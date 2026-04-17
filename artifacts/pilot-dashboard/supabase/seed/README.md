@@ -50,6 +50,20 @@ duty roster, NOTAMs, and today's flight schedule.
 | `notams`      | 3    | Recent NOTAMs                                           |
 | `schedule`    | 4    | Today's flight line                                     |
 
+## Verifying
+
+Right after running the seed, these counts should match (one squadron):
+
+```sql
+select 'pilots'      as t, count(*) from pilots      where squadron_id = '00000000-0000-0000-0000-000000000001'
+union all select 'sorties',     count(*) from sorties      where squadron_id = '00000000-0000-0000-0000-000000000001'
+union all select 'currencies',  count(*) from currencies   where squadron_id = '00000000-0000-0000-0000-000000000001'
+union all select 'leaves',      count(*) from leaves       where squadron_id = '00000000-0000-0000-0000-000000000001'
+union all select 'duty_week',   count(*) from duty_week    where squadron_id = '00000000-0000-0000-0000-000000000001'
+union all select 'notams',      count(*) from notams       where squadron_id = '00000000-0000-0000-0000-000000000001';
+-- expect: 16, 80, 240, 16, 5, 3
+```
+
 ## Re-running
 
 The seed is idempotent for stable-key tables (squadrons, licenses,
