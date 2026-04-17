@@ -3,7 +3,7 @@ import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots, useUnavailable, useCreateUnavailable, useDeleteUnavailable, type UnavailEntry } from "@/lib/squadron-data";
 import { Plus, UserX, Trash2 } from "lucide-react";
-import { ConfirmDialog } from "./Roster";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 export default function Unavailable() {
   const { t } = useI18n();

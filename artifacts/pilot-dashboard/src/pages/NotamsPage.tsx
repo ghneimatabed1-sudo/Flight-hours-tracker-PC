@@ -3,7 +3,7 @@ import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { useNotams, useCreateNotam, useUpdateNotam, useDeleteNotam, type NotamRow } from "@/lib/squadron-data";
 import { Plus, Megaphone, Pencil, Trash2, Check, X } from "lucide-react";
-import { ConfirmDialog } from "./Roster";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 export default function NotamsPage() {
   const { t } = useI18n();
@@ -48,7 +48,7 @@ export default function NotamsPage() {
     if (!confirmDelete) return;
     setErr("");
     try {
-      await remove.mutateAsync(confirmDelete.id);
+      await remove.mutateAsync(confirmDelete);
       setConfirmDelete(null);
     } catch (e) {
       setErr((e as Error).message || "Withdraw failed");

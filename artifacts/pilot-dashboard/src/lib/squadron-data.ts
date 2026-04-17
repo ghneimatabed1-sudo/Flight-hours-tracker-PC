@@ -24,7 +24,7 @@ import {
 
 export type { Pilot, Sortie } from "./mock";
 
-export interface NotamRow { id: string; date: string; text: string; }
+export interface NotamRow { id: string; date: string; text: string; pk?: string; }
 export interface DutyDay  { day: string; mainDuty: string; standby: string; rcm: string; }
 export interface UnavailEntry { id: string; pilotId: string; from: string; to: string; reason: string; }
 export interface ScheduleEntry { id: string; ac: string; config: string; crew: string[]; mission: string; takeoff: string; land: string; fuel: string; }
@@ -232,11 +232,12 @@ export function useNotams(): UseQueryResult<NotamRow[]> & { data: NotamRow[] } {
     queryFn: async () => {
       if (!isLive()) return [...getMockNotams()];
       const { data, error } = await supabase!
-        .from("notams").select("notam_no, posted_on, body")
+        .from("notams").select("id, notam_no, posted_on, body")
         .order("posted_on", { ascending: false });
       if (error) throw error;
       return (data ?? []).map(r => ({
         id: r.notam_no as string,
+        pk: String(r.id),
         date: r.posted_on as string,
         text: r.body as string,
       }));
@@ -277,7 +278,10 @@ export function useUpdateNotam() {
         if (idx >= 0) arr[idx] = n;
         return n;
       }
-      const { error } = await supabase!.from("notams").update({ body: n.text }).eq("notam_no", n.id);
+      // Always update by primary key (uuid) — notam_no is a text label and
+      // not guaranteed unique, so matching on it could mutate sibling rows.
+      if (!n.pk) throw new Error("Missing NOTAM primary key");
+      const { error } = await supabase!.from("notams").update({ body: n.text }).eq("id", n.pk);
       if (error) throw error;
       return n;
     },
@@ -288,16 +292,17 @@ export function useUpdateNotam() {
 export function useDeleteNotam() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async (n: NotamRow) => {
       if (!isLive()) {
         const arr = getMockNotams();
-        const idx = arr.findIndex(x => x.id === id);
+        const idx = arr.findIndex(x => x.id === n.id);
         if (idx >= 0) arr.splice(idx, 1);
-        return { id };
+        return n;
       }
-      const { error } = await supabase!.from("notams").delete().eq("notam_no", id);
+      if (!n.pk) throw new Error("Missing NOTAM primary key");
+      const { error } = await supabase!.from("notams").delete().eq("id", n.pk);
       if (error) throw error;
-      return { id };
+      return n;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notams"] }),
   });
