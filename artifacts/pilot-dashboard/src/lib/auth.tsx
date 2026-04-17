@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import { supabase, supabaseConfigured, validateLicenseRemote, recordAuditEvent } from "./supabase";
 import { lookupLicenseKey } from "./license-registry";
-import { commanders, SUPER_ADMIN } from "./mockData";
+import { SUPER_ADMIN } from "./mockData";
+import { findCommanderByUsername, verifyCommanderPassword } from "./commander-store";
 import type { User } from "./types";
 import { generateSecret, otpauthURL, verifyTotp } from "./totp";
 
@@ -168,14 +169,11 @@ async function makeFingerprint(): Promise<string> {
   return fp;
 }
 
-// Static credentials for HQ users *other than* the super admin. Empty on a
-// fresh install — commander accounts are created by the Super Admin through
-// the Commanders page (or issued by the server once Supabase is configured).
-// The super admin's password is held only on the server
-// (SUPER_ADMIN_PASSWORD_HASH) and validated by the super-admin-2fa edge
-// function in production; in standalone mode the DEFAULT_ADMIN_PASSWORD_HASH
-// below is used.
-const HQ_CREDS: Record<string, string> = {};
+// Commander accounts are created by the Super Admin through the Admin →
+// Commanders page; password hashes live in the local commander store
+// (see ./commander-store). The super admin's password is held server-side
+// (SUPER_ADMIN_PASSWORD_HASH) in Supabase mode; in standalone mode the
+// DEFAULT_ADMIN_PASSWORD_HASH below is used.
 // Default super admin password — stored as a SHA-256 hash so the raw password
 // never lives in the source. When a super admin changes their password via
 // Settings → Security, the new hash is written to ADMIN_PASSWORD_HASH_KEY in
@@ -185,7 +183,7 @@ const DEFAULT_ADMIN_PASSWORD_HASH = "e25d97cfa9c1ef91c61b0f84a92a19fcbaa490ebde6
 function lookupHQUser(username: string): User | null {
   const u = username.trim().toLowerCase();
   if (u === "admin") return SUPER_ADMIN;
-  return commanders.find(c => c.username === u) ?? null;
+  return findCommanderByUsername(u);
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -400,15 +398,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { ok: false, requires2fa: "enroll" };
       }
 
-      const hqExpected = HQ_CREDS[u];
-      if (hqExpected) {
-        if (hqExpected !== password) return await recordFail("bad_credentials");
-        if (!hqUser) return await recordFail("unknown_hq_user");
+      if (hqUser && hqUser.role === "commander") {
+        const verified = await verifyCommanderPassword(u, password);
+        if (!verified) return await recordFail("bad_credentials");
 
-        localStorage.setItem("rjaf.user", JSON.stringify(hqUser));
+        localStorage.setItem("rjaf.user", JSON.stringify(verified));
         localStorage.removeItem("rjaf.fails");
         localStorage.removeItem("rjaf.lockUntil");
-        await recordAuditEvent({ type: "login.ok", actor: username, detail: { role: hqUser.role } });
+        await recordAuditEvent({ type: "login.ok", actor: username, detail: { role: verified.role } });
         setState(s => ({ ...s, user: hqUser, failedAttempts: 0, lockedUntil: null }));
         return { ok: true };
       }
