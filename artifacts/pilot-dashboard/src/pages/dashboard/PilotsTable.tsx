@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { CurrencyCell, StatusBadge } from "@/components/StatusBadge";
 import { pilots, squadrons } from "@/lib/mockData";
-import { pilotWorstStatus, fmtDate } from "@/lib/format";
+import { pilotWorstStatus, pilotWorstDate, fmtDate } from "@/lib/format";
 import type { CurrencyStatus, Pilot } from "@/lib/types";
 import { Search, ArrowUpDown, ChevronLeft, Download, Printer, FileSpreadsheet } from "lucide-react";
 import * as XLSX from "xlsx";
