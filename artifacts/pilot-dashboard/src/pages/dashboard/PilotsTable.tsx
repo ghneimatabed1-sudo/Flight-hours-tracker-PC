@@ -8,9 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { CurrencyCell, StatusBadge } from "@/components/StatusBadge";
 import { pilots, squadrons } from "@/lib/mockData";
-import { pilotWorstStatus } from "@/lib/format";
+import { pilotWorstStatus, fmtDate } from "@/lib/format";
 import type { CurrencyStatus, Pilot } from "@/lib/types";
-import { Search, ArrowUpDown, ChevronLeft } from "lucide-react";
+import { Search, ArrowUpDown, ChevronLeft, Download, Printer } from "lucide-react";
 
 type SortKey = keyof Pick<Pilot, "callSign" | "fullName" | "monthlyHours" | "grandTotalHours" | "nvgTotalHours">;
 
@@ -30,6 +30,7 @@ export default function PilotsTable() {
   const myIds = new Set(user.squadronIds);
   const mySqns = squadrons.filter(s => myIds.has(s.id));
   const focusedSqn = focusedSqnId ? squadrons.find(s => s.id === focusedSqnId) : null;
+  const canExport = user.role === "commander";
 
   const list = useMemo(() => {
     let l = pilots.filter(p => myIds.has(p.squadronId));
@@ -54,9 +55,71 @@ export default function PilotsTable() {
     else { setSortKey(k); setSortDir("asc"); }
   }
 
+  const reportTitle = focusedSqn
+    ? `${t("pilotReport")} — ${lang === "ar" ? focusedSqn.nameAr : focusedSqn.name}`
+    : sqnFilter !== "__all"
+      ? (() => {
+          const s = squadrons.find(x => x.id === sqnFilter);
+          return s ? `${t("pilotReport")} — ${lang === "ar" ? s.nameAr : s.name}` : t("pilotReport");
+        })()
+      : `${t("pilotReport")} — ${t("allSquadrons")}`;
+
+  function statusLabel(s: CurrencyStatus): string {
+    return s === "current" ? t("current") : s === "warning" ? t("warning") : t("expired");
+  }
+
+  function exportCsv() {
+    const headers = [
+      t("callSign"), t("name"), t("squadron"),
+      t("nvgTotal"), t("monthlyHours"), t("grandTotal"),
+      t("dayCurrency"), t("nightCurrency"), t("irtCurrency"), t("medicalCurrency"),
+      t("status"),
+    ];
+    const rows = list.map(p => {
+      const sqn = squadrons.find(s => s.id === p.squadronId);
+      return [
+        p.callSign,
+        lang === "ar" ? p.fullNameAr : p.fullName,
+        sqn ? (lang === "ar" ? sqn.nameAr : sqn.code) : "",
+        String(p.nvgTotalHours),
+        p.monthlyHours.toFixed(1),
+        String(p.grandTotalHours),
+        p.dayCurrencyDate,
+        p.nightCurrencyDate,
+        p.irtCurrencyDate,
+        p.medicalCurrencyDate,
+        statusLabel(pilotWorstStatus(p)),
+      ];
+    });
+    const escape = (v: string) => {
+      const needs = /[",\n\r]/.test(v);
+      const cleaned = v.replace(/"/g, '""');
+      return needs ? `"${cleaned}"` : cleaned;
+    };
+    const csv = [headers, ...rows].map(r => r.map(escape).join(",")).join("\r\n");
+    // Prepend BOM so Excel detects UTF-8 (important for Arabic names)
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    const scope = focusedSqn?.code ?? (sqnFilter !== "__all" ? squadrons.find(s => s.id === sqnFilter)?.code : null) ?? "all";
+    a.href = url;
+    a.download = `pilots-${scope}-${stamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function printReport() {
+    window.print();
+  }
+
+  const printedOnText = `${t("printedOn")}: ${fmtDate(new Date().toISOString(), lang)}`;
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
+    <div className="space-y-4 print-area">
+      <div className="flex items-center justify-between flex-wrap gap-2 no-print">
         <div>
           {focusedSqn && (
             <Link href="/dashboard/pilots" className="text-xs inline-flex items-center text-muted-foreground hover:text-foreground mb-1">
@@ -67,10 +130,30 @@ export default function PilotsTable() {
             {focusedSqn ? `${t("squadronView")}: ${lang === "ar" ? focusedSqn.nameAr : focusedSqn.name}` : t("pilots")}
           </h2>
         </div>
-        <span className="text-xs text-muted-foreground">{list.length} {t("pilots")}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">{list.length} {t("pilots")}</span>
+          {canExport && (
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={exportCsv} data-testid="button-export-csv">
+                <Download className="h-3.5 w-3.5 me-1.5" />{t("exportCsv")}
+              </Button>
+              <Button size="sm" variant="outline" onClick={printReport} data-testid="button-print">
+                <Printer className="h-3.5 w-3.5 me-1.5" />{t("print")}
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="print-only print-header">
+        <h1>{reportTitle}</h1>
+        <div className="meta">
+          <div>{printedOnText}</div>
+          <div>{list.length} {t("pilots")}</div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 no-print">
         <div className="relative flex-1 min-w-48">
           <Search className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input value={q} onChange={e => setQ(e.target.value)} placeholder={t("search")} className="ps-9" data-testid="input-search" />
@@ -114,7 +197,7 @@ export default function PilotsTable() {
                   <th className="text-center py-2 px-3">{t("irtCurrency")}</th>
                   <th className="text-center py-2 px-3">{t("medicalCurrency")}</th>
                   <th className="text-start py-2 px-3">{t("status")}</th>
-                  <th className="py-2 px-3"></th>
+                  <th className="py-2 px-3 no-print"></th>
                 </tr>
               </thead>
               <tbody>
@@ -136,7 +219,7 @@ export default function PilotsTable() {
                       <td className="py-2 px-3 text-center"><CurrencyCell date={p.irtCurrencyDate} /></td>
                       <td className="py-2 px-3 text-center"><CurrencyCell date={p.medicalCurrencyDate} /></td>
                       <td className="py-2 px-3"><StatusBadge status={pilotWorstStatus(p)} /></td>
-                      <td className="py-2 px-3 text-end">
+                      <td className="py-2 px-3 text-end no-print">
                         <Link href={`/dashboard/pilot/${p.id}`}>
                           <Button size="sm" variant="outline" data-testid={`button-view-${p.id}`}>{t("viewDetails")}</Button>
                         </Link>

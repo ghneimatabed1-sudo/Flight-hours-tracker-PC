@@ -245,3 +245,27 @@ html, body, #root {
 .dark .currency-warning { background-color: rgb(113 63 18 / 0.4); color: rgb(254 240 138); }
 .currency-expired { background-color: rgb(254 202 202); color: rgb(127 29 29); }
 .dark .currency-expired { background-color: rgb(127 29 29 / 0.4); color: rgb(254 202 202); }
+
+/* Print-friendly pilot table export */
+.print-only { display: none; }
+@media print {
+  @page { size: A4 landscape; margin: 12mm; }
+  html, body { background: #fff !important; color: #000 !important; }
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+  .print-area { color: #000 !important; background: #fff !important; }
+  .print-area table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+  .print-area th, .print-area td { border: 1px solid #ccc; padding: 4px 6px; text-align: start; vertical-align: middle; }
+  .print-area thead { background: #f4f4f4 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  .print-area .currency-current,
+  .print-area .currency-warning,
+  .print-area .currency-expired {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+  .print-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 12px; }
+  .print-header h1 { font-size: 16px; font-weight: 700; margin: 0; }
+  .print-header .meta { font-size: 10.5px; color: #333; text-align: end; }
+  tr { page-break-inside: avoid; }
+}
