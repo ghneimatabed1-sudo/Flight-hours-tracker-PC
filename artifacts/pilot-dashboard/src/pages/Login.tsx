@@ -8,6 +8,7 @@ export default function LoginGate() {
   const {
     licensed, configured, activateLicense, configureSquadron, login, fingerprint,
     lockedUntil, user, pendingAdmin, verifyAdminTotp, cancelAdminTotp,
+    pendingRecoveryCodes, ackRecoveryCodes,
   } = useAuth();
   const { t, lang, setLang } = useI18n();
 
@@ -26,6 +27,8 @@ export default function LoginGate() {
   const [code, setCode] = useState("");
   const [codeErr, setCodeErr] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [recoveryCopied, setRecoveryCopied] = useState(false);
 
   // HQ users (super admin / commanders) bypass license + squadron setup.
   const [hqMode, setHqMode] = useState(false);
@@ -41,7 +44,7 @@ export default function LoginGate() {
     return () => { cancelled = true; };
   }, [pendingAdmin]);
 
-  useEffect(() => { setCode(""); setCodeErr(null); }, [pendingAdmin?.mode]);
+  useEffect(() => { setCode(""); setCodeErr(null); setRecoveryMode(false); }, [pendingAdmin?.mode]);
 
   const submitLicense = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,6 +72,29 @@ export default function LoginGate() {
       setCodeErr(r.error === "locked" ? t("lockedOut") : t("twoFactorBad"));
     }
   };
+  const copyRecoveryCodes = async () => {
+    if (!pendingRecoveryCodes) return;
+    try {
+      await navigator.clipboard.writeText(pendingRecoveryCodes.join("\n"));
+      setRecoveryCopied(true);
+      window.setTimeout(() => setRecoveryCopied(false), 2000);
+    } catch { /* no-op */ }
+  };
+  const downloadRecoveryCodes = () => {
+    if (!pendingRecoveryCodes) return;
+    const header = "RJAF Pilot Dashboard — Super Admin recovery codes\n" +
+      "Generated: " + new Date().toISOString() + "\n" +
+      "Keep these somewhere safe. Each one works only once.\n\n";
+    const blob = new Blob([header + pendingRecoveryCodes.join("\n") + "\n"], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "rjaf-admin-recovery-codes.txt";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   const showLogin = hqMode || (licensed && configured && !user);
 
@@ -89,11 +115,56 @@ export default function LoginGate() {
         </div>
 
         <div className="panel p-6">
-          {pendingAdmin ? (
+          {pendingRecoveryCodes ? (
+            <div className="space-y-3" data-testid="panel-recovery-codes">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <KeyRound className="h-4 w-4 text-amber-400" />
+                {t("recoveryCodesTitle")}
+              </div>
+              <p className="text-xs text-muted-foreground">{t("recoveryCodesHint")}</p>
+              <div
+                data-testid="list-recovery-codes"
+                className="grid grid-cols-2 gap-2 p-3 rounded-md bg-input border border-border font-mono text-sm tracking-wider select-all"
+              >
+                {pendingRecoveryCodes.map((c, i) => (
+                  <div key={i} className="py-0.5" data-testid={`text-recovery-code-${i}`}>{c}</div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  data-testid="button-copy-recovery-codes"
+                  onClick={copyRecoveryCodes}
+                  className="flex-1 py-1.5 rounded-md border border-border hover:bg-secondary text-xs"
+                >
+                  {recoveryCopied ? t("copied") : t("copy")}
+                </button>
+                <button
+                  type="button"
+                  data-testid="button-download-recovery-codes"
+                  onClick={downloadRecoveryCodes}
+                  className="flex-1 py-1.5 rounded-md border border-border hover:bg-secondary text-xs"
+                >
+                  {t("download")}
+                </button>
+              </div>
+              <p className="text-[11px] text-amber-400">{t("recoveryCodesWarn")}</p>
+              <button
+                type="button"
+                data-testid="button-ack-recovery-codes"
+                onClick={() => { setRecoveryCopied(false); ackRecoveryCodes(); }}
+                className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90"
+              >
+                {t("recoveryCodesAck")}
+              </button>
+            </div>
+          ) : pendingAdmin ? (
             <form onSubmit={submitTotp} className="space-y-3">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <Smartphone className="h-4 w-4 text-amber-400" />
-                {pendingAdmin.mode === "enroll" ? t("twoFactorEnrollTitle") : t("twoFactorVerifyTitle")}
+                {pendingAdmin.mode === "enroll"
+                  ? t("twoFactorEnrollTitle")
+                  : recoveryMode ? t("recoveryVerifyTitle") : t("twoFactorVerifyTitle")}
               </div>
               {pendingAdmin.mode === "enroll" && (
                 <>
@@ -112,22 +183,41 @@ export default function LoginGate() {
                 </>
               )}
               {pendingAdmin.mode === "verify" && (
-                <p className="text-xs text-muted-foreground">{t("twoFactorVerifyHint")}</p>
+                <p className="text-xs text-muted-foreground">
+                  {recoveryMode ? t("recoveryVerifyHint") : t("twoFactorVerifyHint")}
+                </p>
               )}
               <div>
-                <label htmlFor="totp-code" className="text-xs text-muted-foreground">{t("twoFactorCode")}</label>
-                <input
-                  id="totp-code"
-                  data-testid="input-totp"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  pattern="[0-9]{6}"
-                  maxLength={6}
-                  value={code}
-                  onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-center font-mono text-lg tracking-[0.4em]"
-                  placeholder="000000"
-                />
+                <label htmlFor="totp-code" className="text-xs text-muted-foreground">
+                  {recoveryMode ? t("recoveryCodeLabel") : t("twoFactorCode")}
+                </label>
+                {recoveryMode ? (
+                  <input
+                    id="totp-code"
+                    data-testid="input-recovery-code"
+                    autoComplete="one-time-code"
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                    maxLength={9}
+                    value={code}
+                    onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-Z2-7-]/g, "").slice(0, 9))}
+                    className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-center font-mono text-base tracking-[0.3em] uppercase"
+                    placeholder="XXXX-XXXX"
+                  />
+                ) : (
+                  <input
+                    id="totp-code"
+                    data-testid="input-totp"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9]{6}"
+                    maxLength={6}
+                    value={code}
+                    onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-center font-mono text-lg tracking-[0.4em]"
+                    placeholder="000000"
+                  />
+                )}
               </div>
               {lockedRemaining > 0
                 ? <div className="text-xs text-amber-400">{t("lockedOut")} ({lockedRemaining}s)</div>
@@ -135,14 +225,31 @@ export default function LoginGate() {
               <button
                 type="submit"
                 data-testid="button-verify-totp"
-                disabled={lockedRemaining > 0 || code.length !== 6}
+                disabled={
+                  lockedRemaining > 0 ||
+                  (recoveryMode
+                    ? code.replace(/-/g, "").length !== 8
+                    : code.length !== 6)
+                }
                 className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 disabled:opacity-50"
               >
-                {pendingAdmin.mode === "enroll" ? t("twoFactorEnrollBtn") : t("twoFactorVerifyBtn")}
+                {pendingAdmin.mode === "enroll"
+                  ? t("twoFactorEnrollBtn")
+                  : recoveryMode ? t("recoveryVerifyBtn") : t("twoFactorVerifyBtn")}
               </button>
+              {pendingAdmin.mode === "verify" && (
+                <button
+                  type="button"
+                  data-testid="button-toggle-recovery"
+                  onClick={() => { setRecoveryMode(r => !r); setCode(""); setCodeErr(null); }}
+                  className="w-full text-[11px] text-amber-400 hover:text-amber-300 underline"
+                >
+                  {recoveryMode ? t("recoveryUseTotp") : t("recoveryLostDevice")}
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => { cancelAdminTotp(); setCode(""); setCodeErr(null); }}
+                onClick={() => { cancelAdminTotp(); setCode(""); setCodeErr(null); setRecoveryMode(false); }}
                 className="w-full text-[11px] text-muted-foreground hover:text-foreground underline"
               >
                 ← {t("cancel")}

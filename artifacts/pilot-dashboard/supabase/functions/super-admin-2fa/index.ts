@@ -18,10 +18,15 @@
 //       rotated on retries, so a QR already scanned stays valid).
 //
 //   - "verify" { username, token, code }
-//       → validates token, then the 6-digit TOTP code against the
-//       stored secret. On success, finalises any pending enrollment
-//       and bumps last_verified_at. On failure, increments
-//       failed_attempts; 5 in a row → 5-minute lock.
+//       → validates token, then the submitted code against either the
+//       stored TOTP secret OR the pre-hashed recovery codes. On
+//       successful first enrollment, a fresh set of 10 single-use
+//       recovery codes is generated, hashed, stored, and returned to
+//       the client one time (recoveryCodes on the response). On a
+//       recovery-code sign-in the matching code is burned (used_at set)
+//       so it cannot be reused, and the event is written to the audit
+//       log. On failure, increments failed_attempts; 5 in a row →
+//       5-minute lock.
 //
 // Authorization model:
 //   - The super-admin password is held only on the server, as a SHA-256
@@ -71,6 +76,24 @@ interface Body {
   password?: string;
   token?: string;
   code?: string;
+}
+
+const RECOVERY_CODE_COUNT = 10;
+
+function generateRecoveryCode(): string {
+  const bytes = new Uint8Array(5);
+  crypto.getRandomValues(bytes);
+  const b32 = base32Encode(bytes).slice(0, 8);
+  return `${b32.slice(0, 4)}-${b32.slice(4, 8)}`;
+}
+function generateRecoveryCodes(n = RECOVERY_CODE_COUNT): string[] {
+  return Array.from({ length: n }, () => generateRecoveryCode());
+}
+function normalizeRecoveryCode(raw: string): string {
+  return (raw ?? "").trim().toUpperCase().replace(/[\s-]+/g, "");
+}
+function isRecoveryCodeShape(raw: string): boolean {
+  return /^[A-Z2-7]{8}$/.test(normalizeRecoveryCode(raw));
 }
 
 function reply(payload: Record<string, unknown>, status = 200) {
@@ -302,9 +325,13 @@ Deno.serve(async (req: Request) => {
   }
 
   if (action === "verify") {
-    const code = (body.code ?? "").trim();
+    const rawCode = (body.code ?? "").trim();
     const token = body.token ?? "";
-    if (!/^\d{6}$/.test(code) || !token) return reply({ ok: false, error: "bad_input" }, 400);
+    const isTotpShape = /^\d{6}$/.test(rawCode);
+    const isRecoveryShape = isRecoveryCodeShape(rawCode);
+    if ((!isTotpShape && !isRecoveryShape) || !token) {
+      return reply({ ok: false, error: "bad_input" }, 400);
+    }
 
     if (!(await verifyToken(challengeSecret, username, token))) {
       return reply({ ok: false, error: "unauthorized" }, 401);
@@ -320,8 +347,43 @@ Deno.serve(async (req: Request) => {
     const lockedNow = row.locked_until && new Date(row.locked_until).getTime() > Date.now();
     if (lockedNow) return reply({ ok: false, error: "locked" }, 423);
 
-    const ok = await verifyTotp(row.secret_b32, code);
-    if (!ok) {
+    // Recovery-code path: only usable once enrollment is complete. Before
+    // enrollment the admin hasn't received any codes yet, so this falls
+    // through and is rejected like any bad code.
+    let recoveryMatched = false;
+    if (isRecoveryShape && row.enrolled_at) {
+      const normalized = normalizeRecoveryCode(rawCode);
+      const hash = await sha256Hex(normalized);
+      const hashes: string[] = Array.isArray(row.recovery_code_hashes) ? row.recovery_code_hashes : [];
+      const usedAt: (string | null)[] = Array.isArray(row.recovery_code_used_at) ? row.recovery_code_used_at : [];
+      for (let i = 0; i < hashes.length; i++) {
+        if (timingSafeEq(hashes[i], hash) && !usedAt[i]) {
+          recoveryMatched = true;
+          const nextUsedAt = [...usedAt];
+          while (nextUsedAt.length < hashes.length) nextUsedAt.push(null);
+          nextUsedAt[i] = new Date().toISOString();
+          const remaining = nextUsedAt.filter(v => !v).length;
+          await admin.from("super_admin_2fa").update({
+            recovery_code_used_at: nextUsedAt,
+            last_verified_at: new Date().toISOString(),
+            failed_attempts: 0,
+            locked_until: null,
+            updated_at: new Date().toISOString(),
+          }).eq("username", username);
+          await admin.from("audit_log").insert({
+            squadron_id: null,
+            type: "super_admin.2fa.recovery_used",
+            actor: username,
+            detail: { index: i, remaining },
+          }).then(() => {}, () => {});
+          break;
+        }
+      }
+    }
+
+    const totpOk = !recoveryMatched && isTotpShape && (await verifyTotp(row.secret_b32, rawCode));
+
+    if (!recoveryMatched && !totpOk) {
       const fails = (row.failed_attempts ?? 0) + 1;
       const lockUntil = fails >= LOCKOUT_THRESHOLD
         ? new Date(Date.now() + LOCKOUT_MS).toISOString()
@@ -332,26 +394,53 @@ Deno.serve(async (req: Request) => {
         updated_at: new Date().toISOString(),
       }).eq("username", username);
       await admin.from("audit_log").insert({
-        squadron_id: null, type: "super_admin.2fa.failed", actor: username, detail: { fails },
+        squadron_id: null, type: "super_admin.2fa.failed", actor: username,
+        detail: { fails, mode: isRecoveryShape ? "recovery" : "totp" },
       }).then(() => {}, () => {});
       return reply({ ok: false, error: lockUntil ? "locked" : "bad", fails });
     }
 
     const wasEnrollment = !row.enrolled_at;
-    await admin.from("super_admin_2fa").update({
-      enrolled_at: row.enrolled_at ?? new Date().toISOString(),
-      last_verified_at: new Date().toISOString(),
-      failed_attempts: 0,
-      locked_until: null,
-      updated_at: new Date().toISOString(),
-    }).eq("username", username);
+    let recoveryCodes: string[] | undefined;
+    if (wasEnrollment) {
+      // Finalising enrollment: mint the one-time recovery codes, hash them,
+      // store the hashes, and return the plaintext codes exactly once so
+      // the admin can write them down.
+      recoveryCodes = generateRecoveryCodes();
+      const hashes = await Promise.all(
+        recoveryCodes.map(c => sha256Hex(normalizeRecoveryCode(c))),
+      );
+      await admin.from("super_admin_2fa").update({
+        enrolled_at: new Date().toISOString(),
+        last_verified_at: new Date().toISOString(),
+        failed_attempts: 0,
+        locked_until: null,
+        recovery_code_hashes: hashes,
+        recovery_code_used_at: hashes.map(() => null),
+        updated_at: new Date().toISOString(),
+      }).eq("username", username);
+    } else {
+      await admin.from("super_admin_2fa").update({
+        last_verified_at: new Date().toISOString(),
+        failed_attempts: 0,
+        locked_until: null,
+        updated_at: new Date().toISOString(),
+      }).eq("username", username);
+    }
     await admin.from("audit_log").insert({
       squadron_id: null,
-      type: wasEnrollment ? "super_admin.2fa.enrolled" : "super_admin.2fa.verified",
+      type: wasEnrollment
+        ? "super_admin.2fa.enrolled"
+        : (recoveryMatched ? "super_admin.2fa.verified_recovery" : "super_admin.2fa.verified"),
       actor: username, detail: {},
     }).then(() => {}, () => {});
 
-    return reply({ ok: true, enrolled: true });
+    return reply({
+      ok: true,
+      enrolled: true,
+      ...(recoveryCodes ? { recoveryCodes } : {}),
+      ...(recoveryMatched ? { usedRecoveryCode: true } : {}),
+    });
   }
 
   return reply({ ok: false, error: "unknown_action" }, 400);

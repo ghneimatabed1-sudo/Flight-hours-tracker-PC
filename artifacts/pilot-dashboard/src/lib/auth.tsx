@@ -10,7 +10,51 @@ import { generateSecret, otpauthURL, verifyTotp } from "./totp";
 // server-side in `super_admin_2fa` and verified by the
 // `super-admin-2fa` edge function — the localStorage path is never used.
 const ADMIN_TOTP_SECRET_KEY = "rjaf.adminTotp.secret";
+const ADMIN_TOTP_RECOVERY_KEY = "rjaf.adminTotp.recovery";
 const ADMIN_TOTP_ISSUER = "RJAF Pilot Dashboard";
+const RECOVERY_CODE_COUNT = 10;
+
+interface StoredRecoveryCode {
+  hash: string;
+  usedAt: string | null;
+}
+
+function isTotpShape(s: string): boolean {
+  return /^\d{6}$/.test(s.trim());
+}
+function normalizeRecoveryCode(raw: string): string {
+  return (raw ?? "").trim().toUpperCase().replace(/[\s-]+/g, "");
+}
+function isRecoveryCodeShape(raw: string): boolean {
+  return /^[A-Z2-7]{8}$/.test(normalizeRecoveryCode(raw));
+}
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function generateDemoRecoveryCodes(n = RECOVERY_CODE_COUNT): string[] {
+  const alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const bytes = new Uint8Array(8);
+    crypto.getRandomValues(bytes);
+    let s = "";
+    for (let j = 0; j < 8; j++) s += alpha[bytes[j] % 32];
+    out.push(`${s.slice(0, 4)}-${s.slice(4, 8)}`);
+  }
+  return out;
+}
+function readDemoRecoveryCodes(): StoredRecoveryCode[] {
+  try {
+    const raw = localStorage.getItem(ADMIN_TOTP_RECOVERY_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+function writeDemoRecoveryCodes(codes: StoredRecoveryCode[]): void {
+  localStorage.setItem(ADMIN_TOTP_RECOVERY_KEY, JSON.stringify(codes));
+}
 
 interface PendingAdmin {
   user: User;
@@ -45,10 +89,15 @@ interface AuthCtx extends AuthState {
   activateLicense: (key: string, username: string) => Promise<{ ok: boolean; error?: string }>;
   configureSquadron: (cfg: SquadronConfig) => void;
   login: (username: string, password: string) => Promise<LoginResult>;
-  verifyAdminTotp: (code: string) => Promise<{ ok: boolean; error?: string }>;
+  verifyAdminTotp: (code: string) => Promise<{ ok: boolean; error?: string; recoveryCodes?: string[] }>;
   cancelAdminTotp: () => void;
   pendingAdmin: { mode: "enroll" | "verify"; secret: string; otpauth: string } | null;
   adminTotpEnrolled: boolean;
+  // One-time plaintext recovery codes shown to the super admin right after
+  // they finish 2FA enrollment. Cleared as soon as they click "I've saved
+  // these" (ackRecoveryCodes), so they never end up persisted anywhere.
+  pendingRecoveryCodes: string[] | null;
+  ackRecoveryCodes: () => void;
   logout: () => void;
   releaseLicense: () => void;
   backendMode: "supabase" | "demo";
@@ -125,6 +174,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     lockedUntil: Number(localStorage.getItem("rjaf.lockUntil") || 0) || null,
   }));
   const [pending, setPending] = useState<PendingAdmin | null>(null);
+  const [pendingRecoveryCodes, setPendingRecoveryCodes] = useState<string[] | null>(null);
+  const pendingLoginUserRef = useRef<User | null>(null);
   // Short-lived HMAC challenge token returned by the edge function's "start"
   // step, presented back to "verify". Held in memory only — never persisted.
   // Replaces the previous practice of stashing the raw password.
@@ -348,6 +399,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { ok: false, error: "locked" };
       }
 
+      const trimmed = code.trim();
+      const usedRecoveryShape = isRecoveryCodeShape(trimmed);
+      if (!isTotpShape(trimmed) && !usedRecoveryShape) {
+        return { ok: false, error: "bad" };
+      }
+
       // Server-backed verification path (production). The secret never
       // leaves the database; we just hand the code to the edge function
       // and trust its yes/no plus its server-side rate-limit.
@@ -358,7 +415,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               action: "verify",
               username: pending.user.username,
               token: pendingTokenRef.current,
-              code,
+              code: trimmed,
             },
           });
           if (error || !data?.ok) {
@@ -373,15 +430,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
           if (pending.mode === "enroll") setAdminTotpEnrolled(true);
           const hqUser = pending.user;
-          localStorage.setItem("rjaf.user", JSON.stringify(hqUser));
+          const recoveryCodes: string[] | undefined = Array.isArray(data.recoveryCodes)
+            ? (data.recoveryCodes as string[])
+            : undefined;
+          const usedRecoveryCode = !!data.usedRecoveryCode;
+          if (usedRecoveryCode) {
+            await recordAuditEvent({
+              type: "login.2fa.recovery_used",
+              actor: hqUser.username,
+              detail: {},
+            });
+          }
           localStorage.removeItem("rjaf.fails");
           localStorage.removeItem("rjaf.lockUntil");
+          pendingTokenRef.current = "";
+          if (recoveryCodes && recoveryCodes.length > 0) {
+            // Block the dashboard entry screen until the admin clicks
+            // "I've saved these". We keep the user in the
+            // pendingLoginUserRef so ackRecoveryCodes can finish the login.
+            pendingLoginUserRef.current = hqUser;
+            setPending(null);
+            setPendingRecoveryCodes(recoveryCodes);
+            setState(s => ({ ...s, failedAttempts: 0, lockedUntil: null }));
+            return { ok: true, recoveryCodes };
+          }
+          localStorage.setItem("rjaf.user", JSON.stringify(hqUser));
           await recordAuditEvent({
             type: "login.ok",
             actor: hqUser.username,
-            detail: { role: hqUser.role, twoFactor: true },
+            detail: { role: hqUser.role, twoFactor: true, viaRecoveryCode: usedRecoveryCode },
           });
-          pendingTokenRef.current = "";
           setPending(null);
           setState(s => ({ ...s, user: hqUser, failedAttempts: 0, lockedUntil: null }));
           return { ok: true };
@@ -391,8 +469,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // Demo-only local verification (matches the localStorage enroll above).
-      const ok = await verifyTotp(pending.secret, code);
-      if (!ok) {
+      let recoveryMatched = false;
+      if (usedRecoveryShape && pending.mode === "verify") {
+        const stored = readDemoRecoveryCodes();
+        const h = await sha256Hex(normalizeRecoveryCode(trimmed));
+        const idx = stored.findIndex(c => c.hash === h && !c.usedAt);
+        if (idx >= 0) {
+          stored[idx] = { hash: stored[idx].hash, usedAt: new Date().toISOString() };
+          writeDemoRecoveryCodes(stored);
+          recoveryMatched = true;
+          const remaining = stored.filter(c => !c.usedAt).length;
+          await recordAuditEvent({
+            type: "login.2fa.recovery_used",
+            actor: pending.user.username,
+            detail: { remaining },
+          });
+        }
+      }
+
+      const totpOk = !recoveryMatched && isTotpShape(trimmed) && (await verifyTotp(pending.secret, trimmed));
+      if (!recoveryMatched && !totpOk) {
         const fails = state.failedAttempts + 1;
         const lockedUntil = fails >= 5 ? now + 5 * 60_000 : null;
         localStorage.setItem("rjaf.fails", String(fails));
@@ -400,32 +496,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await recordAuditEvent({
           type: "login.2fa.failed",
           actor: pending.user.username,
-          detail: { stage: pending.mode, fails },
+          detail: { stage: pending.mode, fails, mode: usedRecoveryShape ? "recovery" : "totp" },
         });
         setState(s => ({ ...s, failedAttempts: fails, lockedUntil }));
         if (lockedUntil) setPending(null);
         return { ok: false, error: lockedUntil ? "locked" : "bad" };
       }
+      let mintedRecoveryCodes: string[] | undefined;
       if (pending.mode === "enroll") {
         localStorage.setItem(ADMIN_TOTP_SECRET_KEY, pending.secret);
         setAdminTotpEnrolled(true);
+        mintedRecoveryCodes = generateDemoRecoveryCodes();
+        const hashed: StoredRecoveryCode[] = await Promise.all(
+          mintedRecoveryCodes.map(async c => ({
+            hash: await sha256Hex(normalizeRecoveryCode(c)),
+            usedAt: null,
+          })),
+        );
+        writeDemoRecoveryCodes(hashed);
         await recordAuditEvent({
           type: "login.2fa.enrolled",
           actor: pending.user.username,
         });
       }
       const hqUser = pending.user;
-      localStorage.setItem("rjaf.user", JSON.stringify(hqUser));
       localStorage.removeItem("rjaf.fails");
       localStorage.removeItem("rjaf.lockUntil");
+      if (mintedRecoveryCodes && mintedRecoveryCodes.length > 0) {
+        pendingLoginUserRef.current = hqUser;
+        setPending(null);
+        setPendingRecoveryCodes(mintedRecoveryCodes);
+        setState(s => ({ ...s, failedAttempts: 0, lockedUntil: null }));
+        return { ok: true, recoveryCodes: mintedRecoveryCodes };
+      }
+      localStorage.setItem("rjaf.user", JSON.stringify(hqUser));
       await recordAuditEvent({
         type: "login.ok",
         actor: hqUser.username,
-        detail: { role: hqUser.role, twoFactor: true },
+        detail: { role: hqUser.role, twoFactor: true, viaRecoveryCode: recoveryMatched },
       });
       setPending(null);
       setState(s => ({ ...s, user: hqUser, failedAttempts: 0, lockedUntil: null }));
       return { ok: true };
+    },
+    pendingRecoveryCodes,
+    ackRecoveryCodes: () => {
+      const hqUser = pendingLoginUserRef.current;
+      if (!hqUser) { setPendingRecoveryCodes(null); return; }
+      pendingLoginUserRef.current = null;
+      localStorage.setItem("rjaf.user", JSON.stringify(hqUser));
+      recordAuditEvent({
+        type: "login.ok",
+        actor: hqUser.username,
+        detail: { role: hqUser.role, twoFactor: true, recoveryCodesIssued: true },
+      });
+      setPendingRecoveryCodes(null);
+      setState(s => ({ ...s, user: hqUser }));
     },
     cancelAdminTotp: () => {
       pendingTokenRef.current = "";
@@ -435,6 +561,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (supabase) supabase.auth.signOut();
       localStorage.removeItem("rjaf.user");
       setPending(null);
+      setPendingRecoveryCodes(null);
+      pendingLoginUserRef.current = null;
       setState(s => ({ ...s, user: null }));
     },
     releaseLicense: () => {
@@ -446,7 +574,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem("rjaf.squadronId");
       setState(s => ({ ...s, licensed: false, user: null }));
     },
-  }), [state, pending, adminTotpEnrolled]);
+  }), [state, pending, adminTotpEnrolled, pendingRecoveryCodes]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
