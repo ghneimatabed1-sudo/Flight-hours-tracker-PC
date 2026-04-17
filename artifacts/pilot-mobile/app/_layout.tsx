@@ -6,9 +6,10 @@ import {
   useFonts,
 } from "@expo-google-fonts/inter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
+import * as Notifications from "expo-notifications";
+import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -16,16 +17,76 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppDataProvider } from "@/lib/data";
 import { I18nProvider } from "@/lib/i18n";
+import { configureNotificationHandler } from "@/lib/notifications";
 
 SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
 function RootLayoutNav() {
+  const router = useRouter();
+  const lastHandled = useRef<string | null>(null);
+
+  useEffect(() => {
+    configureNotificationHandler();
+
+    // Tap on a notification while the app is running.
+    const tapSub = Notifications.addNotificationResponseReceivedListener(
+      (response) => {
+        const data = response.notification.request.content.data as
+          | { deepLink?: string; type?: string }
+          | undefined;
+        const link =
+          (typeof data?.deepLink === "string" && data.deepLink) ||
+          (data?.type === "currency_expiry" ? "/currency" : null);
+        if (link && lastHandled.current !== response.notification.request.identifier) {
+          lastHandled.current = response.notification.request.identifier;
+          // Defer one tick so the navigator is mounted before we navigate.
+          setTimeout(() => {
+            try {
+              // The currency tab lives inside the (tabs) group.
+              router.push(link as never);
+            } catch {
+              // Swallow nav errors; the user can still navigate manually.
+            }
+          }, 50);
+        }
+      }
+    );
+
+    // App opened from a quit state by tapping a notification.
+    Notifications.getLastNotificationResponseAsync()
+      .then((response) => {
+        if (!response) return;
+        const data = response.notification.request.content.data as
+          | { deepLink?: string; type?: string }
+          | undefined;
+        const link =
+          (typeof data?.deepLink === "string" && data.deepLink) ||
+          (data?.type === "currency_expiry" ? "/currency" : null);
+        if (link && lastHandled.current !== response.notification.request.identifier) {
+          lastHandled.current = response.notification.request.identifier;
+          setTimeout(() => {
+            try {
+              router.push(link as never);
+            } catch {
+              // ignore
+            }
+          }, 200);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      tapSub.remove();
+    };
+  }, [router]);
+
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="link" options={{ presentation: "modal" }} />
+      <Stack.Screen name="reminders" options={{ presentation: "modal" }} />
     </Stack>
   );
 }

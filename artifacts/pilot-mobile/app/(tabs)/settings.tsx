@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import React from "react";
 import {
   Alert,
@@ -58,6 +59,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { t, isRTL, lang, setLang } = useI18n();
   const { snapshot, unlink } = useAppData();
+  const router = useRouter();
 
   if (!snapshot) return null;
 
@@ -166,6 +168,63 @@ export default function SettingsScreen() {
           );
         })}
       </View>
+
+      <Text
+        style={[
+          styles.section,
+          { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
+        ]}
+      >
+        {t("reminders_title")}
+      </Text>
+      <Pressable
+        onPress={() => router.push("/reminders" as never)}
+        style={({ pressed }) => [
+          styles.row,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            flexDirection: isRTL ? "row-reverse" : "row",
+            opacity: pressed ? 0.85 : 1,
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.helpIcon,
+            { backgroundColor: colors.muted, borderColor: colors.border },
+          ]}
+        >
+          <Feather name="bell" size={16} color={colors.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text
+            style={[
+              styles.rowValue,
+              { color: colors.foreground, textAlign: isRTL ? "right" : "left" },
+            ]}
+          >
+            {t("reminders_settings_label")}
+          </Text>
+          <Text
+            style={[
+              styles.rowLabel,
+              {
+                color: colors.mutedForeground,
+                textAlign: isRTL ? "right" : "left",
+                marginTop: 2,
+              },
+            ]}
+          >
+            {t("reminders_settings_hint")}
+          </Text>
+        </View>
+        <Feather
+          name={isRTL ? "chevron-left" : "chevron-right"}
+          size={18}
+          color={colors.mutedForeground}
+        />
+      </Pressable>
 
       <Text
         style={[

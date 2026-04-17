@@ -82,6 +82,37 @@ const EN: Dict = {
   cancel: "Cancel",
   confirm: "Confirm",
   not_set: "Not set",
+  // Reminders
+  currency_day: "Day",
+  currency_night: "Night",
+  currency_irt: "IRT",
+  currency_medical: "Medical",
+  currency_sim: "Simulator",
+  reminders_title: "Reminders",
+  reminders_settings_label: "Currency reminders",
+  reminders_settings_hint: "Choose when each currency should remind you.",
+  reminders_subtitle:
+    "Pick how many days before each currency expires you want a push reminder. You can choose any combination of values per currency.",
+  reminders_push_label: "Push notifications",
+  reminders_push_on: "Enabled — you'll receive reminders.",
+  reminders_push_off: "Off — turn on to receive reminders.",
+  reminders_per_currency: "Per currency",
+  reminders_chip_today: "On expiry",
+  reminders_chip_day_suffix: "d",
+  reminders_none: "No reminders set.",
+  reminders_summary: "{n} reminder(s) set.",
+  reminders_footnote:
+    "Reminders fire once per expiry date. Tap a notification to jump to your Currency screen.",
+  reminders_perm_title: "Notifications disabled",
+  reminders_perm_body:
+    "Allow notifications in your phone's settings to receive currency reminders.",
+  reminders_open_settings: "Open Settings",
+  reminders_unsupported:
+    "Push notifications are not supported on this device.",
+  reminders_no_project:
+    "Push setup incomplete — contact your operations officer.",
+  reminders_token_error: "Could not register for push notifications.",
+  reminders_save_error: "Could not save your reminder settings.",
 };
 
 const AR: Dict = {
@@ -160,6 +191,37 @@ const AR: Dict = {
   cancel: "إلغاء",
   confirm: "تأكيد",
   not_set: "غير محدد",
+  // Reminders
+  currency_day: "نهار",
+  currency_night: "ليل",
+  currency_irt: "IRT",
+  currency_medical: "طبية",
+  currency_sim: "محاكاة",
+  reminders_title: "التذكيرات",
+  reminders_settings_label: "تذكيرات الصلاحيات",
+  reminders_settings_hint: "اختر متى يذكرك التطبيق بكل صلاحية.",
+  reminders_subtitle:
+    "حدد عدد الأيام قبل انتهاء كل صلاحية لتلقي تذكير. يمكنك اختيار أي مجموعة لكل صلاحية.",
+  reminders_push_label: "الإشعارات",
+  reminders_push_on: "مفعّلة — ستصلك التذكيرات.",
+  reminders_push_off: "موقوفة — فعّلها لتلقي التذكيرات.",
+  reminders_per_currency: "حسب الصلاحية",
+  reminders_chip_today: "يوم الانتهاء",
+  reminders_chip_day_suffix: "ي",
+  reminders_none: "لا توجد تذكيرات.",
+  reminders_summary: "{n} تذكير(ات).",
+  reminders_footnote:
+    "يُرسل كل تذكير مرة واحدة لكل تاريخ انتهاء. اضغط الإشعار للانتقال إلى شاشة الصلاحيات.",
+  reminders_perm_title: "الإشعارات معطلة",
+  reminders_perm_body:
+    "اسمح بالإشعارات من إعدادات الجهاز لتلقي تذكيرات الصلاحيات.",
+  reminders_open_settings: "فتح الإعدادات",
+  reminders_unsupported:
+    "الإشعارات الفورية غير مدعومة على هذا الجهاز.",
+  reminders_no_project:
+    "إعداد الإشعارات غير مكتمل — تواصل مع ضابط العمليات.",
+  reminders_token_error: "تعذر تسجيل الإشعارات الفورية.",
+  reminders_save_error: "تعذر حفظ إعدادات التذكيرات.",
 };
 
 const DICTS: Record<Lang, Dict> = { en: EN, ar: AR };

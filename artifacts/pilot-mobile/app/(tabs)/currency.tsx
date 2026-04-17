@@ -1,6 +1,9 @@
+import { Feather } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import React, { useMemo } from "react";
 import {
   Platform,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -18,6 +21,7 @@ import { useI18n } from "@/lib/i18n";
 export default function CurrencyScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { t, isRTL } = useI18n();
   const { snapshot, refresh, refreshing } = useAppData();
 
@@ -42,14 +46,44 @@ export default function CurrencyScreen() {
         />
       }
     >
-      <Text
+      <View
         style={[
-          styles.title,
-          { color: colors.foreground, textAlign: isRTL ? "right" : "left" },
+          styles.titleRow,
+          { flexDirection: isRTL ? "row-reverse" : "row" },
         ]}
       >
-        {t("currency_title")}
-      </Text>
+        <Text
+          style={[
+            styles.title,
+            { color: colors.foreground, textAlign: isRTL ? "right" : "left" },
+          ]}
+        >
+          {t("currency_title")}
+        </Text>
+        <Pressable
+          onPress={() => router.push("/reminders" as never)}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.remindersBtn,
+            {
+              backgroundColor: colors.muted,
+              borderColor: colors.border,
+              opacity: pressed ? 0.7 : 1,
+              flexDirection: isRTL ? "row-reverse" : "row",
+            },
+          ]}
+        >
+          <Feather name="bell" size={14} color={colors.primary} />
+          <Text
+            style={[
+              styles.remindersBtnText,
+              { color: colors.foreground },
+            ]}
+          >
+            {t("reminders_title")}
+          </Text>
+        </Pressable>
+      </View>
       <View style={styles.list}>
         {items.map((item) => (
           <CurrencyRow key={item.key} item={item} />
@@ -65,10 +99,27 @@ const styles = StyleSheet.create({
     paddingBottom: 120,
     gap: 12,
   },
+  titleRow: {
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+    gap: 12,
+  },
   title: {
     fontSize: 26,
     fontFamily: "Inter_700Bold",
-    marginBottom: 6,
+  },
+  remindersBtn: {
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 6,
+  },
+  remindersBtnText: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
   },
   list: {
     gap: 10,

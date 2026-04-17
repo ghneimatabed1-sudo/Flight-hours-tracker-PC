@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { Stack } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
@@ -21,6 +21,7 @@ import { useI18n } from "@/lib/i18n";
 export default function LinkScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { t, isRTL } = useI18n();
   const { linkAccount, remoteEnabled } = useAppData();
 
@@ -43,8 +44,20 @@ export default function LinkScreen() {
       };
       setError(map[r.error ?? ""] ?? t("link_error_generic"));
       if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
-    } else if (Platform.OS !== "web") {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } else {
+      if (Platform.OS !== "web") {
+        Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Success
+        ).catch(() => {});
+      }
+      // Send the freshly-linked pilot to the reminders screen so they can
+      // opt in to push notifications and pick their per-currency thresholds
+      // before landing on the home tab. They can skip with the back button.
+      try {
+        router.replace("/reminders" as never);
+      } catch {
+        // Navigation is best-effort; if it fails the user still lands in tabs.
+      }
     }
   };
 
