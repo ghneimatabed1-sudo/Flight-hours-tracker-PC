@@ -22,6 +22,11 @@ const SQUADRON_NUMBER = "7";
 const SQUADRON_NAME = "7th Squadron";
 const SQUADRON_BASE = "King Abdullah II Air Base";
 const LICENSE_KEY = "DEMO-RJAF-1234-5678";
+const ADMIN_USER_ID = "00000000-0000-0000-0000-0000000000a1";
+const ADMIN_EMAIL = "admin@demo.rjaf.local";
+const ADMIN_PASSWORD = "admin123"; // demo-only; override in production seeds
+const ADMIN_USERNAME = "ops.lead";
+const ADMIN_DISPLAY = "Ops Lead";
 
 // ── RNG identical to mock.ts ──────────────────────────────────────────────
 function rand(seed) {
@@ -320,19 +325,44 @@ const schedRows = schedule.map(s => `  (${Q(SQUADRON_ID)}, current_date, ${Q(s.a
 lines.push(schedRows.join(",\n") + ";");
 lines.push(``);
 
-lines.push(`commit;`);
+// Admin auth user — provisioned directly into auth.users + auth.identities
+// via the standard Supabase seed pattern. Requires the pgcrypto extension
+// (already installed by 0001_init.sql) for bcrypt hashing.
+lines.push(`-- ── Admin auth user (auth.users + auth.identities + public.users) ─────`);
+lines.push(`-- Demo credentials: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
+lines.push(`-- app_metadata.squadron_id and .role drive every RLS policy.`);
+lines.push(`-- Idempotent: drops the existing demo admin (by id) before reinserting.`);
+lines.push(`delete from auth.identities where user_id = ${Q(ADMIN_USER_ID)};`);
+lines.push(`delete from auth.users      where id      = ${Q(ADMIN_USER_ID)};`);
+lines.push(`insert into auth.users (`);
+lines.push(`  instance_id, id, aud, role, email, encrypted_password,`);
+lines.push(`  email_confirmed_at, raw_app_meta_data, raw_user_meta_data,`);
+lines.push(`  created_at, updated_at, confirmation_token, email_change,`);
+lines.push(`  email_change_token_new, recovery_token`);
+lines.push(`) values (`);
+lines.push(`  '00000000-0000-0000-0000-000000000000', ${Q(ADMIN_USER_ID)},`);
+lines.push(`  'authenticated', 'authenticated', ${Q(ADMIN_EMAIL)},`);
+lines.push(`  crypt(${Q(ADMIN_PASSWORD)}, gen_salt('bf')),`);
+lines.push(`  now(),`);
+lines.push(`  jsonb_build_object('squadron_id', ${Q(SQUADRON_ID)}, 'role', 'admin', 'provider', 'email', 'providers', jsonb_build_array('email')),`);
+lines.push(`  '{}'::jsonb, now(), now(), '', '', '', ''`);
+lines.push(`);`);
+lines.push(`insert into auth.identities (`);
+lines.push(`  provider_id, user_id, identity_data, provider,`);
+lines.push(`  last_sign_in_at, created_at, updated_at`);
+lines.push(`) values (`);
+lines.push(`  ${Q(ADMIN_USER_ID)}, ${Q(ADMIN_USER_ID)},`);
+lines.push(`  jsonb_build_object('sub', ${Q(ADMIN_USER_ID)}, 'email', ${Q(ADMIN_EMAIL)}, 'email_verified', true),`);
+lines.push(`  'email', now(), now(), now()`);
+lines.push(`);`);
 lines.push(``);
-lines.push(`-- ── Admin user (manual step) ───────────────────────────────────────────`);
-lines.push(`-- The 'users' table FKs auth.users(id), so an admin account must first be`);
-lines.push(`-- created through Supabase Auth. From the Supabase dashboard:`);
-lines.push(`--   1. Authentication → Users → "Add user" → email + password.`);
-lines.push(`--   2. Edit the new user's app_metadata to:`);
-lines.push(`--        { "squadron_id": "${SQUADRON_ID}", "role": "admin" }`);
-lines.push(`--      (RLS on every table reads squadron_id from this claim.)`);
-lines.push(`--   3. Then run, replacing <auth-user-uuid> with the new user's id:`);
-lines.push(`--`);
-lines.push(`--      insert into users (id, squadron_id, username, display_name, role)`);
-lines.push(`--      values ('<auth-user-uuid>', '${SQUADRON_ID}', 'ops.lead', 'Ops Lead', 'admin');`);
+lines.push(`insert into users (id, squadron_id, username, display_name, role) values`);
+lines.push(`  (${Q(ADMIN_USER_ID)}, ${Q(SQUADRON_ID)}, ${Q(ADMIN_USERNAME)}, ${Q(ADMIN_DISPLAY)}, 'admin')`);
+lines.push(`on conflict (id) do update set`);
+lines.push(`  squadron_id = excluded.squadron_id, username = excluded.username,`);
+lines.push(`  display_name = excluded.display_name, role = excluded.role;`);
+lines.push(``);
+lines.push(`commit;`);
 lines.push(``);
 
 writeFileSync(OUT, lines.join("\n"));

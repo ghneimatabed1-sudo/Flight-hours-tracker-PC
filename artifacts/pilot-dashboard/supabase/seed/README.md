@@ -2,7 +2,7 @@
 
 This folder contains the demo seed for a freshly provisioned Supabase
 project. Running it gives the app the same baseline data the in-memory
-preview shows: one squadron, 16 pilots, 50 sorties, currencies, leaves,
+preview shows: one squadron, 16 pilots, 80 sorties, currencies, leaves,
 duty roster, NOTAMs, and today's flight schedule.
 
 ## Files
@@ -21,18 +21,18 @@ duty roster, NOTAMs, and today's flight schedule.
    - `migrations/0002_mobile_link.sql`
 2. **Run the seed** with the **service role** (Supabase SQL editor is
    already service-role; psql callers must use the service-role
-   connection string). RLS would otherwise block the inserts.
+   connection string). RLS would otherwise block the inserts, and the
+   admin-user provisioning at the end writes directly to the `auth.*`
+   tables.
    ```sh
    psql "$SUPABASE_SERVICE_ROLE_URL" -f seed.sql
    ```
-3. **Create an admin auth user** (manual, see comment block at the
-   bottom of `seed.sql`):
-   - In the Supabase dashboard: Authentication → Users → "Add user".
-   - Edit `app_metadata` to:
-     `{"squadron_id": "00000000-0000-0000-0000-000000000001", "role": "admin"}`
-   - Run the small `insert into users (...)` statement at the bottom of
-     `seed.sql`, replacing `<auth-user-uuid>` with the new user's id.
-4. **Activate the license** in the desktop app using the seeded key:
+   The seed creates a ready-to-use admin account in one step:
+   - **Email:** `admin@demo.rjaf.local`
+   - **Password:** `admin123`
+   - `app_metadata`: `{"squadron_id": "00000000-0000-0000-0000-000000000001", "role": "admin"}`
+   Change the password immediately for any non-demo environment.
+3. **Activate the license** in the desktop app using the seeded key:
    `DEMO-RJAF-1234-5678`.
 
 ## What gets seeded
