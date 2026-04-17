@@ -13,21 +13,36 @@ interface StatProps {
 
 export function Stat({ label, value, hint, emphasis, isRTL }: StatProps) {
   const colors = useColors();
+  const textColor = emphasis ? colors.primary : colors.foreground;
   return (
     <View
       style={[
         styles.container,
         {
-          backgroundColor: emphasis ? colors.primary : colors.card,
-          borderColor: emphasis ? colors.primary : colors.border,
+          backgroundColor: colors.card,
+          borderColor: emphasis ? colors.primary + "55" : colors.border,
         },
       ]}
     >
+      {/* Tactical corner ticks */}
+      <View
+        style={[
+          styles.tickTL,
+          { borderColor: emphasis ? colors.primary : colors.border },
+        ]}
+      />
+      <View
+        style={[
+          styles.tickBR,
+          { borderColor: emphasis ? colors.primary : colors.border },
+        ]}
+      />
+
       <Text
         style={[
           styles.label,
           {
-            color: emphasis ? colors.primaryForeground : colors.mutedForeground,
+            color: colors.mutedForeground,
             textAlign: isRTL ? "right" : "left",
           },
         ]}
@@ -38,7 +53,7 @@ export function Stat({ label, value, hint, emphasis, isRTL }: StatProps) {
         style={[
           styles.value,
           {
-            color: emphasis ? colors.primaryForeground : colors.foreground,
+            color: textColor,
             textAlign: isRTL ? "right" : "left",
           },
         ]}
@@ -50,7 +65,7 @@ export function Stat({ label, value, hint, emphasis, isRTL }: StatProps) {
           style={[
             styles.hint,
             {
-              color: emphasis ? colors.primaryForeground : colors.mutedForeground,
+              color: colors.mutedForeground,
               textAlign: isRTL ? "right" : "left",
             },
           ]}
@@ -66,23 +81,50 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     minWidth: 140,
-    padding: 14,
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     gap: 4,
+    overflow: "hidden",
+    position: "relative",
+  },
+  tickTL: {
+    position: "absolute",
+    top: 6,
+    left: 6,
+    width: 10,
+    height: 10,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    opacity: 0.55,
+  },
+  tickBR: {
+    position: "absolute",
+    bottom: 6,
+    right: 6,
+    width: 10,
+    height: 10,
+    borderBottomWidth: 1,
+    borderRightWidth: 1,
+    opacity: 0.55,
   },
   label: {
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: "Inter_500Medium",
     textTransform: "uppercase",
-    letterSpacing: 0.6,
+    letterSpacing: 1.4,
   },
   value: {
-    fontSize: 28,
+    fontSize: 26,
     fontFamily: "Inter_700Bold",
+    letterSpacing: -0.4,
+    fontVariant: ["tabular-nums"],
   },
   hint: {
     fontSize: 11,
     fontFamily: "Inter_400Regular",
+    marginTop: 2,
+    letterSpacing: 0.2,
   },
 });

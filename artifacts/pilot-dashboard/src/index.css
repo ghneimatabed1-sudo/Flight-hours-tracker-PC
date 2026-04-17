@@ -170,6 +170,74 @@ html, body, #root {
 
 .title-line { letter-spacing: .14em; text-transform: uppercase; font-size: 11px; color: hsl(220 12% 65%); }
 
+/* ─── Tactical / military design language ─────────────────────────── */
+.stencil { font-family: var(--app-font-mono); letter-spacing: .22em; text-transform: uppercase; font-size: 10px; color: hsl(220 12% 60%); }
+.stencil-lg { font-family: var(--app-font-mono); letter-spacing: .28em; text-transform: uppercase; font-size: 12px; color: hsl(220 12% 70%); }
+.tick { color: hsl(42 90% 55%); font-family: var(--app-font-mono); }
+.hairline { height: 1px; background: linear-gradient(90deg, transparent, hsl(220 25% 22%), transparent); border: 0; }
+
+/* Gradient gold border using mask trick */
+.frame-gold {
+  position: relative;
+  border-radius: 14px;
+  background: linear-gradient(180deg, hsl(220 40% 11%), hsl(220 45% 8%));
+}
+.frame-gold::before {
+  content: "";
+  position: absolute; inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(245,213,122,.55), rgba(201,143,31,.15) 35%, rgba(255,255,255,.04) 60%, rgba(245,213,122,.45));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Tactical corner brackets — purely decorative */
+.brackets { position: relative; }
+.brackets::before, .brackets::after {
+  content: ""; position: absolute; width: 14px; height: 14px;
+  border: 1px solid hsl(42 90% 55% / .6); pointer-events: none;
+}
+.brackets::before { top: 8px; left: 8px; border-right: 0; border-bottom: 0; }
+.brackets::after { bottom: 8px; right: 8px; border-left: 0; border-top: 0; }
+
+/* Hero number — military readout */
+.hero-num {
+  font-family: var(--app-font-mono);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  background: linear-gradient(180deg, #fbe39a 0%, #f5d57a 35%, #d4a528 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: 0 0 30px rgba(245,213,122,.18);
+}
+
+/* Subtle scanline overlay (very faint) */
+.scan {
+  background-image: repeating-linear-gradient(180deg, rgba(255,255,255,0) 0, rgba(255,255,255,0) 3px, rgba(255,255,255,.012) 3px, rgba(255,255,255,.012) 4px);
+}
+
+/* Subtle pulse for live indicators */
+@keyframes pulse-soft { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+.pulse-soft { animation: pulse-soft 2.4s ease-in-out infinite; }
+
+/* Stagger fade-in for content */
+@keyframes rise-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.rise { animation: rise-in .4s ease-out both; }
+.rise-1 { animation-delay: .04s; }
+.rise-2 { animation-delay: .08s; }
+.rise-3 { animation-delay: .12s; }
+.rise-4 { animation-delay: .16s; }
+
+/* Hover lift on cards */
+.lift { transition: transform .18s ease, border-color .18s ease, background-color .18s ease; }
+.lift:hover { transform: translateY(-1px); border-color: hsl(42 90% 55% / .35); }
+
+/* Inline progress meter */
+.meter { height: 4px; border-radius: 999px; background: hsl(220 25% 16%); overflow: hidden; }
+.meter > i { display: block; height: 100%; background: linear-gradient(90deg, #f5d57a, #d4a528); border-radius: 999px; }
+
 /* HQ Dashboard currency status utilities */
 .currency-current { background-color: rgb(187 247 208); color: rgb(20 83 45); }
 .dark .currency-current { background-color: rgb(20 83 45 / 0.3); color: rgb(187 247 208); }
