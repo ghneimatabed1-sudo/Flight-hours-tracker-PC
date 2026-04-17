@@ -13,9 +13,11 @@ export interface LinkRecord {
   pilotId: string;
   linkedAt: string;
   squadronId?: string;
-  // Opaque device token issued by the link_pilot_device RPC. Required for
-  // every subsequent snapshot fetch. Stored in SecureStore so it never sits
-  // in plaintext on disk.
+  // Legacy: opaque device token from the pre-RLS-per-pilot link path. The
+  // current flow uses a real Supabase auth session (persisted by the
+  // supabase client into SecureStore under `rjaf.auth.v1`) instead, so new
+  // links no longer set this. Kept optional for backward-compat reads of
+  // already-linked devices.
   token?: string;
 }
 

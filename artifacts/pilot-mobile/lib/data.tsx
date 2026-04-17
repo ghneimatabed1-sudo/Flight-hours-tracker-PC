@@ -20,6 +20,7 @@ import {
 import {
   fetchPilotSnapshotRemote,
   linkPilotRemote,
+  supabase,
   supabaseConfigured,
 } from "./supabase";
 import type { PilotSnapshot } from "./types";
@@ -48,10 +49,10 @@ interface AppDataValue {
 
 const Ctx = createContext<AppDataValue | null>(null);
 
-// Background sync interval. The mobile client polls the SECURITY DEFINER
-// snapshot RPC because Supabase Realtime's postgres_changes channel requires
-// row-level SELECT for the anon role, which we deliberately revoke. Polling
-// is the documented sync path; pull-to-refresh remains for on-demand updates.
+// Background sync interval. The mobile client polls direct table reads under
+// its per-pilot Supabase auth session (RLS scopes them to the signed-in
+// pilot). Polling keeps the dependency surface small; pull-to-refresh
+// remains for on-demand updates.
 const POLL_MS = 15_000;
 
 export function AppDataProvider({ children }: { children: React.ReactNode }) {
@@ -66,8 +67,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   linkRef.current = link;
 
   const applyRefresh = useCallback(async (rec: LinkRecord) => {
-    if (!rec.token) return;
-    const r = await fetchPilotSnapshotRemote(rec.token);
+    if (!rec.pilotId) return;
+    const r = await fetchPilotSnapshotRemote(rec.pilotId);
     if (r.ok && r.snapshot) {
       setSnapshot(r.snapshot);
       await saveSnapshot(r.snapshot);
@@ -94,8 +95,19 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setSnapshot(storedSnap);
       setReady(true);
 
-      if (storedLink && supabaseConfigured && storedLink.token) {
-        await applyRefresh(storedLink);
+      if (storedLink && supabaseConfigured && storedLink.pilotId) {
+        // The Supabase client restores the persisted auth session from
+        // SecureStore on its own; just verify it is still valid before
+        // attempting a read so we surface revoked sessions cleanly.
+        const { data } = (await supabase?.auth.getSession()) ?? { data: null };
+        if (data?.session) {
+          await applyRefresh(storedLink);
+        } else {
+          setLastError("revoked");
+          await clearLink();
+          setLink(null);
+          setSnapshot(null);
+        }
       }
     })();
     return () => {
@@ -106,7 +118,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   // Background sync: only active while linked against a real Supabase
   // project. Demo mode skips this since the cached snapshot never changes.
   useEffect(() => {
-    if (!link || !supabaseConfigured || !link.token) return;
+    if (!link || !supabaseConfigured || !link.pilotId) return;
 
     let stopped = false;
     const interval = setInterval(() => {
@@ -130,7 +142,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
       if (supabaseConfigured) {
         const r = await linkPilotRemote(mn, cd);
-        if (!r.ok || !r.snapshot || !r.token) {
+        if (!r.ok || !r.snapshot) {
           const err = (r.error as LinkErrorCode) ?? "generic";
           setLastError(err);
           return { ok: false, error: err };
@@ -139,7 +151,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           militaryNumber: mn,
           pilotId: r.snapshot.profile.id,
           linkedAt: new Date().toISOString(),
-          token: r.token,
+          squadronId: r.squadronId,
         };
         await saveLink(linkRec);
         await saveSnapshot(r.snapshot);
@@ -175,7 +187,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     if (!link) return;
     setRefreshing(true);
     try {
-      if (supabaseConfigured && link.token) {
+      if (supabaseConfigured && link.pilotId) {
         await applyRefresh(link);
       } else {
         const next: PilotSnapshot = {
@@ -191,6 +203,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   }, [link, applyRefresh]);
 
   const unlink = useCallback(async () => {
+    if (supabaseConfigured) {
+      try {
+        await supabase?.auth.signOut();
+      } catch {
+        // Best-effort: even if the network sign-out fails we still want to
+        // wipe local state below.
+      }
+    }
     await clearLink();
     setLink(null);
     setSnapshot(null);
