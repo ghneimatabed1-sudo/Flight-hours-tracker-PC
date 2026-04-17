@@ -43,6 +43,22 @@ export function pilotWorstStatus(p: Pilot): CurrencyStatus {
   return all.reduce((worst, s) => (rank[s] > rank[worst] ? s : worst), "current" as CurrencyStatus);
 }
 
+// Returns the date string of the currency that drives the pilot's worst status.
+// Used so badges can show "Expiring Soon · 23 Apr" rather than a bare label.
+export function pilotWorstDate(p: Pilot): string | null {
+  const entries: { status: CurrencyStatus; date: string }[] = [
+    { status: currencyStatus(p.dayCurrencyDate), date: p.dayCurrencyDate },
+    { status: currencyStatus(p.nightCurrencyDate), date: p.nightCurrencyDate },
+    { status: currencyStatus(p.irtCurrencyDate), date: p.irtCurrencyDate },
+    { status: currencyStatus(p.medicalCurrencyDate), date: p.medicalCurrencyDate },
+  ];
+  let best: { status: CurrencyStatus; date: string } | null = null;
+  for (const e of entries) {
+    if (!best || rank[e.status] > rank[best.status]) best = e;
+  }
+  return best && best.status !== "current" ? best.date : null;
+}
+
 export function fmtDate(d: string, lang: string): string {
   return new Date(d).toLocaleDateString(lang === "ar" ? "ar-EG" : "en-GB", {
     year: "numeric", month: "short", day: "2-digit",

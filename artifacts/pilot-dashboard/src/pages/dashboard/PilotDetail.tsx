@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { pilots, squadrons } from "@/lib/mockData";
-import { pilotWorstStatus, currencyStatus, fmtDate } from "@/lib/format";
+import { pilotWorstStatus, pilotWorstDate, currencyStatus, fmtDate } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ChevronLeft, Eye, Plane, Calendar, Award } from "lucide-react";
 
@@ -41,7 +41,7 @@ export default function PilotDetail() {
           <p className="text-sm text-muted-foreground font-mono">{pilot.callSign} · {lang === "ar" ? squadron.nameAr : squadron.name}</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <StatusBadge status={pilotWorstStatus(pilot)} />
+          <StatusBadge status={pilotWorstStatus(pilot)} date={pilotWorstDate(pilot)} />
           <Badge variant="outline" className="gap-1"><Eye className="h-3 w-3" />{t("readOnly")}</Badge>
         </div>
       </div>
@@ -95,7 +95,7 @@ export default function PilotDetail() {
                     <div className="text-xs text-muted-foreground">{c.label}</div>
                     <div className="font-medium tabular-nums">{fmtDate(c.date, lang)}</div>
                   </div>
-                  <StatusBadge status={status} />
+                  <StatusBadge status={status} date={c.date} />
                 </div>
               );
             })}

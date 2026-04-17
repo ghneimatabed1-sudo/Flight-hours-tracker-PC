@@ -9,12 +9,23 @@ function statusLabelKey(s: CurrencyStatus): "current" | "warning" | "expiringSoo
   return "current";
 }
 
-export function StatusBadge({ status }: { status: CurrencyStatus }) {
-  const { t } = useI18n();
+function fmtShort(date: string, lang: string): string {
+  return new Date(date).toLocaleDateString(lang === "ar" ? "ar-EG" : "en-GB", {
+    day: "2-digit",
+    month: "short",
+  });
+}
+
+export function StatusBadge({ status, date }: { status: CurrencyStatus; date?: string | null }) {
+  const { t, lang } = useI18n();
   const label = t(statusLabelKey(status));
+  const showDate = !!date && status !== "current";
   return (
-    <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${statusClass(status)}`}>
+    <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium tabular-nums ${statusClass(status)}`}>
       {label}
+      {showDate && (
+        <span className="ms-1.5 opacity-80 font-normal">· {fmtShort(date!, lang)}</span>
+      )}
     </span>
   );
 }

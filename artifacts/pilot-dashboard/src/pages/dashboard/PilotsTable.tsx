@@ -278,7 +278,7 @@ export default function PilotsTable() {
                       <td className="py-2 px-3 text-center"><CurrencyCell date={p.nightCurrencyDate} /></td>
                       <td className="py-2 px-3 text-center"><CurrencyCell date={p.irtCurrencyDate} /></td>
                       <td className="py-2 px-3 text-center"><CurrencyCell date={p.medicalCurrencyDate} /></td>
-                      <td className="py-2 px-3"><StatusBadge status={pilotWorstStatus(p)} /></td>
+                      <td className="py-2 px-3"><StatusBadge status={pilotWorstStatus(p)} date={pilotWorstDate(p)} /></td>
                       <td className="py-2 px-3 text-end no-print">
                         <Link href={`/dashboard/pilot/${p.id}`}>
                           <Button size="sm" variant="outline" data-testid={`button-view-${p.id}`}>{t("viewDetails")}</Button>
