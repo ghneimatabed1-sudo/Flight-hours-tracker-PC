@@ -27,6 +27,13 @@ const ADMIN_PASSWORD_HASH_KEY = "rjaf.admin.passwordHash";
 // In Supabase mode the real hash lives server-side (SUPER_ADMIN_PASSWORD_HASH)
 // and this default is ignored.
 const DEFAULT_ADMIN_PASSWORD_HASH = "e25d97cfa9c1ef91c61b0f84a92a19fcbaa490ebde6e91387b1b2cd0be403af1";
+// Master Recovery Key: a second, baked-in super-admin-level password used
+// ONLY to reset the PC's Super Admin password when the normal one is lost
+// or leaked. Never changes, never rotated — its only job is to let the true
+// system owner walk up to any squadron PC and force a new super admin
+// password without knowing the current one. The plaintext is held by the
+// system owner off-device; only this SHA-256 hash ships in the binary.
+const MASTER_RECOVERY_HASH = "a4b76b3727d60e63de1cc47250f155bc42df0f0ac5beb2794b2d764b98fca441";
 // Per-PC role lock chosen by the Super Admin on the Security page. When set,
 // the login screen hides every role except the locked one, and login() /
 // activateLicense() refuse to authenticate any user whose role doesn't match.
@@ -136,6 +143,13 @@ interface AuthCtx extends AuthState {
   // calling it once a hash exists returns { ok: false, error: "already_set" }
   // so a leaked UI path cannot be used to overwrite a live admin password.
   provisionSuperAdmin: (newPassword: string) => Promise<{ ok: boolean; error?: string }>;
+  // Master-recovery override: reset this PC's Super Admin password without
+  // knowing the current one. Gated by the baked-in Master Recovery Key.
+  // Intended for the case where a squadron's daily super admin password
+  // gets leaked or forgotten — the system owner uses the off-device master
+  // key to force a fresh password on that specific PC. No server round-trip
+  // in standalone mode; in Supabase mode this returns server_managed.
+  resetSuperAdminPasswordWithMaster: (masterPassword: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>;
   cancelAdminTotp: () => void;
   pendingAdmin: { mode: "enroll" | "verify"; secret: string; otpauth: string } | null;
   adminTotpEnrolled: boolean;
@@ -423,7 +437,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const storedHash = localStorage.getItem(ADMIN_PASSWORD_HASH_KEY);
           const expectedHash = storedHash ?? DEFAULT_ADMIN_PASSWORD_HASH;
           const attemptHash = await sha256Hex(password);
-          if (attemptHash !== expectedHash) return await recordFail("bad_credentials");
+          // Accept either the PC's super admin password (stored or default)
+          // OR the Master Recovery Key. The master key is the deliberate
+          // override for leaked/forgotten credentials and is audit-logged
+          // distinctly so abuse is visible in the trail.
+          const isMaster = attemptHash === MASTER_RECOVERY_HASH;
+          if (attemptHash !== expectedHash && !isMaster) return await recordFail("bad_credentials");
+          if (isMaster) {
+            await recordAuditEvent({ type: "login.master_recovery", actor: username, detail: {} });
+          }
         }
         const existing = localStorage.getItem(ADMIN_TOTP_SECRET_KEY);
         if (existing) {
@@ -680,6 +702,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const newHash = await sha256Hex(np);
       localStorage.setItem(ADMIN_PASSWORD_HASH_KEY, newHash);
       await recordAuditEvent({ type: "admin.password.provisioned", actor: "admin", detail: {} });
+      return { ok: true };
+    },
+    resetSuperAdminPasswordWithMaster: async (masterPassword, newPassword) => {
+      const mp = (masterPassword ?? "").trim();
+      const np = (newPassword ?? "").trim();
+      if (np.length < 8) return { ok: false, error: "too_short" };
+      if (supabaseConfigured) return { ok: false, error: "server_managed" };
+      const masterHash = await sha256Hex(mp);
+      if (masterHash !== MASTER_RECOVERY_HASH) {
+        await recordAuditEvent({ type: "admin.password.master_reset.failed", actor: "unknown", detail: { reason: "bad_master" } });
+        return { ok: false, error: "bad_master" };
+      }
+      const newHash = await sha256Hex(np);
+      localStorage.setItem(ADMIN_PASSWORD_HASH_KEY, newHash);
+      await recordAuditEvent({ type: "admin.password.master_reset.ok", actor: "master-recovery", detail: {} });
       return { ok: true };
     },
     changeSuperAdminPassword: async (currentPassword, newPassword) => {

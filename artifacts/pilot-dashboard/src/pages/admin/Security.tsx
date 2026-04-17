@@ -12,12 +12,44 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { KeyRound, ShieldCheck, ShieldAlert, RefreshCw, Lock, Monitor } from "lucide-react";
+import { KeyRound, ShieldCheck, ShieldAlert, RefreshCw, Lock, Monitor, LifeBuoy } from "lucide-react";
 import type { PcRoleLock } from "@/lib/auth";
 
 export default function AdminSecurity() {
   const { t } = useI18n();
-  const { adminTotpEnrolled, regenerateRecoveryCodes, changeSuperAdminPassword, backendMode, pcRoleLock, setPcRoleLock } = useAuth();
+  const { adminTotpEnrolled, regenerateRecoveryCodes, changeSuperAdminPassword, resetSuperAdminPasswordWithMaster, backendMode, pcRoleLock, setPcRoleLock } = useAuth();
+
+  // Master-recovery reset (for when a PC's super admin password is lost or
+  // leaked). Uses the baked-in Master Recovery Key instead of the current
+  // password. Kept visually distinct from the normal Change Password card
+  // so no one touches it by accident.
+  const [mrMaster, setMrMaster] = useState("");
+  const [mrNew, setMrNew] = useState("");
+  const [mrConfirm, setMrConfirm] = useState("");
+  const [mrBusy, setMrBusy] = useState(false);
+  const [mrErr, setMrErr] = useState<string | null>(null);
+  const [mrOk, setMrOk] = useState(false);
+  const submitMasterReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (mrBusy) return;
+    setMrErr(null);
+    setMrOk(false);
+    if (mrNew.length < 8) { setMrErr(t("pwTooShort")); return; }
+    if (mrNew !== mrConfirm) { setMrErr(t("pwMismatch")); return; }
+    setMrBusy(true);
+    const res = await resetSuperAdminPasswordWithMaster(mrMaster, mrNew);
+    setMrBusy(false);
+    if (!res.ok) {
+      if (res.error === "bad_master") setMrErr(t("masterResetBadMaster"));
+      else if (res.error === "too_short") setMrErr(t("pwTooShort"));
+      else if (res.error === "server_managed") setMrErr(t("pwServerManaged"));
+      else setMrErr(t("pwGenericError"));
+      return;
+    }
+    setMrMaster(""); setMrNew(""); setMrConfirm("");
+    setMrOk(true);
+    window.setTimeout(() => setMrOk(false), 5000);
+  };
 
   // Local editable copy of the PC role lock so the super admin can preview
   // the choice before applying. Initialized from the persisted value.
@@ -252,6 +284,66 @@ export default function AdminSecurity() {
           )}
         </CardContent>
       </Card>
+
+      {!pwServerManaged && (
+        <Card className="border-destructive/40">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <LifeBuoy className="h-5 w-5 text-destructive" />
+              {t("masterResetTitle")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-[11px] text-destructive mb-3 inline-block">
+              {t("masterResetDanger")}
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">{t("masterResetBlurb")}</p>
+            <form onSubmit={submitMasterReset} className="space-y-3 max-w-md">
+              <div>
+                <label className="text-xs text-muted-foreground">{t("masterResetKey")}</label>
+                <Input
+                  type="password"
+                  autoComplete="off"
+                  value={mrMaster}
+                  onChange={e => { setMrMaster(e.target.value); setMrErr(null); setMrOk(false); }}
+                  data-testid="input-master-recovery-key"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">{t("newPassword")}</label>
+                <Input
+                  type="password"
+                  autoComplete="new-password"
+                  value={mrNew}
+                  onChange={e => { setMrNew(e.target.value); setMrErr(null); setMrOk(false); }}
+                  data-testid="input-master-recovery-new"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">{t("pwMinHint")}</p>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">{t("confirmPassword")}</label>
+                <Input
+                  type="password"
+                  autoComplete="new-password"
+                  value={mrConfirm}
+                  onChange={e => { setMrConfirm(e.target.value); setMrErr(null); setMrOk(false); }}
+                  data-testid="input-master-recovery-confirm"
+                />
+              </div>
+              {mrErr && <p className="text-xs text-destructive" data-testid="text-master-recovery-error">{mrErr}</p>}
+              {mrOk && <p className="text-xs text-emerald-400" data-testid="text-master-recovery-ok">{t("masterResetOk")}</p>}
+              <Button
+                type="submit"
+                variant="destructive"
+                disabled={mrBusy || !mrMaster || !mrNew || !mrConfirm}
+                data-testid="button-master-recovery-submit"
+              >
+                {mrBusy ? t("saving") : t("masterResetBtn")}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
