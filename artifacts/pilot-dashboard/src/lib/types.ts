@@ -27,6 +27,9 @@ export interface Squadron {
 export interface Pilot {
   id: string;
   callSign: string;
+  // Optional flight name — personal handle distinct from the tactical
+  // callSign. Shown on commander / HQ roster views next to the callSign.
+  flightName?: string;
   rank: string;
   rankAr: string;
   fullName: string;

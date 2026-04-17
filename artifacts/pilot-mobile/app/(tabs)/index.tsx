@@ -116,6 +116,11 @@ export default function HomeScreen() {
         <Text style={[styles.name, { color: colors.foreground, textAlign: align }]}>
           {profile.rank} {isRTL && profile.arabicName ? profile.arabicName : profile.name}
         </Text>
+        {profile.flightName ? (
+          <Text style={[styles.unit, { color: colors.primary, textAlign: align, fontFamily: "monospace" }]}>
+            "{profile.flightName}"
+          </Text>
+        ) : null}
         <Text style={[styles.unit, { color: colors.mutedForeground, textAlign: align }]}>
           {profile.squadron || profile.unit}
         </Text>

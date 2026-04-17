@@ -234,6 +234,7 @@ export default function PilotsTable() {
               <thead>
                 <tr className="border-b border-border bg-muted/40 text-muted-foreground text-xs uppercase">
                   <Th onClick={() => setSort("callSign")}>{t("callSign")}</Th>
+                  <th className="text-start py-2 px-3">{t("flightName")}</th>
                   <Th onClick={() => setSort("fullName")}>{t("name")}</Th>
                   <th className="text-start py-2 px-3">{t("squadron")}</th>
                   <Th onClick={() => setSort("grandTotalHours")} align="end">{t("grandTotal")}</Th>
@@ -244,13 +245,14 @@ export default function PilotsTable() {
               </thead>
               <tbody>
                 {list.length === 0 && (
-                  <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">{t("noResults")}</td></tr>
+                  <tr><td colSpan={8} className="py-8 text-center text-muted-foreground">{t("noResults")}</td></tr>
                 )}
                 {list.map(p => {
                   const sqn = squadrons.find(s => s.id === p.squadronId);
                   return (
                     <tr key={p.id} className="border-b border-border/60 hover:bg-accent/30" data-testid={`row-pilot-${p.id}`}>
                       <td className="py-2 px-3 font-mono text-xs">{p.callSign}</td>
+                      <td className="py-2 px-3 font-mono text-xs text-muted-foreground">{p.flightName ?? "—"}</td>
                       <td className="py-2 px-3 whitespace-nowrap">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-medium">{lang === "ar" ? p.fullNameAr : p.fullName}</span>

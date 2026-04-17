@@ -4,6 +4,9 @@ export interface PilotProfile {
   name: string;
   arabicName: string;
   rank: string;
+  // Personal flight name / handle the pilot is known by within the squadron.
+  // Purely a display field — shown as a subtitle on the home screen.
+  flightName?: string;
   unit: string;
   squadron: string;
   phone?: string;

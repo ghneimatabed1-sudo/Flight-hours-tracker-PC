@@ -19,6 +19,9 @@ export const auditLog: AuditEntry[] = [];
 //
 // Stored in the registry with the `_fullKey` field so lookupLicenseKey() can
 // match the exact string the operator types. Never expires.
+// The extra `_fullKey` field on the seed is consumed by license-registry.ts
+// when validating an activation attempt. It intentionally isn't part of the
+// LicenseKey type — the admin table only ever shows keyPreview.
 export const licenseKeys: LicenseKey[] = [
   {
     id: "seed-install-key",
@@ -27,10 +30,8 @@ export const licenseKeys: LicenseKey[] = [
     status: "active",
     issuedAt: "2026-01-01T00:00:00.000Z",
     expiresAt: null,
-    // @ts-expect-error — _fullKey is a private registry-only field consumed by
-    // license-registry.ts; it is intentionally absent from the LicenseKey type.
     _fullKey: "MG3H7HM22",
-  } as LicenseKey,
+  } as unknown as LicenseKey,
 ];
 
 export const SUPER_ADMIN: User = {

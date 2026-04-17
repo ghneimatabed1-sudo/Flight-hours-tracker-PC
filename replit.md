@@ -183,3 +183,27 @@ in `src/lib/archive.ts` runs once. It is **idempotent**.
   `admin@8sar.rjaf.local`, `admin@12vip.rjaf.local`,
   `admin@5fts.rjaf.local`. README + replit.md updated with the full
   squadron table.
+
+## Flight Hours System — Data Preservation Policy
+
+**Updates must be additive.** Existing pilots, logs, monthly summaries, ops
+officer accounts, license keys, squadron attachments, and admin settings MUST
+survive every release. Breaking changes (field renames, removals, storage key
+changes) require explicit user sign-off before shipping.
+
+- LocalStorage keys are stable across releases. Never rename. Current keys:
+  `rjaf.lang`, `rjaf.auth`, `rjaf.license`, `rjaf.licenseKeys`,
+  `rjaf.hqContext`, plus the mock-data buckets.
+- New schema fields must be optional and default to a sensible empty value
+  (e.g. `flightName?: string`). Legacy records without the field keep working.
+- The install license key `MG3H7HM22` is seeded in `mockData.ts`
+  (id `seed-install-key`, never expires, unbound to operator). Do not remove.
+- Recent additive changes:
+  - Unified Admin → Access Accounts Role/Scope into a single **Tier** dropdown
+    (HQ / Base / Wing / Squadron / Flight / Ops Officer).
+  - Added optional **Flight Name** field on pilot profiles — shown on the
+    commander pilots table, pilot detail header, and mobile home screen.
+- CodeMagic CI config lives at **repo root** (`codemagic.yaml`). The iOS/
+  Android workflows build the Expo app in `artifacts/pilot-mobile`. The user
+  connects GitHub → CodeMagic via codemagic.io UI; the signing group is named
+  `codemagic` (lowercase).

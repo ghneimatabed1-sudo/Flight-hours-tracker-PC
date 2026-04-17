@@ -46,6 +46,7 @@ function rowToPilot(r: Record<string, unknown>): Pilot {
   return {
     id: String(r.id),
     callSign: data.callSign ? String(data.callSign) : undefined,
+    flightName: data.flightName ? String(data.flightName) : undefined,
     name: String(r.name ?? data.name ?? ""),
     arabicName: String(r.arabic_name ?? data.arabicName ?? ""),
     rank: String(r.rank ?? data.rank ?? ""),
@@ -116,6 +117,7 @@ export function useUpdatePilot() {
         // other derived values aren't wiped on profile edits.
         data: {
           callSign: p.callSign,
+          flightName: p.flightName,
           name: p.name,
           arabicName: p.arabicName,
           rank: p.rank,
@@ -172,6 +174,7 @@ export function useCreatePilot() {
         available: p.available,
         data: {
           callSign: p.callSign,
+          flightName: p.flightName,
           name: p.name,
           arabicName: p.arabicName,
           rank: p.rank,
@@ -337,6 +340,7 @@ async function applyCurrencyRefresh(
       const { error } = await supabase!.from("pilots").update({
         data: {
           callSign: p.callSign,
+          flightName: p.flightName,
           name: p.name, arabicName: p.arabicName, rank: p.rank, phone: p.phone,
           address: p.address, unit: p.unit, available: p.available,
           openingDay: p.openingDay, openingNight: p.openingNight, openingNvg: p.openingNvg,

@@ -8,6 +8,11 @@ export interface Pilot {
   // (which is the immutable roster/service identifier). Ops officer can edit
   // freely; HQ dashboards show it alongside the pilot's name.
   callSign?: string;
+  // Optional flight name — a personal handle the pilot goes by within the
+  // squadron (e.g. "GHOST", "RAPTOR"). Distinct from the tactical callSign.
+  // Displayed on commander / HQ views next to the callSign and on the mobile
+  // app as the pilot's personal greeting.
+  flightName?: string;
   name: string;
   arabicName: string;
   rank: string;

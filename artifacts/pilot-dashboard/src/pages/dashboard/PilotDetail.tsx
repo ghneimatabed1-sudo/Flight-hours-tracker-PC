@@ -43,7 +43,12 @@ export default function PilotDetail() {
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-2xl font-bold">{lang === "ar" ? pilot.fullNameAr : pilot.fullName}</h2>
-          <p className="text-sm text-muted-foreground font-mono">{pilot.callSign} · {lang === "ar" ? squadron.nameAr : squadron.name}</p>
+          <p className="text-sm text-muted-foreground font-mono">
+            {pilot.callSign}
+            {pilot.flightName ? ` · ${pilot.flightName}` : ""}
+            {" · "}
+            {lang === "ar" ? squadron.nameAr : squadron.name}
+          </p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <StatusBadge status={pilotWorstStatus(pilot)} date={pilotWorstDate(pilot)} />
