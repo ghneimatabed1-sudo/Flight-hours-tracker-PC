@@ -84,7 +84,7 @@ export default function Commanders() {
                     <td className="py-2 px-3 font-mono text-xs">{u.username}</td>
                     <td className="py-2 px-3">{u.scope ? t(scopeKeys[u.scope]) : "—"}</td>
                     <td className="py-2 px-3 text-xs">
-                      {u.squadronIds.map(id => {
+                      {(u.squadronIds ?? []).map(id => {
                         const s = squadrons.find(x => x.id === id);
                         return s ? <span key={id} className="inline-block me-1 mb-1 rounded bg-secondary px-2 py-0.5">{s.code}</span> : null;
                       })}
