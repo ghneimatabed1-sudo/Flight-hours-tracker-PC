@@ -707,13 +707,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     resetSuperAdminPasswordWithMaster: async (masterPassword, newPassword) => {
       const mp = (masterPassword ?? "").trim();
       const np = (newPassword ?? "").trim();
-      if (np.length < 8) return { ok: false, error: "too_short" };
       if (supabaseConfigured) return { ok: false, error: "server_managed" };
+      // Verify the Master Recovery Key first so the UI can use an empty
+      // password to probe for "is the key right?" without needing a second
+      // code path. Password-length validation only matters once the key is
+      // accepted.
       const masterHash = await sha256Hex(mp);
       if (masterHash !== MASTER_RECOVERY_HASH) {
         await recordAuditEvent({ type: "admin.password.master_reset.failed", actor: "unknown", detail: { reason: "bad_master" } });
         return { ok: false, error: "bad_master" };
       }
+      if (np.length < 8) return { ok: false, error: "too_short" };
       const newHash = await sha256Hex(np);
       localStorage.setItem(ADMIN_PASSWORD_HASH_KEY, newHash);
       await recordAuditEvent({ type: "admin.password.master_reset.ok", actor: "master-recovery", detail: {} });

@@ -17,23 +17,54 @@ import type { PcRoleLock } from "@/lib/auth";
 
 export default function AdminSecurity() {
   const { t } = useI18n();
-  const { adminTotpEnrolled, regenerateRecoveryCodes, changeSuperAdminPassword, resetSuperAdminPasswordWithMaster, backendMode, pcRoleLock, setPcRoleLock } = useAuth();
+  const { adminTotpEnrolled, regenerateRecoveryCodes, changeSuperAdminPassword, resetSuperAdminPasswordWithMaster, backendMode, pcRoleLock, setPcRoleLock, squadron, fingerprint } = useAuth();
 
-  // Master-recovery reset (for when a PC's super admin password is lost or
-  // leaked). Uses the baked-in Master Recovery Key instead of the current
-  // password. Kept visually distinct from the normal Change Password card
-  // so no one touches it by accident.
+  // Master-recovery reset is now staged through a 3-step dialog:
+  //   step "key"      → enter the Master Recovery Key
+  //   step "pick"     → list of PCs known to this install (just this one in
+  //                     standalone mode) with a "Change password" action
+  //   step "password" → new password + confirm → apply → done
+  // The baked-in key is checked client-side on "key" so we don't show the
+  // PC list until the key is correct. The actual password hash is only
+  // written in the final step, matching the user's mental model.
+  type MrStep = "closed" | "key" | "pick" | "password" | "done";
+  const [mrStep, setMrStep] = useState<MrStep>("closed");
   const [mrMaster, setMrMaster] = useState("");
   const [mrNew, setMrNew] = useState("");
   const [mrConfirm, setMrConfirm] = useState("");
   const [mrBusy, setMrBusy] = useState(false);
   const [mrErr, setMrErr] = useState<string | null>(null);
-  const [mrOk, setMrOk] = useState(false);
-  const submitMasterReset = async (e: React.FormEvent) => {
+  const pcLabel = squadron?.name
+    ? `${squadron.name}${squadron.number ? " — " + squadron.number : ""}`
+    : t("thisPc");
+  const pcFingerprintShort = fingerprint ? fingerprint.slice(0, 8).toUpperCase() : "—";
+  const closeMasterDialog = () => {
+    setMrStep("closed");
+    setMrMaster(""); setMrNew(""); setMrConfirm("");
+    setMrErr(null); setMrBusy(false);
+  };
+  const submitMasterKey = async (e: React.FormEvent) => {
     e.preventDefault();
     if (mrBusy) return;
     setMrErr(null);
-    setMrOk(false);
+    // We piggy-back on resetSuperAdminPasswordWithMaster's master-key check
+    // by calling it with a deliberately invalid new password — if the key
+    // is right we'll get { error: "too_short" } back; if the key is wrong
+    // we'll get { error: "bad_master" }. That way the authoritative check
+    // stays in one place (auth.tsx) instead of being duplicated in the UI.
+    setMrBusy(true);
+    const probe = await resetSuperAdminPasswordWithMaster(mrMaster, "");
+    setMrBusy(false);
+    if (probe.ok) { setMrStep("pick"); return; }
+    if (probe.error === "too_short") { setMrStep("pick"); return; }
+    if (probe.error === "bad_master") { setMrErr(t("masterResetBadMaster")); return; }
+    if (probe.error === "server_managed") { setMrErr(t("pwServerManaged")); return; }
+    setMrErr(t("pwGenericError"));
+  };
+  const submitNewPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (mrBusy) return;
+    setMrErr(null);
     if (mrNew.length < 8) { setMrErr(t("pwTooShort")); return; }
     if (mrNew !== mrConfirm) { setMrErr(t("pwMismatch")); return; }
     setMrBusy(true);
@@ -46,9 +77,7 @@ export default function AdminSecurity() {
       else setMrErr(t("pwGenericError"));
       return;
     }
-    setMrMaster(""); setMrNew(""); setMrConfirm("");
-    setMrOk(true);
-    window.setTimeout(() => setMrOk(false), 5000);
+    setMrStep("done");
   };
 
   // Local editable copy of the PC role lock so the super admin can preview
@@ -298,52 +327,158 @@ export default function AdminSecurity() {
               {t("masterResetDanger")}
             </div>
             <p className="text-xs text-muted-foreground mb-3">{t("masterResetBlurb")}</p>
-            <form onSubmit={submitMasterReset} className="space-y-3 max-w-md">
-              <div>
-                <label className="text-xs text-muted-foreground">{t("masterResetKey")}</label>
-                <Input
-                  type="password"
-                  autoComplete="off"
-                  value={mrMaster}
-                  onChange={e => { setMrMaster(e.target.value); setMrErr(null); setMrOk(false); }}
-                  data-testid="input-master-recovery-key"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">{t("newPassword")}</label>
-                <Input
-                  type="password"
-                  autoComplete="new-password"
-                  value={mrNew}
-                  onChange={e => { setMrNew(e.target.value); setMrErr(null); setMrOk(false); }}
-                  data-testid="input-master-recovery-new"
-                />
-                <p className="text-[11px] text-muted-foreground mt-1">{t("pwMinHint")}</p>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">{t("confirmPassword")}</label>
-                <Input
-                  type="password"
-                  autoComplete="new-password"
-                  value={mrConfirm}
-                  onChange={e => { setMrConfirm(e.target.value); setMrErr(null); setMrOk(false); }}
-                  data-testid="input-master-recovery-confirm"
-                />
-              </div>
-              {mrErr && <p className="text-xs text-destructive" data-testid="text-master-recovery-error">{mrErr}</p>}
-              {mrOk && <p className="text-xs text-emerald-400" data-testid="text-master-recovery-ok">{t("masterResetOk")}</p>}
-              <Button
-                type="submit"
-                variant="destructive"
-                disabled={mrBusy || !mrMaster || !mrNew || !mrConfirm}
-                data-testid="button-master-recovery-submit"
-              >
-                {mrBusy ? t("saving") : t("masterResetBtn")}
-              </Button>
-            </form>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => { setMrErr(null); setMrStep("key"); }}
+              data-testid="button-open-master-recovery"
+            >
+              <LifeBuoy className="h-4 w-4 me-2" />
+              {t("masterResetOpenBtn")}
+            </Button>
           </CardContent>
         </Card>
       )}
+
+      {/* Master-recovery dialog: key → pick PC → new password → done */}
+      <Dialog open={mrStep !== "closed"} onOpenChange={(o) => { if (!o) closeMasterDialog(); }}>
+        <DialogContent data-testid="dialog-master-recovery">
+          {mrStep === "key" && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <LifeBuoy className="h-5 w-5 text-destructive" />
+                  {t("masterResetTitle")}
+                </DialogTitle>
+                <DialogDescription>{t("masterResetStepKeyHint")}</DialogDescription>
+              </DialogHeader>
+              <form onSubmit={submitMasterKey} className="space-y-3">
+                <div>
+                  <label className="text-xs text-muted-foreground">{t("masterResetKey")}</label>
+                  <Input
+                    autoFocus
+                    type="password"
+                    autoComplete="off"
+                    value={mrMaster}
+                    onChange={e => { setMrMaster(e.target.value); setMrErr(null); }}
+                    data-testid="input-master-recovery-key"
+                  />
+                </div>
+                {mrErr && <p className="text-xs text-destructive" data-testid="text-master-recovery-error">{mrErr}</p>}
+                <DialogFooter>
+                  <Button type="button" variant="ghost" onClick={closeMasterDialog} data-testid="button-master-recovery-cancel">{t("cancel")}</Button>
+                  <Button type="submit" disabled={mrBusy || !mrMaster} data-testid="button-master-recovery-unlock">
+                    {mrBusy ? t("saving") : t("masterResetUnlockBtn")}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </>
+          )}
+
+          {mrStep === "pick" && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Monitor className="h-5 w-5" />
+                  {t("masterResetPickTitle")}
+                </DialogTitle>
+                <DialogDescription>{t("masterResetPickHint")}</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => { setMrErr(null); setMrStep("password"); }}
+                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { setMrErr(null); setMrStep("password"); } }}
+                  className="rounded-md border border-border hover:border-primary hover:bg-secondary/50 p-3 cursor-pointer transition-colors"
+                  data-testid="row-master-recovery-pc"
+                >
+                  <div className="flex items-center gap-3">
+                    <Monitor className="h-5 w-5 text-primary flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate" data-testid="text-master-recovery-pc-label">{pcLabel}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {t("thisPcBadge")} · ID: <span className="font-mono" data-testid="text-master-recovery-pc-id">{pcFingerprintShort}</span>
+                      </div>
+                    </div>
+                    <Button type="button" size="sm" variant="outline" tabIndex={-1}>
+                      {t("masterResetPickBtn")}
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground">{t("masterResetPickNote")}</p>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="ghost" onClick={closeMasterDialog} data-testid="button-master-recovery-close">{t("close")}</Button>
+              </DialogFooter>
+            </>
+          )}
+
+          {mrStep === "password" && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <KeyRound className="h-5 w-5" />
+                  {t("masterResetPasswordTitle")}
+                </DialogTitle>
+                <DialogDescription>
+                  <span className="opacity-80">{t("masterResetPasswordHintFor")} </span>
+                  <span className="font-medium">{pcLabel}</span>
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={submitNewPassword} className="space-y-3">
+                <div>
+                  <label className="text-xs text-muted-foreground">{t("newPassword")}</label>
+                  <Input
+                    autoFocus
+                    type="password"
+                    autoComplete="new-password"
+                    value={mrNew}
+                    onChange={e => { setMrNew(e.target.value); setMrErr(null); }}
+                    data-testid="input-master-recovery-new"
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-1">{t("pwMinHint")}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">{t("confirmPassword")}</label>
+                  <Input
+                    type="password"
+                    autoComplete="new-password"
+                    value={mrConfirm}
+                    onChange={e => { setMrConfirm(e.target.value); setMrErr(null); }}
+                    data-testid="input-master-recovery-confirm"
+                  />
+                </div>
+                {mrErr && <p className="text-xs text-destructive" data-testid="text-master-recovery-error">{mrErr}</p>}
+                <DialogFooter>
+                  <Button type="button" variant="ghost" onClick={() => { setMrErr(null); setMrStep("pick"); }} data-testid="button-master-recovery-back">{t("back")}</Button>
+                  <Button type="submit" variant="destructive" disabled={mrBusy || !mrNew || !mrConfirm} data-testid="button-master-recovery-submit">
+                    {mrBusy ? t("saving") : t("masterResetBtn")}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </>
+          )}
+
+          {mrStep === "done" && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-emerald-500">
+                  <ShieldCheck className="h-5 w-5" />
+                  {t("masterResetOk")}
+                </DialogTitle>
+                <DialogDescription>
+                  <span className="opacity-80">{t("masterResetDoneHintFor")} </span>
+                  <span className="font-medium">{pcLabel}</span>
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button type="button" onClick={closeMasterDialog} data-testid="button-master-recovery-done">{t("done")}</Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Card>
         <CardHeader>
