@@ -2,8 +2,9 @@ import { useMemo, useRef, useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
-import { useImportHistory, type Pilot, type Sortie } from "@/lib/squadron-data";
-import { Upload, FileText, AlertCircle, CheckCircle2, X } from "lucide-react";
+import { useImportHistory, useUndoLastImport, getLastImportStamp, type Pilot, type Sortie } from "@/lib/squadron-data";
+import { Upload, FileText, AlertCircle, CheckCircle2, X, Undo2 } from "lucide-react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 type RowError = { row: number; reason: string };
 type Parsed<T> = { rows: T[]; errors: RowError[]; rawCount: number };
@@ -214,11 +215,17 @@ export default function HistoricalImport() {
   const { t } = useI18n();
   const { user, backendMode } = useAuth();
   const importMut = useImportHistory();
+  const undoMut = useUndoLastImport();
 
   const [pilotFile, setPilotFile] = useState<{ name: string; text: string } | null>(null);
   const [sortieFile, setSortieFile] = useState<{ name: string; text: string } | null>(null);
   const [result, setResult] = useState<{ pilots: number; sorties: number; mode: string } | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [confirmUndo, setConfirmUndo] = useState(false);
+  const [undoResult, setUndoResult] = useState<{ pilots: number; sorties: number } | null>(null);
+  // Re-read on every render so the button reflects the latest stamp without a
+  // useState dance — getLastImportStamp() is a synchronous localStorage read.
+  const lastImportStamp = getLastImportStamp();
 
   const pilotsParsed = useMemo<Parsed<Pilot> | null>(
     () => (pilotFile ? parsePilots(pilotFile.text) : null), [pilotFile]
@@ -254,11 +261,37 @@ export default function HistoricalImport() {
     }
   };
 
+  const onUndo = async () => {
+    setSubmitError(null);
+    setUndoResult(null);
+    try {
+      const res = await undoMut.mutateAsync({ actor: user?.username });
+      setUndoResult({ pilots: res.pilotsRemoved, sorties: res.sortiesRemoved });
+      setResult(null);
+      setConfirmUndo(false);
+    } catch (e) {
+      setSubmitError((e as Error).message);
+      setConfirmUndo(false);
+    }
+  };
+
   return (
     <div>
       <PageHead
         title={t("nav_import")}
         subtitle={`Bring forward pilots and flight history from the legacy SqDn App 21.10.16 export. Backend: ${backendMode}.`}
+        actions={lastImportStamp ? (
+          <button
+            onClick={() => setConfirmUndo(true)}
+            disabled={undoMut.isPending}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-secondary border border-border text-sm font-medium hover:bg-secondary/80 disabled:opacity-50"
+            data-testid="button-undo-import"
+            title={`${t("undoLastImportHelp")}: ${new Date(lastImportStamp).toLocaleString()}`}
+          >
+            <Undo2 className="h-3.5 w-3.5" />
+            {undoMut.isPending ? t("syncing") : t("undoLastImport")}
+          </button>
+        ) : undefined}
       />
 
       <div className="grid md:grid-cols-2 gap-4 mb-4">
@@ -407,6 +440,29 @@ export default function HistoricalImport() {
             Records are tagged with an "imported" flag and are visible in the Audit Log.
           </div>
         </Card>
+      )}
+
+      {undoResult && (
+        <Card className="mt-4 border border-amber-500/40">
+          <div className="text-sm text-amber-300 flex items-center gap-2" data-testid="undo-success">
+            <Undo2 className="h-4 w-4" />
+            {t("undoneRemoved")
+              .replace("{p}", String(undoResult.pilots))
+              .replace("{s}", String(undoResult.sorties))}
+          </div>
+        </Card>
+      )}
+
+      {confirmUndo && (
+        <ConfirmDialog
+          title={t("undoLastImport")}
+          message={t("undoConfirmBody")}
+          confirmLabel={t("undoLastImport")}
+          onCancel={() => setConfirmUndo(false)}
+          onConfirm={onUndo}
+          busy={undoMut.isPending}
+          danger
+        />
       )}
     </div>
   );

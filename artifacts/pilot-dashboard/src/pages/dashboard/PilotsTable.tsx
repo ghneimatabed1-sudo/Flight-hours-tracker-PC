@@ -10,7 +10,8 @@ import { CurrencyCell, StatusBadge } from "@/components/StatusBadge";
 import { pilots, squadrons } from "@/lib/mockData";
 import { pilotWorstStatus, fmtDate } from "@/lib/format";
 import type { CurrencyStatus, Pilot } from "@/lib/types";
-import { Search, ArrowUpDown, ChevronLeft, Download, Printer } from "lucide-react";
+import { Search, ArrowUpDown, ChevronLeft, Download, Printer, FileSpreadsheet } from "lucide-react";
+import * as XLSX from "xlsx";
 
 type SortKey = keyof Pick<Pilot, "callSign" | "fullName" | "monthlyHours" | "grandTotalHours" | "nvgTotalHours">;
 
@@ -111,6 +112,39 @@ export default function PilotsTable() {
     URL.revokeObjectURL(url);
   }
 
+  function exportXlsx() {
+    const headers = [
+      t("callSign"), t("name"), t("squadron"),
+      t("nvgTotal"), t("monthlyHours"), t("grandTotal"),
+      t("dayCurrency"), t("nightCurrency"), t("irtCurrency"), t("medicalCurrency"),
+      t("status"),
+    ];
+    const rows = list.map(p => {
+      const sqn = squadrons.find(s => s.id === p.squadronId);
+      return {
+        [headers[0]]: p.callSign,
+        [headers[1]]: lang === "ar" ? p.fullNameAr : p.fullName,
+        [headers[2]]: sqn ? (lang === "ar" ? sqn.nameAr : sqn.code) : "",
+        [headers[3]]: p.nvgTotalHours,
+        [headers[4]]: Number(p.monthlyHours.toFixed(1)),
+        [headers[5]]: p.grandTotalHours,
+        [headers[6]]: p.dayCurrencyDate,
+        [headers[7]]: p.nightCurrencyDate,
+        [headers[8]]: p.irtCurrencyDate,
+        [headers[9]]: p.medicalCurrencyDate,
+        [headers[10]]: statusLabel(pilotWorstStatus(p)),
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows, { header: headers });
+    // Reasonable default column widths so Arabic names don't get clipped.
+    ws["!cols"] = headers.map(h => ({ wch: Math.max(12, Math.min(28, h.length + 4)) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Pilots");
+    const stamp = new Date().toISOString().slice(0, 10);
+    const scope = focusedSqn?.code ?? (sqnFilter !== "__all" ? squadrons.find(s => s.id === sqnFilter)?.code : null) ?? "all";
+    XLSX.writeFile(wb, `pilots-${scope}-${stamp}.xlsx`);
+  }
+
   function printReport() {
     window.print();
   }
@@ -136,6 +170,9 @@ export default function PilotsTable() {
             <div className="flex items-center gap-2">
               <Button size="sm" variant="outline" onClick={exportCsv} data-testid="button-export-csv">
                 <Download className="h-3.5 w-3.5 me-1.5" />{t("exportCsv")}
+              </Button>
+              <Button size="sm" variant="outline" onClick={exportXlsx} data-testid="button-export-xlsx">
+                <FileSpreadsheet className="h-3.5 w-3.5 me-1.5" />{t("exportXlsx")}
               </Button>
               <Button size="sm" variant="outline" onClick={printReport} data-testid="button-print">
                 <Printer className="h-3.5 w-3.5 me-1.5" />{t("print")}

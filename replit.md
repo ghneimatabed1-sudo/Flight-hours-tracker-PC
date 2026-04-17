@@ -76,3 +76,32 @@ computes the expiresAt from the issue date. The keys table shows the expiry
 column and flags expired keys with a red "Expired" badge alongside the status.
 The server-side validate-license Edge Function should reject any key whose
 expiresAt is in the past.
+
+## Batch shipped 2026-04-17 (small queue items)
+- **#19 Imported-only filter** on Roster: header toggle filters PILOTS by `imported` flag.
+- **#20 Undo last CSV import**: `useUndoLastImport` hook + button on HistoricalImport.
+  Tracks `rjaf.lastImportStamp` in localStorage on every successful import; undo
+  deletes pilots+sorties whose `data->>importedAt` matches (sorties first because
+  of the FK from sorties.pilot_id). Demo mode mirrors the same behaviour against
+  the in-memory arrays. Audit-logs both `import.history.ok` and
+  `import.history.undone` with row counts.
+- **#22 Reset & reseed helper**: `supabase/seed/reset-and-reseed.sh`. Truncates
+  pilots/sorties/notams/schedule/audit_log/squadrons/licenses/pilot_link_codes/
+  pilot_devices with CASCADE, re-applies migrations, then runs seed.sql. Requires
+  DATABASE_URL pointed at the direct Postgres connection (service role bypasses
+  RLS, which is required because seed rows have no JWT claim yet).
+- **#25 XLSX export** on commander PilotsTable: `xlsx` package, button next to the
+  CSV/Print buttons. Filename pattern matches the CSV export.
+- **#14 (partial) loading/error states** on Roster: `usePilots()` is destructured
+  for `isLoading`/`isError`/`refetch`/`isFetching`; spinner on first load, error
+  banner with retry button, and a "syncing" hint in the subtitle on refetch.
+- **#21 deferred** — already satisfied by `mockData.ts` (6 squadrons across 3
+  wings). Supabase seed.sql remains intentionally single-squadron because each
+  desktop install is per-squadron.
+
+Notes:
+- i18n keys added (EN/AR): `importedOnly`, `noImportedYet`, `loading`,
+  `errorLoading`, `retry`, `undoLastImport`, `undoLastImportHelp`,
+  `undoConfirmBody`, `undoneRemoved`, `exportXlsx`.
+- Pre-existing TS errors in button-group.tsx, calendar.tsx, dashboard/Commanders.tsx
+  and dashboard/PilotDetail.tsx remain untouched (out of scope).

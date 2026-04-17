@@ -631,6 +631,20 @@ export function appendDemoAudit(row: AuditRow) {
   SEED_AUDIT.unshift(row);
 }
 
+// Persist the timestamp of the most recent successful import so the user
+// can undo it with a single click. localStorage is fine here — undo only
+// makes sense for the device that did the import in the first place.
+const LAST_IMPORT_KEY = "rjaf.lastImportStamp";
+export function getLastImportStamp(): string | null {
+  try { return localStorage.getItem(LAST_IMPORT_KEY); } catch { return null; }
+}
+function setLastImportStamp(s: string | null) {
+  try {
+    if (s) localStorage.setItem(LAST_IMPORT_KEY, s);
+    else localStorage.removeItem(LAST_IMPORT_KEY);
+  } catch { /* ignore */ }
+}
+
 export function useImportHistory() {
   const qc = useQueryClient();
   return useMutation<ImportResult, Error, ImportPayload>({
@@ -691,6 +705,86 @@ export function useImportHistory() {
         },
       });
       return { pilotsInserted: taggedPilots.length, sortiesInserted: taggedSorties.length, mode: "supabase" as const };
+    },
+    onSuccess: (_res, vars) => {
+      // Re-derive the stamp the same way mutationFn did so undo targets
+      // exactly the rows that were just inserted. We approximate "the moment
+      // of this import" by reading back the importedAt of the first tagged
+      // pilot/sortie — they all share the same stamp by construction.
+      const stamp = vars.pilots[0]?.importedAt ?? vars.sorties[0]?.importedAt
+        ?? new Date().toISOString();
+      setLastImportStamp(stamp);
+      qc.invalidateQueries({ queryKey: ["pilots"] });
+      qc.invalidateQueries({ queryKey: ["sorties"] });
+      qc.invalidateQueries({ queryKey: ["audit_log"] });
+    },
+  });
+}
+
+// Roll back the most recent CSV import by deleting every pilot and sortie
+// whose importedAt matches the saved stamp. Records added or edited through
+// the UI after the import remain untouched because they have a different
+// importedAt (or none at all). If no stamp exists this is a no-op.
+export interface UndoImportResult {
+  pilotsRemoved: number;
+  sortiesRemoved: number;
+  mode: "supabase" | "demo";
+}
+export function useUndoLastImport() {
+  const qc = useQueryClient();
+  return useMutation<UndoImportResult, Error, { actor?: string } | void>({
+    mutationFn: async (input) => {
+      const actor = (input && "actor" in input) ? input.actor : undefined;
+      const stamp = getLastImportStamp();
+      if (!stamp) throw new Error("no_import_to_undo");
+
+      if (!isLive()) {
+        const beforeP = MOCK_PILOTS.length;
+        const beforeS = MOCK_SORTIES.length;
+        for (let i = MOCK_PILOTS.length - 1; i >= 0; i--) {
+          if (MOCK_PILOTS[i].imported && MOCK_PILOTS[i].importedAt === stamp) MOCK_PILOTS.splice(i, 1);
+        }
+        for (let i = MOCK_SORTIES.length - 1; i >= 0; i--) {
+          if (MOCK_SORTIES[i].imported && MOCK_SORTIES[i].importedAt === stamp) MOCK_SORTIES.splice(i, 1);
+        }
+        const removedP = beforeP - MOCK_PILOTS.length;
+        const removedS = beforeS - MOCK_SORTIES.length;
+        appendDemoAudit({
+          ts: tsNow(),
+          user: actor ?? "ops.lead",
+          action: "Historical Import (undone)",
+          target: `${removedP} pilots, ${removedS} sorties`,
+        });
+        setLastImportStamp(null);
+        return { pilotsRemoved: removedP, sortiesRemoved: removedS, mode: "demo" as const };
+      }
+
+      // Live Supabase: delete by JSONB stamp match. Sorties first because of
+      // the FK from sorties.pilot_id → pilots.id.
+      const { data: sDel, error: sErr } = await supabase!
+        .from("sorties")
+        .delete()
+        .filter("data->>importedAt", "eq", stamp)
+        .select("id");
+      if (sErr) throw new Error(`Sortie undo failed: ${sErr.message}`);
+      const { data: pDel, error: pErr } = await supabase!
+        .from("pilots")
+        .delete()
+        .filter("data->>importedAt", "eq", stamp)
+        .select("id");
+      if (pErr) throw new Error(`Pilot undo failed: ${pErr.message}`);
+
+      await recordAuditEvent({
+        type: "import.history.undone",
+        actor,
+        detail: { stamp, pilots: pDel?.length ?? 0, sorties: sDel?.length ?? 0 },
+      });
+      setLastImportStamp(null);
+      return {
+        pilotsRemoved: pDel?.length ?? 0,
+        sortiesRemoved: sDel?.length ?? 0,
+        mode: "supabase" as const,
+      };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pilots"] });
