@@ -14,9 +14,10 @@ import {
   deleteCommander,
   resetCommanderPassword,
   type CommanderRecord,
+  type AccountRole,
 } from "@/lib/commander-store";
 import type { CommanderScope } from "@/lib/types";
-import { Users, Plus, Trash2, KeyRound, Copy } from "lucide-react";
+import { Users, Plus, Trash2, KeyRound, Copy, Info } from "lucide-react";
 
 const scopeKeys: Record<CommanderScope, "scopeSquadron" | "scopeFlight" | "scopeWing" | "scopeBase" | "scopeHQ"> = {
   squadron: "scopeSquadron",
@@ -32,6 +33,10 @@ export default function Commanders() {
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
+  // Role defaults to "commander" to preserve the old flow for existing users;
+  // Super Admin can flip to "ops" to create a flight operations account that
+  // has no squadron visibility controls (operates this PC's squadron only).
+  const [role, setRole] = useState<AccountRole>("commander");
   const [scope, setScope] = useState<CommanderScope>("squadron");
   const [selSqns, setSelSqns] = useState<string[]>([]);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -57,15 +62,20 @@ export default function Commanders() {
     setCreateError(null);
     if (!username.trim()) { setCreateError(t("missingUsername")); return; }
     if (!name.trim()) { setCreateError(t("missingName")); return; }
-    if (selSqns.length === 0 && scope !== "hq") {
+    // Squadron-visibility rules only apply to commanders. Ops officers run
+    // this PC's squadron implicitly — the store ignores scope/squadronIds.
+    if (role === "commander" && selSqns.length === 0 && scope !== "hq") {
       setCreateError(t("pickAtLeastOneSquadron"));
       return;
     }
-    const sqnIds = scope === "hq" ? squadrons.map(s => s.id) : selSqns;
+    const sqnIds = role === "commander"
+      ? (scope === "hq" ? squadrons.map(s => s.id) : selSqns)
+      : [];
     const res = await createCommander({
       username: username.trim(),
       displayName: name.trim(),
-      scope,
+      role,
+      scope: role === "commander" ? scope : undefined,
       squadronIds: sqnIds,
     });
     if (!res.ok || !res.record || !res.initialPassword) {
@@ -79,12 +89,12 @@ export default function Commanders() {
     }
     refresh();
     setCreateOpen(false);
-    setName(""); setUsername(""); setScope("squadron"); setSelSqns([]);
+    setName(""); setUsername(""); setRole("commander"); setScope("squadron"); setSelSqns([]);
     setCredsShow({ username: res.record.username, password: res.initialPassword });
   }
 
   function del(id: string) {
-    if (!confirm(t("confirmDeleteCommander"))) return;
+    if (!confirm(t("confirmDeleteAccount"))) return;
     deleteCommander(id);
     refresh();
   }
@@ -104,8 +114,13 @@ export default function Commanders() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold flex items-center gap-2"><Users className="h-5 w-5" />{t("commanders")}</h2>
-        <Button onClick={() => setCreateOpen(true)} data-testid="button-create"><Plus className="h-4 w-4 me-1" />{t("createCommander")}</Button>
+        <h2 className="text-xl font-bold flex items-center gap-2"><Users className="h-5 w-5" />{t("accessAccounts")}</h2>
+        <Button onClick={() => setCreateOpen(true)} data-testid="button-create"><Plus className="h-4 w-4 me-1" />{t("createAccount")}</Button>
+      </div>
+
+      <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/40 border border-border rounded p-3">
+        <Info className="h-4 w-4 mt-0.5 text-amber-400 shrink-0" />
+        <span>{t("accessAccountsHint")}</span>
       </div>
 
       <Card>
@@ -116,6 +131,7 @@ export default function Commanders() {
                 <tr className="border-b border-border bg-muted/40 text-muted-foreground">
                   <th className="text-start py-2 px-3">{t("name")}</th>
                   <th className="text-start py-2 px-3">{t("username")}</th>
+                  <th className="text-start py-2 px-3">{t("accountRole")}</th>
                   <th className="text-start py-2 px-3">{t("scope")}</th>
                   <th className="text-start py-2 px-3">{t("authorizedSquadrons")}</th>
                   <th className="text-end py-2 px-3"></th>
@@ -124,21 +140,32 @@ export default function Commanders() {
               <tbody>
                 {list.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-8 text-center text-muted-foreground">
-                      {t("noCommandersYet")}
+                    <td colSpan={6} className="py-8 text-center text-muted-foreground">
+                      {t("noAccountsYet")}
                     </td>
                   </tr>
                 ) : list.map(u => (
                   <tr key={u.id} className="border-b border-border/60" data-testid={`row-cmdr-${u.id}`}>
                     <td className="py-2 px-3 font-medium">{u.displayName}</td>
                     <td className="py-2 px-3 font-mono text-xs">{u.username}</td>
+                    <td className="py-2 px-3">
+                      <span className={`inline-block rounded px-2 py-0.5 text-xs ${u.role === "ops" ? "bg-amber-400/20 text-amber-300" : "bg-primary/20 text-primary"}`}>
+                        {u.role === "ops" ? t("roleOps") : t("roleCommander")}
+                      </span>
+                    </td>
                     <td className="py-2 px-3">{u.scope ? t(scopeKeys[u.scope]) : "—"}</td>
                     <td className="py-2 px-3 text-xs">
-                      {(u.squadronIds ?? []).map(id => {
-                        const s = squadrons.find(x => x.id === id);
-                        return s ? <span key={id} className="inline-block me-1 mb-1 rounded bg-secondary px-2 py-0.5">{s.code}</span> : null;
-                      })}
-                      {(u.squadronIds ?? []).length === 0 && <span className="text-muted-foreground">—</span>}
+                      {u.role === "ops" ? (
+                        <span className="text-muted-foreground italic">{t("roleOps")}</span>
+                      ) : (
+                        <>
+                          {(u.squadronIds ?? []).map(id => {
+                            const s = squadrons.find(x => x.id === id);
+                            return s ? <span key={id} className="inline-block me-1 mb-1 rounded bg-secondary px-2 py-0.5">{s.code}</span> : null;
+                          })}
+                          {(u.squadronIds ?? []).length === 0 && <span className="text-muted-foreground">—</span>}
+                        </>
+                      )}
                     </td>
                     <td className="py-2 px-3 text-end space-x-2 rtl:space-x-reverse whitespace-nowrap">
                       <Button size="sm" variant="outline" onClick={() => reset(u.id)} data-testid={`button-reset-${u.id}`}>
@@ -158,7 +185,7 @@ export default function Commanders() {
 
       <Dialog open={createOpen} onOpenChange={(o) => { if (!o) setCreateError(null); setCreateOpen(o); }}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>{t("createCommander")}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t("createAccount")}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
               <Label htmlFor="c-name">{t("name")}</Label>
@@ -169,22 +196,37 @@ export default function Commanders() {
               <Input id="c-user" value={username} onChange={e => setUsername(e.target.value.toLowerCase())} data-testid="input-cuser" />
             </div>
             <div>
-              <Label>{t("scope")}</Label>
-              <Select value={scope} onValueChange={(v: string) => setScope(v as CommanderScope)}>
-                <SelectTrigger data-testid="select-scope"><SelectValue /></SelectTrigger>
+              <Label>{t("accountRole")}</Label>
+              <Select value={role} onValueChange={(v: string) => setRole(v as AccountRole)}>
+                <SelectTrigger data-testid="select-role"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="hq">{t("scopeHQ")}</SelectItem>
-                  <SelectItem value="base">{t("scopeBase")}</SelectItem>
-                  <SelectItem value="wing">{t("scopeWing")}</SelectItem>
-                  <SelectItem value="squadron">{t("scopeSquadron")}</SelectItem>
-                  <SelectItem value="flight">{t("scopeFlight")}</SelectItem>
+                  <SelectItem value="commander">{t("roleCommander")}</SelectItem>
+                  <SelectItem value="ops">{t("roleOps")}</SelectItem>
                 </SelectContent>
               </Select>
-              {scope === "hq" && (
-                <p className="text-xs text-muted-foreground mt-1">{t("hqScopeHint")}</p>
+              {role === "ops" && (
+                <p className="text-xs text-muted-foreground mt-1">{t("opsRoleHint")}</p>
               )}
             </div>
-            {scope !== "hq" && (
+            {role === "commander" && (
+              <div>
+                <Label>{t("scope")}</Label>
+                <Select value={scope} onValueChange={(v: string) => setScope(v as CommanderScope)}>
+                  <SelectTrigger data-testid="select-scope"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="hq">{t("scopeHQ")}</SelectItem>
+                    <SelectItem value="base">{t("scopeBase")}</SelectItem>
+                    <SelectItem value="wing">{t("scopeWing")}</SelectItem>
+                    <SelectItem value="squadron">{t("scopeSquadron")}</SelectItem>
+                    <SelectItem value="flight">{t("scopeFlight")}</SelectItem>
+                  </SelectContent>
+                </Select>
+                {scope === "hq" && (
+                  <p className="text-xs text-muted-foreground mt-1">{t("hqScopeHint")}</p>
+                )}
+              </div>
+            )}
+            {role === "commander" && scope !== "hq" && (
               <div>
                 <Label>{t("authorizedSquadrons")}</Label>
                 <p className="text-xs text-muted-foreground mb-1">{t("authorizedSquadronsHint")}</p>
@@ -212,14 +254,14 @@ export default function Commanders() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>{t("cancel")}</Button>
-            <Button onClick={create} data-testid="button-save-cmdr">{t("createCommander")}</Button>
+            <Button onClick={create} data-testid="button-save-cmdr">{t("createAccount")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={credsShow !== null} onOpenChange={o => !o && setCredsShow(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{t("commanderCredentialsTitle")}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t("accountCredentialsTitle")}</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">{t("commanderCredentialsHint")}</p>
           <div className="space-y-2 pt-2">
             <div>

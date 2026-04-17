@@ -1,7 +1,17 @@
-// Persistent store for HQ / commander accounts created by the Super Admin
-// through the Admin → Commanders page. Each record holds the User object
-// plus a SHA-256 hash of the commander's password. The raw password is
-// shown exactly once at creation/reset time and is never persisted.
+// Persistent store for access accounts created by the Super Admin through
+// the Admin → Access Accounts page. Each record holds a User object plus a
+// SHA-256 hash of the account's password. The raw password is shown exactly
+// once at creation/reset time and is never persisted.
+//
+// Two kinds of accounts live here:
+//   - role="commander" — HQ / base / wing / squadron / flight commanders
+//     with a squadron-visibility scope.
+//   - role="ops" — flight operations officers who run the app on THIS PC.
+//     Scope/squadronIds are not used for ops (they operate this squadron).
+//
+// If the Super Admin never creates an account of a given role, users of
+// that role simply cannot log in on this PC. That is the entire access
+// model: no default credentials, no implicit access.
 //
 // In Supabase mode the real source of truth is the `commander_accounts`
 // table; this localStorage store is the fallback used by the standalone
@@ -12,12 +22,17 @@ import type { CommanderScope, User } from "./types";
 const STORE_KEY = "rjaf.commanders";
 const HASH_KEY = "rjaf.commanderPwHashes";
 
+export type AccountRole = "commander" | "ops";
+
 export interface CommanderRecord extends User {
   id: string;
   username: string;
   displayName: string;
-  role: "commander";
-  scope: CommanderScope;
+  role: AccountRole;
+  // Commanders carry a scope + list of authorized squadrons. Ops officers
+  // leave scope undefined and squadronIds empty — they always operate the
+  // current squadron this PC is bound to.
+  scope?: CommanderScope;
   squadronIds: string[];
   createdAt: string;
 }
@@ -81,8 +96,10 @@ export function generateInitialPassword(): string {
 export interface CreateCommanderInput {
   username: string;
   displayName: string;
-  scope: CommanderScope;
-  squadronIds: string[];
+  role: AccountRole;
+  // Required when role === "commander"; ignored for role === "ops".
+  scope?: CommanderScope;
+  squadronIds?: string[];
 }
 
 export interface CreateCommanderResult {
@@ -101,13 +118,16 @@ export async function createCommander(input: CreateCommanderInput): Promise<Crea
     return { ok: false, error: "duplicate_username" };
   }
 
+  const prefix = input.role === "ops" ? "ops" : "cmdr";
   const record: CommanderRecord = {
-    id: `cmdr-${Math.random().toString(36).slice(2, 10)}`,
+    id: `${prefix}-${Math.random().toString(36).slice(2, 10)}`,
     username,
     displayName: input.displayName.trim() || username,
-    role: "commander",
-    scope: input.scope,
-    squadronIds: [...input.squadronIds],
+    role: input.role,
+    // Only commanders carry scope / squadron lists. For ops the visibility
+    // is implicitly "this PC's squadron" — the store stays agnostic.
+    scope: input.role === "commander" ? input.scope : undefined,
+    squadronIds: input.role === "commander" ? [...(input.squadronIds ?? [])] : [],
     createdAt: new Date().toISOString(),
   };
 

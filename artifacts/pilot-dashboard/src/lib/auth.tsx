@@ -405,7 +405,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { ok: false, requires2fa: "enroll" };
       }
 
-      if (hqUser && hqUser.role === "commander") {
+      // Stored accounts created by the Super Admin on this PC. Covers
+      // commanders (HQ / base / wing / squadron / flight) AND ops officers.
+      // Both go through the same hash-verify path; the role on the returned
+      // record determines what the rest of the app lets them see and do.
+      if (hqUser && (hqUser.role === "commander" || hqUser.role === "ops")) {
         const verified = await verifyCommanderPassword(u, password);
         if (!verified) return await recordFail("bad_credentials");
 
@@ -413,7 +417,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem("rjaf.fails");
         localStorage.removeItem("rjaf.lockUntil");
         await recordAuditEvent({ type: "login.ok", actor: username, detail: { role: verified.role } });
-        setState(s => ({ ...s, user: hqUser, failedAttempts: 0, lockedUntil: null }));
+        setState(s => ({ ...s, user: verified, failedAttempts: 0, lockedUntil: null }));
         return { ok: true };
       }
 
