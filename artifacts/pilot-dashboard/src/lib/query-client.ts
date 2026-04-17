@@ -56,11 +56,18 @@ export const queryClient = new QueryClient({
   // Surface every failed mutation through the global toast + indicator so
   // ops officers always see why a save did not persist. Successful mutations
   // can still emit their own page-specific toasts.
+  // Per spec: the red "last mutation failed" indicator is driven only by
+  // mutation failures. Query failures still surface a non-destructive toast
+  // so the operator sees them, but they do not flip the live-data pill red
+  // (the amber syncing state already covers in-flight reads).
   mutationCache: new MutationCache({
     onError: (err) => recordDataError(describe(err)),
     onSuccess: () => clearDataError(),
   }),
   queryCache: new QueryCache({
-    onError: (err) => recordDataError(describe(err)),
+    onError: (err) => toast({
+      title: "Couldn't reach the server",
+      description: describe(err),
+    }),
   }),
 });
