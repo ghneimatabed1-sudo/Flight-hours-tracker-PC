@@ -35,6 +35,13 @@ export interface Pilot {
   monthlyHours: number;
   grandTotalHours: number;
   nvgTotalHours: number;
+  // Detailed hour breakdown — only shown on the pilot detail ("View") page,
+  // not in the main commander roster. Optional so older records still work.
+  dayHours?: number;
+  nightHours?: number;
+  simHours?: number;
+  captainHours?: number;
+  instrumentHours?: number;
   dayCurrencyDate: string;
   nightCurrencyDate: string;
   irtCurrencyDate: string;

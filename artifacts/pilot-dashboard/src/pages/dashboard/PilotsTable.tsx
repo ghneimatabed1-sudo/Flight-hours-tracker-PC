@@ -236,20 +236,14 @@ export default function PilotsTable() {
                   <Th onClick={() => setSort("callSign")}>{t("callSign")}</Th>
                   <Th onClick={() => setSort("fullName")}>{t("name")}</Th>
                   <th className="text-start py-2 px-3">{t("squadron")}</th>
-                  <Th onClick={() => setSort("nvgTotalHours")} align="end">{t("nvgTotal")}</Th>
-                  <Th onClick={() => setSort("monthlyHours")} align="end">{t("monthlyHours")}</Th>
                   <Th onClick={() => setSort("grandTotalHours")} align="end">{t("grandTotal")}</Th>
-                  <th className="text-center py-2 px-3">{t("dayCurrency")}</th>
-                  <th className="text-center py-2 px-3">{t("nightCurrency")}</th>
-                  <th className="text-center py-2 px-3">{t("irtCurrency")}</th>
-                  <th className="text-center py-2 px-3">{t("medicalCurrency")}</th>
                   <th className="text-start py-2 px-3">{t("status")}</th>
                   <th className="py-2 px-3 no-print"></th>
                 </tr>
               </thead>
               <tbody>
                 {list.length === 0 && (
-                  <tr><td colSpan={12} className="py-8 text-center text-muted-foreground">{t("noResults")}</td></tr>
+                  <tr><td colSpan={6} className="py-8 text-center text-muted-foreground">{t("noResults")}</td></tr>
                 )}
                 {list.map(p => {
                   const sqn = squadrons.find(s => s.id === p.squadronId);
@@ -271,13 +265,7 @@ export default function PilotsTable() {
                         </div>
                       </td>
                       <td className="py-2 px-3 text-xs">{sqn ? (lang === "ar" ? sqn.nameAr : sqn.code) : ""}</td>
-                      <td className="py-2 px-3 text-end tabular-nums">{p.nvgTotalHours}</td>
-                      <td className="py-2 px-3 text-end tabular-nums">{p.monthlyHours.toFixed(1)}</td>
-                      <td className="py-2 px-3 text-end tabular-nums font-medium">{p.grandTotalHours}</td>
-                      <td className="py-2 px-3 text-center"><CurrencyCell date={p.dayCurrencyDate} /></td>
-                      <td className="py-2 px-3 text-center"><CurrencyCell date={p.nightCurrencyDate} /></td>
-                      <td className="py-2 px-3 text-center"><CurrencyCell date={p.irtCurrencyDate} /></td>
-                      <td className="py-2 px-3 text-center"><CurrencyCell date={p.medicalCurrencyDate} /></td>
+                      <td className="py-2 px-3 text-end tabular-nums font-semibold text-base">{p.grandTotalHours}</td>
                       <td className="py-2 px-3"><StatusBadge status={pilotWorstStatus(p)} date={pilotWorstDate(p)} /></td>
                       <td className="py-2 px-3 text-end no-print">
                         <Link href={`/dashboard/pilot/${p.id}`}>

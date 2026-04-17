@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { pilots, squadrons } from "@/lib/mockData";
 import { pilotWorstStatus, pilotWorstDate, currencyStatus, fmtDate } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
-import { ChevronLeft, Eye, Plane, Calendar, Award, Printer } from "lucide-react";
+import { ChevronLeft, Eye, Plane, Calendar, Award, Printer, Sun, Moon, Cpu, Gauge, Star } from "lucide-react";
 
 export default function PilotDetail() {
   const { t, lang, dir } = useI18n();
@@ -67,26 +67,32 @@ export default function PilotDetail() {
         </div>
       )}
 
-      <div className="grid sm:grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="p-4">
-            <div className="text-xs text-muted-foreground flex items-center gap-1"><Plane className="h-3 w-3" />{t("monthlyHours")}</div>
-            <div className="text-2xl font-bold tabular-nums">{pilot.monthlyHours.toFixed(1)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
+      <Card className="border-primary/40 bg-primary/5">
+        <CardContent className="p-5 flex items-center justify-between flex-wrap gap-3">
+          <div>
             <div className="text-xs text-muted-foreground flex items-center gap-1"><Award className="h-3 w-3" />{t("grandTotal")}</div>
-            <div className="text-2xl font-bold tabular-nums">{pilot.grandTotalHours}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="text-xs text-muted-foreground flex items-center gap-1"><Calendar className="h-3 w-3" />{t("nvgTotal")}</div>
-            <div className="text-2xl font-bold tabular-nums">{pilot.nvgTotalHours}</div>
-          </CardContent>
-        </Card>
-      </div>
+            <div className="text-4xl font-extrabold tabular-nums">{pilot.grandTotalHours}</div>
+          </div>
+          <div className="text-end">
+            <div className="text-xs text-muted-foreground flex items-center gap-1 justify-end"><Plane className="h-3 w-3" />{t("monthlyHours")}</div>
+            <div className="text-2xl font-bold tabular-nums">{pilot.monthlyHours.toFixed(1)}</div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">{t("hourBreakdown")}</CardTitle></CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <HourStat icon={<Sun className="h-3 w-3" />} label={t("dayHours")} value={pilot.dayHours} />
+            <HourStat icon={<Moon className="h-3 w-3" />} label={t("nightHours")} value={pilot.nightHours} />
+            <HourStat icon={<Eye className="h-3 w-3" />} label={t("nvgTotal")} value={pilot.nvgTotalHours} accent="text-rose-500 dark:text-rose-300" />
+            <HourStat icon={<Gauge className="h-3 w-3" />} label={t("instrumentHours")} value={pilot.instrumentHours} />
+            <HourStat icon={<Cpu className="h-3 w-3" />} label={t("simHours")} value={pilot.simHours} />
+            <HourStat icon={<Star className="h-3 w-3" />} label={t("captainHours")} value={pilot.captainHours} accent="text-amber-600 dark:text-amber-400" />
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader><CardTitle className="text-base">{t("currencies")}</CardTitle></CardHeader>
@@ -111,6 +117,15 @@ export default function PilotDetail() {
       <Link href={`/dashboard/squadron/${pilot.squadronId}`}>
         <Button variant="outline" data-testid="button-squadron">{t("squadronView")}: {lang === "ar" ? squadron.nameAr : squadron.name}</Button>
       </Link>
+    </div>
+  );
+}
+
+function HourStat({ icon, label, value, accent }: { icon: React.ReactNode; label: string; value: number | undefined; accent?: string }) {
+  return (
+    <div className="rounded-md border p-3">
+      <div className="text-[11px] text-muted-foreground flex items-center gap-1">{icon}{label}</div>
+      <div className={`text-xl font-bold tabular-nums ${accent ?? ""}`}>{value ?? "—"}</div>
     </div>
   );
 }

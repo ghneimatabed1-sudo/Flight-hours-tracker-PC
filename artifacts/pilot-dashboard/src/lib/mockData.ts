@@ -53,6 +53,16 @@ export const pilots: Pilot[] = (() => {
       const night = Math.floor(r() * 180) - 30;
       const irt = Math.floor(r() * 180) - 30;
       const med = Math.floor(r() * 365) - 30;
+      const grand = 200 + Math.round(r() * 4500);
+      const nvg = Math.round(r() * 800);
+      // Split the non-NVG portion into Day (~55%), Night (~25%), Sim (~10%),
+      // Instrument (~10%). Captain hours are ~40% of the grand total.
+      const nonNvg = Math.max(0, grand - nvg);
+      const dayHours = Math.round(nonNvg * (0.45 + r() * 0.2));
+      const nightHours = Math.round(nonNvg * (0.18 + r() * 0.12));
+      const simHours = Math.round(nonNvg * (0.05 + r() * 0.1));
+      const instrumentHours = Math.max(0, nonNvg - dayHours - nightHours - simHours);
+      const captainHours = Math.round(grand * (0.25 + r() * 0.35));
       out.push({
         id: `pilot-${pid}`,
         callSign,
@@ -62,8 +72,13 @@ export const pilots: Pilot[] = (() => {
         fullNameAr: `${rk.ar} ${namesAr[nIdx]}`,
         squadronId: sqn.id,
         monthlyHours: Math.round(r() * 35 * 10) / 10,
-        grandTotalHours: 200 + Math.round(r() * 4500),
-        nvgTotalHours: Math.round(r() * 800),
+        grandTotalHours: grand,
+        nvgTotalHours: nvg,
+        dayHours,
+        nightHours,
+        simHours,
+        captainHours,
+        instrumentHours,
         dayCurrencyDate: dateOffset(day),
         nightCurrencyDate: dateOffset(night),
         irtCurrencyDate: dateOffset(irt),
