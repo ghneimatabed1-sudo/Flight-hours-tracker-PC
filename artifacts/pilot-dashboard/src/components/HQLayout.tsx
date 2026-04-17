@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle } from "lucide-react";
 import emblem from "@assets/rjaf_emblem.png";
-import wings from "@assets/wings_fixed_1776427346118.png";
 
 interface NavItem {
   path: string;
@@ -62,7 +61,6 @@ export function HQLayout({ children }: { children: ReactNode }) {
               )}
             </p>
           </div>
-          <img src={wings} alt="" className="hidden sm:block h-8 object-contain opacity-90" />
           <Button
             variant="ghost"
             size="sm"

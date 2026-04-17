@@ -51,8 +51,7 @@ export default function LoginGate() {
 
       <div className="w-full max-w-md">
         <div className="flex flex-col items-center mb-6">
-          <img src="brand/emblem.png" className="h-20 w-20 object-contain mb-2" alt="RJAF Emblem" />
-          <img src="brand/wings.png" className="h-10 object-contain mb-3 opacity-95" alt="Pilot Wings" />
+          <img src="brand/emblem.png" className="h-24 w-24 object-contain mb-3" alt="RJAF Emblem" />
           <div className="text-2xl font-semibold gold-grad text-center">{t("appName")}</div>
           <div className="text-xs text-muted-foreground text-center mt-1">{t("appTag")}</div>
         </div>

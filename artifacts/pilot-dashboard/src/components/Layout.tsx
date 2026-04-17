@@ -78,7 +78,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         {/* Topbar */}
         <header className="h-16 flex items-center justify-between px-4 border-b border-border bg-card/40 backdrop-blur">
           <div className="flex items-center gap-3 min-w-0">
-            <img src="brand/wings.png" className="h-9 object-contain" alt="Wings" />
+            <img src="brand/emblem.png" className="h-10 object-contain" alt="RJAF" />
             <div className="leading-tight min-w-0">
               <div className="title-line truncate">
                 {squadron ? `${squadron.number} SQDN · ${squadron.base}` : "Squadron Operations"}
