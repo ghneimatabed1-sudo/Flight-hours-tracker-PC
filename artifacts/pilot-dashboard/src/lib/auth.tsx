@@ -19,6 +19,17 @@ const ADMIN_TOTP_REMAINING_KEY = "rjaf.adminTotp.remaining";
 // can route the user into the provisioning form. In Supabase mode the real
 // hash lives server-side (SUPER_ADMIN_PASSWORD_HASH) and this key is unused.
 const ADMIN_PASSWORD_HASH_KEY = "rjaf.admin.passwordHash";
+// Per-PC role lock chosen by the Super Admin on the Security page. When set,
+// the login screen hides every role except the locked one, and login() /
+// activateLicense() refuse to authenticate any user whose role doesn't match.
+// Valid values: "ops" | "commander" | "super_admin". Absent key = no lock
+// (default multi-role screen). Stored per-install; never shared across PCs.
+const PC_ROLE_LOCK_KEY = "rjaf.pcRoleLock";
+export type PcRoleLock = "ops" | "commander" | "super_admin" | null;
+function readPcRoleLock(): PcRoleLock {
+  const v = localStorage.getItem(PC_ROLE_LOCK_KEY);
+  return v === "ops" || v === "commander" || v === "super_admin" ? v : null;
+}
 const ADMIN_TOTP_ISSUER = "RJAF Pilot Dashboard";
 const RECOVERY_CODE_COUNT = 10;
 // When unused recovery codes drop to this number or below, the dashboard
@@ -135,6 +146,10 @@ interface AuthCtx extends AuthState {
   logout: () => void;
   releaseLicense: () => void;
   backendMode: "supabase" | "demo";
+  // Per-PC role lock. `null` = no lock. When set, login screen shows only
+  // the matching role's form and login() rejects accounts of other roles.
+  pcRoleLock: PcRoleLock;
+  setPcRoleLock: (v: PcRoleLock) => void;
 }
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -246,6 +261,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [adminTotpEnrolled, setAdminTotpEnrolled] = useState<boolean>(
     () => supabaseConfigured ? false : !!localStorage.getItem(ADMIN_TOTP_SECRET_KEY),
   );
+  const [pcRoleLock, setPcRoleLockState] = useState<PcRoleLock>(() => readPcRoleLock());
+  const applyPcRoleLock = (v: PcRoleLock) => {
+    if (v === null) localStorage.removeItem(PC_ROLE_LOCK_KEY);
+    else localStorage.setItem(PC_ROLE_LOCK_KEY, v);
+    setPcRoleLockState(v);
+    void recordAuditEvent({ type: "pc.rolelock.updated", actor: "admin", detail: { lock: v } });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -334,6 +356,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // HQ users (super admin, commanders) skip license/squadron setup entirely.
       const u = username.trim().toLowerCase();
       const hqUser = lookupHQUser(username);
+
+      // Per-PC role lock. If the super admin has pinned this PC to a specific
+      // role, refuse any account whose role doesn't match. For ops officers
+      // (not in lookupHQUser) the check is deferred to the Supabase branch
+      // below using the role resolved from the server; for standalone-mode
+      // ops officers sign-in happens through the license screen, not here.
+      const lock = readPcRoleLock();
+      if (lock && hqUser && hqUser.role !== lock) {
+        await recordAuditEvent({ type: "login.rolelock.blocked", actor: username, detail: { lock, attemptedRole: hqUser.role } });
+        return { ok: false, error: "role_locked" };
+      }
 
       // Super admin path: password is validated server-side by the edge
       // function (Supabase mode). The client doesn't know the password.
@@ -437,6 +470,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const role = ((data.user.app_metadata?.role as User["role"])
           ?? (data.user.user_metadata?.role as User["role"])
           ?? "ops");
+        if (lock && role !== lock) {
+          await recordAuditEvent({ type: "login.rolelock.blocked", actor: username, detail: { lock, attemptedRole: role } });
+          return { ok: false, error: "role_locked" };
+        }
         const user: User = { username, role, displayName: (data.user.user_metadata?.displayName as string) ?? username };
         localStorage.setItem("rjaf.user", JSON.stringify(user));
         localStorage.removeItem("rjaf.fails");
@@ -805,7 +842,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       updateAdminRecoveryRemaining(null);
       setState(s => ({ ...s, licensed: false, user: null }));
     },
-  }), [state, pending, adminTotpEnrolled, pendingRecoveryCodes, adminRecoveryCodesRemaining]);
+    pcRoleLock,
+    setPcRoleLock: applyPcRoleLock,
+  }), [state, pending, adminTotpEnrolled, pendingRecoveryCodes, adminRecoveryCodesRemaining, pcRoleLock]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

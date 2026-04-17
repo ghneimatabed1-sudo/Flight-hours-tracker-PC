@@ -8,7 +8,7 @@ export default function LoginGate() {
   const {
     licensed, configured, activateLicense, configureSquadron, login, fingerprint,
     lockedUntil, user, pendingAdmin, verifyAdminTotp, cancelAdminTotp,
-    pendingRecoveryCodes, ackRecoveryCodes, provisionSuperAdmin,
+    pendingRecoveryCodes, ackRecoveryCodes, provisionSuperAdmin, pcRoleLock,
   } = useAuth();
   const { t, lang, setLang } = useI18n();
 
@@ -40,7 +40,13 @@ export default function LoginGate() {
   const [recoveryCopied, setRecoveryCopied] = useState(false);
 
   // HQ users (super admin / commanders) bypass license + squadron setup.
-  const [hqMode, setHqMode] = useState(false);
+  // When this PC is locked to an HQ role, enter HQ mode automatically so the
+  // user never sees the license-key / squadron-setup screens at all.
+  const [hqMode, setHqMode] = useState(pcRoleLock === "super_admin" || pcRoleLock === "commander");
+  useEffect(() => {
+    if (pcRoleLock === "super_admin" || pcRoleLock === "commander") setHqMode(true);
+    if (pcRoleLock === "ops") setHqMode(false);
+  }, [pcRoleLock]);
 
   const lockedRemaining = lockedUntil ? Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000)) : 0;
 
@@ -75,6 +81,7 @@ export default function LoginGate() {
         setSetupPw1(""); setSetupPw2(""); setSetupErr(null); setSetupOk(false);
         return;
       }
+      if (r.error === "role_locked") { setErr(t("roleLockMismatch")); return; }
       setErr(r.error === "locked" ? t("lockedOut") : t("badCreds"));
     }
   };
@@ -368,9 +375,11 @@ export default function LoginGate() {
               <div className="text-[11px] font-mono text-muted-foreground break-all">FP: {fingerprint}</div>
               {licError && <div className="text-xs text-destructive">{licError}</div>}
               <button className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90">{t("activate")}</button>
-              <button type="button" onClick={() => setHqMode(true)} className="w-full text-xs text-amber-400 hover:text-amber-300 pt-1">
-                {t("superAdminPanel")} / {t("commanderDashboard")} →
-              </button>
+              {pcRoleLock !== "ops" && (
+                <button type="button" onClick={() => setHqMode(true)} className="w-full text-xs text-amber-400 hover:text-amber-300 pt-1">
+                  {t("superAdminPanel")} / {t("commanderDashboard")} →
+                </button>
+              )}
             </form>
           ) : (
             <form onSubmit={submitSetup} className="space-y-3">

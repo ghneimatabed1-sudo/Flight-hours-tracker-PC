@@ -12,11 +12,34 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { KeyRound, ShieldCheck, ShieldAlert, RefreshCw, Lock } from "lucide-react";
+import { KeyRound, ShieldCheck, ShieldAlert, RefreshCw, Lock, Monitor } from "lucide-react";
+import type { PcRoleLock } from "@/lib/auth";
 
 export default function AdminSecurity() {
   const { t } = useI18n();
-  const { adminTotpEnrolled, regenerateRecoveryCodes, changeSuperAdminPassword, backendMode } = useAuth();
+  const { adminTotpEnrolled, regenerateRecoveryCodes, changeSuperAdminPassword, backendMode, pcRoleLock, setPcRoleLock } = useAuth();
+
+  // Local editable copy of the PC role lock so the super admin can preview
+  // the choice before applying. Initialized from the persisted value.
+  const [lockDraft, setLockDraft] = useState<PcRoleLock>(pcRoleLock);
+  const [lockSaved, setLockSaved] = useState(false);
+  const lockOptionLabel = (v: PcRoleLock): string => {
+    if (v === "ops") return t("roleLockOps");
+    if (v === "commander") return t("roleLockCommander");
+    if (v === "super_admin") return t("roleLockSuperAdmin");
+    return t("roleLockNone");
+  };
+  const applyLock = () => {
+    setPcRoleLock(lockDraft);
+    setLockSaved(true);
+    window.setTimeout(() => setLockSaved(false), 3000);
+  };
+  const clearLock = () => {
+    setPcRoleLock(null);
+    setLockDraft(null);
+    setLockSaved(true);
+    window.setTimeout(() => setLockSaved(false), 3000);
+  };
 
   const [pwCurrent, setPwCurrent] = useState("");
   const [pwNew, setPwNew] = useState("");
@@ -114,6 +137,65 @@ export default function AdminSecurity() {
   return (
     <div className="space-y-6">
       <h2 className="text-xl font-bold">{t("securityTitle")}</h2>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Monitor className="h-5 w-5" />
+            {t("roleLockTitle")}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs text-muted-foreground mb-3">{t("roleLockDesc")}</p>
+          {pcRoleLock && (
+            <div className="rounded-md border border-amber-600/40 bg-amber-500/10 p-3 text-xs text-amber-200 mb-3" data-testid="text-role-lock-active">
+              <span className="opacity-80">{t("roleLockActiveBadge")} </span>
+              <span className="font-semibold">{lockOptionLabel(pcRoleLock)}</span>
+            </div>
+          )}
+          <div className="space-y-3 max-w-md">
+            <div>
+              <label className="text-xs text-muted-foreground">{t("roleLockCurrentLabel")}</label>
+              <select
+                data-testid="select-role-lock"
+                value={lockDraft ?? ""}
+                onChange={e => {
+                  const v = e.target.value;
+                  setLockDraft(v === "" ? null : (v as PcRoleLock));
+                  setLockSaved(false);
+                }}
+                className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm"
+              >
+                <option value="">{t("roleLockNone")}</option>
+                <option value="ops">{t("roleLockOps")}</option>
+                <option value="commander">{t("roleLockCommander")}</option>
+                <option value="super_admin">{t("roleLockSuperAdmin")}</option>
+              </select>
+            </div>
+            {lockSaved && <p className="text-xs text-emerald-400" data-testid="text-role-lock-saved">{t("roleLockSaved")}</p>}
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                data-testid="button-role-lock-apply"
+                onClick={applyLock}
+                disabled={lockDraft === pcRoleLock}
+              >
+                {t("roleLockSaveBtn")}
+              </Button>
+              {pcRoleLock && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  data-testid="button-role-lock-clear"
+                  onClick={clearLock}
+                >
+                  {t("roleLockClearBtn")}
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
