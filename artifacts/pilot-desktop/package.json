@@ -1,0 +1,52 @@
+{
+  "name": "@workspace/pilot-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RJAF Flight Hour Tracker — Windows desktop wrapper",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "pnpm run build && electron .",
+    "dist": "pnpm run build && electron-builder --win --x64",
+    "dist:portable": "pnpm run build && electron-builder --win portable --x64"
+  },
+  "devDependencies": {
+    "electron": "^32.2.7",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.6.3",
+    "@types/node": "^22.9.0"
+  },
+  "build": {
+    "appId": "com.rjaf.flighthourtracker",
+    "productName": "Flight Hour Tracker",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "FlightHourTracker-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Flight Hour Tracker",
+      "include": "build/installer.nsh",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}
