@@ -3,17 +3,21 @@ import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots, useCreateSortie } from "@/lib/squadron-data";
 import { useToast } from "@/hooks/use-toast";
-import { Plane } from "lucide-react";
+import { Plane, UserPlus } from "lucide-react";
 
 export default function AddSortie() {
   const { t } = useI18n();
   const { toast } = useToast();
   const { data: PILOTS } = usePilots();
   const create = useCreateSortie();
+  const [pilotExt, setPilotExt] = useState(false);
+  const [coPilotExt, setCoPilotExt] = useState(false);
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     acType: "UH-60M", acNumber: "",
     pilot: PILOTS[0]?.id ?? "", coPilot: PILOTS[1]?.id ?? "",
+    pilotExtName: "", pilotExtSqn: "",
+    coPilotExtName: "", coPilotExtSqn: "",
     sortieType: "Training", name: "NAV",
     day1: 0, day2: 0, dayDual: 0,
     night1: 0, night2: 0, nightDual: 0,
@@ -26,21 +30,28 @@ export default function AddSortie() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // The mutation cache surfaces errors automatically through the global
-    // toast + live-data indicator, so here we only need to celebrate the
-    // happy path.
+    if (pilotExt && !form.pilotExtName.trim()) { toast({ title: t("externalMissingName"), variant: "destructive" }); return; }
+    if (coPilotExt && !form.coPilotExtName.trim()) { toast({ title: t("externalMissingName"), variant: "destructive" }); return; }
     try {
       await create.mutateAsync({
         date: form.date, acType: form.acType, acNumber: form.acNumber,
-        pilotId: form.pilot, coPilotId: form.coPilot,
+        pilotId: pilotExt ? "" : form.pilot,
+        coPilotId: coPilotExt ? "" : form.coPilot,
+        pilotExternal: pilotExt ? { name: form.pilotExtName.trim(), squadron: form.pilotExtSqn.trim() } : undefined,
+        coPilotExternal: coPilotExt ? { name: form.coPilotExtName.trim(), squadron: form.coPilotExtSqn.trim() } : undefined,
         sortieType: form.sortieType, name: form.name,
         day1: form.day1, day2: form.day2, dayDual: form.dayDual,
         night1: form.night1, night2: form.night2, nightDual: form.nightDual,
         nvg: form.nvg, sim: form.sim, actual: form.actual,
       });
       toast({ title: t("savedTitle"), description: t("sortieSavedMsg") });
+      if (pilotExt || coPilotExt) {
+        toast({ title: t("externalLoggedTitle"), description: t("externalLoggedMsg") });
+      }
     } catch { /* surfaced by the global error toast */ }
   };
+
+  const pilotOpts = PILOTS.map(p => ({ value: p.id, label: `${p.rank} ${p.name}` }));
 
   return (
     <div>
@@ -51,10 +62,37 @@ export default function AddSortie() {
             <Field label={t("date")} type="date" value={form.date} onChange={v => set("date", v)} />
             <Select label={t("acType")} value={form.acType} onChange={v => set("acType", v)} opts={["UH-60M", "UH-60L", "UH-60AIL", "AS332"]} />
             <Field label={t("acNumber")} value={form.acNumber} onChange={v => set("acNumber", v)} placeholder="e.g. 832" />
-            <Select label={t("pilot")} value={form.pilot} onChange={v => set("pilot", v)} opts={PILOTS.map(p => ({ value: p.id, label: `${p.rank} ${p.name}` }))} />
-            <Select label={t("coPilot")} value={form.coPilot} onChange={v => set("coPilot", v)} opts={PILOTS.map(p => ({ value: p.id, label: `${p.rank} ${p.name}` }))} />
             <Select label={t("sortieType")} value={form.sortieType} onChange={v => set("sortieType", v)} opts={["Training", "Mission", "Check Ride", "FCF", "Transport"]} />
-            <Field label={t("sortieName")} value={form.name} onChange={v => set("name", v)} className="md:col-span-3" />
+            <Field label={t("sortieName")} value={form.name} onChange={v => set("name", v)} className="md:col-span-2" />
+          </div>
+
+          <div className="border-t border-border pt-3 space-y-3">
+            <SeatRow
+              label={t("pilot")}
+              external={pilotExt}
+              onToggle={setPilotExt}
+              pilotId={form.pilot}
+              onPilotChange={v => set("pilot", v)}
+              extName={form.pilotExtName}
+              onExtName={v => set("pilotExtName", v)}
+              extSqn={form.pilotExtSqn}
+              onExtSqn={v => set("pilotExtSqn", v)}
+              opts={pilotOpts}
+              externalLabel={t("externalPilotToggle")}
+            />
+            <SeatRow
+              label={t("coPilot")}
+              external={coPilotExt}
+              onToggle={setCoPilotExt}
+              pilotId={form.coPilot}
+              onPilotChange={v => set("coPilot", v)}
+              extName={form.coPilotExtName}
+              onExtName={v => set("coPilotExtName", v)}
+              extSqn={form.coPilotExtSqn}
+              onExtSqn={v => set("coPilotExtSqn", v)}
+              opts={pilotOpts}
+              externalLabel={t("externalPilotToggle")}
+            />
           </div>
 
           <div className="border-t border-border pt-3">
@@ -83,7 +121,7 @@ export default function AddSortie() {
           </div>
 
           <div className="flex items-center gap-2 pt-2">
-            <button disabled={create.isPending} className="px-4 py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 inline-flex items-center gap-2 disabled:opacity-50">
+            <button disabled={create.isPending} className="px-4 py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 inline-flex items-center gap-2 disabled:opacity-50" data-testid="button-submit-sortie">
               <Plane className="h-4 w-4" /> {create.isPending ? t("saving") : t("submit")}
             </button>
           </div>
@@ -96,9 +134,51 @@ export default function AddSortie() {
           <Row k="NVG" v={form.nvg.toFixed(1)} accent="text-rose-300" />
           <Row k="Sim" v={form.sim.toFixed(1)} />
           <Row k="Actual" v={form.actual.toFixed(1)} bold />
+          {(pilotExt || coPilotExt) && (
+            <div className="mt-3 p-2 rounded-md border border-amber-400/40 bg-amber-400/10 text-[11px] text-amber-200">
+              <div className="inline-flex items-center gap-1 font-semibold mb-1"><UserPlus className="h-3 w-3" /> {t("externalPilotNoticeTitle")}</div>
+              <div className="text-amber-100/80">{t("externalPilotNoticeBody")}</div>
+            </div>
+          )}
           <div className="text-[11px] text-muted-foreground mt-3">{t("bigPlaceholder")}</div>
         </Card>
       </form>
+    </div>
+  );
+}
+
+interface SeatOpt { value: string; label: string; }
+interface SeatRowProps {
+  label: string;
+  external: boolean;
+  onToggle: (v: boolean) => void;
+  pilotId: string;
+  onPilotChange: (v: string) => void;
+  extName: string;
+  onExtName: (v: string) => void;
+  extSqn: string;
+  onExtSqn: (v: string) => void;
+  opts: SeatOpt[];
+  externalLabel: string;
+}
+function SeatRow({ label, external, onToggle, pilotId, onPilotChange, extName, onExtName, extSqn, onExtSqn, opts, externalLabel }: SeatRowProps) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{label}</div>
+        <label className="inline-flex items-center gap-1.5 text-[11px] text-amber-200 cursor-pointer" data-testid={`toggle-external-${label}`}>
+          <input type="checkbox" checked={external} onChange={e => onToggle(e.target.checked)} className="h-3 w-3 accent-amber-400" />
+          {externalLabel}
+        </label>
+      </div>
+      {external ? (
+        <div className="grid grid-cols-2 gap-3 p-3 rounded-md border border-amber-400/40 bg-amber-400/5">
+          <Field label="Name" value={extName} onChange={onExtName} placeholder="Capt. Ahmad Foo" />
+          <Field label="Squadron" value={extSqn} onChange={onExtSqn} placeholder="Sqn 3" />
+        </div>
+      ) : (
+        <Select label="" value={pilotId} onChange={onPilotChange} opts={opts} />
+      )}
     </div>
   );
 }
@@ -114,7 +194,7 @@ type FieldProps = {
 function Field({ label, value, onChange, type = "text", className = "", placeholder }: FieldProps) {
   return (
     <label className={`block ${className}`}>
-      <span className="text-xs text-muted-foreground">{label}</span>
+      {label && <span className="text-xs text-muted-foreground">{label}</span>}
       <input type={type} value={value} placeholder={placeholder}
         onChange={e => onChange(e.target.value)}
         className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm font-mono" />
@@ -127,7 +207,7 @@ function Select({ label, value, onChange, opts }: SelectProps) {
   const items = opts.map(o => typeof o === "string" ? { value: o, label: o } : o);
   return (
     <label className="block">
-      <span className="text-xs text-muted-foreground">{label}</span>
+      {label && <span className="text-xs text-muted-foreground">{label}</span>}
       <select value={value} onChange={e => onChange(e.target.value)}
         className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm">
         {items.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}

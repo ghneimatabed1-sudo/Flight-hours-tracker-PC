@@ -6,7 +6,7 @@ import {
   LayoutDashboard, ListChecks, PlusCircle, Users, BadgeCheck, AlertOctagon,
   Trophy, CalendarRange, PalmtreeIcon, UserX, Calendar, ClipboardList,
   ShieldAlert, FileText, Megaphone, Map, Tags, FileDown, UserCog, Settings,
-  Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle, Archive, Bell,
+  Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle, Archive, Bell, UserPlus,
 } from "lucide-react";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
 
@@ -15,6 +15,7 @@ const ITEMS: readonly Item[] = [
   { p: "/", k: "nav_dashboard", I: LayoutDashboard },
   { p: "/sortie-log", k: "nav_sortielog", I: ListChecks },
   { p: "/sortie-add", k: "nav_addsortie", I: PlusCircle },
+  { p: "/external-pilots", k: "nav_externalpilots", I: UserPlus },
   { p: "/roster", k: "nav_roster", I: Users },
   { p: "/currency", k: "nav_currency", I: BadgeCheck },
   { p: "/expired", k: "nav_expired", I: AlertOctagon },

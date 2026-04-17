@@ -53,6 +53,17 @@ export function isCurrencyHidden(p: Pick<Pilot, "hiddenCurrencies">, k: Currency
   return Array.isArray(p.hiddenCurrencies) && p.hiddenCurrencies.includes(k);
 }
 
+// When a seat is flown by a pilot from a different squadron (a "guest"),
+// `pilotId` / `coPilotId` stays empty and the free-text details are stored
+// on `pilotExternal` / `coPilotExternal`. The external pilot doesn't exist
+// in this squadron's roster, so their hours & currencies are NOT auto-
+// updated here — instead the other squadron's ops officer can look up the
+// flight on the External Pilots page and enter it in their own app.
+export interface ExternalPilotRef {
+  name: string;
+  squadron: string;
+}
+
 export interface Sortie {
   id: string;
   date: string;
@@ -60,6 +71,8 @@ export interface Sortie {
   acNumber: string;
   pilotId: string;
   coPilotId: string;
+  pilotExternal?: ExternalPilotRef;
+  coPilotExternal?: ExternalPilotRef;
   sortieType: string;
   name: string;
   day1: number;

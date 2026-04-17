@@ -231,6 +231,8 @@ function rowToSortie(r: Record<string, unknown>): Sortie {
     acNumber: String(r.ac_number ?? data.acNumber ?? ""),
     pilotId: String(r.pilot_id ?? data.pilotId ?? ""),
     coPilotId: String(r.co_pilot_id ?? data.coPilotId ?? ""),
+    pilotExternal: data.pilotExternal,
+    coPilotExternal: data.coPilotExternal,
     sortieType: String(r.sortie_type ?? data.sortieType ?? ""),
     name: String(r.sortie_name ?? data.name ?? ""),
     day1: Number(data.day1 ?? 0),
@@ -284,6 +286,8 @@ export function useCreateSortie() {
           day1: s.day1, day2: s.day2, dayDual: s.dayDual,
           night1: s.night1, night2: s.night2, nightDual: s.nightDual,
           nvg: s.nvg, sim: s.sim, actual: s.actual,
+          pilotExternal: s.pilotExternal,
+          coPilotExternal: s.coPilotExternal,
         },
       }).select().single();
       if (error) throw error;
@@ -321,6 +325,8 @@ export function useUpdateSortie() {
           day1: s.day1, day2: s.day2, dayDual: s.dayDual,
           night1: s.night1, night2: s.night2, nightDual: s.nightDual,
           nvg: s.nvg, sim: s.sim, actual: s.actual,
+          pilotExternal: s.pilotExternal,
+          coPilotExternal: s.coPilotExternal,
         },
       }).eq("id", s.id);
       if (error) throw error;

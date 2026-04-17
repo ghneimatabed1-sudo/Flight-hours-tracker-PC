@@ -21,10 +21,11 @@ export default function SortieLog() {
 
   const pilotMap = useMemo(() => Object.fromEntries(PILOTS.map(p => [p.id, p.name])), [PILOTS]);
   const types = useMemo(() => ["All", ...Array.from(new Set(SORTIES.map(s => s.sortieType)))], [SORTIES]);
+  const nameOf = (id: string, ext?: { name: string; squadron: string }) => ext ? `${ext.name}${ext.squadron ? ` (${ext.squadron})` : ""}` : (pilotMap[id] || "");
 
   const rows = SORTIES
     .filter(s => type === "All" || s.sortieType === type)
-    .filter(s => !q || (pilotMap[s.pilotId] + " " + pilotMap[s.coPilotId] + " " + s.acNumber + " " + s.name).toLowerCase().includes(q.toLowerCase()))
+    .filter(s => !q || (nameOf(s.pilotId, s.pilotExternal) + " " + nameOf(s.coPilotId, s.coPilotExternal) + " " + s.acNumber + " " + s.name).toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => b.date.localeCompare(a.date));
 
   const onConfirmDelete = async () => {
@@ -69,8 +70,8 @@ export default function SortieLog() {
                   <Td mono>{s.date}</Td>
                   <Td>{s.acType}</Td>
                   <Td mono>{s.acNumber}</Td>
-                  <Td>{pilotMap[s.pilotId]}</Td>
-                  <Td>{pilotMap[s.coPilotId]}</Td>
+                  <Td><SeatCell id={s.pilotId} ext={s.pilotExternal} nameMap={pilotMap} /></Td>
+                  <Td><SeatCell id={s.coPilotId} ext={s.coPilotExternal} nameMap={pilotMap} /></Td>
                   <Td>{s.sortieType}</Td>
                   <Td>{s.name}</Td>
                   <Td mono right>{s.day1 || "—"}</Td>
@@ -132,6 +133,18 @@ export default function SortieLog() {
       )}
     </div>
   );
+}
+
+function SeatCell({ id, ext, nameMap }: { id: string; ext?: { name: string; squadron: string }; nameMap: Record<string, string> }) {
+  if (ext) {
+    return (
+      <span className="inline-flex items-center gap-1 text-amber-200" title="External pilot">
+        <span className="text-[10px] px-1 rounded bg-amber-400/20 border border-amber-400/40 font-semibold">EXT</span>
+        <span>{ext.name}{ext.squadron ? ` · ${ext.squadron}` : ""}</span>
+      </span>
+    );
+  }
+  return <>{nameMap[id] || id}</>;
 }
 
 function Th({ children, right, cls = "" }: { children: React.ReactNode; right?: boolean; cls?: string }) {

@@ -13,6 +13,7 @@ import LoginGate from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import SortieLog from "@/pages/SortieLog";
 import AddSortie from "@/pages/AddSortie";
+import ExternalPilots from "@/pages/ExternalPilots";
 import Roster from "@/pages/Roster";
 import PilotDetail from "@/pages/PilotDetail";
 import Currency from "@/pages/Currency";
@@ -57,6 +58,7 @@ function SquadronOpsRoutes() {
       <Route path="/" component={Dashboard} />
       <Route path="/sortie-log" component={SortieLog} />
       <Route path="/sortie-add" component={AddSortie} />
+      <Route path="/external-pilots" component={ExternalPilots} />
       <Route path="/roster" component={Roster} />
       <Route path="/pilot/:id" component={PilotDetail} />
       <Route path="/currency" component={Currency} />
