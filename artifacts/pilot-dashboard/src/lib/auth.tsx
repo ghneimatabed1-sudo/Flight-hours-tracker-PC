@@ -5,12 +5,19 @@ import { commanders, SUPER_ADMIN } from "./mockData";
 import type { User } from "./types";
 import { generateSecret, otpauthURL, verifyTotp } from "./totp";
 
+// Demo-only fallback when Supabase isn't configured (in-browser preview).
+// In any real install (`supabaseConfigured === true`) the secret is held
+// server-side in `super_admin_2fa` and verified by the
+// `super-admin-2fa` edge function — the localStorage path is never used.
 const ADMIN_TOTP_SECRET_KEY = "rjaf.adminTotp.secret";
 const ADMIN_TOTP_ISSUER = "RJAF Pilot Dashboard";
 
 interface PendingAdmin {
   user: User;
   mode: "enroll" | "verify";
+  // For "verify" against the server, secret is empty — the client never
+  // sees it. For "enroll" we hold it just long enough to render the QR
+  // and the user-visible setup string, then drop it on completion.
   secret: string;
   otpauth: string;
 }
@@ -113,6 +120,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     lockedUntil: Number(localStorage.getItem("rjaf.lockUntil") || 0) || null,
   }));
   const [pending, setPending] = useState<PendingAdmin | null>(null);
+  // Optimistic local cache only — the authoritative answer for whether a
+  // super admin has enrolled lives in `super_admin_2fa` server-side.
   const [adminTotpEnrolled, setAdminTotpEnrolled] = useState<boolean>(
     () => !!localStorage.getItem(ADMIN_TOTP_SECRET_KEY),
   );
@@ -219,6 +228,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Super admin must complete a real TOTP step (enrollment first time, then
         // verification on every subsequent sign-in) before the panel unlocks.
         if (hqUser.role === "super_admin") {
+          // Server-backed flow (production / any installation with Supabase).
+          // The secret lives in super_admin_2fa, never in localStorage, and
+          // verification is performed by the super-admin-2fa edge function.
+          if (supabaseConfigured && supabase) {
+            try {
+              const { data: status } = await supabase.functions.invoke("super-admin-2fa", {
+                body: { action: "status", username: hqUser.username },
+              });
+              if (status?.lockedUntil && status.lockedUntil > Date.now()) {
+                localStorage.setItem("rjaf.lockUntil", String(status.lockedUntil));
+                setState(s => ({ ...s, lockedUntil: status.lockedUntil }));
+                return { ok: false, error: "locked" };
+              }
+              if (status?.enrolled) {
+                setPending({ user: hqUser, mode: "verify", secret: "", otpauth: "" });
+                setAdminTotpEnrolled(true);
+                await recordAuditEvent({ type: "login.2fa.required", actor: username, detail: { stage: "verify" } });
+                return { ok: false, requires2fa: "verify" };
+              }
+              const { data: enroll, error: enrollErr } = await supabase.functions.invoke("super-admin-2fa", {
+                body: { action: "enroll", username: hqUser.username },
+              });
+              if (enrollErr || !enroll?.ok) {
+                return { ok: false, error: enroll?.error ?? "enroll_failed" };
+              }
+              setPending({
+                user: hqUser, mode: "enroll",
+                secret: enroll.secret as string,
+                otpauth: enroll.otpauth as string,
+              });
+              await recordAuditEvent({ type: "login.2fa.required", actor: username, detail: { stage: "enroll" } });
+              return { ok: false, requires2fa: "enroll" };
+            } catch (e: unknown) {
+              return { ok: false, error: e instanceof Error ? e.message : "totp_server_error" };
+            }
+          }
+
+          // Demo-only fallback: keep the in-browser preview working when
+          // Supabase isn't configured at all.
           const existing = localStorage.getItem(ADMIN_TOTP_SECRET_KEY);
           if (existing) {
             setPending({
@@ -289,6 +337,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (state.lockedUntil && state.lockedUntil > now) {
         return { ok: false, error: "locked" };
       }
+
+      // Server-backed verification path (production). The secret never
+      // leaves the database; we just hand the code to the edge function
+      // and trust its yes/no plus its server-side rate-limit.
+      if (supabaseConfigured && supabase) {
+        try {
+          const { data, error } = await supabase.functions.invoke("super-admin-2fa", {
+            body: { action: "verify", username: pending.user.username, code },
+          });
+          if (error || !data?.ok) {
+            const isLocked = data?.error === "locked";
+            const fails = state.failedAttempts + 1;
+            const lockedUntil = isLocked ? now + 5 * 60_000 : null;
+            if (lockedUntil) localStorage.setItem("rjaf.lockUntil", String(lockedUntil));
+            localStorage.setItem("rjaf.fails", String(fails));
+            setState(s => ({ ...s, failedAttempts: fails, lockedUntil }));
+            if (lockedUntil) setPending(null);
+            return { ok: false, error: isLocked ? "locked" : "bad" };
+          }
+          if (pending.mode === "enroll") setAdminTotpEnrolled(true);
+          const hqUser = pending.user;
+          localStorage.setItem("rjaf.user", JSON.stringify(hqUser));
+          localStorage.removeItem("rjaf.fails");
+          localStorage.removeItem("rjaf.lockUntil");
+          await recordAuditEvent({
+            type: "login.ok",
+            actor: hqUser.username,
+            detail: { role: hqUser.role, twoFactor: true },
+          });
+          setPending(null);
+          setState(s => ({ ...s, user: hqUser, failedAttempts: 0, lockedUntil: null }));
+          return { ok: true };
+        } catch (e: unknown) {
+          return { ok: false, error: e instanceof Error ? e.message : "totp_server_error" };
+        }
+      }
+
+      // Demo-only local verification (matches the localStorage enroll above).
       const ok = await verifyTotp(pending.secret, code);
       if (!ok) {
         const fails = state.failedAttempts + 1;
