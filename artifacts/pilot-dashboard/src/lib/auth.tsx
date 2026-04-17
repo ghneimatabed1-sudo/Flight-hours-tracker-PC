@@ -1,15 +1,12 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 import { supabase, supabaseConfigured, validateLicenseRemote, recordAuditEvent } from "./supabase";
+import { commanders, SUPER_ADMIN } from "./mockData";
+import type { User } from "./types";
 
 interface SquadronConfig {
   name: string;
   number: string;
   base: string;
-}
-interface User {
-  username: string;
-  role: "ops" | "deputy" | "admin";
-  displayName: string;
 }
 interface AuthState {
   licensed: boolean;
@@ -69,6 +66,20 @@ async function makeFingerprint(): Promise<string> {
 }
 
 const DEMO_KEY_PREFIXES = ["RJAF-", "DEMO-"];
+
+const HQ_CREDS: Record<string, string> = {
+  admin: "admin123",
+  commander1: "commander",
+  wing1: "commander",
+  base1: "commander",
+  hq1: "commander",
+};
+
+function lookupHQUser(username: string): User | null {
+  const u = username.trim().toLowerCase();
+  if (u === "admin") return SUPER_ADMIN;
+  return commanders.find(c => c.username === u) ?? null;
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>(() => ({
@@ -143,6 +154,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { ok: false as const, error: lockedUntil ? "locked" : "bad" };
       };
 
+      // HQ users (super admin, commanders) skip license/squadron setup entirely.
+      const hqExpected = HQ_CREDS[username.trim().toLowerCase()];
+      if (hqExpected) {
+        if (hqExpected !== password) return await recordFail("bad_credentials");
+        const hqUser = lookupHQUser(username);
+        if (!hqUser) return await recordFail("unknown_hq_user");
+        localStorage.setItem("rjaf.user", JSON.stringify(hqUser));
+        localStorage.removeItem("rjaf.fails");
+        localStorage.removeItem("rjaf.lockUntil");
+        await recordAuditEvent({ type: "login.ok", actor: username, detail: { role: hqUser.role } });
+        setState(s => ({ ...s, user: hqUser, failedAttempts: 0, lockedUntil: null }));
+        return { ok: true };
+      }
+
       const packaged = await isPackagedDesktop();
       if (packaged && !supabaseConfigured) {
         return { ok: false, error: "Authentication server not configured. Contact your Super Admin." };
@@ -151,7 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const email = username.includes("@") ? username : `${username}@${(state.squadron?.number ?? "rjaf").toLowerCase()}.rjaf.local`;
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error || !data.user) return await recordFail(error?.message ?? "auth_failed");
-        const role: User["role"] = (data.user.user_metadata?.role as User["role"]) ?? "ops";
+        const role = ((data.user.user_metadata?.role as User["role"]) ?? "ops");
         const user: User = { username, role, displayName: (data.user.user_metadata?.displayName as string) ?? username };
         localStorage.setItem("rjaf.user", JSON.stringify(user));
         localStorage.removeItem("rjaf.fails");
@@ -162,7 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (!username || password.length < 4) return await recordFail("bad_credentials");
-      const user: User = { username, role: username.toLowerCase() === "admin" ? "admin" : "ops", displayName: username };
+      const user: User = { username, role: "ops", displayName: username };
       localStorage.setItem("rjaf.user", JSON.stringify(user));
       localStorage.removeItem("rjaf.fails");
       localStorage.removeItem("rjaf.lockUntil");

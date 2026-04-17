@@ -1,10 +1,11 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { I18nProvider } from "@/lib/i18n";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import Layout from "@/components/Layout";
+import { HQLayout } from "@/components/HQLayout";
 import LoginGate from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import SortieLog from "@/pages/SortieLog";
@@ -29,10 +30,19 @@ import Users from "@/pages/Users";
 import AuditLog from "@/pages/AuditLog";
 import SettingsPage from "@/pages/Settings";
 import NotFound from "@/pages/not-found";
+import AdminOverview from "@/pages/admin/Overview";
+import LicenseKeys from "@/pages/admin/LicenseKeys";
+import Commanders from "@/pages/admin/Commanders";
+import AdminSquadrons from "@/pages/admin/Squadrons";
+import AdminAuditLog from "@/pages/admin/AuditLog";
+import CommanderOverview from "@/pages/dashboard/Overview";
+import PilotsTable from "@/pages/dashboard/PilotsTable";
+import DashboardPilotDetail from "@/pages/dashboard/PilotDetail";
+import Alerts from "@/pages/dashboard/Alerts";
 
 const queryClient = new QueryClient();
 
-function Routes() {
+function SquadronOpsRoutes() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
@@ -62,12 +72,52 @@ function Routes() {
   );
 }
 
+function AdminRoutes() {
+  return (
+    <Switch>
+      <Route path="/"><Redirect to="/admin" /></Route>
+      <Route path="/admin" component={AdminOverview} />
+      <Route path="/admin/keys" component={LicenseKeys} />
+      <Route path="/admin/commanders" component={Commanders} />
+      <Route path="/admin/squadrons" component={AdminSquadrons} />
+      <Route path="/admin/audit" component={AdminAuditLog} />
+      <Route component={NotFound} />
+    </Switch>
+  );
+}
+
+function CommanderRoutes() {
+  return (
+    <Switch>
+      <Route path="/"><Redirect to="/dashboard" /></Route>
+      <Route path="/dashboard" component={CommanderOverview} />
+      <Route path="/dashboard/pilots" component={PilotsTable} />
+      <Route path="/dashboard/squadron/:id" component={PilotsTable} />
+      <Route path="/dashboard/pilot/:id" component={DashboardPilotDetail} />
+      <Route path="/dashboard/alerts" component={Alerts} />
+      <Route component={NotFound} />
+    </Switch>
+  );
+}
+
 function Shell() {
   const { licensed, configured, user } = useAuth();
-  if (!licensed || !configured || !user) return <LoginGate />;
+
+  if (!user) return <LoginGate />;
+
+  if (user.role === "super_admin") {
+    return <HQLayout><AdminRoutes /></HQLayout>;
+  }
+  if (user.role === "commander") {
+    return <HQLayout><CommanderRoutes /></HQLayout>;
+  }
+
+  // Squadron Ops users still require local license + squadron config.
+  if (!licensed || !configured) return <LoginGate />;
+
   return (
     <Layout>
-      <Routes />
+      <SquadronOpsRoutes />
     </Layout>
   );
 }

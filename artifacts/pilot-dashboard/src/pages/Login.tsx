@@ -4,7 +4,7 @@ import { useI18n } from "@/lib/i18n";
 import { ShieldCheck, Languages, KeyRound } from "lucide-react";
 
 export default function LoginGate() {
-  const { licensed, configured, activateLicense, configureSquadron, login, fingerprint, lockedUntil } = useAuth();
+  const { licensed, configured, activateLicense, configureSquadron, login, fingerprint, lockedUntil, user } = useAuth();
   const { t, lang, setLang } = useI18n();
 
   const [licenseKey, setLicenseKey] = useState("DEMO-RJAF-1234-5678");
@@ -17,6 +17,9 @@ export default function LoginGate() {
   const [u, setU] = useState("");
   const [p, setP] = useState("");
   const [err, setErr] = useState<string | null>(null);
+
+  // HQ users (super admin / commanders) bypass license + squadron setup.
+  const [hqMode, setHqMode] = useState(false);
 
   const lockedRemaining = lockedUntil ? Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000)) : 0;
 
@@ -34,6 +37,8 @@ export default function LoginGate() {
     const r = await login(u, p);
     if (!r.ok) setErr(r.error === "locked" ? t("lockedOut") : t("badCreds"));
   };
+
+  const showLogin = hqMode || (licensed && configured && !user);
 
   return (
     <div className="min-h-screen brand-bg flex items-center justify-center p-6">
@@ -53,7 +58,25 @@ export default function LoginGate() {
         </div>
 
         <div className="panel p-6">
-          {!licensed ? (
+          {showLogin ? (
+            <form onSubmit={submitLogin} className="space-y-3">
+              <div className="text-sm font-medium">{t("loginTitle")}</div>
+              <Field label={t("username")} value={u} onChange={setU} />
+              <Field label={t("password")} value={p} onChange={setP} type="password" />
+              {lockedRemaining > 0
+                ? <div className="text-xs text-amber-400">{t("lockedOut")} ({lockedRemaining}s)</div>
+                : err && <div className="text-xs text-destructive">{err}</div>}
+              <button data-testid="button-signin" disabled={lockedRemaining > 0} className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 disabled:opacity-50">{t("signIn")}</button>
+              <div className="text-[11px] text-muted-foreground text-center pt-1">
+                {t("loginHelp")}
+              </div>
+              {hqMode && !licensed && (
+                <button type="button" onClick={() => setHqMode(false)} className="w-full text-[11px] text-muted-foreground hover:text-foreground underline">
+                  ← {t("licenseTitle")}
+                </button>
+              )}
+            </form>
+          ) : !licensed ? (
             <form onSubmit={submitLicense} className="space-y-3">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <ShieldCheck className="h-4 w-4 text-amber-400" />
@@ -72,8 +95,11 @@ export default function LoginGate() {
               <div className="text-[11px] font-mono text-muted-foreground break-all">FP: {fingerprint}</div>
               {licError && <div className="text-xs text-destructive">{licError}</div>}
               <button className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90">{t("activate")}</button>
+              <button type="button" onClick={() => setHqMode(true)} className="w-full text-xs text-amber-400 hover:text-amber-300 pt-1">
+                {t("superAdminPanel")} / {t("commanderDashboard")} →
+              </button>
             </form>
-          ) : !configured ? (
+          ) : (
             <form onSubmit={submitSetup} className="space-y-3">
               <div className="text-sm font-medium">{t("setupTitle")}</div>
               <p className="text-xs text-muted-foreground">{t("setupHint")}</p>
@@ -83,17 +109,6 @@ export default function LoginGate() {
                 <Field label={t("base")} value={base} onChange={setBase} />
               </div>
               <button className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90">{t("save")}</button>
-            </form>
-          ) : (
-            <form onSubmit={submitLogin} className="space-y-3">
-              <div className="text-sm font-medium">{t("loginTitle")}</div>
-              <Field label={t("username")} value={u} onChange={setU} />
-              <Field label={t("password")} value={p} onChange={setP} type="password" />
-              {lockedRemaining > 0
-                ? <div className="text-xs text-amber-400">{t("lockedOut")} ({lockedRemaining}s)</div>
-                : err && <div className="text-xs text-destructive">{err}</div>}
-              <button disabled={lockedRemaining > 0} className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 disabled:opacity-50">{t("signIn")}</button>
-              <div className="text-[11px] text-muted-foreground text-center pt-1">Demo: any username + 4+ char password</div>
             </form>
           )}
         </div>
@@ -107,10 +122,12 @@ export default function LoginGate() {
 }
 
 function Field({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (v: string) => void; type?: string }) {
+  const id = `f-${label.replace(/\s+/g, "-").toLowerCase()}`;
+  const dt = label.toLowerCase().includes("user") ? "input-username" : label.toLowerCase().includes("pass") ? "input-password" : undefined;
   return (
     <div>
-      <label className="text-xs text-muted-foreground">{label}</label>
-      <input type={type} value={value} onChange={e => onChange(e.target.value)}
+      <label htmlFor={id} className="text-xs text-muted-foreground">{label}</label>
+      <input id={id} data-testid={dt} type={type} value={value} onChange={e => onChange(e.target.value)}
         className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm" />
     </div>
   );

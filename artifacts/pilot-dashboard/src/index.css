@@ -169,3 +169,11 @@ html, body, #root {
 .row-hover:hover { background: hsl(220 30% 12%); }
 
 .title-line { letter-spacing: .14em; text-transform: uppercase; font-size: 11px; color: hsl(220 12% 65%); }
+
+/* HQ Dashboard currency status utilities */
+.currency-current { background-color: rgb(187 247 208); color: rgb(20 83 45); }
+.dark .currency-current { background-color: rgb(20 83 45 / 0.3); color: rgb(187 247 208); }
+.currency-warning { background-color: rgb(254 240 138); color: rgb(113 63 18); }
+.dark .currency-warning { background-color: rgb(113 63 18 / 0.4); color: rgb(254 240 138); }
+.currency-expired { background-color: rgb(254 202 202); color: rgb(127 29 29); }
+.dark .currency-expired { background-color: rgb(127 29 29 / 0.4); color: rgb(254 202 202); }
