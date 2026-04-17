@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock } from "lucide-react";
 import emblem from "@assets/rjaf_emblem.png";
+import { RecoveryCodesLowBanner } from "@/components/RecoveryCodesLowBanner";
 
 interface NavItem {
   path: string;
@@ -113,7 +114,8 @@ export function HQLayout({ children }: { children: ReactNode }) {
             })}
           </ul>
         </nav>
-        <main className="flex-1 min-w-0 p-4 sm:p-6">
+        <main className="flex-1 min-w-0 p-4 sm:p-6 space-y-4">
+          {isAdmin && <RecoveryCodesLowBanner />}
           {children}
         </main>
       </div>

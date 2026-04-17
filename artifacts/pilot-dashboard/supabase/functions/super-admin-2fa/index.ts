@@ -402,6 +402,7 @@ Deno.serve(async (req: Request) => {
 
     const wasEnrollment = !row.enrolled_at;
     let recoveryCodes: string[] | undefined;
+    let recoveryRemaining: number | undefined;
     if (wasEnrollment) {
       // Finalising enrollment: mint the one-time recovery codes, hash them,
       // store the hashes, and return the plaintext codes exactly once so
@@ -419,6 +420,7 @@ Deno.serve(async (req: Request) => {
         recovery_code_used_at: hashes.map(() => null),
         updated_at: new Date().toISOString(),
       }).eq("username", username);
+      recoveryRemaining = recoveryCodes.length;
     } else {
       await admin.from("super_admin_2fa").update({
         last_verified_at: new Date().toISOString(),
@@ -426,6 +428,21 @@ Deno.serve(async (req: Request) => {
         locked_until: null,
         updated_at: new Date().toISOString(),
       }).eq("username", username);
+      // Compute remaining unused recovery codes so the client can warn
+      // the admin when they're running low and prompt regeneration.
+      const usedAtAll: (string | null)[] = Array.isArray(row.recovery_code_used_at)
+        ? row.recovery_code_used_at
+        : [];
+      const hashesAll: string[] = Array.isArray(row.recovery_code_hashes)
+        ? row.recovery_code_hashes
+        : [];
+      const padded = [...usedAtAll];
+      while (padded.length < hashesAll.length) padded.push(null);
+      // If a recovery code was just burned in this verify call, that update
+      // hasn't been re-read yet — account for it.
+      recoveryRemaining = padded.filter(v => !v).length
+        - (recoveryMatched ? 1 : 0);
+      if (recoveryRemaining < 0) recoveryRemaining = 0;
     }
     await admin.from("audit_log").insert({
       squadron_id: null,
@@ -440,6 +457,73 @@ Deno.serve(async (req: Request) => {
       enrolled: true,
       ...(recoveryCodes ? { recoveryCodes } : {}),
       ...(recoveryMatched ? { usedRecoveryCode: true } : {}),
+      ...(typeof recoveryRemaining === "number" ? { recoveryRemaining } : {}),
+    });
+  }
+
+  if (action === "regenerate") {
+    // Mints a fresh batch of recovery codes for an already-enrolled super
+    // admin. Authorization here is "possession of the current TOTP
+    // authenticator" — we require a valid 6-digit code on the call. This is
+    // the same factor the admin would use to sign in, so it's a fair gate
+    // for rotating the lost-device backups. Failed attempts feed the same
+    // lockout as verify so brute-forcing this endpoint isn't easier than
+    // brute-forcing login.
+    const rawCode = (body.code ?? "").trim();
+    if (!/^\d{6}$/.test(rawCode)) {
+      return reply({ ok: false, error: "bad_input" }, 400);
+    }
+    const { data: row } = await admin
+      .from("super_admin_2fa")
+      .select("*")
+      .eq("username", username)
+      .maybeSingle();
+    if (!row || !row.enrolled_at) {
+      return reply({ ok: false, error: "not_enrolled" }, 404);
+    }
+    const lockedNow = row.locked_until && new Date(row.locked_until).getTime() > Date.now();
+    if (lockedNow) return reply({ ok: false, error: "locked" }, 423);
+
+    const totpOk = await verifyTotp(row.secret_b32, rawCode);
+    if (!totpOk) {
+      const fails = (row.failed_attempts ?? 0) + 1;
+      const lockUntil = fails >= LOCKOUT_THRESHOLD
+        ? new Date(Date.now() + LOCKOUT_MS).toISOString()
+        : null;
+      await admin.from("super_admin_2fa").update({
+        failed_attempts: fails,
+        locked_until: lockUntil,
+        updated_at: new Date().toISOString(),
+      }).eq("username", username);
+      await admin.from("audit_log").insert({
+        squadron_id: null, type: "super_admin.2fa.failed", actor: username,
+        detail: { fails, mode: "totp", stage: "regenerate" },
+      }).then(() => {}, () => {});
+      return reply({ ok: false, error: lockUntil ? "locked" : "bad", fails });
+    }
+
+    const fresh = generateRecoveryCodes();
+    const hashes = await Promise.all(
+      fresh.map(c => sha256Hex(normalizeRecoveryCode(c))),
+    );
+    await admin.from("super_admin_2fa").update({
+      recovery_code_hashes: hashes,
+      recovery_code_used_at: hashes.map(() => null),
+      failed_attempts: 0,
+      locked_until: null,
+      updated_at: new Date().toISOString(),
+    }).eq("username", username);
+    await admin.from("audit_log").insert({
+      squadron_id: null,
+      type: "super_admin.2fa.recovery_regenerated",
+      actor: username,
+      detail: { count: fresh.length },
+    }).then(() => {}, () => {});
+
+    return reply({
+      ok: true,
+      recoveryCodes: fresh,
+      recoveryRemaining: fresh.length,
     });
   }
 

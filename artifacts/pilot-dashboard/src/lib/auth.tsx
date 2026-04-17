@@ -11,8 +11,14 @@ import { generateSecret, otpauthURL, verifyTotp } from "./totp";
 // `super-admin-2fa` edge function — the localStorage path is never used.
 const ADMIN_TOTP_SECRET_KEY = "rjaf.adminTotp.secret";
 const ADMIN_TOTP_RECOVERY_KEY = "rjaf.adminTotp.recovery";
+const ADMIN_TOTP_REMAINING_KEY = "rjaf.adminTotp.remaining";
 const ADMIN_TOTP_ISSUER = "RJAF Pilot Dashboard";
 const RECOVERY_CODE_COUNT = 10;
+// When unused recovery codes drop to this number or below, the dashboard
+// surfaces a banner urging the super admin to regenerate. Exported so the
+// banner UI and any tests stay in sync with the server-side definition of
+// "running low".
+export const RECOVERY_CODES_LOW_THRESHOLD = 2;
 
 interface StoredRecoveryCode {
   hash: string;
@@ -97,6 +103,13 @@ interface AuthCtx extends AuthState {
   cancelAdminTotp: () => void;
   pendingAdmin: { mode: "enroll" | "verify"; secret: string; otpauth: string } | null;
   adminTotpEnrolled: boolean;
+  // Number of unused recovery codes the super admin has left, or null if
+  // unknown (e.g. before sign-in or when the server didn't report it). The
+  // dashboard uses this to warn the admin when the count is at or below
+  // RECOVERY_CODES_LOW_THRESHOLD so they can regenerate before getting
+  // locked out.
+  adminRecoveryCodesRemaining: number | null;
+  regenerateAdminRecoveryCodes: (totpCode: string) => Promise<{ ok: boolean; error?: string; recoveryCodes?: string[] }>;
   // One-time plaintext recovery codes shown to the super admin right after
   // they finish 2FA enrollment. Cleared as soon as they click "I've saved
   // these" (ackRecoveryCodes), so they never end up persisted anywhere.
@@ -179,6 +192,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }));
   const [pending, setPending] = useState<PendingAdmin | null>(null);
   const [pendingRecoveryCodes, setPendingRecoveryCodes] = useState<string[] | null>(null);
+  // Persisted across page reloads so the warning banner stays visible after
+  // the dashboard hot-reloads or the admin refreshes mid-session. Cleared on
+  // logout / license release. Demo mode reads it from the recovery store
+  // directly on init so the count survives refresh in-browser too.
+  const [adminRecoveryCodesRemaining, setAdminRecoveryCodesRemaining] = useState<number | null>(() => {
+    const fromLs = localStorage.getItem(ADMIN_TOTP_REMAINING_KEY);
+    if (fromLs !== null && fromLs !== "") {
+      const n = Number(fromLs);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+    if (!supabaseConfigured) {
+      try {
+        const raw = localStorage.getItem(ADMIN_TOTP_RECOVERY_KEY);
+        if (raw) {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr)) {
+            return arr.filter((c: StoredRecoveryCode) => !c?.usedAt).length;
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    return null;
+  });
+  const updateAdminRecoveryRemaining = (n: number | null) => {
+    if (n === null) localStorage.removeItem(ADMIN_TOTP_REMAINING_KEY);
+    else localStorage.setItem(ADMIN_TOTP_REMAINING_KEY, String(n));
+    setAdminRecoveryCodesRemaining(n);
+  };
   const pendingLoginUserRef = useRef<User | null>(null);
   // Short-lived HMAC challenge token returned by the edge function's "start"
   // step, presented back to "verify". Held in memory only — never persisted.
@@ -448,6 +489,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           localStorage.removeItem("rjaf.fails");
           localStorage.removeItem("rjaf.lockUntil");
           pendingTokenRef.current = "";
+          if (typeof data.recoveryRemaining === "number") {
+            updateAdminRecoveryRemaining(data.recoveryRemaining as number);
+          } else if (recoveryCodes && recoveryCodes.length > 0) {
+            updateAdminRecoveryRemaining(recoveryCodes.length);
+          }
           if (recoveryCodes && recoveryCodes.length > 0) {
             // Block the dashboard entry screen until the admin clicks
             // "I've saved these". We keep the user in the
@@ -518,10 +564,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           })),
         );
         writeDemoRecoveryCodes(hashed);
+        updateAdminRecoveryRemaining(mintedRecoveryCodes.length);
         await recordAuditEvent({
           type: "login.2fa.enrolled",
           actor: pending.user.username,
         });
+      } else {
+        // Re-sync the warning count from the demo store on every successful
+        // sign-in. Keeps the banner accurate after a recovery-code use.
+        const stored = readDemoRecoveryCodes();
+        if (stored.length > 0) {
+          updateAdminRecoveryRemaining(stored.filter(c => !c.usedAt).length);
+        }
       }
       const hqUser = pending.user;
       localStorage.removeItem("rjaf.fails");
@@ -605,12 +659,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       pendingTokenRef.current = "";
       setPending(null);
     },
+    adminRecoveryCodesRemaining,
+    regenerateAdminRecoveryCodes: async (totpCode: string) => {
+      const code = (totpCode ?? "").trim();
+      if (!/^\d{6}$/.test(code)) return { ok: false, error: "bad" };
+      const actor = state.user?.username ?? "admin";
+      if (supabaseConfigured && supabase) {
+        try {
+          const { data, error } = await supabase.functions.invoke("super-admin-2fa", {
+            body: { action: "regenerate", username: actor, code },
+          });
+          if (error || !data?.ok) {
+            const reason = data?.error ?? "regen_failed";
+            return { ok: false, error: reason };
+          }
+          const codes = Array.isArray(data.recoveryCodes) ? (data.recoveryCodes as string[]) : [];
+          updateAdminRecoveryRemaining(
+            typeof data.recoveryRemaining === "number"
+              ? (data.recoveryRemaining as number)
+              : codes.length,
+          );
+          await recordAuditEvent({
+            type: "super_admin.2fa.recovery_regenerated",
+            actor,
+            detail: { count: codes.length },
+          });
+          return { ok: true, recoveryCodes: codes };
+        } catch (e: unknown) {
+          return { ok: false, error: e instanceof Error ? e.message : "regen_error" };
+        }
+      }
+      // Demo mode: verify the TOTP code locally against the stored secret,
+      // then mint and persist a fresh batch of hashed codes.
+      const secret = localStorage.getItem(ADMIN_TOTP_SECRET_KEY) ?? "";
+      if (!secret) return { ok: false, error: "not_enrolled" };
+      const ok = await verifyTotp(secret, code);
+      if (!ok) return { ok: false, error: "bad" };
+      const fresh = generateDemoRecoveryCodes();
+      const hashed: StoredRecoveryCode[] = await Promise.all(
+        fresh.map(async c => ({
+          hash: await sha256Hex(normalizeRecoveryCode(c)),
+          usedAt: null,
+        })),
+      );
+      writeDemoRecoveryCodes(hashed);
+      updateAdminRecoveryRemaining(fresh.length);
+      await recordAuditEvent({
+        type: "super_admin.2fa.recovery_regenerated",
+        actor,
+        detail: { count: fresh.length },
+      });
+      return { ok: true, recoveryCodes: fresh };
+    },
     logout: () => {
       if (supabase) supabase.auth.signOut();
       localStorage.removeItem("rjaf.user");
       setPending(null);
       setPendingRecoveryCodes(null);
       pendingLoginUserRef.current = null;
+      updateAdminRecoveryRemaining(null);
       setState(s => ({ ...s, user: null }));
     },
     releaseLicense: () => {
@@ -620,9 +727,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem("rjaf.licenseBoundFp");
       localStorage.removeItem("rjaf.user");
       localStorage.removeItem("rjaf.squadronId");
+      updateAdminRecoveryRemaining(null);
       setState(s => ({ ...s, licensed: false, user: null }));
     },
-  }), [state, pending, adminTotpEnrolled, pendingRecoveryCodes]);
+  }), [state, pending, adminTotpEnrolled, pendingRecoveryCodes, adminRecoveryCodesRemaining]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
