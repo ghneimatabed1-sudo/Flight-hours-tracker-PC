@@ -118,8 +118,21 @@ async function loadEmblem(): Promise<string> {
 let cachedArabicFont: string | null = null;
 async function loadArabicFontBase64(): Promise<string> {
   if (cachedArabicFont) return cachedArabicFont;
-  const res = await fetch(`${import.meta.env.BASE_URL}fonts/NotoNaskhArabic-Regular.ttf`);
+  const url = `${import.meta.env.BASE_URL}fonts/NotoNaskhArabic-Regular.ttf`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Arabic font not found at ${url} (HTTP ${res.status}). Arabic PDFs require the bundled NotoNaskhArabic-Regular.ttf in /public/fonts/.`);
+  }
+  const ct = res.headers.get("content-type") || "";
+  // Vite serves the asset as application/octet-stream; reject HTML so a
+  // missing-asset 200 fallback never silently registers garbage as a font.
+  if (ct.includes("text/html")) {
+    throw new Error(`Arabic font URL ${url} returned HTML, not a TTF. Check public/fonts/.`);
+  }
   const buf = await res.arrayBuffer();
+  if (buf.byteLength < 10000) {
+    throw new Error(`Arabic font at ${url} is suspiciously small (${buf.byteLength} bytes). Likely not a valid TTF.`);
+  }
   // Convert ArrayBuffer to base64 in chunks to avoid call-stack issues.
   const bytes = new Uint8Array(buf);
   let bin = "";

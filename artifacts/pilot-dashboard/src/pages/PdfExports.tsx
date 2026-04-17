@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
@@ -20,8 +20,14 @@ export default function PdfExports() {
   const [error, setError] = useState<string | null>(null);
   // The PDFs follow the app's current language by default but the operator
   // can override per-export — useful when an English commander needs an
-  // Arabic copy for an external office, or vice versa.
+  // Arabic copy for an external office, or vice versa. Once the operator
+  // makes a manual choice we stop auto-syncing with the app language.
   const [pdfLang, setPdfLang] = useState<PdfLang>(lang);
+  const overridden = useRef(false);
+  useEffect(() => {
+    if (!overridden.current) setPdfLang(lang);
+  }, [lang]);
+  const choose = (l: PdfLang) => { overridden.current = true; setPdfLang(l); };
 
   const EXPORTS: { key: ExportKey; title: string; desc: string }[] = [
     { key: "auth", title: t("pdf_auth_title"), desc: t("pdf_auth_desc") },
@@ -59,14 +65,14 @@ export default function PdfExports() {
         <span className="text-muted-foreground">{t("pdf_language")}:</span>
         <div className="inline-flex rounded-md border border-border overflow-hidden">
           <button
-            onClick={() => setPdfLang("en")}
+            onClick={() => choose("en")}
             data-testid="button-pdflang-en"
             className={`px-3 py-1 text-xs ${pdfLang === "en" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"}`}
           >
             English
           </button>
           <button
-            onClick={() => setPdfLang("ar")}
+            onClick={() => choose("ar")}
             data-testid="button-pdflang-ar"
             className={`px-3 py-1 text-xs ${pdfLang === "ar" ? "bg-primary text-primary-foreground" : "hover:bg-secondary"}`}
           >
