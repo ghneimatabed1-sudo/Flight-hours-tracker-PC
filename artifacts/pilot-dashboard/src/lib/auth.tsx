@@ -12,6 +12,10 @@ import { generateSecret, otpauthURL, verifyTotp } from "./totp";
 const ADMIN_TOTP_SECRET_KEY = "rjaf.adminTotp.secret";
 const ADMIN_TOTP_RECOVERY_KEY = "rjaf.adminTotp.recovery";
 const ADMIN_TOTP_REMAINING_KEY = "rjaf.adminTotp.remaining";
+// SHA-256 hex of the current super admin password. Only consulted in demo
+// mode (no Supabase): when set, overrides the hardcoded DEMO_SUPER_ADMIN_PASSWORD.
+// In Supabase mode the real hash lives server-side in SUPER_ADMIN_PASSWORD_HASH.
+const ADMIN_PASSWORD_HASH_KEY = "rjaf.admin.passwordHash";
 const ADMIN_TOTP_ISSUER = "RJAF Pilot Dashboard";
 const RECOVERY_CODE_COUNT = 10;
 // When unused recovery codes drop to this number or below, the dashboard
@@ -100,6 +104,11 @@ interface AuthCtx extends AuthState {
   // after re-confirming a current 6-digit TOTP code. Old codes are
   // invalidated server-side. Returns the new plaintext codes once.
   regenerateRecoveryCodes: (code: string) => Promise<{ ok: boolean; error?: string; recoveryCodes?: string[] }>;
+  // Changes the super admin password. In demo mode (no Supabase) the new
+  // password's SHA-256 hash is stored in localStorage under ADMIN_PASSWORD_HASH_KEY
+  // and takes effect immediately. In Supabase mode the hash lives server-side
+  // and this call returns { ok: false, error: "server_managed" }.
+  changeSuperAdminPassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>;
   cancelAdminTotp: () => void;
   pendingAdmin: { mode: "enroll" | "verify"; secret: string; otpauth: string } | null;
   adminTotpEnrolled: boolean;
@@ -365,9 +374,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        // Demo-only fallback: in-browser preview without Supabase. The
-        // hardcoded demo password is the only thing the client knows.
-        if (password !== DEMO_SUPER_ADMIN_PASSWORD) return await recordFail("bad_credentials");
+        // Demo-only fallback: in-browser preview without Supabase. Prefer the
+        // admin-chosen password hash from localStorage (set via the Change
+        // Password flow on the Security page). Fall back to the hardcoded demo
+        // default only when no override has been stored.
+        {
+          const storedHash = localStorage.getItem(ADMIN_PASSWORD_HASH_KEY);
+          if (storedHash) {
+            const attemptHash = await sha256Hex(password);
+            if (attemptHash !== storedHash) return await recordFail("bad_credentials");
+          } else if (password !== DEMO_SUPER_ADMIN_PASSWORD) {
+            return await recordFail("bad_credentials");
+          }
+        }
         const existing = localStorage.getItem(ADMIN_TOTP_SECRET_KEY);
         if (existing) {
           setPending({
@@ -595,6 +614,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       setPending(null);
       setState(s => ({ ...s, user: hqUser, failedAttempts: 0, lockedUntil: null }));
+      return { ok: true };
+    },
+    changeSuperAdminPassword: async (currentPassword, newPassword) => {
+      const u = state.user;
+      if (!u || u.role !== "super_admin") return { ok: false, error: "unauthorized" };
+      const np = (newPassword ?? "").trim();
+      if (np.length < 8) return { ok: false, error: "too_short" };
+      if (np === (currentPassword ?? "").trim()) return { ok: false, error: "same" };
+
+      if (supabaseConfigured) {
+        // Server-managed password. A future edge-function action could accept
+        // (current, new) and rotate the hash server-side; until that ships the
+        // super admin must rotate SUPER_ADMIN_PASSWORD_HASH in env vars.
+        return { ok: false, error: "server_managed" };
+      }
+
+      // Demo / standalone mode: verify the current password against the stored
+      // hash (or the hardcoded default if no hash has been set yet).
+      const storedHash = localStorage.getItem(ADMIN_PASSWORD_HASH_KEY);
+      if (storedHash) {
+        const attemptHash = await sha256Hex(currentPassword);
+        if (attemptHash !== storedHash) {
+          await recordAuditEvent({ type: "admin.password.change.failed", actor: u.username, detail: { reason: "bad_current" } });
+          return { ok: false, error: "bad_current" };
+        }
+      } else if (currentPassword !== DEMO_SUPER_ADMIN_PASSWORD) {
+        await recordAuditEvent({ type: "admin.password.change.failed", actor: u.username, detail: { reason: "bad_current" } });
+        return { ok: false, error: "bad_current" };
+      }
+
+      const newHash = await sha256Hex(np);
+      localStorage.setItem(ADMIN_PASSWORD_HASH_KEY, newHash);
+      await recordAuditEvent({ type: "admin.password.change.ok", actor: u.username, detail: {} });
       return { ok: true };
     },
     regenerateRecoveryCodes: async (code) => {

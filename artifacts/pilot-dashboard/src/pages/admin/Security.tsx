@@ -12,11 +12,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { KeyRound, ShieldCheck, ShieldAlert, RefreshCw } from "lucide-react";
+import { KeyRound, ShieldCheck, ShieldAlert, RefreshCw, Lock } from "lucide-react";
 
 export default function AdminSecurity() {
   const { t } = useI18n();
-  const { adminTotpEnrolled, regenerateRecoveryCodes, backendMode } = useAuth();
+  const { adminTotpEnrolled, regenerateRecoveryCodes, changeSuperAdminPassword, backendMode } = useAuth();
+
+  const [pwCurrent, setPwCurrent] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwConfirm, setPwConfirm] = useState("");
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwErr, setPwErr] = useState<string | null>(null);
+  const [pwOk, setPwOk] = useState(false);
+  const pwServerManaged = backendMode === "supabase";
 
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
@@ -80,9 +88,88 @@ export default function AdminSecurity() {
     URL.revokeObjectURL(url);
   };
 
+  const submitPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pwBusy) return;
+    setPwErr(null);
+    setPwOk(false);
+    if (pwNew.length < 8) { setPwErr(t("pwTooShort")); return; }
+    if (pwNew !== pwConfirm) { setPwErr(t("pwMismatch")); return; }
+    setPwBusy(true);
+    const res = await changeSuperAdminPassword(pwCurrent, pwNew);
+    setPwBusy(false);
+    if (!res.ok) {
+      if (res.error === "bad_current") setPwErr(t("pwBadCurrent"));
+      else if (res.error === "too_short") setPwErr(t("pwTooShort"));
+      else if (res.error === "same") setPwErr(t("pwSame"));
+      else if (res.error === "server_managed") setPwErr(t("pwServerManaged"));
+      else setPwErr(t("pwGenericError"));
+      return;
+    }
+    setPwCurrent(""); setPwNew(""); setPwConfirm("");
+    setPwOk(true);
+    window.setTimeout(() => setPwOk(false), 4000);
+  };
+
   return (
     <div className="space-y-6">
       <h2 className="text-xl font-bold">{t("securityTitle")}</h2>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Lock className="h-5 w-5" />
+            {t("changePasswordTitle")}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs text-muted-foreground mb-3">{t("changePasswordBlurb")}</p>
+          {pwServerManaged ? (
+            <div className="rounded-md border border-amber-600/40 bg-amber-500/10 p-3 text-xs text-amber-200">
+              {t("pwServerManaged")}
+            </div>
+          ) : (
+            <form onSubmit={submitPassword} className="space-y-3 max-w-md">
+              <div>
+                <label className="text-xs text-muted-foreground">{t("currentPassword")}</label>
+                <Input
+                  type="password"
+                  autoComplete="current-password"
+                  value={pwCurrent}
+                  onChange={e => { setPwCurrent(e.target.value); setPwErr(null); setPwOk(false); }}
+                  data-testid="input-admin-password-current"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">{t("newPassword")}</label>
+                <Input
+                  type="password"
+                  autoComplete="new-password"
+                  value={pwNew}
+                  onChange={e => { setPwNew(e.target.value); setPwErr(null); setPwOk(false); }}
+                  data-testid="input-admin-password-new"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">{t("pwMinHint")}</p>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">{t("confirmPassword")}</label>
+                <Input
+                  type="password"
+                  autoComplete="new-password"
+                  value={pwConfirm}
+                  onChange={e => { setPwConfirm(e.target.value); setPwErr(null); setPwOk(false); }}
+                  data-testid="input-admin-password-confirm"
+                />
+              </div>
+              {pwErr && <p className="text-xs text-destructive" data-testid="text-admin-password-error">{pwErr}</p>}
+              {pwOk && <p className="text-xs text-emerald-400" data-testid="text-admin-password-ok">✔ {t("pwUpdated")}</p>}
+              <Button type="submit" disabled={pwBusy || !pwCurrent || !pwNew || !pwConfirm} data-testid="button-admin-password-submit">
+                {pwBusy ? t("saving") : t("updatePassword")}
+              </Button>
+            </form>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
