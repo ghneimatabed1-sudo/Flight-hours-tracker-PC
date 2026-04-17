@@ -14,9 +14,14 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.rjaf.pilotlogbook",
+      "buildNumber": "1"
     },
-    "android": {},
+    "android": {
+      "package": "com.rjaf.pilotlogbook",
+      "versionCode": 1
+    },
     "web": {
       "favicon": "./assets/images/icon.png"
     },
