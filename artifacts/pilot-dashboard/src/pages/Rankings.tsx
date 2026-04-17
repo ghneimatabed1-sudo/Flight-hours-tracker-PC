@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { PILOTS } from "@/lib/mock";
+import { usePilots } from "@/lib/squadron-data";
 import { Trophy } from "lucide-react";
 
 const SORTS = [
@@ -16,6 +16,7 @@ export default function Rankings() {
   const { t } = useI18n();
   type SortKey = typeof SORTS[number]["k"];
   const [sortKey, setSortKey] = useState<SortKey>("totalNvg");
+  const { data: PILOTS } = usePilots();
   const sorted = [...PILOTS].sort((a, b) => (b[sortKey] as number) - (a[sortKey] as number));
   return (
     <div>

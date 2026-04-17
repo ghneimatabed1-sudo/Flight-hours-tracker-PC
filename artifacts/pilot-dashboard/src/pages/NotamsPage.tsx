@@ -1,17 +1,18 @@
 import { useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { NOTAMS } from "@/lib/mock";
+import { useNotams, useCreateNotam } from "@/lib/squadron-data";
 import { Plus, Megaphone } from "lucide-react";
 
 export default function NotamsPage() {
   const { t } = useI18n();
-  const [list, setList] = useState(NOTAMS);
+  const { data: list } = useNotams();
+  const create = useCreateNotam();
   const [text, setText] = useState("");
-  const add = (e: React.FormEvent) => {
+  const add = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!text.trim()) return;
-    setList(x => [{ id: "N" + Date.now(), date: new Date().toISOString().slice(0,10), text }, ...x]);
+    await create.mutateAsync(text);
     setText("");
   };
   return (

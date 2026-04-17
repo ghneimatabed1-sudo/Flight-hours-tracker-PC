@@ -1,0 +1,476 @@
+// Squadron Ops data layer.
+//
+// Every operational page reads through these React Query hooks instead of
+// importing arrays from `mock.ts` directly. When VITE_SUPABASE_URL /
+// VITE_SUPABASE_ANON_KEY are set, hooks talk to the real Supabase project
+// (and Row Level Security on `squadron_id` keeps each squadron in its own
+// silo). When the env vars are missing — which is what the hosted preview
+// runs in — hooks fall back to the seed data in `mock.ts` so the demo
+// preview keeps working without a backend.
+//
+// Mutations only attempt to write when Supabase is configured; in demo mode
+// they no-op successfully so the existing UI keeps functioning.
+
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { supabase, supabaseConfigured } from "./supabase";
+import {
+  PILOTS as MOCK_PILOTS,
+  SORTIES as MOCK_SORTIES,
+  NOTAMS as MOCK_NOTAMS,
+  DUTY_WEEK as MOCK_DUTY_WEEK,
+  type Pilot,
+  type Sortie,
+} from "./mock";
+
+export type { Pilot, Sortie } from "./mock";
+
+export interface NotamRow { id: string; date: string; text: string; }
+export interface DutyDay  { day: string; mainDuty: string; standby: string; rcm: string; }
+export interface UnavailEntry { id: string; pilotId: string; from: string; to: string; reason: string; }
+export interface ScheduleEntry { id: string; ac: string; config: string; crew: string[]; mission: string; takeoff: string; land: string; fuel: string; }
+export interface LeaveRow { pilotId: string; months: number[]; total: number; }
+export interface CurrencyRow { pilotId: string; task: string; status: "done" | "partial" | "missing"; }
+export interface AppUser { id: string; username: string; role: "ops" | "deputy"; created: string; }
+
+const isLive = () => supabaseConfigured && supabase !== null;
+
+// ── pilots ──────────────────────────────────────────────────────────────
+function rowToPilot(r: Record<string, unknown>): Pilot {
+  const data = (r.data ?? {}) as Partial<Pilot>;
+  return {
+    id: String(r.id),
+    name: String(r.name ?? data.name ?? ""),
+    arabicName: String(r.arabic_name ?? data.arabicName ?? ""),
+    rank: String(r.rank ?? data.rank ?? ""),
+    phone: String(r.phone ?? data.phone ?? ""),
+    address: String(data.address ?? ""),
+    unit: (r.unit as Pilot["unit"]) ?? data.unit ?? "SQDN",
+    available: Boolean(r.available ?? data.available ?? true),
+    openingDay: Number(data.openingDay ?? 0),
+    openingNight: Number(data.openingNight ?? 0),
+    openingNvg: Number(data.openingNvg ?? 0),
+    doctorNote: data.doctorNote,
+    monthDay: Number(data.monthDay ?? 0),
+    monthNight: Number(data.monthNight ?? 0),
+    monthNvg: Number(data.monthNvg ?? 0),
+    monthSim: Number(data.monthSim ?? 0),
+    monthCaptain: Number(data.monthCaptain ?? 0),
+    totalDay: Number(data.totalDay ?? 0),
+    totalNight: Number(data.totalNight ?? 0),
+    totalNvg: Number(data.totalNvg ?? 0),
+    totalSim: Number(data.totalSim ?? 0),
+    totalCaptain: Number(data.totalCaptain ?? 0),
+    expiry: data.expiry ?? { day: "", night: "", irt: "", medical: "", sim: "" },
+  };
+}
+
+export function usePilots(): UseQueryResult<Pilot[]> & { data: Pilot[] } {
+  const q = useQuery<Pilot[]>({
+    queryKey: ["pilots"],
+    queryFn: async () => {
+      if (!isLive()) return MOCK_PILOTS;
+      const { data, error } = await supabase!.from("pilots").select("*").order("id");
+      if (error) throw error;
+      return (data ?? []).map(rowToPilot);
+    },
+    initialData: MOCK_PILOTS,
+    staleTime: 30_000,
+  });
+  return { ...q, data: q.data ?? MOCK_PILOTS } as UseQueryResult<Pilot[]> & { data: Pilot[] };
+}
+
+// ── sorties ─────────────────────────────────────────────────────────────
+function rowToSortie(r: Record<string, unknown>): Sortie {
+  const data = (r.data ?? {}) as Partial<Sortie>;
+  return {
+    id: String(r.id),
+    date: String(r.date),
+    acType: String(r.ac_type ?? data.acType ?? ""),
+    acNumber: String(r.ac_number ?? data.acNumber ?? ""),
+    pilotId: String(r.pilot_id ?? data.pilotId ?? ""),
+    coPilotId: String(r.co_pilot_id ?? data.coPilotId ?? ""),
+    sortieType: String(r.sortie_type ?? data.sortieType ?? ""),
+    name: String(r.sortie_name ?? data.name ?? ""),
+    day1: Number(data.day1 ?? 0),
+    day2: Number(data.day2 ?? 0),
+    dayDual: Number(data.dayDual ?? 0),
+    night1: Number(data.night1 ?? 0),
+    night2: Number(data.night2 ?? 0),
+    nightDual: Number(data.nightDual ?? 0),
+    nvg: Number(data.nvg ?? 0),
+    sim: Number(data.sim ?? 0),
+    actual: Number(data.actual ?? 0),
+  };
+}
+
+export function useSorties(): UseQueryResult<Sortie[]> & { data: Sortie[] } {
+  const q = useQuery<Sortie[]>({
+    queryKey: ["sorties"],
+    queryFn: async () => {
+      if (!isLive()) return MOCK_SORTIES;
+      const { data, error } = await supabase!
+        .from("sorties").select("*").order("date", { ascending: false }).limit(500);
+      if (error) throw error;
+      return (data ?? []).map(rowToSortie);
+    },
+    initialData: MOCK_SORTIES,
+    staleTime: 30_000,
+  });
+  return { ...q, data: q.data ?? MOCK_SORTIES } as UseQueryResult<Sortie[]> & { data: Sortie[] };
+}
+
+export function useCreateSortie() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (s: Omit<Sortie, "id">) => {
+      if (!isLive()) return { ...s, id: "S" + Date.now() };
+      const { data, error } = await supabase!.from("sorties").insert({
+        pilot_id: s.pilotId,
+        co_pilot_id: s.coPilotId,
+        date: s.date,
+        ac_type: s.acType,
+        ac_number: s.acNumber,
+        sortie_type: s.sortieType,
+        sortie_name: s.name,
+        data: {
+          day1: s.day1, day2: s.day2, dayDual: s.dayDual,
+          night1: s.night1, night2: s.night2, nightDual: s.nightDual,
+          nvg: s.nvg, sim: s.sim, actual: s.actual,
+        },
+      }).select().single();
+      if (error) throw error;
+      return rowToSortie(data);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sorties"] }),
+  });
+}
+
+// ── notams ──────────────────────────────────────────────────────────────
+let mockNotamsList: NotamRow[] | null = null;
+function getMockNotams(): NotamRow[] {
+  if (!mockNotamsList) mockNotamsList = [...MOCK_NOTAMS];
+  return mockNotamsList;
+}
+export function useNotams(): UseQueryResult<NotamRow[]> & { data: NotamRow[] } {
+  const q = useQuery<NotamRow[]>({
+    queryKey: ["notams"],
+    queryFn: async () => {
+      if (!isLive()) return [...getMockNotams()];
+      const { data, error } = await supabase!
+        .from("notams").select("notam_no, posted_on, body")
+        .order("posted_on", { ascending: false });
+      if (error) throw error;
+      return (data ?? []).map(r => ({
+        id: r.notam_no as string,
+        date: r.posted_on as string,
+        text: r.body as string,
+      }));
+    },
+    initialData: () => [...getMockNotams()],
+  });
+  return { ...q, data: q.data ?? getMockNotams() } as UseQueryResult<NotamRow[]> & { data: NotamRow[] };
+}
+
+export function useCreateNotam() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (text: string) => {
+      const id = "N" + Date.now();
+      const date = new Date().toISOString().slice(0, 10);
+      if (!isLive()) {
+        const row = { id, date, text };
+        getMockNotams().unshift(row);
+        return row;
+      }
+      const { error } = await supabase!.from("notams").insert({
+        notam_no: id, posted_on: date, body: text,
+      });
+      if (error) throw error;
+      return { id, date, text };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notams"] }),
+  });
+}
+
+// ── duty week ───────────────────────────────────────────────────────────
+export function useDutyWeek(): UseQueryResult<DutyDay[]> & { data: DutyDay[] } {
+  const q = useQuery<DutyDay[]>({
+    queryKey: ["duty_week"],
+    queryFn: async () => {
+      if (!isLive()) return MOCK_DUTY_WEEK;
+      const { data, error } = await supabase!
+        .from("duty_week").select("day, main_duty, standby, rcm")
+        .order("effective_from", { ascending: false }).limit(7);
+      if (error) throw error;
+      return (data ?? []).map(r => ({
+        day: r.day as string,
+        mainDuty: (r.main_duty as string) ?? "",
+        standby: (r.standby as string) ?? "",
+        rcm: (r.rcm as string) ?? "",
+      }));
+    },
+    initialData: MOCK_DUTY_WEEK,
+  });
+  return { ...q, data: q.data ?? MOCK_DUTY_WEEK } as UseQueryResult<DutyDay[]> & { data: DutyDay[] };
+}
+
+// ── leaves (annual breakdown) ───────────────────────────────────────────
+export function useLeaves(): UseQueryResult<LeaveRow[]> & { data: LeaveRow[] } {
+  const q = useQuery<LeaveRow[]>({
+    queryKey: ["leaves"],
+    queryFn: async () => {
+      if (!isLive()) return seedLeaves();
+      const year = new Date().getFullYear();
+      const { data, error } = await supabase!
+        .from("leaves").select("pilot_id, months").eq("year", year);
+      if (error) throw error;
+      return (data ?? []).map(r => {
+        const months = Array.from({ length: 12 }, (_, i) => Number((r.months as Record<string, number>)?.[String(i)] ?? 0));
+        return { pilotId: r.pilot_id as string, months, total: months.reduce((a, b) => a + b, 0) };
+      });
+    },
+    initialData: seedLeaves(),
+  });
+  return { ...q, data: q.data ?? seedLeaves() } as UseQueryResult<LeaveRow[]> & { data: LeaveRow[] };
+}
+
+function seedLeaves(): LeaveRow[] {
+  let s = 13;
+  const r = () => (s = (s * 9301 + 49297) % 233280) / 233280;
+  return MOCK_PILOTS.map(p => {
+    const months = Array.from({ length: 12 }, () => Math.floor(r() * 8));
+    return { pilotId: p.id, months, total: months.reduce((a, b) => a + b, 0) };
+  });
+}
+
+// ── unavailable entries ─────────────────────────────────────────────────
+let mockUnavailList: UnavailEntry[] | null = null;
+function getMockUnavail(): UnavailEntry[] {
+  if (!mockUnavailList) mockUnavailList = seedUnavailable();
+  return mockUnavailList;
+}
+export function useUnavailable(): UseQueryResult<UnavailEntry[]> & { data: UnavailEntry[] } {
+  const q = useQuery<UnavailEntry[]>({
+    queryKey: ["unavailable"],
+    queryFn: async () => {
+      if (!isLive()) return [...getMockUnavail()];
+      const { data, error } = await supabase!
+        .from("unavailable").select("id, pilot_id, from_date, to_date, reason")
+        .order("from_date", { ascending: false });
+      if (error) throw error;
+      return (data ?? []).map(r => ({
+        id: String(r.id),
+        pilotId: r.pilot_id as string,
+        from: r.from_date as string,
+        to: r.to_date as string,
+        reason: (r.reason as string) ?? "—",
+      }));
+    },
+    initialData: () => [...getMockUnavail()],
+  });
+  return { ...q, data: q.data ?? getMockUnavail() } as UseQueryResult<UnavailEntry[]> & { data: UnavailEntry[] };
+}
+
+function seedUnavailable(): UnavailEntry[] {
+  return [
+    { id: "u-1", pilotId: MOCK_PILOTS[2]?.id ?? "P003", from: "2026-04-15", to: "2026-04-22", reason: "Medical leave" },
+    { id: "u-2", pilotId: MOCK_PILOTS[5]?.id ?? "P006", from: "2026-04-18", to: "2026-04-25", reason: "Course attendance" },
+  ];
+}
+
+export function useCreateUnavailable() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (entry: Omit<UnavailEntry, "id">) => {
+      const id = "u-" + Date.now();
+      if (!isLive()) {
+        const row = { ...entry, id };
+        getMockUnavail().push(row);
+        return row;
+      }
+      const { data, error } = await supabase!.from("unavailable").insert({
+        pilot_id: entry.pilotId, from_date: entry.from, to_date: entry.to, reason: entry.reason,
+      }).select().single();
+      if (error) throw error;
+      return {
+        id: String(data.id),
+        pilotId: data.pilot_id as string,
+        from: data.from_date as string,
+        to: data.to_date as string,
+        reason: (data.reason as string) ?? "—",
+      };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["unavailable"] }),
+  });
+}
+
+// ── schedule ────────────────────────────────────────────────────────────
+export function useSchedule(): UseQueryResult<ScheduleEntry[]> & { data: ScheduleEntry[] } {
+  const q = useQuery<ScheduleEntry[]>({
+    queryKey: ["schedule"],
+    queryFn: async () => {
+      if (!isLive()) return seedSchedule();
+      const today = new Date().toISOString().slice(0, 10);
+      const { data, error } = await supabase!
+        .from("schedule").select("*").eq("flight_date", today).order("takeoff");
+      if (error) throw error;
+      return (data ?? []).map(r => ({
+        id: String(r.id),
+        ac: r.ac as string,
+        config: (r.config as string) ?? "",
+        crew: (r.crew as string[]) ?? [],
+        mission: (r.mission as string) ?? "",
+        takeoff: (r.takeoff as string) ?? "",
+        land: (r.land as string) ?? "",
+        fuel: (r.fuel as string) ?? "",
+      }));
+    },
+    initialData: seedSchedule(),
+  });
+  return { ...q, data: q.data ?? seedSchedule() } as UseQueryResult<ScheduleEntry[]> & { data: ScheduleEntry[] };
+}
+
+function seedSchedule(): ScheduleEntry[] {
+  const p = MOCK_PILOTS;
+  const crewName = (i: number) => `${p[i]?.rank ?? ""} ${p[i]?.name ?? ""}`.trim();
+  return [
+    { id: "sc-1", ac: "UH-60M #832", config: "External cargo", crew: [crewName(0), crewName(3)], mission: "NAV / EMER", takeoff: "0700", land: "1030", fuel: "2200 lbs" },
+    { id: "sc-2", ac: "UH-60M #841", config: "MEDEVAC", crew: [crewName(1), crewName(4)], mission: "MSN DAY", takeoff: "0900", land: "1130", fuel: "1800 lbs" },
+    { id: "sc-3", ac: "UH-60AIL #756", config: "Standard", crew: [crewName(2), crewName(5)], mission: "IF / MTF", takeoff: "1300", land: "1545", fuel: "2000 lbs" },
+    { id: "sc-4", ac: "UH-60M #819", config: "NVG ready", crew: [crewName(6), crewName(7)], mission: "MSN NVG", takeoff: "1900", land: "2230", fuel: "2400 lbs" },
+  ];
+}
+
+// ── currencies (6-month tasks) ──────────────────────────────────────────
+export function useCurrencies(): UseQueryResult<CurrencyRow[]> & { data: CurrencyRow[] } {
+  const q = useQuery<CurrencyRow[]>({
+    queryKey: ["currencies"],
+    queryFn: async () => {
+      if (!isLive()) return [];
+      const { data, error } = await supabase!
+        .from("currencies").select("pilot_id, task, status");
+      if (error) throw error;
+      return (data ?? []).map(r => ({
+        pilotId: r.pilot_id as string,
+        task: r.task as string,
+        status: r.status as CurrencyRow["status"],
+      }));
+    },
+    initialData: [],
+  });
+  return { ...q, data: q.data ?? [] } as UseQueryResult<CurrencyRow[]> & { data: CurrencyRow[] };
+}
+
+// ── deputy users (squadron) ────────────────────────────────────────────
+let mockUsersList: AppUser[] | null = null;
+function getMockUsers(): AppUser[] {
+  if (!mockUsersList) mockUsersList = seedUsers();
+  return mockUsersList;
+}
+export function useSquadronUsers(): UseQueryResult<AppUser[]> & { data: AppUser[] } {
+  const q = useQuery<AppUser[]>({
+    queryKey: ["users"],
+    queryFn: async () => {
+      if (!isLive()) return [...getMockUsers()];
+      const { data, error } = await supabase!
+        .from("users").select("id, username, role, created_at")
+        .in("role", ["ops", "deputy"]).order("created_at");
+      if (error) throw error;
+      return (data ?? []).map(r => ({
+        id: String(r.id),
+        username: r.username as string,
+        role: r.role as AppUser["role"],
+        created: String(r.created_at).slice(0, 10),
+      }));
+    },
+    initialData: () => [...getMockUsers()],
+  });
+  return { ...q, data: q.data ?? getMockUsers() } as UseQueryResult<AppUser[]> & { data: AppUser[] };
+}
+
+function seedUsers(): AppUser[] {
+  return [
+    { id: "1", username: "ops.lead", role: "ops", created: "2026-01-12" },
+    { id: "2", username: "deputy.k", role: "deputy", created: "2026-02-04" },
+  ];
+}
+
+// ── audit log ──────────────────────────────────────────────────────────
+export interface AuditRow {
+  ts: string;
+  user: string;
+  action: string;
+  target: string;
+}
+
+const SEED_AUDIT: AuditRow[] = [
+  { ts: "2026-04-17 08:14:32", user: "ops.lead", action: "Login", target: "—" },
+  { ts: "2026-04-17 08:21:09", user: "ops.lead", action: "Add Sortie", target: "S10092" },
+  { ts: "2026-04-17 09:02:11", user: "deputy.k", action: "Edit Pilot", target: "P003" },
+  { ts: "2026-04-17 09:18:45", user: "ops.lead", action: "Mark Unavailable", target: "P006" },
+  { ts: "2026-04-17 10:33:02", user: "ops.lead", action: "Publish NOTAM", target: "N0004" },
+  { ts: "2026-04-17 11:01:55", user: "admin", action: "Reset Password", target: "deputy.k" },
+];
+
+export function useAuditLog(): UseQueryResult<AuditRow[]> & { data: AuditRow[] } {
+  const q = useQuery<AuditRow[]>({
+    queryKey: ["audit_log"],
+    queryFn: async () => {
+      if (!isLive()) return SEED_AUDIT;
+      const { data, error } = await supabase!
+        .from("audit_log")
+        .select("occurred_at, actor, type, detail")
+        .order("occurred_at", { ascending: false })
+        .limit(200);
+      if (error) throw error;
+      return (data ?? []).map(r => ({
+        ts: new Date(r.occurred_at as string).toISOString().replace("T", " ").slice(0, 19),
+        user: (r.actor as string | null) ?? "system",
+        action: r.type as string,
+        target: typeof r.detail === "object" && r.detail
+          ? Object.entries(r.detail as Record<string, unknown>).map(([k, v]) => `${k}=${String(v)}`).join(" ")
+          : "—",
+      }));
+    },
+    initialData: SEED_AUDIT,
+  });
+  return { ...q, data: q.data ?? SEED_AUDIT } as UseQueryResult<AuditRow[]> & { data: AuditRow[] };
+}
+
+export interface CreateSquadronUserInput {
+  username: string;
+  password: string;
+}
+
+export function useCreateSquadronUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: string | CreateSquadronUserInput) => {
+      const username = typeof input === "string" ? input : input.username;
+      const password = typeof input === "string" ? "changeme123" : input.password;
+      const created = new Date().toISOString().slice(0, 10);
+      if (!isLive()) {
+        const row = { id: String(Date.now()), username, role: "deputy" as const, created };
+        getMockUsers().push(row);
+        return row;
+      }
+      // Provisioning a Supabase auth user requires the service role key, so
+      // it must run server-side. The provision-user edge function creates
+      // the auth user (with squadron_id stamped into app_metadata) and the
+      // matching row in public.users in one transaction-like step.
+      const { data, error } = await supabase!.functions.invoke("provision-user", {
+        body: { username, password, role: "deputy" },
+      });
+      if (error) throw error;
+      const payload = data as { ok?: boolean; error?: string; user?: { id: string } };
+      if (!payload?.ok) throw new Error(payload?.error ?? "provision_failed");
+      return {
+        id: payload.user?.id ?? String(Date.now()),
+        username,
+        role: "deputy" as const,
+        created,
+      };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+  });
+}

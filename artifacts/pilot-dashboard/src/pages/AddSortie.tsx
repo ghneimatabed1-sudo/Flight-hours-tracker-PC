@@ -1,27 +1,46 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { PILOTS } from "@/lib/mock";
+import { usePilots, useCreateSortie } from "@/lib/squadron-data";
 import { Plane } from "lucide-react";
 
 export default function AddSortie() {
   const { t } = useI18n();
+  const { data: PILOTS } = usePilots();
+  const create = useCreateSortie();
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     acType: "UH-60M", acNumber: "",
-    pilot: PILOTS[0].id, coPilot: PILOTS[1].id,
+    pilot: PILOTS[0]?.id ?? "", coPilot: PILOTS[1]?.id ?? "",
     sortieType: "Training", name: "NAV",
     day1: 0, day2: 0, dayDual: 0,
     night1: 0, night2: 0, nightDual: 0,
     nvg: 0, sim: 0, actual: 0,
   });
+  useEffect(() => {
+    if (!form.pilot && PILOTS[0]) setForm(f => ({ ...f, pilot: PILOTS[0].id, coPilot: PILOTS[1]?.id ?? PILOTS[0].id }));
+  }, [PILOTS, form.pilot]);
   const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm(f => ({ ...f, [k]: v }));
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+    setErr(null);
+    try {
+      await create.mutateAsync({
+        date: form.date, acType: form.acType, acNumber: form.acNumber,
+        pilotId: form.pilot, coPilotId: form.coPilot,
+        sortieType: form.sortieType, name: form.name,
+        day1: form.day1, day2: form.day2, dayDual: form.dayDual,
+        night1: form.night1, night2: form.night2, nightDual: form.nightDual,
+        nvg: form.nvg, sim: form.sim, actual: form.actual,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "Save failed");
+    }
   };
 
   return (
@@ -69,6 +88,7 @@ export default function AddSortie() {
               <Plane className="h-4 w-4" /> {t("submit")}
             </button>
             {saved && <span className="text-emerald-300 text-sm">✔ Saved · queued for sync</span>}
+            {err && <span className="text-rose-300 text-sm">{err}</span>}
           </div>
         </Card>
 

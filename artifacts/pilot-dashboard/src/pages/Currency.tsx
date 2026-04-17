@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { PILOTS } from "@/lib/mock";
+import { usePilots } from "@/lib/squadron-data";
 
 const TABS = ["day", "night", "irt", "medical", "sim"] as const;
 
@@ -16,6 +16,7 @@ export default function Currency() {
   const { t } = useI18n();
   const [tab, setTab] = useState<typeof TABS[number]>("day");
   const [unit, setUnit] = useState<"All" | "SQDN" | "Attached">("All");
+  const { data: PILOTS } = usePilots();
 
   const rows = PILOTS
     .filter(p => unit === "All" || (unit === "SQDN" ? p.unit === "SQDN" : p.unit !== "SQDN"))

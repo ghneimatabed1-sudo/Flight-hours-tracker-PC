@@ -1,6 +1,6 @@
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { PILOTS } from "@/lib/mock";
+import { usePilots } from "@/lib/squadron-data";
 
 const CATS = [
   { k: "day", label: "Day" }, { k: "night", label: "Night" },
@@ -9,6 +9,7 @@ const CATS = [
 
 export default function ExpiredAfter() {
   const { t } = useI18n();
+  const { data: PILOTS } = usePilots();
   return (
     <div>
       <PageHead title={t("nav_expired")} subtitle="Side-by-side: who is expired in each category" />

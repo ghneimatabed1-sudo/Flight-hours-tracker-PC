@@ -1,6 +1,6 @@
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { PILOTS, SORTIES } from "@/lib/mock";
+import { usePilots, useSorties } from "@/lib/squadron-data";
 import { Link } from "wouter";
 import { Plane, MoonStar, Eye, Cpu, Users, Calendar, AlertTriangle, ChevronRight } from "lucide-react";
 
@@ -13,6 +13,8 @@ function statusOf(dateStr: string): "ok" | "warn" | "bad" {
 
 export default function Dashboard() {
   const { t } = useI18n();
+  const { data: PILOTS } = usePilots();
+  const { data: SORTIES } = useSorties();
   const monthDay = +PILOTS.reduce((a, p) => a + p.monthDay, 0).toFixed(1);
   const monthNight = +PILOTS.reduce((a, p) => a + p.monthNight, 0).toFixed(1);
   const monthNvg = +PILOTS.reduce((a, p) => a + p.monthNvg, 0).toFixed(1);

@@ -1,7 +1,7 @@
 import { useRoute, Link } from "wouter";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { PILOTS, SORTIES } from "@/lib/mock";
+import { usePilots, useSorties } from "@/lib/squadron-data";
 import { ArrowLeft } from "lucide-react";
 
 const cats = [
@@ -19,6 +19,8 @@ function statusInfo(dateStr: string) {
 export default function PilotDetail() {
   const { t } = useI18n();
   const [, params] = useRoute<{ id: string }>("/pilot/:id");
+  const { data: PILOTS } = usePilots();
+  const { data: SORTIES } = useSorties();
   const p = PILOTS.find(x => x.id === params?.id);
   if (!p) return <div className="p-6">Pilot not found.</div>;
   const sorties = SORTIES.filter(s => s.pilotId === p.id || s.coPilotId === p.id).sort((a, b) => b.date.localeCompare(a.date));

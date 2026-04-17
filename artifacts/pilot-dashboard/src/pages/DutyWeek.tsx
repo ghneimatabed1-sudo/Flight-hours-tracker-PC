@@ -1,9 +1,10 @@
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { DUTY_WEEK } from "@/lib/mock";
+import { useDutyWeek } from "@/lib/squadron-data";
 
 export default function DutyWeek() {
   const { t } = useI18n();
+  const { data: DUTY_WEEK } = useDutyWeek();
   return (
     <div>
       <PageHead title={t("nav_duty")} subtitle="Main Duty · Standby · RCM per day" />

@@ -176,7 +176,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const email = username.includes("@") ? username : `${username}@${(state.squadron?.number ?? "rjaf").toLowerCase()}.rjaf.local`;
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error || !data.user) return await recordFail(error?.message ?? "auth_failed");
-        const role = ((data.user.user_metadata?.role as User["role"]) ?? "ops");
+        // app_metadata is the trusted source (server-stamped by edge functions
+        // and protected from client modification); user_metadata is a fallback.
+        const role = ((data.user.app_metadata?.role as User["role"])
+          ?? (data.user.user_metadata?.role as User["role"])
+          ?? "ops");
         const user: User = { username, role, displayName: (data.user.user_metadata?.displayName as string) ?? username };
         localStorage.setItem("rjaf.user", JSON.stringify(user));
         localStorage.removeItem("rjaf.fails");

@@ -1,24 +1,22 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { PILOTS } from "@/lib/mock";
+import { usePilots, useUnavailable, useCreateUnavailable } from "@/lib/squadron-data";
 import { Plus, UserX } from "lucide-react";
-
-interface Entry { id: string; pilotId: string; from: string; to: string; reason: string; }
 
 export default function Unavailable() {
   const { t } = useI18n();
-  const [items, setItems] = useState<Entry[]>([
-    { id: "1", pilotId: PILOTS[2].id, from: "2026-04-15", to: "2026-04-22", reason: "Medical leave" },
-    { id: "2", pilotId: PILOTS[5].id, from: "2026-04-18", to: "2026-04-25", reason: "Course attendance" },
-  ]);
-  const [pid, setPid] = useState(PILOTS[0].id);
+  const { data: PILOTS } = usePilots();
+  const { data: items } = useUnavailable();
+  const create = useCreateUnavailable();
+  const [pid, setPid] = useState(PILOTS[0]?.id ?? "");
+  useEffect(() => { if (!pid && PILOTS[0]) setPid(PILOTS[0].id); }, [PILOTS, pid]);
   const [from, setFrom] = useState(new Date().toISOString().slice(0,10));
   const [to, setTo] = useState(new Date(Date.now()+7*86400000).toISOString().slice(0,10));
   const [reason, setReason] = useState("");
-  const add = (e: React.FormEvent) => {
+  const add = async (e: React.FormEvent) => {
     e.preventDefault();
-    setItems(x => [...x, { id: String(Date.now()), pilotId: pid, from, to, reason: reason || "—" }]);
+    await create.mutateAsync({ pilotId: pid, from, to, reason: reason || "—" });
     setReason("");
   };
   const pname = (id: string) => PILOTS.find(p => p.id === id)?.name || id;

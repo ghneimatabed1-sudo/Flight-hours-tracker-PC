@@ -1,11 +1,12 @@
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { PILOTS, Pilot } from "@/lib/mock";
+import { usePilots, type Pilot } from "@/lib/squadron-data";
 
 const CATS: Pilot["unit"][] = ["SQDN", "HQ Attached", "Other", "UH-60M", "UH-60AIL", "Both", "RCN"];
 
 export default function Units() {
   const { t } = useI18n();
+  const { data: PILOTS } = usePilots();
   const grouped = CATS.map(c => ({ c, list: PILOTS.filter(p => p.unit === c) }));
   return (
     <div>

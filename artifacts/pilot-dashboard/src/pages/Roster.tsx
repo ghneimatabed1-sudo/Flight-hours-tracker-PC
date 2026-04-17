@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { PILOTS, Pilot } from "@/lib/mock";
+import { usePilots, type Pilot } from "@/lib/squadron-data";
 import { Link } from "wouter";
 import { Plus, Search, Pencil, Trash2 } from "lucide-react";
 
 export default function Roster() {
   const { t } = useI18n();
   const [q, setQ] = useState("");
+  const { data: PILOTS } = usePilots();
   const list = PILOTS.filter(p => !q || (p.name + p.arabicName + p.id).toLowerCase().includes(q.toLowerCase()));
   return (
     <div>

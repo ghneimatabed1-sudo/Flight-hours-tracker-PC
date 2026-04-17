@@ -1,16 +1,18 @@
 import { useMemo, useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { PILOTS, SORTIES } from "@/lib/mock";
+import { usePilots, useSorties } from "@/lib/squadron-data";
 import { Search, Filter } from "lucide-react";
 
 export default function SortieLog() {
   const { t } = useI18n();
   const [q, setQ] = useState("");
   const [type, setType] = useState("All");
+  const { data: PILOTS } = usePilots();
+  const { data: SORTIES } = useSorties();
 
-  const pilotMap = useMemo(() => Object.fromEntries(PILOTS.map(p => [p.id, p.name])), []);
-  const types = useMemo(() => ["All", ...Array.from(new Set(SORTIES.map(s => s.sortieType)))], []);
+  const pilotMap = useMemo(() => Object.fromEntries(PILOTS.map(p => [p.id, p.name])), [PILOTS]);
+  const types = useMemo(() => ["All", ...Array.from(new Set(SORTIES.map(s => s.sortieType)))], [SORTIES]);
 
   const rows = SORTIES
     .filter(s => type === "All" || s.sortieType === type)

@@ -1,18 +1,17 @@
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { PILOTS } from "@/lib/mock";
+import { usePilots, useLeaves } from "@/lib/squadron-data";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-function rng(seed: number) { let s = seed; return () => (s = (s * 9301 + 49297) % 233280) / 233280; }
-
 export default function Leaves() {
   const { t } = useI18n();
-  const r = rng(13);
+  const { data: PILOTS } = usePilots();
+  const { data: LEAVES } = useLeaves();
+  const byId = new Map(LEAVES.map(l => [l.pilotId, l]));
   const data = PILOTS.map(p => {
-    const months = MONTHS.map(() => Math.floor(r() * 8));
-    const total = months.reduce((a, b) => a + b, 0);
-    return { p, months, total };
+    const lr = byId.get(p.id) ?? { months: Array(12).fill(0), total: 0 };
+    return { p, months: lr.months, total: lr.total };
   });
   return (
     <div>

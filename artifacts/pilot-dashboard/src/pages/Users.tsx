@@ -1,22 +1,26 @@
 import { useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
+import { useSquadronUsers, useCreateSquadronUser } from "@/lib/squadron-data";
 import { Plus, Trash2, KeyRound } from "lucide-react";
-
-interface U { id: string; username: string; role: "ops" | "deputy"; created: string; }
 
 export default function Users() {
   const { t } = useI18n();
-  const [list, setList] = useState<U[]>([
-    { id: "1", username: "ops.lead", role: "ops", created: "2026-01-12" },
-    { id: "2", username: "deputy.k", role: "deputy", created: "2026-02-04" },
-  ]);
+  const { data: list } = useSquadronUsers();
+  const create = useCreateSquadronUser();
   const [u, setU] = useState("");
-  const add = (e: React.FormEvent) => {
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const add = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!u) return;
-    setList(x => [...x, { id: String(Date.now()), username: u, role: "deputy", created: new Date().toISOString().slice(0,10) }]);
-    setU("");
+    setErr(null);
+    try {
+      await create.mutateAsync({ username: u, password: pw || `Tmp-${Date.now()}` });
+      setU(""); setPw("");
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "Create failed");
+    }
   };
   return (
     <div>
@@ -48,9 +52,10 @@ export default function Users() {
             <label className="block text-xs"><span className="text-muted-foreground">Username</span>
               <input value={u} onChange={e=>setU(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm" />
             </label>
-            <label className="block text-xs"><span className="text-muted-foreground">Temporary password</span>
-              <input type="password" placeholder="Auto-generated" disabled className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm" />
+            <label className="block text-xs"><span className="text-muted-foreground">Temporary password (min 8 chars)</span>
+              <input type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="Auto-generated if blank" className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm" />
             </label>
+            {err && <div className="text-xs text-rose-300">{err}</div>}
             <button className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium inline-flex items-center justify-center gap-1.5"><Plus className="h-4 w-4" /> Create user</button>
           </form>
         </Card>
