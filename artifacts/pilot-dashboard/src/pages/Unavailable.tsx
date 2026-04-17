@@ -1,34 +1,63 @@
 import { useEffect, useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { usePilots, useUnavailable, useCreateUnavailable } from "@/lib/squadron-data";
-import { Plus, UserX } from "lucide-react";
+import { usePilots, useUnavailable, useCreateUnavailable, useDeleteUnavailable, type UnavailEntry } from "@/lib/squadron-data";
+import { Plus, UserX, Trash2 } from "lucide-react";
+import { ConfirmDialog } from "./Roster";
 
 export default function Unavailable() {
   const { t } = useI18n();
   const { data: PILOTS } = usePilots();
   const { data: items } = useUnavailable();
   const create = useCreateUnavailable();
+  const remove = useDeleteUnavailable();
   const [pid, setPid] = useState(PILOTS[0]?.id ?? "");
   useEffect(() => { if (!pid && PILOTS[0]) setPid(PILOTS[0].id); }, [PILOTS, pid]);
   const [from, setFrom] = useState(new Date().toISOString().slice(0,10));
   const [to, setTo] = useState(new Date(Date.now()+7*86400000).toISOString().slice(0,10));
   const [reason, setReason] = useState("");
+  const [confirmRemove, setConfirmRemove] = useState<UnavailEntry | null>(null);
+  const [err, setErr] = useState("");
+
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
-    await create.mutateAsync({ pilotId: pid, from, to, reason: reason || "—" });
-    setReason("");
+    setErr("");
+    try {
+      await create.mutateAsync({ pilotId: pid, from, to, reason: reason || "—" });
+      setReason("");
+    } catch (e) {
+      setErr((e as Error).message || "Add failed");
+    }
   };
+
+  const onRemove = async () => {
+    if (!confirmRemove) return;
+    setErr("");
+    try {
+      await remove.mutateAsync(confirmRemove.id);
+      setConfirmRemove(null);
+    } catch (e) {
+      setErr((e as Error).message || "Remove failed");
+    }
+  };
+
   const pname = (id: string) => PILOTS.find(p => p.id === id)?.name || id;
 
   return (
     <div>
       <PageHead title={t("nav_unavail")} subtitle="Date range + reason per pilot" />
+      {err && <div className="mb-3 text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-md px-3 py-2">{err}</div>}
       <div className="grid lg:grid-cols-3 gap-4">
         <Card className="lg:col-span-2 !p-0 overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
-              <tr><th className="px-3 py-2 text-left">Pilot</th><th className="px-3 py-2 text-left">From</th><th className="px-3 py-2 text-left">To</th><th className="px-3 py-2 text-left">Reason</th></tr>
+              <tr>
+                <th className="px-3 py-2 text-left">Pilot</th>
+                <th className="px-3 py-2 text-left">From</th>
+                <th className="px-3 py-2 text-left">To</th>
+                <th className="px-3 py-2 text-left">Reason</th>
+                <th className="px-3 py-2 text-right">{t("actions")}</th>
+              </tr>
             </thead>
             <tbody>
               {items.map(i => (
@@ -37,8 +66,16 @@ export default function Unavailable() {
                   <td className="px-3 py-2 font-mono">{i.from}</td>
                   <td className="px-3 py-2 font-mono">{i.to}</td>
                   <td className="px-3 py-2 text-muted-foreground">{i.reason}</td>
+                  <td className="px-3 py-2 text-right">
+                    <button onClick={() => setConfirmRemove(i)} className="p-1.5 rounded hover:bg-destructive/20 text-destructive" title="Remove" data-testid={`button-remove-${i.id}`}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </td>
                 </tr>
               ))}
+              {items.length === 0 && (
+                <tr><td colSpan={5} className="px-3 py-6 text-center text-xs text-muted-foreground">No pilots marked unavailable.</td></tr>
+              )}
             </tbody>
           </table>
         </Card>
@@ -57,10 +94,22 @@ export default function Unavailable() {
             <label className="block text-xs"><span className="text-muted-foreground">Reason</span>
               <input value={reason} onChange={e=>setReason(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm" />
             </label>
-            <button className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium inline-flex items-center justify-center gap-1.5"><Plus className="h-4 w-4" /> Add</button>
+            <button disabled={create.isPending} className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium inline-flex items-center justify-center gap-1.5 disabled:opacity-50"><Plus className="h-4 w-4" /> Add</button>
           </form>
         </Card>
       </div>
+
+      {confirmRemove && (
+        <ConfirmDialog
+          title="Remove unavailability?"
+          message={`Remove ${pname(confirmRemove.pilotId)}'s unavailability (${confirmRemove.from} → ${confirmRemove.to})?`}
+          confirmLabel="Remove"
+          onCancel={() => setConfirmRemove(null)}
+          onConfirm={onRemove}
+          busy={remove.isPending}
+          danger
+        />
+      )}
     </div>
   );
 }

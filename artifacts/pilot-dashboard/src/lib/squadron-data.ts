@@ -64,19 +64,94 @@ function rowToPilot(r: Record<string, unknown>): Pilot {
   };
 }
 
+let mockPilotsList: Pilot[] | null = null;
+function getMockPilots(): Pilot[] {
+  if (!mockPilotsList) mockPilotsList = [...MOCK_PILOTS];
+  return mockPilotsList;
+}
+
 export function usePilots(): UseQueryResult<Pilot[]> & { data: Pilot[] } {
   const q = useQuery<Pilot[]>({
     queryKey: ["pilots"],
     queryFn: async () => {
-      if (!isLive()) return MOCK_PILOTS;
+      if (!isLive()) return [...getMockPilots()];
       const { data, error } = await supabase!.from("pilots").select("*").order("id");
       if (error) throw error;
       return (data ?? []).map(rowToPilot);
     },
-    initialData: MOCK_PILOTS,
+    initialData: () => [...getMockPilots()],
     staleTime: 30_000,
   });
-  return { ...q, data: q.data ?? MOCK_PILOTS } as UseQueryResult<Pilot[]> & { data: Pilot[] };
+  return { ...q, data: q.data ?? getMockPilots() } as UseQueryResult<Pilot[]> & { data: Pilot[] };
+}
+
+export function useUpdatePilot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: Pilot) => {
+      if (!isLive()) {
+        const arr = getMockPilots();
+        const idx = arr.findIndex(x => x.id === p.id);
+        if (idx >= 0) arr[idx] = p;
+        return p;
+      }
+      const { data, error } = await supabase!.from("pilots").update({
+        name: p.name,
+        arabic_name: p.arabicName,
+        rank: p.rank,
+        phone: p.phone,
+        unit: p.unit,
+        available: p.available,
+        // Persist every Pilot field inside `data` so monthly/total hours and
+        // other derived values aren't wiped on profile edits.
+        data: {
+          name: p.name,
+          arabicName: p.arabicName,
+          rank: p.rank,
+          phone: p.phone,
+          address: p.address,
+          unit: p.unit,
+          available: p.available,
+          openingDay: p.openingDay,
+          openingNight: p.openingNight,
+          openingNvg: p.openingNvg,
+          doctorNote: p.doctorNote,
+          monthDay: p.monthDay,
+          monthNight: p.monthNight,
+          monthNvg: p.monthNvg,
+          monthSim: p.monthSim,
+          monthCaptain: p.monthCaptain,
+          totalDay: p.totalDay,
+          totalNight: p.totalNight,
+          totalNvg: p.totalNvg,
+          totalSim: p.totalSim,
+          totalCaptain: p.totalCaptain,
+          expiry: p.expiry,
+        },
+      }).eq("id", p.id).select().single();
+      if (error) throw error;
+      return rowToPilot(data);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pilots"] }),
+  });
+}
+
+export function useDeletePilot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      if (!isLive()) {
+        const arr = getMockPilots();
+        const idx = arr.findIndex(x => x.id === id);
+        if (idx >= 0) arr.splice(idx, 1);
+        return { id };
+      }
+      const { error } = await supabase!.from("pilots").delete().eq("id", id);
+      if (error) throw error;
+      return { id };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pilots"] }),
+  });
 }
 
 // ── sorties ─────────────────────────────────────────────────────────────
@@ -192,6 +267,42 @@ export function useCreateNotam() {
   });
 }
 
+export function useUpdateNotam() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (n: NotamRow) => {
+      if (!isLive()) {
+        const arr = getMockNotams();
+        const idx = arr.findIndex(x => x.id === n.id);
+        if (idx >= 0) arr[idx] = n;
+        return n;
+      }
+      const { error } = await supabase!.from("notams").update({ body: n.text }).eq("notam_no", n.id);
+      if (error) throw error;
+      return n;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notams"] }),
+  });
+}
+
+export function useDeleteNotam() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      if (!isLive()) {
+        const arr = getMockNotams();
+        const idx = arr.findIndex(x => x.id === id);
+        if (idx >= 0) arr.splice(idx, 1);
+        return { id };
+      }
+      const { error } = await supabase!.from("notams").delete().eq("notam_no", id);
+      if (error) throw error;
+      return { id };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notams"] }),
+  });
+}
+
 // ── duty week ───────────────────────────────────────────────────────────
 export function useDutyWeek(): UseQueryResult<DutyDay[]> & { data: DutyDay[] } {
   const q = useQuery<DutyDay[]>({
@@ -299,6 +410,24 @@ export function useCreateUnavailable() {
         to: data.to_date as string,
         reason: (data.reason as string) ?? "—",
       };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["unavailable"] }),
+  });
+}
+
+export function useDeleteUnavailable() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      if (!isLive()) {
+        const arr = getMockUnavail();
+        const idx = arr.findIndex(x => x.id === id);
+        if (idx >= 0) arr.splice(idx, 1);
+        return { id };
+      }
+      const { error } = await supabase!.from("unavailable").delete().eq("id", id);
+      if (error) throw error;
+      return { id };
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["unavailable"] }),
   });
