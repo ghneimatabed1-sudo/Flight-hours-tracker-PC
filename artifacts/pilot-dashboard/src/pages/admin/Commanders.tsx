@@ -90,10 +90,10 @@ export default function Commanders() {
                       })}
                     </td>
                     <td className="py-2 px-3 text-end space-x-2 rtl:space-x-reverse whitespace-nowrap">
-                      <Button size="sm" variant="outline" onClick={() => reset(u.id)} data-testid={`button-reset-${u.id}`}>
+                      <Button size="sm" variant="outline" onClick={() => u.id && reset(u.id)} data-testid={`button-reset-${u.id}`}>
                         <KeyRound className="h-3 w-3 me-1" />{t("resetPassword")}
                       </Button>
-                      <Button size="sm" variant="destructive" onClick={() => del(u.id)} data-testid={`button-delete-${u.id}`}>
+                      <Button size="sm" variant="destructive" onClick={() => u.id && del(u.id)} data-testid={`button-delete-${u.id}`}>
                         <Trash2 className="h-3 w-3 me-1" />{t("delete")}
                       </Button>
                     </td>

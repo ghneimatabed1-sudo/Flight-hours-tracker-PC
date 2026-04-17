@@ -4,6 +4,10 @@
 
 export interface Pilot {
   id: string;
+  // Optional squadron call sign (e.g. "EAGLE-07"). Independent from `id`
+  // (which is the immutable roster/service identifier). Ops officer can edit
+  // freely; HQ dashboards show it alongside the pilot's name.
+  callSign?: string;
   name: string;
   arabicName: string;
   rank: string;

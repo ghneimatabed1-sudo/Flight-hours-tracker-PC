@@ -37,6 +37,7 @@ export function HQLayout({ children }: { children: ReactNode }) {
         { path: "/dashboard", labelKey: "overview", icon: <BarChart3 className="h-4 w-4" /> },
         { path: "/dashboard/pilots", labelKey: "pilots", icon: <Users className="h-4 w-4" /> },
         { path: "/dashboard/alerts", labelKey: "alerts", icon: <AlertTriangle className="h-4 w-4" /> },
+        { path: "/dashboard/currencies", labelKey: "currencies", icon: <Gauge className="h-4 w-4" /> },
         ...(user.scope === "squadron"
           ? [{ path: "/dashboard/simulator", labelKey: "simulator" as Key, icon: <Gauge className="h-4 w-4" /> }]
           : []),

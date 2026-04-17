@@ -45,6 +45,7 @@ function rowToPilot(r: Record<string, unknown>): Pilot {
   const data = (r.data ?? {}) as Partial<Pilot>;
   return {
     id: String(r.id),
+    callSign: data.callSign ? String(data.callSign) : undefined,
     name: String(r.name ?? data.name ?? ""),
     arabicName: String(r.arabic_name ?? data.arabicName ?? ""),
     rank: String(r.rank ?? data.rank ?? ""),
@@ -114,6 +115,7 @@ export function useUpdatePilot() {
         // Persist every Pilot field inside `data` so monthly/total hours and
         // other derived values aren't wiped on profile edits.
         data: {
+          callSign: p.callSign,
           name: p.name,
           arabicName: p.arabicName,
           rank: p.rank,
@@ -169,6 +171,7 @@ export function useCreatePilot() {
         unit: p.unit,
         available: p.available,
         data: {
+          callSign: p.callSign,
           name: p.name,
           arabicName: p.arabicName,
           rank: p.rank,
@@ -267,6 +270,90 @@ export function useSorties(): UseQueryResult<Sortie[]> & { data: Sortie[] } {
   return { ...q, data: q.data ?? fallback } as UseQueryResult<Sortie[]> & { data: Sortie[] };
 }
 
+// Currency auto-refresh: when a Day/Night/NVG sortie is logged, push the
+// affected pilots' expiry dates forward to sortie-date + 60 days (standard
+// RJAF UH-60M currency window). Never moves an expiry backwards — if the
+// pilot already has a later date on record (from a more recent sortie), we
+// keep the later one. Applies to both P1 and P2. Day condition refreshes
+// `day`; Night and NVG conditions refresh `night` (UH-60M night ops are
+// flown on NVG, so they share a currency per squadron SOP).
+const CURRENCY_WINDOW_DAYS = 60;
+function bumpDate(current: string, sortieDate: string, days = CURRENCY_WINDOW_DAYS): string {
+  const d = new Date(sortieDate);
+  if (isNaN(d.getTime())) return current;
+  d.setDate(d.getDate() + days);
+  const iso = d.toISOString().slice(0, 10);
+  if (!current) return iso;
+  return iso > current ? iso : current;
+}
+
+async function refreshCurrenciesForSortie(
+  s: { date: string; pilotId: string; coPilotId: string; condition?: "Day" | "Night" | "NVG" },
+  getPilot: (id: string) => Pilot | undefined,
+  persist: (p: Pilot) => Promise<void>,
+) {
+  if (!s.condition) return;
+  const ids = [s.pilotId, s.coPilotId].filter(Boolean);
+  for (const id of ids) {
+    const p = getPilot(id);
+    if (!p) continue;
+    const next = { ...p.expiry };
+    if (s.condition === "Day") {
+      next.day = bumpDate(p.expiry.day, s.date);
+    } else {
+      // Night or NVG both credit the night/NVG currency window.
+      next.night = bumpDate(p.expiry.night, s.date);
+    }
+    if (next.day === p.expiry.day && next.night === p.expiry.night) continue;
+    await persist({ ...p, expiry: next });
+  }
+}
+
+async function applyCurrencyRefresh(
+  s: { date: string; pilotId: string; coPilotId: string; condition?: "Day" | "Night" | "NVG" },
+  qc: ReturnType<typeof useQueryClient>,
+) {
+  if (!s.condition) return;
+  if (!isLive()) {
+    const arr = getMockPilots();
+    await refreshCurrenciesForSortie(
+      s,
+      (id) => arr.find((x) => x.id === id),
+      async (p) => {
+        const idx = arr.findIndex((x) => x.id === p.id);
+        if (idx >= 0) arr[idx] = p;
+      },
+    );
+    return;
+  }
+  // Live mode: re-fetch pilots in cache, patch via update.
+  const cached = qc.getQueryData<Pilot[]>(["pilots"]) ?? [];
+  await refreshCurrenciesForSortie(
+    s,
+    (id) => cached.find((x) => x.id === id),
+    async (p) => {
+      const { error } = await supabase!.from("pilots").update({
+        data: {
+          callSign: p.callSign,
+          name: p.name, arabicName: p.arabicName, rank: p.rank, phone: p.phone,
+          address: p.address, unit: p.unit, available: p.available,
+          openingDay: p.openingDay, openingNight: p.openingNight, openingNvg: p.openingNvg,
+          doctorNote: p.doctorNote,
+          monthDay: p.monthDay, monthNight: p.monthNight, monthNvg: p.monthNvg,
+          monthSim: p.monthSim, monthCaptain: p.monthCaptain,
+          totalDay: p.totalDay, totalNight: p.totalNight, totalNvg: p.totalNvg,
+          totalSim: p.totalSim, totalCaptain: p.totalCaptain,
+          expiry: p.expiry,
+          hiddenCurrencies: p.hiddenCurrencies,
+          qualifications: p.qualifications,
+          lastSimDate: p.lastSimDate,
+        },
+      }).eq("id", p.id);
+      if (error) throw error;
+    },
+  );
+}
+
 export function useCreateSortie() {
   const qc = useQueryClient();
   return useMutation({
@@ -274,6 +361,7 @@ export function useCreateSortie() {
       if (!isLive()) {
         const created = { ...s, id: "S" + Date.now() } as Sortie;
         MOCK_SORTIES.push(created);
+        await applyCurrencyRefresh(s, qc);
         return created;
       }
       const { data, error } = await supabase!.from("sorties").insert({
@@ -295,9 +383,13 @@ export function useCreateSortie() {
         },
       }).select().single();
       if (error) throw error;
+      await applyCurrencyRefresh(s, qc);
       return rowToSortie(data);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["sorties"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sorties"] });
+      qc.invalidateQueries({ queryKey: ["pilots"] });
+    },
   });
 }
 
@@ -313,6 +405,7 @@ export function useUpdateSortie() {
         const idx = MOCK_SORTIES.findIndex(x => x.id === s.id);
         if (idx < 0) throw new Error("sortie_not_found");
         MOCK_SORTIES[idx] = s;
+        await applyCurrencyRefresh(s, qc);
         appendDemoAudit({
           ts: tsNow(),
           user: input.actor ?? "ops.officer",
@@ -336,6 +429,7 @@ export function useUpdateSortie() {
         },
       }).eq("id", s.id);
       if (error) throw error;
+      await applyCurrencyRefresh(s, qc);
       await recordAuditEvent({
         type: "sortie.update",
         actor: input.actor,
@@ -345,6 +439,7 @@ export function useUpdateSortie() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sorties"] });
+      qc.invalidateQueries({ queryKey: ["pilots"] });
       qc.invalidateQueries({ queryKey: ["audit_log"] });
     },
   });

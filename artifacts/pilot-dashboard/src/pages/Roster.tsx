@@ -232,6 +232,7 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
             {isNew && (
               <Field label="ID" value={p.id} onChange={v => set("id", v)} testId="input-id" />
             )}
+            <Field label={t("callSign")} value={p.callSign || ""} onChange={v => set("callSign", v)} testId="input-callSign" />
             <Field label={t("name")} value={p.name} onChange={v => set("name", v)} testId="input-name" />
             <Field label={t("arabicName")} value={p.arabicName} onChange={v => set("arabicName", v)} testId="input-arabicName" />
             <Field label={t("rank")} value={p.rank} onChange={v => set("rank", v)} testId="input-rank" />

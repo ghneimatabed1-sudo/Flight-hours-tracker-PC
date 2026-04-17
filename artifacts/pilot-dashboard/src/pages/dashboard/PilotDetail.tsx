@@ -18,7 +18,7 @@ export default function PilotDetail() {
   const squadron = pilot ? squadrons.find(s => s.id === pilot.squadronId) : null;
 
   if (!user) return null;
-  if (!pilot || !squadron || !user.squadronIds.includes(pilot.squadronId)) {
+  if (!pilot || !squadron || !(user.squadronIds ?? []).includes(pilot.squadronId)) {
     return <div className="text-center py-12 text-muted-foreground">{t("noResults")}</div>;
   }
 
