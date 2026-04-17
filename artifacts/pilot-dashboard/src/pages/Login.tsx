@@ -12,7 +12,7 @@ export default function LoginGate() {
   } = useAuth();
   const { t, lang, setLang } = useI18n();
 
-  const [licenseKey, setLicenseKey] = useState("DEMO-RJAF-1234-5678");
+  const [licenseKey, setLicenseKey] = useState("");
   const [licUsername, setLicUsername] = useState("");
   const [licError, setLicError] = useState<string | null>(null);
 

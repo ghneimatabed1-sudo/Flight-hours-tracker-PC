@@ -168,19 +168,14 @@ async function makeFingerprint(): Promise<string> {
   return fp;
 }
 
-const DEMO_KEY_PREFIXES = ["RJAF-", "DEMO-"];
-
-// Static credentials for HQ users *other than* the super admin. The super
-// admin's password is held only on the server (SUPER_ADMIN_PASSWORD_HASH)
-// and validated by the super-admin-2fa edge function — never by the
-// client. In demo mode (no Supabase) we still accept "admin123" so the
-// in-browser preview can log in.
-const HQ_CREDS: Record<string, string> = {
-  commander1: "commander",
-  wing1: "commander",
-  base1: "commander",
-  hq1: "commander",
-};
+// Static credentials for HQ users *other than* the super admin. Empty on a
+// fresh install — commander accounts are created by the Super Admin through
+// the Commanders page (or issued by the server once Supabase is configured).
+// The super admin's password is held only on the server
+// (SUPER_ADMIN_PASSWORD_HASH) and validated by the super-admin-2fa edge
+// function in production; in standalone mode the DEFAULT_ADMIN_PASSWORD_HASH
+// below is used.
+const HQ_CREDS: Record<string, string> = {};
 // Default super admin password — stored as a SHA-256 hash so the raw password
 // never lives in the source. When a super admin changes their password via
 // Settings → Security, the new hash is written to ADMIN_PASSWORD_HASH_KEY in
@@ -284,10 +279,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setState(s => ({ ...s, licensed: true }));
         return { ok: true };
       }
-      // Demo mode: validate against the local registry written by the Super
-      // Admin LicenseKeys page. The legacy DEMO-/RJAF- prefix shortcut is kept
-      // as a fallback so the smoke-test seed key still opens the app, but a
-      // username is still required for the audit trail.
+      // Standalone mode: validate against the local registry written by the
+      // Super Admin LicenseKeys page. Every key must be issued through that
+      // page — there are no hard-coded fallback keys.
       const lookup = lookupLicenseKey(k, u);
       if (lookup.ok) {
         localStorage.setItem("rjaf.licensed", "1");
@@ -306,17 +300,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (lookup.reason === "expired") {
         return { ok: false, error: "This license key has expired." };
       }
-      // Unknown key — fall back to the legacy DEMO-/RJAF- prefix so the seed
-      // smoke-test path still works for first-time evaluators.
-      if (DEMO_KEY_PREFIXES.some(p => k.startsWith(p))) {
-        localStorage.setItem("rjaf.licensed", "1");
-        localStorage.setItem("rjaf.licenseKey", k);
-        localStorage.setItem("rjaf.licenseUser", u);
-        localStorage.setItem("rjaf.licenseBoundFp", state.fingerprint);
-        setState(s => ({ ...s, licensed: true }));
-        return { ok: true };
-      }
-      return { ok: false, error: "Invalid license key format. Keys are issued by the Super Admin." };
+      return { ok: false, error: "Invalid license key. Keys are issued by the Super Admin." };
     },
     configureSquadron: (cfg) => {
       localStorage.setItem("rjaf.squadron", JSON.stringify(cfg));
