@@ -9,6 +9,7 @@ export default function LoginGate() {
     licensed, configured, activateLicense, configureSquadron, login, fingerprint,
     lockedUntil, user, pendingAdmin, verifyAdminTotp, cancelAdminTotp,
     pendingRecoveryCodes, ackRecoveryCodes, provisionSuperAdmin, pcRoleLock,
+    pcDeviceName,
   } = useAuth();
   const { t, lang, setLang } = useI18n();
 
@@ -324,6 +325,15 @@ export default function LoginGate() {
           ) : showLogin ? (
             <form onSubmit={submitLogin} className="space-y-3">
               <div className="text-sm font-medium">{t("loginTitle")}</div>
+              {pcDeviceName && (
+                <div
+                  className="rounded-md border border-border bg-secondary/40 px-3 py-2 text-xs"
+                  data-testid="text-login-device-name"
+                >
+                  <span className="opacity-70">{t("deviceNameBadge")}: </span>
+                  <span className="font-medium">{pcDeviceName}</span>
+                </div>
+              )}
               <Field label={t("username")} value={u} onChange={setU} />
               <Field label={t("password")} value={p} onChange={setP} type="password" />
               {lockedRemaining > 0

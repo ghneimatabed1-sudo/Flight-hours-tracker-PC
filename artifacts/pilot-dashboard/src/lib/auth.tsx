@@ -45,6 +45,15 @@ function readPcRoleLock(): PcRoleLock {
   const v = localStorage.getItem(PC_ROLE_LOCK_KEY);
   return v === "ops" || v === "commander" || v === "super_admin" ? v : null;
 }
+// Optional human label the super admin assigns to this PC during setup.
+// Shown on the Login screen and in the Master Recovery "pick PC" dialog.
+// Empty/unset = no label shown (behavior unchanged).
+const PC_DEVICE_NAME_KEY = "rjaf.pcDeviceName";
+const PC_DEVICE_NAME_MAX = 48;
+function readPcDeviceName(): string {
+  const v = localStorage.getItem(PC_DEVICE_NAME_KEY);
+  return typeof v === "string" ? v.slice(0, PC_DEVICE_NAME_MAX) : "";
+}
 const ADMIN_TOTP_ISSUER = "RJAF Pilot Dashboard";
 const RECOVERY_CODE_COUNT = 10;
 // When unused recovery codes drop to this number or below, the dashboard
@@ -172,6 +181,10 @@ interface AuthCtx extends AuthState {
   // the matching role's form and login() rejects accounts of other roles.
   pcRoleLock: PcRoleLock;
   setPcRoleLock: (v: PcRoleLock) => void;
+  // Optional super-admin-assigned label for this PC. Trimmed and clipped
+  // to 48 chars. Empty string = no label set.
+  pcDeviceName: string;
+  setPcDeviceName: (v: string) => void;
 }
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -289,6 +302,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     else localStorage.setItem(PC_ROLE_LOCK_KEY, v);
     setPcRoleLockState(v);
     void recordAuditEvent({ type: "pc.rolelock.updated", actor: "admin", detail: { lock: v } });
+  };
+  const [pcDeviceName, setPcDeviceNameState] = useState<string>(() => readPcDeviceName());
+  const applyPcDeviceName = (v: string) => {
+    const clean = (v ?? "").trim().slice(0, PC_DEVICE_NAME_MAX);
+    if (!clean) localStorage.removeItem(PC_DEVICE_NAME_KEY);
+    else localStorage.setItem(PC_DEVICE_NAME_KEY, clean);
+    setPcDeviceNameState(clean);
+    void recordAuditEvent({ type: "pc.devicename.updated", actor: "admin", detail: { set: !!clean } });
   };
 
   useEffect(() => {
@@ -890,7 +911,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     pcRoleLock,
     setPcRoleLock: applyPcRoleLock,
-  }), [state, pending, adminTotpEnrolled, pendingRecoveryCodes, adminRecoveryCodesRemaining, pcRoleLock]);
+    pcDeviceName,
+    setPcDeviceName: applyPcDeviceName,
+  }), [state, pending, adminTotpEnrolled, pendingRecoveryCodes, adminRecoveryCodesRemaining, pcRoleLock, pcDeviceName]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

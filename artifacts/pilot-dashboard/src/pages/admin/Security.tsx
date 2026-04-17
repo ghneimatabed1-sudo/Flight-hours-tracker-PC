@@ -17,7 +17,7 @@ import type { PcRoleLock } from "@/lib/auth";
 
 export default function AdminSecurity() {
   const { t } = useI18n();
-  const { adminTotpEnrolled, regenerateRecoveryCodes, changeSuperAdminPassword, resetSuperAdminPasswordWithMaster, backendMode, pcRoleLock, setPcRoleLock, squadron, fingerprint } = useAuth();
+  const { adminTotpEnrolled, regenerateRecoveryCodes, changeSuperAdminPassword, resetSuperAdminPasswordWithMaster, backendMode, pcRoleLock, setPcRoleLock, pcDeviceName, setPcDeviceName, squadron, fingerprint } = useAuth();
 
   // Master-recovery reset is now staged through a 3-step dialog:
   //   step "key"      → enter the Master Recovery Key
@@ -34,9 +34,14 @@ export default function AdminSecurity() {
   const [mrConfirm, setMrConfirm] = useState("");
   const [mrBusy, setMrBusy] = useState(false);
   const [mrErr, setMrErr] = useState<string | null>(null);
-  const pcLabel = squadron?.name
-    ? `${squadron.name}${squadron.number ? " — " + squadron.number : ""}`
-    : t("thisPc");
+  // Prefer the super-admin-assigned device name; fall back to squadron
+  // identity; finally to a generic "This PC" string so the row is never
+  // empty in the master-recovery picker.
+  const pcLabel = pcDeviceName
+    ? pcDeviceName
+    : squadron?.name
+      ? `${squadron.name}${squadron.number ? " — " + squadron.number : ""}`
+      : t("thisPc");
   const pcFingerprintShort = fingerprint ? fingerprint.slice(0, 8).toUpperCase() : "—";
   const closeMasterDialog = () => {
     setMrStep("closed");
@@ -83,6 +88,7 @@ export default function AdminSecurity() {
   // Local editable copy of the PC role lock so the super admin can preview
   // the choice before applying. Initialized from the persisted value.
   const [lockDraft, setLockDraft] = useState<PcRoleLock>(pcRoleLock);
+  const [deviceNameDraft, setDeviceNameDraft] = useState<string>(pcDeviceName);
   const [lockSaved, setLockSaved] = useState(false);
   const lockOptionLabel = (v: PcRoleLock): string => {
     if (v === "ops") return t("roleLockOps");
@@ -92,15 +98,19 @@ export default function AdminSecurity() {
   };
   const applyLock = () => {
     setPcRoleLock(lockDraft);
+    setPcDeviceName(deviceNameDraft);
     setLockSaved(true);
     window.setTimeout(() => setLockSaved(false), 3000);
   };
   const clearLock = () => {
     setPcRoleLock(null);
+    setPcDeviceName("");
     setLockDraft(null);
+    setDeviceNameDraft("");
     setLockSaved(true);
     window.setTimeout(() => setLockSaved(false), 3000);
   };
+  const lockDirty = lockDraft !== pcRoleLock || deviceNameDraft.trim() !== pcDeviceName;
 
   const [pwCurrent, setPwCurrent] = useState("");
   const [pwNew, setPwNew] = useState("");
@@ -233,13 +243,24 @@ export default function AdminSecurity() {
                 <option value="super_admin">{t("roleLockSuperAdmin")}</option>
               </select>
             </div>
+            <div>
+              <label className="text-xs text-muted-foreground">{t("deviceNameLabel")}</label>
+              <Input
+                data-testid="input-device-name"
+                value={deviceNameDraft}
+                onChange={e => { setDeviceNameDraft(e.target.value.slice(0, 48)); setLockSaved(false); }}
+                placeholder={t("deviceNamePlaceholder")}
+                maxLength={48}
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">{t("deviceNameHint")}</p>
+            </div>
             {lockSaved && <p className="text-xs text-emerald-400" data-testid="text-role-lock-saved">{t("roleLockSaved")}</p>}
             <div className="flex gap-2">
               <Button
                 type="button"
                 data-testid="button-role-lock-apply"
                 onClick={applyLock}
-                disabled={lockDraft === pcRoleLock}
+                disabled={!lockDirty}
               >
                 {t("roleLockSaveBtn")}
               </Button>
