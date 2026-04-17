@@ -1,5 +1,7 @@
+import { useEffect } from "react";
 import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { runArchiveCheck } from "@/lib/archive";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { I18nProvider } from "@/lib/i18n";
@@ -31,6 +33,7 @@ import AuditLog from "@/pages/AuditLog";
 import HistoricalImport from "@/pages/HistoricalImport";
 import SettingsPage from "@/pages/Settings";
 import Help from "@/pages/Help";
+import Archives from "@/pages/Archives";
 import NotFound from "@/pages/not-found";
 import AdminOverview from "@/pages/admin/Overview";
 import LicenseKeys from "@/pages/admin/LicenseKeys";
@@ -69,6 +72,7 @@ function SquadronOpsRoutes() {
       <Route path="/users" component={Users} />
       <Route path="/audit" component={AuditLog} />
       <Route path="/import" component={HistoricalImport} />
+      <Route path="/archives" component={Archives} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/help" component={Help} />
       <Route component={NotFound} />
@@ -121,9 +125,15 @@ function Shell() {
 
   return (
     <Layout>
+      <ArchiveBootstrap />
       <SquadronOpsRoutes />
     </Layout>
   );
+}
+
+function ArchiveBootstrap() {
+  useEffect(() => { runArchiveCheck(); }, []);
+  return null;
 }
 
 function App() {

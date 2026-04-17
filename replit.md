@@ -132,3 +132,22 @@ desktop app.
 - **i18n**: EN/AR keys: operatorUsername, operatorUsernamePh,
   operatorUsernameHelp, duration_custom, invalidDuration, issuedToLine,
   assignedTo. ("days" key already existed.)
+
+## Auto archive (monthly + yearly) (2026-04-17)
+On every app boot for an authenticated Squadron Ops user, `runArchiveCheck()`
+in `src/lib/archive.ts` runs once. It is **idempotent**.
+
+- For each completed month between the last archived month and the current
+  month, it writes a snapshot to `localStorage` under
+  `rjaf.archive.YYYY-MM`. The snapshot contains every sortie whose `date`
+  starts with `YYYY-MM`, the participating pilots, and totals (sortie count,
+  pilot count, flight hours).
+- After writing months, if all 12 months of a calendar year are present, it
+  composes a yearly archive at `rjaf.archive.YYYY`.
+- A cursor at `rjaf.archive.lastRun` (last archived `YYYY-MM`) prevents
+  re-archiving on subsequent boots.
+- New page `/archives` (sidebar entry "Archives" / "الأرشيف") lists all
+  archives and offers a JSON download per archive plus a manual "Check now".
+- All archive storage is local browser storage on the operator's PC — the
+  same model as the rest of the demo-mode dataset. Downloads produce
+  `rjaf-archive-YYYY-MM.json` or `rjaf-archive-YYYY.json` for off-PC backup.
