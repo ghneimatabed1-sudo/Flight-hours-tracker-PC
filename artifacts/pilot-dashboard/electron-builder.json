@@ -1,0 +1,39 @@
+{
+  "appId": "jo.gov.rjaf.squadron-ops",
+  "productName": "RJAF Squadron Ops",
+  "copyright": "© Royal Jordanian Air Force",
+  "directories": {
+    "output": "release",
+    "buildResources": "public/brand"
+  },
+  "files": [
+    "dist-electron/**/*",
+    "dist/public/**/*",
+    "public/brand/**/*",
+    "package.json"
+  ],
+  "asar": true,
+  "win": {
+    "target": [{ "target": "nsis", "arch": ["x64"] }],
+    "icon": "public/brand/emblem.png",
+    "publisherName": "Royal Jordanian Air Force",
+    "artifactName": "RJAF-SquadronOps-Setup-${version}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": true,
+    "allowElevation": true,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "RJAF Squadron Ops",
+    "include": "build/installer.nsh"
+  },
+  "publish": [
+    {
+      "provider": "generic",
+      "url": "https://updates.rjaf.local/squadron-ops/",
+      "channel": "latest"
+    }
+  ]
+}

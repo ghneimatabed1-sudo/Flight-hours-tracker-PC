@@ -1,0 +1,68 @@
+import { useState } from "react";
+import { Card, PageHead } from "@/components/Layout";
+import { useI18n } from "@/lib/i18n";
+import { PILOTS } from "@/lib/mock";
+import { Plus, UserX } from "lucide-react";
+
+interface Entry { id: string; pilotId: string; from: string; to: string; reason: string; }
+
+export default function Unavailable() {
+  const { t } = useI18n();
+  const [items, setItems] = useState<Entry[]>([
+    { id: "1", pilotId: PILOTS[2].id, from: "2026-04-15", to: "2026-04-22", reason: "Medical leave" },
+    { id: "2", pilotId: PILOTS[5].id, from: "2026-04-18", to: "2026-04-25", reason: "Course attendance" },
+  ]);
+  const [pid, setPid] = useState(PILOTS[0].id);
+  const [from, setFrom] = useState(new Date().toISOString().slice(0,10));
+  const [to, setTo] = useState(new Date(Date.now()+7*86400000).toISOString().slice(0,10));
+  const [reason, setReason] = useState("");
+  const add = (e: React.FormEvent) => {
+    e.preventDefault();
+    setItems(x => [...x, { id: String(Date.now()), pilotId: pid, from, to, reason: reason || "—" }]);
+    setReason("");
+  };
+  const pname = (id: string) => PILOTS.find(p => p.id === id)?.name || id;
+
+  return (
+    <div>
+      <PageHead title={t("nav_unavail")} subtitle="Date range + reason per pilot" />
+      <div className="grid lg:grid-cols-3 gap-4">
+        <Card className="lg:col-span-2 !p-0 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
+              <tr><th className="px-3 py-2 text-left">Pilot</th><th className="px-3 py-2 text-left">From</th><th className="px-3 py-2 text-left">To</th><th className="px-3 py-2 text-left">Reason</th></tr>
+            </thead>
+            <tbody>
+              {items.map(i => (
+                <tr key={i.id} className="border-t border-border row-hover">
+                  <td className="px-3 py-2"><UserX className="inline h-3.5 w-3.5 mr-1 text-amber-400" />{pname(i.pilotId)}</td>
+                  <td className="px-3 py-2 font-mono">{i.from}</td>
+                  <td className="px-3 py-2 font-mono">{i.to}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{i.reason}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+        <Card>
+          <form onSubmit={add} className="space-y-3">
+            <div className="text-sm font-semibold">Mark Unavailable</div>
+            <label className="block text-xs"><span className="text-muted-foreground">Pilot</span>
+              <select value={pid} onChange={e=>setPid(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm">
+                {PILOTS.map(p => <option key={p.id} value={p.id}>{p.rank} {p.name}</option>)}
+              </select>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-xs"><span className="text-muted-foreground">From</span><input type="date" value={from} onChange={e=>setFrom(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm font-mono" /></label>
+              <label className="text-xs"><span className="text-muted-foreground">To</span><input type="date" value={to} onChange={e=>setTo(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm font-mono" /></label>
+            </div>
+            <label className="block text-xs"><span className="text-muted-foreground">Reason</span>
+              <input value={reason} onChange={e=>setReason(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm" />
+            </label>
+            <button className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium inline-flex items-center justify-center gap-1.5"><Plus className="h-4 w-4" /> Add</button>
+          </form>
+        </Card>
+      </div>
+    </div>
+  );
+}

@@ -1,13 +1,17 @@
 {
   "name": "@workspace/pilot-dashboard",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
+  "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite --config vite.config.ts --host 0.0.0.0",
     "build": "vite build --config vite.config.ts",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "electron:compile": "tsc -p electron/tsconfig.json && node -e \"require('fs').mkdirSync('dist-electron',{recursive:true});require('fs').writeFileSync('dist-electron/package.json',JSON.stringify({type:'commonjs'}))\"",
+    "electron:dev": "pnpm run electron:compile && electron dist-electron/main.js",
+    "electron:build": "pnpm run build && pnpm run electron:compile && electron-builder --win nsis --config electron-builder.json"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -73,5 +77,8 @@
     "vite": "catalog:",
     "wouter": "^3.3.5",
     "zod": "catalog:"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.103.3"
   }
 }
