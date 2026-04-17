@@ -1,9 +1,10 @@
 import { useI18n } from "@/lib/i18n";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plane, Users, AlertTriangle, KeyRound } from "lucide-react";
+import { Plane, Users, AlertTriangle, KeyRound, Printer } from "lucide-react";
 import { squadrons, pilots, licenseKeys } from "@/lib/mockData";
 import { pilotWorstStatus } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
+import { Button } from "@/components/ui/button";
 
 export default function AdminOverview() {
   const { t, lang } = useI18n();
@@ -21,7 +22,12 @@ export default function AdminOverview() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-bold">{t("systemOverview")}</h2>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <h2 className="text-xl font-bold">{t("systemOverview")}</h2>
+        <Button size="sm" variant="outline" onClick={() => window.print()} data-testid="button-print-admin-overview" className="no-print">
+          <Printer className="h-3.5 w-3.5 me-1" />{t("print")}
+        </Button>
+      </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((s, i) => (

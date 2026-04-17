@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { squadrons, pilots } from "@/lib/mockData";
 import { pilotWorstStatus } from "@/lib/format";
-import { ChevronRight, Eye, Plane, Users, AlertTriangle, Clock } from "lucide-react";
+import { ChevronRight, Eye, Plane, Users, AlertTriangle, Clock, Printer } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export default function CommanderOverview() {
   const { t, lang, dir } = useI18n();
@@ -29,7 +30,12 @@ export default function CommanderOverview() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-xl font-bold">{t("overview")}</h2>
-        <Badge variant="outline" className="gap-1"><Eye className="h-3 w-3" />{t("readOnly")}</Badge>
+        <div className="flex items-center gap-2 no-print">
+          <Badge variant="outline" className="gap-1"><Eye className="h-3 w-3" />{t("readOnly")}</Badge>
+          <Button size="sm" variant="outline" onClick={() => window.print()} data-testid="button-print-overview">
+            <Printer className="h-3.5 w-3.5 me-1" />{t("print")}
+          </Button>
+        </div>
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((s, i) => (

@@ -42,6 +42,9 @@ export interface Pilot {
   // Pilot qualifications (e.g. "MTP", "QHI", "IP"). Manually entered by ops
   // officer; reflected on commander / HQ dashboards.
   qualifications?: string[];
+  // Date of the pilot's most recent simulator session. Visible only to the
+  // squadron commander on the dashboard.
+  lastSimDate?: string;
 }
 
 export type CurrencyKey = "day" | "night" | "irt" | "medical" | "sim";

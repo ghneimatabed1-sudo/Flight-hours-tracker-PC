@@ -214,6 +214,21 @@ function PilotEditDialog({ pilot, onClose, onSave, saving }: { pilot: Pilot; onC
             <Field label="Medical" value={p.expiry.medical} onChange={v => set("expiry", { ...p.expiry, medical: v })} type="date" testId="input-expMedical" />
             <Field label="Sim" value={p.expiry.sim} onChange={v => set("expiry", { ...p.expiry, sim: v })} type="date" testId="input-expSim" />
           </div>
+          <div className="grid grid-cols-3 gap-3 pt-2 border-t border-border">
+            <label className="block text-xs col-span-3 sm:col-span-1">
+              <span className="text-muted-foreground">{t("lastSimDate")}</span>
+              <input
+                type="date"
+                value={p.lastSimDate || ""}
+                onChange={e => set("lastSimDate", e.target.value)}
+                data-testid="input-lastSimDate"
+                className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm font-mono"
+              />
+            </label>
+            <div className="col-span-3 sm:col-span-2 text-[11px] text-muted-foreground self-end pb-2">
+              {t("lastSimDateHelp")} · <span className="italic">{t("lastSimDateVisibility")}</span>
+            </div>
+          </div>
           <div className="flex items-center justify-end gap-2 pt-3 border-t border-border">
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-md bg-secondary border border-border text-sm">{t("cancel")}</button>
             <button type="submit" disabled={saving} className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50" data-testid="button-save-pilot">

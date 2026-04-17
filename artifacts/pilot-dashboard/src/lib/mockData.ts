@@ -68,6 +68,7 @@ export const pilots: Pilot[] = (() => {
         nightCurrencyDate: dateOffset(night),
         irtCurrencyDate: dateOffset(irt),
         medicalCurrencyDate: dateOffset(med),
+        lastSimDate: dateOffset(-Math.floor(r() * 150) - 5),
         qualifications: (() => {
           const pool = ["MTP", "QHI", "IP", "IE", "NVG", "TAC", "FI"];
           // Guarantee the first few pilots in each squadron have visible

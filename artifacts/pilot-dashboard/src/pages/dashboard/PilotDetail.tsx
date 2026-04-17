@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { pilots, squadrons } from "@/lib/mockData";
 import { pilotWorstStatus, pilotWorstDate, currencyStatus, fmtDate } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
-import { ChevronLeft, Eye, Plane, Calendar, Award } from "lucide-react";
+import { ChevronLeft, Eye, Plane, Calendar, Award, Printer, Activity } from "lucide-react";
 
 export default function PilotDetail() {
   const { t, lang, dir } = useI18n();
@@ -31,9 +31,14 @@ export default function PilotDetail() {
 
   return (
     <div className="space-y-4">
-      <Link href="/dashboard/pilots" className="text-xs inline-flex items-center text-muted-foreground hover:text-foreground">
-        <ChevronLeft className={`h-3 w-3 me-1 ${dir === "rtl" ? "rotate-180" : ""}`} />{t("back")}
-      </Link>
+      <div className="flex items-center justify-between gap-2 no-print">
+        <Link href="/dashboard/pilots" className="text-xs inline-flex items-center text-muted-foreground hover:text-foreground">
+          <ChevronLeft className={`h-3 w-3 me-1 ${dir === "rtl" ? "rotate-180" : ""}`} />{t("back")}
+        </Link>
+        <Button size="sm" variant="outline" onClick={() => window.print()} data-testid="button-print-pilot">
+          <Printer className="h-3.5 w-3.5 me-1" />{t("print")}
+        </Button>
+      </div>
 
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
@@ -82,6 +87,26 @@ export default function PilotDetail() {
           </CardContent>
         </Card>
       </div>
+
+      {user.scope === "squadron" && pilot.lastSimDate && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Activity className="h-4 w-4 text-primary" />
+              {t("lastSimDate")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="flex items-center justify-between gap-3 rounded-md border p-3">
+              <div>
+                <div className="font-medium tabular-nums">{fmtDate(pilot.lastSimDate, lang)}</div>
+                <div className="text-[11px] text-muted-foreground italic">{t("lastSimDateVisibility")}</div>
+              </div>
+              <Badge variant="outline" className="gap-1"><Eye className="h-3 w-3" />{t("readOnly")}</Badge>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader><CardTitle className="text-base">{t("currencies")}</CardTitle></CardHeader>

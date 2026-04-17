@@ -42,6 +42,9 @@ export interface Pilot {
   // Pilot qualifications (e.g. "MTP", "QHI", "IP"). Manually entered by ops
   // officer; displayed as badges on commander / HQ views.
   qualifications?: string[];
+  // Date of the pilot's most recent simulator session. Entered by ops officer
+  // and visible only to the squadron commander (not wing/base/HQ).
+  lastSimDate?: string;
 }
 
 export interface LicenseKey {

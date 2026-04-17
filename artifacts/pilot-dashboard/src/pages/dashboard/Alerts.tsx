@@ -7,7 +7,7 @@ import { pilots, squadrons } from "@/lib/mockData";
 import { currencyStatus, fmtDate } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { CurrencyStatus } from "@/lib/types";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Printer } from "lucide-react";
 
 export default function Alerts() {
   const { t, lang } = useI18n();
@@ -50,7 +50,12 @@ export default function Alerts() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-bold flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-500" />{t("alerts")}</h2>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <h2 className="text-xl font-bold flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-500" />{t("alerts")}</h2>
+        <Button size="sm" variant="outline" onClick={() => window.print()} data-testid="button-print-alerts" className="no-print">
+          <Printer className="h-3.5 w-3.5 me-1" />{t("print")}
+        </Button>
+      </div>
 
       <Section title={`${t("expired")} (${expired.length})`} items={expired} t={t} />
       <Section title={`${t("expiringSoon")} (${warning.length})`} items={warning} t={t} />
