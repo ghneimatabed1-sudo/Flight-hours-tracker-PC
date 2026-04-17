@@ -73,10 +73,10 @@ function maskUrl(u) {
 
 // Interactive confirmation. CI runs and `--yes` skip the prompt.
 async function confirm(target) {
-  if (process.env.CI === "1" || process.argv.includes("--yes")) return true;
+  if (process.env.CI || process.argv.includes("--yes")) return true;
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const q = (s) => new Promise(r => rl.question(s, r));
-  const ans = await q(`This will TRUNCATE squadrons, pilots, sorties, notams, schedule,\n  audit_log, pilot_link_codes, pilot_devices and re-seed against\n  ${target}\n  Continue? [y/N] `);
+  const ans = await q(`This will DROP and RECREATE the entire \`public\` schema\n  (every table, function, and policy under it) and then re-seed against\n  ${target}\n  Supabase's auth/storage/extensions schemas are untouched.\n  Continue? [y/N] `);
   rl.close();
   return /^y(es)?$/i.test(ans.trim());
 }

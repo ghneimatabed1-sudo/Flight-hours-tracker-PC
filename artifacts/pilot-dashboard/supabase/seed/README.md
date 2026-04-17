@@ -74,9 +74,17 @@ SUPABASE_DB_URL=postgresql://postgres:PWD@db.<project>.supabase.co:5432/postgres
 ```
 
 The script (`db-seed.mjs`) does, in order: regenerate `seed.sql` from
-`src/lib/mock.ts`, truncate the operational tables, re-apply every
-migration in `../migrations`, apply the fresh `seed.sql`, then print a
-sanity-check row count. It requires the `psql` CLI on `PATH`.
+`src/lib/mock.ts`, **drop and recreate the entire `public` schema**
+(clean slate — Supabase's own `auth`, `storage`, and `extensions`
+schemas are not touched), re-apply every migration in `../migrations`,
+apply the fresh `seed.sql`, then print a sanity-check row count. It
+requires the `psql` CLI on `PATH`.
+
+Because each run resets `public` from scratch, the migrations don't have
+to be idempotent — every run is effectively a first run.
+
+The older `reset-and-reseed.sh` in this folder is the previous
+truncate-only flow; prefer `pnpm run db:seed` for new work.
 
 **Safety guards:**
 
