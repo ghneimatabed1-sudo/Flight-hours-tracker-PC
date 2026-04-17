@@ -1,0 +1,79 @@
+workflows:
+  android-apk:
+    name: Flight Hour Tracker - Android APK
+    max_build_duration: 60
+    environment:
+      node: 20
+      java: 17
+      groups:
+        - expo_credentials
+    scripts:
+      - name: Install pnpm
+        script: |
+          npm install -g pnpm@9
+      - name: Install dependencies (workspace root)
+        script: |
+          cd $CM_BUILD_DIR
+          pnpm install --frozen-lockfile
+      - name: Build Android APK with EAS
+        working_directory: artifacts/pilot-mobile
+        script: |
+          npx eas-cli@latest build \
+            --platform android \
+            --profile production \
+            --non-interactive \
+            --no-wait=false \
+            --local \
+            --output $CM_BUILD_DIR/flight-hour-tracker.apk
+    artifacts:
+      - flight-hour-tracker.apk
+    publishing:
+      email:
+        recipients:
+          - YOUR_EMAIL@example.com
+        notify:
+          success: true
+          failure: true
+
+  ios-ipa:
+    name: Flight Hour Tracker - iOS IPA
+    max_build_duration: 90
+    integrations:
+      app_store_connect: codemagic
+    environment:
+      node: 20
+      xcode: latest
+      cocoapods: default
+      groups:
+        - expo_credentials
+        - ios_credentials
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.rjaf.pilotlogbook
+    scripts:
+      - name: Install pnpm
+        script: |
+          npm install -g pnpm@9
+      - name: Install dependencies (workspace root)
+        script: |
+          cd $CM_BUILD_DIR
+          pnpm install --frozen-lockfile
+      - name: Build iOS IPA with EAS
+        working_directory: artifacts/pilot-mobile
+        script: |
+          npx eas-cli@latest build \
+            --platform ios \
+            --profile production \
+            --non-interactive \
+            --no-wait=false \
+            --local \
+            --output $CM_BUILD_DIR/flight-hour-tracker.ipa
+    artifacts:
+      - flight-hour-tracker.ipa
+    publishing:
+      email:
+        recipients:
+          - YOUR_EMAIL@example.com
+        notify:
+          success: true
+          failure: true
