@@ -128,11 +128,7 @@ interface AuthCtx extends AuthState {
   activateLicense: (key: string, username: string) => Promise<{ ok: boolean; error?: string }>;
   configureSquadron: (cfg: SquadronConfig) => void;
   login: (username: string, password: string) => Promise<LoginResult>;
-  // `masterKey` is only required when the current pending step is an initial
-  // 2FA enrollment — it prevents a Super-Admin-password-only attacker from
-  // planting their own Authenticator secret on a fresh PC. Ignored during a
-  // normal "verify" step.
-  verifyAdminTotp: (code: string, masterKey?: string) => Promise<{ ok: boolean; error?: string; recoveryCodes?: string[] }>;
+  verifyAdminTotp: (code: string) => Promise<{ ok: boolean; error?: string; recoveryCodes?: string[] }>;
   // Mints a fresh set of recovery codes for the signed-in super admin
   // after re-confirming a current 6-digit TOTP code. Old codes are
   // invalidated server-side. Returns the new plaintext codes once.
@@ -153,7 +149,7 @@ interface AuthCtx extends AuthState {
   // gets leaked or forgotten — the system owner uses the off-device master
   // key to force a fresh password on that specific PC. No server round-trip
   // in standalone mode; in Supabase mode this returns server_managed.
-  resetSuperAdminPasswordWithMaster: (masterPassword: string, newPassword: string, totpCode: string) => Promise<{ ok: boolean; error?: string }>;
+  resetSuperAdminPasswordWithMaster: (masterPassword: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>;
   cancelAdminTotp: () => void;
   pendingAdmin: { mode: "enroll" | "verify"; secret: string; otpauth: string } | null;
   adminTotpEnrolled: boolean;
@@ -528,7 +524,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ? { mode: pending.mode, secret: pending.secret, otpauth: pending.otpauth }
       : null,
     adminTotpEnrolled,
-    verifyAdminTotp: async (code, masterKey) => {
+    verifyAdminTotp: async (code) => {
       if (!pending) return { ok: false, error: "no_pending" };
       const now = Date.now();
       if (state.lockedUntil && state.lockedUntil > now) {
@@ -539,24 +535,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const usedRecoveryShape = isRecoveryCodeShape(trimmed);
       if (!isTotpShape(trimmed) && !usedRecoveryShape) {
         return { ok: false, error: "bad" };
-      }
-
-      // Enrollment is a privileged action because it plants the 2FA secret
-      // that all future logins on this PC will trust. Require the Master
-      // Recovery Key here, so knowing only the Super Admin password is not
-      // enough to register a new Authenticator against this PC.
-      if (pending.mode === "enroll") {
-        const mk = (masterKey ?? "").trim();
-        if (!mk) return { ok: false, error: "master_required" };
-        const mkHash = await sha256Hex(mk);
-        if (mkHash !== MASTER_RECOVERY_HASH) {
-          await recordAuditEvent({
-            type: "login.2fa.enroll_blocked",
-            actor: pending.user.username,
-            detail: { reason: "bad_master" },
-          });
-          return { ok: false, error: "bad_master" };
-        }
       }
 
       // Server-backed verification path (production). The secret never
@@ -726,33 +704,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await recordAuditEvent({ type: "admin.password.provisioned", actor: "admin", detail: {} });
       return { ok: true };
     },
-    resetSuperAdminPasswordWithMaster: async (masterPassword, newPassword, totpCode) => {
+    resetSuperAdminPasswordWithMaster: async (masterPassword, newPassword) => {
       const mp = (masterPassword ?? "").trim();
       const np = (newPassword ?? "").trim();
-      const code = (totpCode ?? "").replace(/\s+/g, "");
       if (np.length < 8) return { ok: false, error: "too_short" };
       if (supabaseConfigured) return { ok: false, error: "server_managed" };
-      // Second factor is mandatory: this path bypasses the current password,
-      // so the Authenticator code stops anyone who has only learned the
-      // master key from using it unaccompanied.
-      const totpSecret = localStorage.getItem(ADMIN_TOTP_SECRET_KEY);
-      if (!totpSecret) {
-        await recordAuditEvent({ type: "admin.password.master_reset.failed", actor: "unknown", detail: { reason: "no_totp_enrolled" } });
-        return { ok: false, error: "no_totp_enrolled" };
-      }
       const masterHash = await sha256Hex(mp);
       if (masterHash !== MASTER_RECOVERY_HASH) {
         await recordAuditEvent({ type: "admin.password.master_reset.failed", actor: "unknown", detail: { reason: "bad_master" } });
         return { ok: false, error: "bad_master" };
-      }
-      if (!/^\d{6}$/.test(code)) {
-        await recordAuditEvent({ type: "admin.password.master_reset.failed", actor: "master-recovery", detail: { reason: "bad_totp_shape" } });
-        return { ok: false, error: "bad_totp" };
-      }
-      const totpOk = await verifyTotp(totpSecret, code);
-      if (!totpOk) {
-        await recordAuditEvent({ type: "admin.password.master_reset.failed", actor: "master-recovery", detail: { reason: "bad_totp" } });
-        return { ok: false, error: "bad_totp" };
       }
       const newHash = await sha256Hex(np);
       localStorage.setItem(ADMIN_PASSWORD_HASH_KEY, newHash);

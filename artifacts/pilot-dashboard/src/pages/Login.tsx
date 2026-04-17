@@ -37,9 +37,6 @@ export default function LoginGate() {
   const [codeErr, setCodeErr] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [recoveryMode, setRecoveryMode] = useState(false);
-  // Master Recovery Key required to complete an initial 2FA enrollment. Kept
-  // local to the login screen so it never persists anywhere.
-  const [enrollMasterKey, setEnrollMasterKey] = useState("");
   const [recoveryCopied, setRecoveryCopied] = useState(false);
 
   // HQ users (super admin / commanders) bypass license + squadron setup.
@@ -108,14 +105,10 @@ export default function LoginGate() {
   const submitTotp = async (e: React.FormEvent) => {
     e.preventDefault();
     setCodeErr(null);
-    const r = await verifyAdminTotp(code, enrollMasterKey);
+    const r = await verifyAdminTotp(code);
     if (!r.ok) {
-      if (r.error === "locked") setCodeErr(t("lockedOut"));
-      else if (r.error === "master_required" || r.error === "bad_master") setCodeErr(t("enrollBadMaster"));
-      else setCodeErr(t("twoFactorBad"));
-      return;
+      setCodeErr(r.error === "locked" ? t("lockedOut") : t("twoFactorBad"));
     }
-    setEnrollMasterKey("");
   };
   const copyRecoveryCodes = async () => {
     if (!pendingRecoveryCodes) return;
@@ -224,19 +217,6 @@ export default function LoginGate() {
                     <div data-testid="text-totp-secret" className="mt-1 px-3 py-2 rounded-md bg-input border border-border font-mono text-xs tracking-wider break-all select-all">
                       {pendingAdmin.secret}
                     </div>
-                  </div>
-                  <div className="rounded-md border border-amber-600/40 bg-amber-500/10 p-3 space-y-2">
-                    <div className="text-[11px] text-amber-300 font-medium">{t("enrollMasterRequiredTitle")}</div>
-                    <p className="text-[11px] text-amber-200/90">{t("enrollMasterRequiredHint")}</p>
-                    <input
-                      type="password"
-                      autoComplete="off"
-                      value={enrollMasterKey}
-                      onChange={e => { setEnrollMasterKey(e.target.value); setCodeErr(null); }}
-                      placeholder={t("masterResetKey")}
-                      className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
-                      data-testid="input-enroll-master-key"
-                    />
                   </div>
                 </>
               )}

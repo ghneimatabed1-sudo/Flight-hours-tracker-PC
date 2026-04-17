@@ -26,7 +26,6 @@ export default function AdminSecurity() {
   const [mrMaster, setMrMaster] = useState("");
   const [mrNew, setMrNew] = useState("");
   const [mrConfirm, setMrConfirm] = useState("");
-  const [mrTotp, setMrTotp] = useState("");
   const [mrBusy, setMrBusy] = useState(false);
   const [mrErr, setMrErr] = useState<string | null>(null);
   const [mrOk, setMrOk] = useState(false);
@@ -37,20 +36,17 @@ export default function AdminSecurity() {
     setMrOk(false);
     if (mrNew.length < 8) { setMrErr(t("pwTooShort")); return; }
     if (mrNew !== mrConfirm) { setMrErr(t("pwMismatch")); return; }
-    if (!/^\d{6}$/.test(mrTotp.replace(/\s+/g, ""))) { setMrErr(t("masterResetBadTotp")); return; }
     setMrBusy(true);
-    const res = await resetSuperAdminPasswordWithMaster(mrMaster, mrNew, mrTotp);
+    const res = await resetSuperAdminPasswordWithMaster(mrMaster, mrNew);
     setMrBusy(false);
     if (!res.ok) {
       if (res.error === "bad_master") setMrErr(t("masterResetBadMaster"));
-      else if (res.error === "bad_totp") setMrErr(t("masterResetBadTotp"));
-      else if (res.error === "no_totp_enrolled") setMrErr(t("masterResetNoTotp"));
       else if (res.error === "too_short") setMrErr(t("pwTooShort"));
       else if (res.error === "server_managed") setMrErr(t("pwServerManaged"));
       else setMrErr(t("pwGenericError"));
       return;
     }
-    setMrMaster(""); setMrNew(""); setMrConfirm(""); setMrTotp("");
+    setMrMaster(""); setMrNew(""); setMrConfirm("");
     setMrOk(true);
     window.setTimeout(() => setMrOk(false), 5000);
   };
@@ -334,28 +330,12 @@ export default function AdminSecurity() {
                   data-testid="input-master-recovery-confirm"
                 />
               </div>
-              <div>
-                <label className="text-xs text-muted-foreground">{t("masterResetTotp")}</label>
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={7}
-                  placeholder="123 456"
-                  value={mrTotp}
-                  onChange={e => { setMrTotp(e.target.value); setMrErr(null); setMrOk(false); }}
-                  data-testid="input-master-recovery-totp"
-                />
-                {!adminTotpEnrolled && (
-                  <p className="text-[11px] text-destructive mt-1" data-testid="text-master-recovery-enroll-hint">{t("masterResetNoTotp")}</p>
-                )}
-              </div>
               {mrErr && <p className="text-xs text-destructive" data-testid="text-master-recovery-error">{mrErr}</p>}
               {mrOk && <p className="text-xs text-emerald-400" data-testid="text-master-recovery-ok">{t("masterResetOk")}</p>}
               <Button
                 type="submit"
                 variant="destructive"
-                disabled={mrBusy || !mrMaster || !mrNew || !mrConfirm || !mrTotp || !adminTotpEnrolled}
+                disabled={mrBusy || !mrMaster || !mrNew || !mrConfirm}
                 data-testid="button-master-recovery-submit"
               >
                 {mrBusy ? t("saving") : t("masterResetBtn")}
