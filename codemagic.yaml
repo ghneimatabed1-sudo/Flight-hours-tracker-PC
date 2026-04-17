@@ -1,30 +1,34 @@
 workflows:
   android-apk:
-    name: Flight Hour Tracker - Android APK
+    name: Flight Hour Tracker - Android APK (debug)
     max_build_duration: 60
+    instance_type: mac_mini_m2
     environment:
       node: 20
       java: 17
-      groups:
-        - expo_credentials
     scripts:
-      - name: Install pnpm
+      - name: Ensure pnpm
         script: |
-          npm install -g pnpm@9
+          corepack enable
+          corepack prepare pnpm@9.12.0 --activate
+          pnpm --version
       - name: Install dependencies (workspace root)
         script: |
           cd $CM_BUILD_DIR
-          pnpm install --frozen-lockfile
-      - name: Build Android APK with EAS
+          pnpm install --no-frozen-lockfile
+      - name: Expo prebuild (android)
         working_directory: artifacts/pilot-mobile
         script: |
-          npx eas-cli@latest build \
-            --platform android \
-            --profile production \
-            --non-interactive \
-            --no-wait=false \
-            --local \
-            --output $CM_BUILD_DIR/flight-hour-tracker.apk
+          npx expo prebuild --platform android --no-install --clean
+      - name: Build Android debug APK
+        working_directory: artifacts/pilot-mobile/android
+        script: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease -x lint
+      - name: Collect artifact
+        script: |
+          cp $CM_BUILD_DIR/artifacts/pilot-mobile/android/app/build/outputs/apk/release/*.apk \
+             $CM_BUILD_DIR/flight-hour-tracker.apk
     artifacts:
       - flight-hour-tracker.apk
     publishing:
@@ -35,39 +39,105 @@ workflows:
           success: true
           failure: true
 
-  ios-ipa:
-    name: Flight Hour Tracker - iOS IPA
+  ios-ipa-simulator:
+    name: Flight Hour Tracker - iOS IPA (simulator, unsigned)
     max_build_duration: 90
+    instance_type: mac_mini_m2
+    environment:
+      node: 20
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Ensure pnpm
+        script: |
+          corepack enable
+          corepack prepare pnpm@9.12.0 --activate
+      - name: Install dependencies (workspace root)
+        script: |
+          cd $CM_BUILD_DIR
+          pnpm install --no-frozen-lockfile
+      - name: Expo prebuild (ios)
+        working_directory: artifacts/pilot-mobile
+        script: |
+          npx expo prebuild --platform ios --no-install --clean
+      - name: CocoaPods install
+        working_directory: artifacts/pilot-mobile/ios
+        script: |
+          pod install
+      - name: Build iOS for Simulator
+        working_directory: artifacts/pilot-mobile/ios
+        script: |
+          set -e
+          WORKSPACE=$(ls *.xcworkspace | head -1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          xcodebuild -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+          APP_PATH=$(find build/Build/Products -name "*.app" -type d | head -1)
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qr "$CM_BUILD_DIR/flight-hour-tracker-simulator.ipa" Payload
+    artifacts:
+      - flight-hour-tracker-simulator.ipa
+    publishing:
+      email:
+        recipients:
+          - ghneimatabed1@icloud.com
+        notify:
+          success: true
+          failure: true
+
+  ios-ipa-device:
+    name: Flight Hour Tracker - iOS IPA (signed, requires Apple cert)
+    max_build_duration: 90
+    instance_type: mac_mini_m2
     integrations:
       app_store_connect: codemagic
     environment:
       node: 20
       xcode: latest
       cocoapods: default
-      groups:
-        - expo_credentials
-        - ios_credentials
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.rjaf.pilotlogbook
     scripts:
-      - name: Install pnpm
+      - name: Ensure pnpm
         script: |
-          npm install -g pnpm@9
+          corepack enable
+          corepack prepare pnpm@9.12.0 --activate
       - name: Install dependencies (workspace root)
         script: |
           cd $CM_BUILD_DIR
-          pnpm install --frozen-lockfile
-      - name: Build iOS IPA with EAS
+          pnpm install --no-frozen-lockfile
+      - name: Expo prebuild (ios)
         working_directory: artifacts/pilot-mobile
         script: |
-          npx eas-cli@latest build \
-            --platform ios \
-            --profile production \
-            --non-interactive \
-            --no-wait=false \
-            --local \
-            --output $CM_BUILD_DIR/flight-hour-tracker.ipa
+          npx expo prebuild --platform ios --no-install --clean
+      - name: CocoaPods install
+        working_directory: artifacts/pilot-mobile/ios
+        script: |
+          pod install
+      - name: Set up signing
+        working_directory: artifacts/pilot-mobile/ios
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "com.rjaf.pilotlogbook" \
+            --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles
+      - name: Build signed IPA
+        working_directory: artifacts/pilot-mobile/ios
+        script: |
+          WORKSPACE=$(ls *.xcworkspace | head -1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          xcode-project build-ipa \
+            --workspace "$WORKSPACE" \
+            --scheme "$SCHEME" \
+            --archive-flags "-destination 'generic/platform=iOS'"
+          cp build/ios/ipa/*.ipa $CM_BUILD_DIR/flight-hour-tracker.ipa
     artifacts:
       - flight-hour-tracker.ipa
     publishing:
