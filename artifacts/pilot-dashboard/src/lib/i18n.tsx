@@ -327,7 +327,7 @@ const dict = {
     creditsBlurb: "For support, feedback, or questions about this system, please contact the developer.",
   },
   ar: {
-    appName: "عمليات أسراب القوات الجوية الملكية الأردنية",
+    appName: "أسراب عمليات سلاح الجو الملكي",
     appTag: "سلاح الجو الملكي الأردني — نظام إدارة الأسراب",
     licenseTitle: "تفعيل الترخيص",
     licensePrompt: "أدخل مفتاح الترخيص الصادر من المسؤول الأعلى.",
