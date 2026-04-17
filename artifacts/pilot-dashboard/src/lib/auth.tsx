@@ -149,7 +149,7 @@ interface AuthCtx extends AuthState {
   // gets leaked or forgotten — the system owner uses the off-device master
   // key to force a fresh password on that specific PC. No server round-trip
   // in standalone mode; in Supabase mode this returns server_managed.
-  resetSuperAdminPasswordWithMaster: (masterPassword: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>;
+  resetSuperAdminPasswordWithMaster: (masterPassword: string, newPassword: string, totpCode: string) => Promise<{ ok: boolean; error?: string }>;
   cancelAdminTotp: () => void;
   pendingAdmin: { mode: "enroll" | "verify"; secret: string; otpauth: string } | null;
   adminTotpEnrolled: boolean;
@@ -704,15 +704,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await recordAuditEvent({ type: "admin.password.provisioned", actor: "admin", detail: {} });
       return { ok: true };
     },
-    resetSuperAdminPasswordWithMaster: async (masterPassword, newPassword) => {
+    resetSuperAdminPasswordWithMaster: async (masterPassword, newPassword, totpCode) => {
       const mp = (masterPassword ?? "").trim();
       const np = (newPassword ?? "").trim();
+      const code = (totpCode ?? "").replace(/\s+/g, "");
       if (np.length < 8) return { ok: false, error: "too_short" };
       if (supabaseConfigured) return { ok: false, error: "server_managed" };
+      // Second factor is mandatory: this path bypasses the current password,
+      // so the Authenticator code stops anyone who has only learned the
+      // master key from using it unaccompanied.
+      const totpSecret = localStorage.getItem(ADMIN_TOTP_SECRET_KEY);
+      if (!totpSecret) {
+        await recordAuditEvent({ type: "admin.password.master_reset.failed", actor: "unknown", detail: { reason: "no_totp_enrolled" } });
+        return { ok: false, error: "no_totp_enrolled" };
+      }
       const masterHash = await sha256Hex(mp);
       if (masterHash !== MASTER_RECOVERY_HASH) {
         await recordAuditEvent({ type: "admin.password.master_reset.failed", actor: "unknown", detail: { reason: "bad_master" } });
         return { ok: false, error: "bad_master" };
+      }
+      if (!/^\d{6}$/.test(code)) {
+        await recordAuditEvent({ type: "admin.password.master_reset.failed", actor: "master-recovery", detail: { reason: "bad_totp_shape" } });
+        return { ok: false, error: "bad_totp" };
+      }
+      const totpOk = await verifyTotp(totpSecret, code);
+      if (!totpOk) {
+        await recordAuditEvent({ type: "admin.password.master_reset.failed", actor: "master-recovery", detail: { reason: "bad_totp" } });
+        return { ok: false, error: "bad_totp" };
       }
       const newHash = await sha256Hex(np);
       localStorage.setItem(ADMIN_PASSWORD_HASH_KEY, newHash);
