@@ -8,7 +8,7 @@ export default function LoginGate() {
   const {
     licensed, configured, activateLicense, configureSquadron, login, fingerprint,
     lockedUntil, user, pendingAdmin, verifyAdminTotp, cancelAdminTotp,
-    pendingRecoveryCodes, ackRecoveryCodes,
+    pendingRecoveryCodes, ackRecoveryCodes, provisionSuperAdmin,
   } = useAuth();
   const { t, lang, setLang } = useI18n();
 
@@ -23,6 +23,15 @@ export default function LoginGate() {
   const [u, setU] = useState("");
   const [p, setP] = useState("");
   const [err, setErr] = useState<string | null>(null);
+
+  // First-run Super Admin password setup. Triggered when login() returns
+  // { error: "admin_not_provisioned" }, meaning this PC has no admin hash
+  // yet. The user picks a password here and it is hashed + stored locally.
+  const [setupMode, setSetupMode] = useState(false);
+  const [setupPw1, setSetupPw1] = useState("");
+  const [setupPw2, setSetupPw2] = useState("");
+  const [setupErr, setSetupErr] = useState<string | null>(null);
+  const [setupOk, setSetupOk] = useState(false);
 
   const [code, setCode] = useState("");
   const [codeErr, setCodeErr] = useState<string | null>(null);
@@ -61,8 +70,30 @@ export default function LoginGate() {
     setErr(null);
     const r = await login(u, p);
     if (!r.ok && !r.requires2fa) {
+      if (r.error === "admin_not_provisioned") {
+        setSetupMode(true);
+        setSetupPw1(""); setSetupPw2(""); setSetupErr(null); setSetupOk(false);
+        return;
+      }
       setErr(r.error === "locked" ? t("lockedOut") : t("badCreds"));
     }
+  };
+  const submitProvision = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSetupErr(null);
+    if (setupPw1.length < 8) { setSetupErr(t("pwTooShort")); return; }
+    if (setupPw1 !== setupPw2) { setSetupErr(t("pwMismatch")); return; }
+    const r = await provisionSuperAdmin(setupPw1);
+    if (!r.ok) {
+      setSetupErr(r.error === "too_short" ? t("pwTooShort") : t("badCreds"));
+      return;
+    }
+    setSetupOk(true);
+    // Pre-fill the login form so they can sign in immediately.
+    setU("admin"); setP(setupPw1);
+    setSetupPw1(""); setSetupPw2("");
+    // Drop back to the login form after a brief confirmation.
+    window.setTimeout(() => { setSetupMode(false); setSetupOk(false); }, 1200);
   };
   const submitTotp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -250,6 +281,34 @@ export default function LoginGate() {
               <button
                 type="button"
                 onClick={() => { cancelAdminTotp(); setCode(""); setCodeErr(null); setRecoveryMode(false); }}
+                className="w-full text-[11px] text-muted-foreground hover:text-foreground underline"
+              >
+                ← {t("cancel")}
+              </button>
+            </form>
+          ) : setupMode ? (
+            <form onSubmit={submitProvision} className="space-y-3" data-testid="form-first-run-setup">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <KeyRound className="h-4 w-4 text-amber-400" />
+                {t("firstRunTitle")}
+              </div>
+              <p className="text-xs text-muted-foreground">{t("firstRunHint")}</p>
+              <Field label={t("newPassword")} value={setupPw1} onChange={setSetupPw1} type="password" />
+              <Field label={t("confirmPassword")} value={setupPw2} onChange={setSetupPw2} type="password" />
+              {setupOk
+                ? <div className="text-xs text-emerald-400">{t("pwSet")}</div>
+                : setupErr && <div className="text-xs text-destructive">{setupErr}</div>}
+              <button
+                type="submit"
+                data-testid="button-provision-admin"
+                disabled={setupOk}
+                className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 disabled:opacity-50"
+              >
+                {t("provision")}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSetupMode(false); setSetupErr(null); }}
                 className="w-full text-[11px] text-muted-foreground hover:text-foreground underline"
               >
                 ← {t("cancel")}

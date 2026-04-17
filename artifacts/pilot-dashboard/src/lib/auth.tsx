@@ -13,9 +13,11 @@ import { generateSecret, otpauthURL, verifyTotp } from "./totp";
 const ADMIN_TOTP_SECRET_KEY = "rjaf.adminTotp.secret";
 const ADMIN_TOTP_RECOVERY_KEY = "rjaf.adminTotp.recovery";
 const ADMIN_TOTP_REMAINING_KEY = "rjaf.adminTotp.remaining";
-// SHA-256 hex of the current super admin password. Only consulted in demo
-// mode (no Supabase): when set, overrides the DEFAULT_ADMIN_PASSWORD_HASH.
-// In Supabase mode the real hash lives server-side in SUPER_ADMIN_PASSWORD_HASH.
+// SHA-256 hex of the super admin password chosen on THIS PC during first-run
+// setup. In standalone mode this is the only acceptable credential; if the
+// key is missing, the login path returns `admin_not_provisioned` so the UI
+// can route the user into the provisioning form. In Supabase mode the real
+// hash lives server-side (SUPER_ADMIN_PASSWORD_HASH) and this key is unused.
 const ADMIN_PASSWORD_HASH_KEY = "rjaf.admin.passwordHash";
 const ADMIN_TOTP_ISSUER = "RJAF Pilot Dashboard";
 const RECOVERY_CODE_COUNT = 10;
@@ -110,6 +112,11 @@ interface AuthCtx extends AuthState {
   // and takes effect immediately. In Supabase mode the hash lives server-side
   // and this call returns { ok: false, error: "server_managed" }.
   changeSuperAdminPassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>;
+  // First-run setup: write the initial Super Admin password hash on this
+  // specific PC. Only succeeds when no hash has been provisioned yet —
+  // calling it once a hash exists returns { ok: false, error: "already_set" }
+  // so a leaked UI path cannot be used to overwrite a live admin password.
+  provisionSuperAdmin: (newPassword: string) => Promise<{ ok: boolean; error?: string }>;
   cancelAdminTotp: () => void;
   pendingAdmin: { mode: "enroll" | "verify"; secret: string; otpauth: string } | null;
   adminTotpEnrolled: boolean;
@@ -171,14 +178,16 @@ async function makeFingerprint(): Promise<string> {
 
 // Commander accounts are created by the Super Admin through the Admin →
 // Commanders page; password hashes live in the local commander store
-// (see ./commander-store). The super admin's password is held server-side
-// (SUPER_ADMIN_PASSWORD_HASH) in Supabase mode; in standalone mode the
-// DEFAULT_ADMIN_PASSWORD_HASH below is used.
-// Default super admin password — stored as a SHA-256 hash so the raw password
-// never lives in the source. When a super admin changes their password via
-// Settings → Security, the new hash is written to ADMIN_PASSWORD_HASH_KEY in
-// localStorage and overrides this default on that device only.
-const DEFAULT_ADMIN_PASSWORD_HASH = "e25d97cfa9c1ef91c61b0f84a92a19fcbaa490ebde6e91387b1b2cd0be403af1";
+// (see ./commander-store).
+//
+// The Super Admin password is NOT baked into the source. On a fresh install
+// the ADMIN_PASSWORD_HASH_KEY slot in localStorage is empty; the first time
+// someone tries to log in as `admin`, the login API returns
+// `admin_not_provisioned` and the Login page renders a first-run setup form
+// that calls provisionSuperAdmin() to store a hash of a password the Super
+// Admin chooses on that specific PC. Every installed copy therefore has its
+// own unique admin password — no shared default can leak across squadrons.
+// In Supabase mode the hash lives server-side and this whole flow is bypassed.
 
 function lookupHQUser(username: string): User | null {
   const u = username.trim().toLowerCase();
@@ -360,21 +369,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        // Demo-only fallback: in-browser preview without Supabase. Prefer the
-        // admin-chosen password hash from localStorage (set via the Change
-        // Password flow on the Security page). Fall back to the hardcoded demo
-        // default only when no override has been stored.
+        // Standalone mode (no Supabase): verify against the admin-chosen
+        // password hash that was set during first-run setup on THIS PC. If
+        // nothing is stored yet, tell the UI to show the first-run setup
+        // form — we never accept any input as a successful login until a
+        // hash has been deliberately written by the Super Admin.
         {
           const storedHash = localStorage.getItem(ADMIN_PASSWORD_HASH_KEY);
-          if (storedHash) {
-            const attemptHash = await sha256Hex(password);
-            if (attemptHash !== storedHash) return await recordFail("bad_credentials");
-          } else {
-            const attemptHash = await sha256Hex(password);
-            if (attemptHash !== DEFAULT_ADMIN_PASSWORD_HASH) {
-              return await recordFail("bad_credentials");
-            }
+          if (!storedHash) {
+            await recordAuditEvent({ type: "login.admin_not_provisioned", actor: username });
+            return { ok: false, error: "admin_not_provisioned" };
           }
+          const attemptHash = await sha256Hex(password);
+          if (attemptHash !== storedHash) return await recordFail("bad_credentials");
         }
         const existing = localStorage.getItem(ADMIN_TOTP_SECRET_KEY);
         if (existing) {
@@ -432,13 +439,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { ok: true };
       }
 
-      if (!username || password.length < 4) return await recordFail("bad_credentials");
-      const user: User = { username, role: "ops", displayName: username };
-      localStorage.setItem("rjaf.user", JSON.stringify(user));
-      localStorage.removeItem("rjaf.fails");
-      localStorage.removeItem("rjaf.lockUntil");
-      setState(s => ({ ...s, user, failedAttempts: 0, lockedUntil: null }));
-      return { ok: true };
+      // Any other username in standalone mode is rejected. Ops officers do
+      // not authenticate through this password form at all — their entry
+      // path is license-key activation, which runs on a different screen
+      // and never calls login(). Historically this function had a
+      // "password.length >= 4 wins" fallback here, which meant anyone who
+      // knew a commander's username could guess a 4-char password and sign
+      // in as ops. That fallback is gone; unknown accounts always fail.
+      return await recordFail("unknown_user");
     },
     pendingAdmin: pending
       ? { mode: pending.mode, secret: pending.secret, otpauth: pending.otpauth }
@@ -604,6 +612,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState(s => ({ ...s, user: hqUser, failedAttempts: 0, lockedUntil: null }));
       return { ok: true };
     },
+    provisionSuperAdmin: async (newPassword) => {
+      const np = (newPassword ?? "").trim();
+      if (np.length < 8) return { ok: false, error: "too_short" };
+      if (supabaseConfigured) {
+        // In Supabase mode the password is managed server-side and can't
+        // be set from the client.
+        return { ok: false, error: "server_managed" };
+      }
+      if (localStorage.getItem(ADMIN_PASSWORD_HASH_KEY)) {
+        // Safety net: refuse to overwrite an existing admin password. If
+        // the Super Admin forgot their password they must rotate through
+        // Settings → Security (which requires the current one) or clear
+        // the local install.
+        return { ok: false, error: "already_set" };
+      }
+      const newHash = await sha256Hex(np);
+      localStorage.setItem(ADMIN_PASSWORD_HASH_KEY, newHash);
+      await recordAuditEvent({ type: "admin.password.provisioned", actor: "admin", detail: {} });
+      return { ok: true };
+    },
     changeSuperAdminPassword: async (currentPassword, newPassword) => {
       const u = state.user;
       if (!u || u.role !== "super_admin") return { ok: false, error: "unauthorized" };
@@ -619,20 +647,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // Demo / standalone mode: verify the current password against the stored
-      // hash (or the hardcoded default if no hash has been set yet).
+      // hash. If nothing is stored, the admin has never completed first-run
+      // setup — tell the caller so the Login page can route them through
+      // provisionSuperAdmin() instead.
       const storedHash = localStorage.getItem(ADMIN_PASSWORD_HASH_KEY);
-      if (storedHash) {
-        const attemptHash = await sha256Hex(currentPassword);
-        if (attemptHash !== storedHash) {
-          await recordAuditEvent({ type: "admin.password.change.failed", actor: u.username, detail: { reason: "bad_current" } });
-          return { ok: false, error: "bad_current" };
-        }
-      } else {
-        const attemptHash = await sha256Hex(currentPassword);
-        if (attemptHash !== DEFAULT_ADMIN_PASSWORD_HASH) {
-          await recordAuditEvent({ type: "admin.password.change.failed", actor: u.username, detail: { reason: "bad_current" } });
-          return { ok: false, error: "bad_current" };
-        }
+      if (!storedHash) {
+        return { ok: false, error: "not_provisioned" };
+      }
+      const attemptHash = await sha256Hex(currentPassword);
+      if (attemptHash !== storedHash) {
+        await recordAuditEvent({ type: "admin.password.change.failed", actor: u.username, detail: { reason: "bad_current" } });
+        return { ok: false, error: "bad_current" };
       }
 
       const newHash = await sha256Hex(np);
