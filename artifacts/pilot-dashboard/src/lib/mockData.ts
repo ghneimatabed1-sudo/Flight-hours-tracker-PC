@@ -69,10 +69,21 @@ export const pilots: Pilot[] = (() => {
         irtCurrencyDate: dateOffset(irt),
         medicalCurrencyDate: dateOffset(med),
         qualifications: (() => {
-          const pool = ["MTP", "QHI", "IP", "NVG", "TAC"];
+          const pool = ["MTP", "QHI", "IP", "IE", "NVG", "TAC", "FI"];
+          // Guarantee the first few pilots in each squadron have visible
+          // qualifications so commanders immediately see the badges in demo.
+          const fixed: Record<number, string[]> = {
+            0: ["MTP", "IP"],
+            1: ["QHI"],
+            2: ["IE", "NVG"],
+            3: ["MTP"],
+            4: ["QHI", "TAC"],
+            5: ["IP"],
+          };
+          if (fixed[i]) return fixed[i];
           const roll = r();
-          if (roll < 0.55) return [];
-          const n = roll < 0.85 ? 1 : 2;
+          if (roll < 0.35) return [];
+          const n = roll < 0.8 ? 1 : 2;
           const picked: string[] = [];
           for (let k = 0; k < n; k++) {
             const q = pool[Math.floor(r() * pool.length)];
