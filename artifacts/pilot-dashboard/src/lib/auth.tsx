@@ -19,6 +19,14 @@ const ADMIN_TOTP_REMAINING_KEY = "rjaf.adminTotp.remaining";
 // can route the user into the provisioning form. In Supabase mode the real
 // hash lives server-side (SUPER_ADMIN_PASSWORD_HASH) and this key is unused.
 const ADMIN_PASSWORD_HASH_KEY = "rjaf.admin.passwordHash";
+// Default super admin password ships baked into every install as a SHA-256
+// hash so the raw password never appears in source. Every copy accepts this
+// password on first sign-in; once the super admin rotates it through Admin
+// → Security (changeSuperAdminPassword), the new hash is written to
+// ADMIN_PASSWORD_HASH_KEY and takes precedence over this default on that PC.
+// In Supabase mode the real hash lives server-side (SUPER_ADMIN_PASSWORD_HASH)
+// and this default is ignored.
+const DEFAULT_ADMIN_PASSWORD_HASH = "e25d97cfa9c1ef91c61b0f84a92a19fcbaa490ebde6e91387b1b2cd0be403af1";
 // Per-PC role lock chosen by the Super Admin on the Security page. When set,
 // the login screen hides every role except the locked one, and login() /
 // activateLicense() refuse to authenticate any user whose role doesn't match.
@@ -406,18 +414,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         // Standalone mode (no Supabase): verify against the admin-chosen
-        // password hash that was set during first-run setup on THIS PC. If
-        // nothing is stored yet, tell the UI to show the first-run setup
-        // form — we never accept any input as a successful login until a
-        // hash has been deliberately written by the Super Admin.
+        // password hash on this PC if one has been set, otherwise against
+        // the baked-in DEFAULT_ADMIN_PASSWORD_HASH. This way every fresh
+        // install accepts the factory-default super admin password without
+        // forcing a first-run setup step; the admin can rotate it any time
+        // from Admin → Security.
         {
           const storedHash = localStorage.getItem(ADMIN_PASSWORD_HASH_KEY);
-          if (!storedHash) {
-            await recordAuditEvent({ type: "login.admin_not_provisioned", actor: username });
-            return { ok: false, error: "admin_not_provisioned" };
-          }
+          const expectedHash = storedHash ?? DEFAULT_ADMIN_PASSWORD_HASH;
           const attemptHash = await sha256Hex(password);
-          if (attemptHash !== storedHash) return await recordFail("bad_credentials");
+          if (attemptHash !== expectedHash) return await recordFail("bad_credentials");
         }
         const existing = localStorage.getItem(ADMIN_TOTP_SECRET_KEY);
         if (existing) {
@@ -690,16 +696,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { ok: false, error: "server_managed" };
       }
 
-      // Demo / standalone mode: verify the current password against the stored
-      // hash. If nothing is stored, the admin has never completed first-run
-      // setup — tell the caller so the Login page can route them through
-      // provisionSuperAdmin() instead.
+      // Demo / standalone mode: verify the current password against the PC's
+      // stored hash if one has been set, or the baked-in default otherwise
+      // (mirroring the login path). This way the admin can rotate the
+      // factory-default password right away without a separate provisioning
+      // step.
       const storedHash = localStorage.getItem(ADMIN_PASSWORD_HASH_KEY);
-      if (!storedHash) {
-        return { ok: false, error: "not_provisioned" };
-      }
+      const expectedHash = storedHash ?? DEFAULT_ADMIN_PASSWORD_HASH;
       const attemptHash = await sha256Hex(currentPassword);
-      if (attemptHash !== storedHash) {
+      if (attemptHash !== expectedHash) {
         await recordAuditEvent({ type: "admin.password.change.failed", actor: u.username, detail: { reason: "bad_current" } });
         return { ok: false, error: "bad_current" };
       }
