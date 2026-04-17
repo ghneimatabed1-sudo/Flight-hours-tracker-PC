@@ -53,3 +53,17 @@ All paths below are relative to `artifacts/pilot-dashboard/`.
 Many seeded fields (pilot expiry dates, leave year, etc.) are baked at generator-run time, so re-run `node supabase/seed/generate-seed.mjs` before provisioning a new environment to keep those dates realistic. After seeding, a quick `select count(*) from pilots; select count(*) from sorties;` (expect 16 / 80 for one squadron) confirms success.
 
 See `supabase/seed/README.md` for full details and the per-table row counts.
+
+## Per-pilot currency hiding
+The Pilot type has `hiddenCurrencies?: ("day"|"night"|"irt"|"medical"|"sim")[]`. Currencies in this list:
+- render as "N/A" on PilotDetail, the Currency tab, and ExpiredAfter
+- are excluded from the Dashboard expiring/expired alert
+- are persisted inside the `pilots.data` JSONB blob (no schema migration needed)
+Toggle UI lives on the Currencies card on /pilot/:id (Eye/EyeOff per row).
+
+## License-key uniqueness invariant
+A license key MUST be usable on exactly one PC (or one mobile pilot device) at a time.
+This is enforced server-side via the `validate-license` Supabase Edge Function plus
+the `lockedToDevice` field on license keys and the `licenseBoundFp` fingerprint stored
+in the desktop client's localStorage. If the same key is presented from a different
+hardware fingerprint, validation must fail and ops needs HQ to issue a fresh key.

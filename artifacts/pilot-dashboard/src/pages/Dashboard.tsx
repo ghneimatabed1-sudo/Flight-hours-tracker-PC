@@ -74,6 +74,7 @@ export default function Dashboard() {
   const expiring = PILOTS.flatMap(p => {
     const items: { pilot: string; type: string; date: string; status: "warn" | "bad" }[] = [];
     (["day", "night", "irt", "medical", "sim"] as const).forEach(c => {
+      if (p.hiddenCurrencies?.includes(c)) return; // ops marked this currency N/A for this pilot
       const s = statusOf(p.expiry[c]);
       if (s !== "ok") items.push({ pilot: p.name, type: c.toUpperCase(), date: p.expiry[c], status: s });
     });

@@ -61,6 +61,7 @@ function rowToPilot(r: Record<string, unknown>): Pilot {
     totalSim: Number(data.totalSim ?? 0),
     totalCaptain: Number(data.totalCaptain ?? 0),
     expiry: data.expiry ?? { day: "", night: "", irt: "", medical: "", sim: "" },
+    hiddenCurrencies: Array.isArray(data.hiddenCurrencies) ? data.hiddenCurrencies : undefined,
   };
 }
 
@@ -127,6 +128,7 @@ export function useUpdatePilot() {
           totalSim: p.totalSim,
           totalCaptain: p.totalCaptain,
           expiry: p.expiry,
+          hiddenCurrencies: p.hiddenCurrencies,
         },
       }).eq("id", p.id).select().single();
       if (error) throw error;

@@ -15,7 +15,9 @@ export default function ExpiredAfter() {
       <PageHead title={t("nav_expired")} subtitle="Side-by-side: who is expired in each category" />
       <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-3">
         {CATS.map(c => {
-          const exp = PILOTS.filter(p => +new Date(p.expiry[c.k]) < Date.now())
+          const exp = PILOTS
+            .filter(p => !p.hiddenCurrencies?.includes(c.k))
+            .filter(p => +new Date(p.expiry[c.k]) < Date.now())
             .sort((a, b) => +new Date(a.expiry[c.k]) - +new Date(b.expiry[c.k]));
           return (
             <Card key={c.k}>

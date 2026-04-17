@@ -111,6 +111,12 @@ const dict = {
     mobileRevoked: "Device access revoked.",
     mobilePendingCode: "An unused code is currently active.",
 
+    notApplicable: "N/A",
+    currencyHide: "Mark not applicable",
+    currencyShow: "Track this currency",
+    currencyHiddenBadge: "Not tracked",
+    currencyHiddenHint: "This pilot does not fly this category — it will not appear in expired/expiring alerts.",
+
     monthlyTotals: "Monthly Squadron Totals",
     expiringAlert: "Expiring / Expired Currencies",
     dayHrs: "Day Hours",
@@ -397,6 +403,12 @@ const dict = {
     mobileRevokeConfirm: "إلغاء وصول هاتف هذا الطيار؟ سيُسجَّل خروجه من التطبيق في المزامنة التالية وستُمسح البيانات المخزنة.",
     mobileRevoked: "تم إلغاء وصول الجهاز.",
     mobilePendingCode: "يوجد رمز غير مستخدم نشط حالياً.",
+
+    notApplicable: "لا ينطبق",
+    currencyHide: "تحديد كغير منطبقة",
+    currencyShow: "تتبّع هذه الصلاحية",
+    currencyHiddenBadge: "غير مُتتبَّعة",
+    currencyHiddenHint: "هذا الطيار لا يطير هذه الفئة — لن تظهر في تنبيهات الانتهاء.",
 
     monthlyTotals: "إجماليات السرب الشهرية",
     expiringAlert: "صلاحيات منتهية / قاربت على الانتهاء",

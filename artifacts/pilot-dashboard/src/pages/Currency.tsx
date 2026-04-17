@@ -20,8 +20,9 @@ export default function Currency() {
 
   const rows = PILOTS
     .filter(p => unit === "All" || (unit === "SQDN" ? p.unit === "SQDN" : p.unit !== "SQDN"))
-    .map(p => ({ p, s: statusOf(p.expiry[tab]) }))
-    .sort((a, b) => a.s.days - b.s.days);
+    .map(p => ({ p, hidden: p.hiddenCurrencies?.includes(tab) ?? false, s: statusOf(p.expiry[tab]) }))
+    // Sort hidden rows to the bottom so the active currency list stays clean.
+    .sort((a, b) => Number(a.hidden) - Number(b.hidden) || a.s.days - b.s.days);
 
   return (
     <div>
@@ -50,12 +51,17 @@ export default function Currency() {
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ p, s }) => (
-              <tr key={p.id} className="border-t border-border row-hover">
+            {rows.map(({ p, s, hidden }) => (
+              <tr key={p.id} className={`border-t border-border row-hover ${hidden ? "opacity-50" : ""}`}>
                 <td className="px-3 py-2">{p.rank} {p.name}</td>
                 <td className="px-3 py-2 text-muted-foreground">{p.unit}</td>
-                <td className="px-3 py-2 font-mono">{p.expiry[tab]}</td>
-                <td className="px-3 py-2"><span className={`status-dot ${s.cls} mr-2`}></span><span className={s.cls === "status-bad" ? "text-rose-300" : s.cls === "status-warn" ? "text-amber-300" : "text-emerald-300"}>{s.lbl}</span></td>
+                <td className="px-3 py-2 font-mono">{hidden ? "—" : p.expiry[tab]}</td>
+                <td className="px-3 py-2">
+                  {hidden
+                    ? <span className="inline-flex items-center rounded px-2 py-0.5 text-xs bg-secondary text-muted-foreground border border-border">{t("notApplicable")}</span>
+                    : <><span className={`status-dot ${s.cls} mr-2`}></span><span className={s.cls === "status-bad" ? "text-rose-300" : s.cls === "status-warn" ? "text-amber-300" : "text-emerald-300"}>{s.lbl}</span></>
+                  }
+                </td>
               </tr>
             ))}
           </tbody>

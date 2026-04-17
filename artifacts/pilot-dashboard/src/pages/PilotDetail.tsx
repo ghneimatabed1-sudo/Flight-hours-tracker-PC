@@ -5,9 +5,11 @@ import { useI18n } from "@/lib/i18n";
 import {
   usePilots,
   useSorties,
+  useUpdatePilot,
   usePilotLinkStatus,
   useIssueLinkCode,
   useRevokePilotDevices,
+  type Pilot,
   type PilotLinkStatus,
 } from "@/lib/squadron-data";
 import { useAuth } from "@/lib/auth";
@@ -20,12 +22,15 @@ import {
   ShieldOff,
   RefreshCw,
   AlertTriangle,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 const cats = [
   { k: "day", label: "Day" }, { k: "night", label: "Night" },
   { k: "irt", label: "IRT" }, { k: "medical", label: "Medical" }, { k: "sim", label: "Sim" },
 ] as const;
+type CurrencyKey = typeof cats[number]["k"];
 
 function statusInfo(dateStr: string) {
   const days = Math.floor((+new Date(dateStr) - Date.now()) / 86400000);
@@ -58,22 +63,7 @@ export default function PilotDetail() {
           <div className="text-sm font-semibold mb-2">Grand Totals</div>
           <Stat k="Day" v={p.totalDay} /><Stat k="Night" v={p.totalNight} /><Stat k="NVG" v={p.totalNvg} accent="text-rose-300" /><Stat k="Sim" v={p.totalSim} /><Stat k="Captain" v={p.totalCaptain} />
         </Card>
-        <Card>
-          <div className="text-sm font-semibold mb-2">Currencies</div>
-          {cats.map(c => {
-            const s = statusInfo(p.expiry[c.k]);
-            return (
-              <div key={c.k} className="flex items-center justify-between py-1.5 border-b border-border last:border-b-0 text-sm">
-                <span>{c.label}</span>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs text-muted-foreground">{p.expiry[c.k]}</span>
-                  <span className={`status-dot ${s.cls}`}></span>
-                  <span className="text-xs w-20 text-right">{s.label}</span>
-                </div>
-              </div>
-            );
-          })}
-        </Card>
+        <CurrenciesCard pilot={p} />
       </div>
 
       <MobileAccessCard pilotId={p.id} />
@@ -112,6 +102,66 @@ export default function PilotDetail() {
         </div>
       </Card>
     </div>
+  );
+}
+
+function CurrenciesCard({ pilot }: { pilot: Pilot }) {
+  const { t } = useI18n();
+  const update = useUpdatePilot();
+  const hidden = pilot.hiddenCurrencies ?? [];
+
+  function toggle(k: CurrencyKey) {
+    const set = new Set(hidden);
+    if (set.has(k)) set.delete(k); else set.add(k);
+    const next = Array.from(set) as CurrencyKey[];
+    update.mutate({ ...pilot, hiddenCurrencies: next.length ? next : undefined });
+  }
+
+  const anyHidden = hidden.length > 0;
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-sm font-semibold">Currencies</div>
+        {anyHidden ? (
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-secondary border border-border text-muted-foreground">
+            {hidden.length} {t("currencyHiddenBadge")}
+          </span>
+        ) : null}
+      </div>
+      {cats.map(c => {
+        const isHidden = hidden.includes(c.k);
+        const s = isHidden ? null : statusInfo(pilot.expiry[c.k]);
+        return (
+          <div key={c.k} className={`flex items-center justify-between py-1.5 border-b border-border last:border-b-0 text-sm ${isHidden ? "opacity-60" : ""}`}>
+            <span>{c.label}</span>
+            <div className="flex items-center gap-2">
+              {isHidden ? (
+                <span className="text-xs px-2 py-0.5 rounded bg-secondary border border-border text-muted-foreground">{t("notApplicable")}</span>
+              ) : (
+                <>
+                  <span className="font-mono text-xs text-muted-foreground">{pilot.expiry[c.k]}</span>
+                  <span className={`status-dot ${s!.cls}`}></span>
+                  <span className="text-xs w-20 text-right">{s!.label}</span>
+                </>
+              )}
+              <button
+                onClick={() => toggle(c.k)}
+                title={isHidden ? t("currencyShow") : t("currencyHide")}
+                aria-label={isHidden ? t("currencyShow") : t("currencyHide")}
+                className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground"
+                data-testid={`button-toggle-currency-${c.k}`}
+              >
+                {isHidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          </div>
+        );
+      })}
+      {anyHidden ? (
+        <p className="text-[11px] text-muted-foreground mt-2 leading-snug">{t("currencyHiddenHint")}</p>
+      ) : null}
+    </Card>
   );
 }
 

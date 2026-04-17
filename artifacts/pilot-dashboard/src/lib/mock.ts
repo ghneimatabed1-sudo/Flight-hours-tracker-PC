@@ -31,9 +31,20 @@ export interface Pilot {
     medical: string;
     sim: string;
   };
+  // Currencies the ops officer has marked as not applicable for this pilot
+  // (e.g. a pilot who only flies NVG and has no night currency to track).
+  // Hidden currencies render as "N/A" everywhere and are excluded from
+  // expired/warning counts and alerts.
+  hiddenCurrencies?: ("day" | "night" | "irt" | "medical" | "sim")[];
   available: boolean;
   imported?: boolean;
   importedAt?: string;
+}
+
+export type CurrencyKey = "day" | "night" | "irt" | "medical" | "sim";
+
+export function isCurrencyHidden(p: Pick<Pilot, "hiddenCurrencies">, k: CurrencyKey): boolean {
+  return Array.isArray(p.hiddenCurrencies) && p.hiddenCurrencies.includes(k);
 }
 
 export interface Sortie {
