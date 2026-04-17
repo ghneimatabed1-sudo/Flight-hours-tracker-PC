@@ -14,7 +14,7 @@ import {
   loadReminderSession, saveReminderSession, clearReminderSession,
 } from "@/lib/reminder-session";
 import {
-  AlarmClock, RefreshCw, Power, PowerOff, ListChecks, AlertTriangle, Lock,
+  AlarmClock, RefreshCw, Power, PowerOff, ListChecks, AlertTriangle, Lock, Play,
 } from "lucide-react";
 
 interface ScheduleRun {
@@ -45,7 +45,7 @@ interface ScheduleStatus {
 const ADMIN_USERNAME = "admin";
 const DEFAULT_CRON = "0 6 * * *";
 
-type PendingAction = "status" | "enable" | "disable";
+type PendingAction = "status" | "enable" | "disable" | "run-now";
 
 export default function RemindersSchedule() {
   const { t, lang } = useI18n();
@@ -68,7 +68,7 @@ export default function RemindersSchedule() {
     setAuthOpen(true);
   }
 
-  async function callAction(action: "status" | "enable" | "disable", token: string) {
+  async function callAction(action: "status" | "enable" | "disable" | "run-now", token: string) {
     if (!supabase) return null;
     const body: Record<string, unknown> = { action, token };
     if (action === "enable") body.cron = cronInput.trim();
@@ -151,25 +151,36 @@ export default function RemindersSchedule() {
       return;
     }
 
-    // enable / disable
+    // enable / disable / run-now
     const token = res.data.token as string;
     const op = await callAction(action, token);
     setBusy(false);
     if (op?.error || !op?.data?.ok) {
       toast({
-        title: t("scheduleActionFailed"),
+        title: action === "run-now" ? t("runNowFailed") : t("scheduleActionFailed"),
         description: op?.data?.error ?? op?.error?.message ?? "failed",
         variant: "destructive",
       });
       return;
     }
-    toast({
-      title: action === "enable" ? t("scheduleEnabled") : t("scheduleDisabled"),
-    });
+    if (action === "run-now") {
+      const r = (op.data?.result ?? {}) as { sent?: number; failed?: number; candidates?: number };
+      toast({
+        title: t("runNowSuccess"),
+        description: t("runNowResult")
+          .replace("{sent}", String(r.sent ?? 0))
+          .replace("{failed}", String(r.failed ?? 0))
+          .replace("{candidates}", String(r.candidates ?? 0)),
+      });
+    } else {
+      toast({
+        title: action === "enable" ? t("scheduleEnabled") : t("scheduleDisabled"),
+      });
+    }
     refresh();
   }
 
-  async function performMutation(action: "enable" | "disable") {
+  async function performMutation(action: "enable" | "disable" | "run-now") {
     const session = loadReminderSession();
     if (!session) {
       requireSession(action);
@@ -187,15 +198,26 @@ export default function RemindersSchedule() {
         return;
       }
       toast({
-        title: t("scheduleActionFailed"),
+        title: action === "run-now" ? t("runNowFailed") : t("scheduleActionFailed"),
         description: reason,
         variant: "destructive",
       });
       return;
     }
-    toast({
-      title: action === "enable" ? t("scheduleEnabled") : t("scheduleDisabled"),
-    });
+    if (action === "run-now") {
+      const r = (res.data?.result ?? {}) as { sent?: number; failed?: number; candidates?: number };
+      toast({
+        title: t("runNowSuccess"),
+        description: t("runNowResult")
+          .replace("{sent}", String(r.sent ?? 0))
+          .replace("{failed}", String(r.failed ?? 0))
+          .replace("{candidates}", String(r.candidates ?? 0)),
+      });
+    } else {
+      toast({
+        title: action === "enable" ? t("scheduleEnabled") : t("scheduleDisabled"),
+      });
+    }
     refresh();
   }
 
@@ -340,7 +362,17 @@ export default function RemindersSchedule() {
               <PowerOff className="h-4 w-4 me-1" />
               {t("scheduleDisable")}
             </Button>
+            <Button
+              variant="secondary"
+              onClick={() => performMutation("run-now")}
+              disabled={busy || loading}
+              data-testid="button-run-now"
+            >
+              <Play className="h-4 w-4 me-1" />
+              {t("runNow")}
+            </Button>
           </div>
+          <p className="text-[11px] text-muted-foreground">{t("runNowHelp")}</p>
         </CardContent>
       </Card>
 
@@ -465,14 +497,18 @@ export default function RemindersSchedule() {
                 ? t("confirmEnableSchedule")
                 : pendingAction === "disable"
                   ? t("confirmDisableSchedule")
-                  : t("scheduleAuthTitle")}
+                  : pendingAction === "run-now"
+                    ? t("confirmRunNow")
+                    : t("scheduleAuthTitle")}
             </DialogTitle>
             <DialogDescription>
               {pendingAction === "enable"
                 ? t("confirmEnableScheduleHelp")
                 : pendingAction === "disable"
                   ? t("confirmDisableScheduleHelp")
-                  : t("scheduleAuthHelp")}
+                  : pendingAction === "run-now"
+                    ? t("confirmRunNowHelp")
+                    : t("scheduleAuthHelp")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -519,7 +555,9 @@ export default function RemindersSchedule() {
                   ? t("scheduleEnable")
                   : pendingAction === "disable"
                     ? t("scheduleDisable")
-                    : t("scheduleUnlock")}
+                    : pendingAction === "run-now"
+                      ? t("runNow")
+                      : t("scheduleUnlock")}
             </Button>
           </DialogFooter>
         </DialogContent>

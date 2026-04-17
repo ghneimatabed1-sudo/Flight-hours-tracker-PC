@@ -28,6 +28,9 @@
 //   - "log"     { token }                     → { ok, log }
 //   - "enable"  { token, cron? }              → { ok, result }
 //   - "disable" { token }                     → { ok, result }
+//   - "run-now" { token }                     → { ok, result } — invokes
+//       notify-currency-expiry once with the service-role bearer so ops can
+//       verify the wiring without waiting for the next cron tick.
 //
 // Deploy:
 //   supabase functions deploy manage-reminder-schedule --no-verify-jwt
@@ -163,7 +166,7 @@ async function verifyTotp(secretB32: string, code: string, windowSteps = 1): Pro
 }
 
 interface Body {
-  action?: "session" | "status" | "log" | "enable" | "disable";
+  action?: "session" | "status" | "log" | "enable" | "disable" | "run-now";
   username?: string;
   password?: string;
   code?: string;
@@ -313,6 +316,63 @@ Deno.serve(async (req: Request) => {
       detail: { schedule: cron, jobid: result.jobid ?? null },
     }).then(() => {}, () => {});
     return reply({ ok: true, result });
+  }
+
+  if (action === "run-now") {
+    const fnUrl = `${url.replace(/\/$/, "")}/functions/v1/notify-currency-expiry`;
+    const startedAt = new Date().toISOString();
+    let httpStatus = 0;
+    let payload: Record<string, unknown> | null = null;
+    let errorMsg: string | null = null;
+    try {
+      const resp = await fetch(fnUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${serviceKey}`,
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      });
+      httpStatus = resp.status;
+      const text = await resp.text();
+      try { payload = text ? JSON.parse(text) : null; }
+      catch { errorMsg = text.slice(0, 500); }
+    } catch (e) {
+      errorMsg = e instanceof Error ? e.message : String(e);
+    }
+    const endedAt = new Date().toISOString();
+    const ok = httpStatus >= 200 && httpStatus < 300 && !!payload?.ok;
+    const sent = typeof payload?.sent === "number" ? payload.sent : 0;
+    const failed = typeof payload?.failed === "number" ? payload.failed : 0;
+    const candidates = typeof payload?.candidates === "number" ? payload.candidates : 0;
+
+    // Persist a row so the dashboard's recent-runs table surfaces this
+    // manual invocation alongside the cron-driven runs on next refresh.
+    const returnMessage = ok
+      ? `manual: sent=${sent}, failed=${failed}, candidates=${candidates}`
+      : `manual: ${errorMsg ?? (payload?.error as string | undefined) ?? `http_${httpStatus}`}`;
+    await admin.from("reminder_manual_runs").insert({
+      started_at: startedAt,
+      ended_at: endedAt,
+      status: ok ? "succeeded" : "failed",
+      return_message: returnMessage,
+      actor: tok.username,
+    }).then(() => {}, () => {});
+
+    await admin.from("audit_log").insert({
+      squadron_id: null,
+      type: ok ? "reminders.run_now" : "reminders.run_now.failed",
+      actor: tok.username,
+      detail: { httpStatus, sent, failed, candidates, error: errorMsg ?? payload?.error ?? null },
+    }).then(() => {}, () => {});
+    if (!ok) {
+      return reply({
+        ok: false,
+        error: errorMsg ?? (payload?.error as string | undefined) ?? `http_${httpStatus}`,
+        httpStatus,
+      }, 502);
+    }
+    return reply({ ok: true, result: { sent, failed, candidates, httpStatus } });
   }
 
   if (action === "disable") {
