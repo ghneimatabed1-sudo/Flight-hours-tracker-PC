@@ -8,6 +8,7 @@ import {
   ShieldAlert, FileText, Megaphone, Map, Tags, FileDown, UserCog, Settings,
   Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle, Archive,
 } from "lucide-react";
+import { LiveDataIndicator } from "@/components/LiveDataIndicator";
 
 type Item = { p: string; k: TKey; I: typeof LayoutDashboard };
 const ITEMS: readonly Item[] = [
@@ -94,6 +95,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               {online ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
               {online ? t("online") : t("offline")}
             </span>
+            <LiveDataIndicator />
             <button onClick={() => setLang(lang === "en" ? "ar" : "en")} className="text-xs px-2 py-1 rounded-md border border-border hover:bg-secondary">
               {lang === "en" ? t("arabic") : t("english")}
             </button>

@@ -2,25 +2,24 @@ import { useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { useSquadronUsers, useCreateSquadronUser } from "@/lib/squadron-data";
+import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, KeyRound } from "lucide-react";
 
 export default function Users() {
   const { t } = useI18n();
+  const { toast } = useToast();
   const { data: list } = useSquadronUsers();
   const create = useCreateSquadronUser();
   const [u, setU] = useState("");
   const [pw, setPw] = useState("");
-  const [err, setErr] = useState<string | null>(null);
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!u) return;
-    setErr(null);
     try {
       await create.mutateAsync({ username: u, password: pw || `Tmp-${Date.now()}` });
       setU(""); setPw("");
-    } catch (ex) {
-      setErr(ex instanceof Error ? ex.message : "Create failed");
-    }
+      toast({ title: t("userCreated") });
+    } catch { /* surfaced */ }
   };
   return (
     <div>
@@ -55,8 +54,7 @@ export default function Users() {
             <label className="block text-xs"><span className="text-muted-foreground">Temporary password (min 8 chars)</span>
               <input type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="Auto-generated if blank" className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm" />
             </label>
-            {err && <div className="text-xs text-rose-300">{err}</div>}
-            <button className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium inline-flex items-center justify-center gap-1.5"><Plus className="h-4 w-4" /> Create user</button>
+            <button disabled={create.isPending} className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium inline-flex items-center justify-center gap-1.5 disabled:opacity-50"><Plus className="h-4 w-4" /> Create user</button>
           </form>
         </Card>
       </div>

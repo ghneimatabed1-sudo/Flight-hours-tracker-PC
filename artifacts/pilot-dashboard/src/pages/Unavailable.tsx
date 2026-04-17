@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots, useUnavailable, useCreateUnavailable, useDeleteUnavailable, type UnavailEntry } from "@/lib/squadron-data";
+import { useToast } from "@/hooks/use-toast";
 import { Plus, UserX, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 export default function Unavailable() {
   const { t } = useI18n();
+  const { toast } = useToast();
   const { data: PILOTS } = usePilots();
   const { data: items } = useUnavailable();
   const create = useCreateUnavailable();
@@ -17,28 +19,23 @@ export default function Unavailable() {
   const [to, setTo] = useState(new Date(Date.now()+7*86400000).toISOString().slice(0,10));
   const [reason, setReason] = useState("");
   const [confirmRemove, setConfirmRemove] = useState<UnavailEntry | null>(null);
-  const [err, setErr] = useState("");
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErr("");
     try {
       await create.mutateAsync({ pilotId: pid, from, to, reason: reason || "—" });
       setReason("");
-    } catch (e) {
-      setErr((e as Error).message || "Add failed");
-    }
+      toast({ title: t("unavailAdded") });
+    } catch { /* surfaced */ }
   };
 
   const onRemove = async () => {
     if (!confirmRemove) return;
-    setErr("");
     try {
       await remove.mutateAsync(confirmRemove.id);
       setConfirmRemove(null);
-    } catch (e) {
-      setErr((e as Error).message || "Remove failed");
-    }
+      toast({ title: t("unavailRemoved") });
+    } catch { /* surfaced */ }
   };
 
   const pname = (id: string) => PILOTS.find(p => p.id === id)?.name || id;
@@ -46,7 +43,6 @@ export default function Unavailable() {
   return (
     <div>
       <PageHead title={t("nav_unavail")} subtitle="Date range + reason per pilot" />
-      {err && <div className="mb-3 text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-md px-3 py-2">{err}</div>}
       <div className="grid lg:grid-cols-3 gap-4">
         <Card className="lg:col-span-2 !p-0 overflow-hidden">
           <table className="w-full text-sm">

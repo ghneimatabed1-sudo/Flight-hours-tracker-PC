@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "@/lib/query-client";
 import { runArchiveCheck } from "@/lib/archive";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -44,8 +45,6 @@ import CommanderOverview from "@/pages/dashboard/Overview";
 import PilotsTable from "@/pages/dashboard/PilotsTable";
 import DashboardPilotDetail from "@/pages/dashboard/PilotDetail";
 import Alerts from "@/pages/dashboard/Alerts";
-
-const queryClient = new QueryClient();
 
 function SquadronOpsRoutes() {
   return (

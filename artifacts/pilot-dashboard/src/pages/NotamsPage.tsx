@@ -2,11 +2,13 @@ import { useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { useNotams, useCreateNotam, useUpdateNotam, useDeleteNotam, type NotamRow } from "@/lib/squadron-data";
+import { useToast } from "@/hooks/use-toast";
 import { Plus, Megaphone, Pencil, Trash2, Check, X } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 export default function NotamsPage() {
   const { t } = useI18n();
+  const { toast } = useToast();
   const { data: list } = useNotams();
   const create = useCreateNotam();
   const update = useUpdateNotam();
@@ -15,18 +17,15 @@ export default function NotamsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<NotamRow | null>(null);
-  const [err, setErr] = useState("");
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!text.trim()) return;
-    setErr("");
     try {
       await create.mutateAsync(text);
       setText("");
-    } catch (e) {
-      setErr((e as Error).message || "Publish failed");
-    }
+      toast({ title: t("notamPublished") });
+    } catch { /* surfaced by global error toast */ }
   };
 
   const startEdit = (n: NotamRow) => {
@@ -35,30 +34,25 @@ export default function NotamsPage() {
   };
 
   const saveEdit = async (n: NotamRow) => {
-    setErr("");
     try {
       await update.mutateAsync({ ...n, text: editText });
       setEditingId(null);
-    } catch (e) {
-      setErr((e as Error).message || "Update failed");
-    }
+      toast({ title: t("savedTitle") });
+    } catch { /* surfaced */ }
   };
 
   const onWithdraw = async () => {
     if (!confirmDelete) return;
-    setErr("");
     try {
       await remove.mutateAsync(confirmDelete);
       setConfirmDelete(null);
-    } catch (e) {
-      setErr((e as Error).message || "Withdraw failed");
-    }
+      toast({ title: t("notamWithdrawn") });
+    } catch { /* surfaced */ }
   };
 
   return (
     <div>
       <PageHead title={t("nav_notams")} subtitle="Navigation notices by date" />
-      {err && <div className="mb-3 text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-md px-3 py-2">{err}</div>}
       <div className="grid lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-2">
           {list.map(n => (

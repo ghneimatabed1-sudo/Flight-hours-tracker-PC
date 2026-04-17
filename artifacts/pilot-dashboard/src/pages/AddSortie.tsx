@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots, useCreateSortie } from "@/lib/squadron-data";
+import { useToast } from "@/hooks/use-toast";
 import { Plane } from "lucide-react";
 
 export default function AddSortie() {
   const { t } = useI18n();
+  const { toast } = useToast();
   const { data: PILOTS } = usePilots();
   const create = useCreateSortie();
   const [form, setForm] = useState({
@@ -20,13 +22,13 @@ export default function AddSortie() {
   useEffect(() => {
     if (!form.pilot && PILOTS[0]) setForm(f => ({ ...f, pilot: PILOTS[0].id, coPilot: PILOTS[1]?.id ?? PILOTS[0].id }));
   }, [PILOTS, form.pilot]);
-  const [saved, setSaved] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm(f => ({ ...f, [k]: v }));
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErr(null);
+    // The mutation cache surfaces errors automatically through the global
+    // toast + live-data indicator, so here we only need to celebrate the
+    // happy path.
     try {
       await create.mutateAsync({
         date: form.date, acType: form.acType, acNumber: form.acNumber,
@@ -36,11 +38,8 @@ export default function AddSortie() {
         night1: form.night1, night2: form.night2, nightDual: form.nightDual,
         nvg: form.nvg, sim: form.sim, actual: form.actual,
       });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
-    } catch (ex) {
-      setErr(ex instanceof Error ? ex.message : "Save failed");
-    }
+      toast({ title: t("savedTitle"), description: t("sortieSavedMsg") });
+    } catch { /* surfaced by the global error toast */ }
   };
 
   return (
@@ -84,11 +83,9 @@ export default function AddSortie() {
           </div>
 
           <div className="flex items-center gap-2 pt-2">
-            <button className="px-4 py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 inline-flex items-center gap-2">
-              <Plane className="h-4 w-4" /> {t("submit")}
+            <button disabled={create.isPending} className="px-4 py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 inline-flex items-center gap-2 disabled:opacity-50">
+              <Plane className="h-4 w-4" /> {create.isPending ? t("saving") : t("submit")}
             </button>
-            {saved && <span className="text-emerald-300 text-sm">✔ Saved · queued for sync</span>}
-            {err && <span className="text-rose-300 text-sm">{err}</span>}
           </div>
         </Card>
 
