@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import React from "react";
 import {
   Alert,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -172,6 +173,67 @@ export default function SettingsScreen() {
           { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
         ]}
       >
+        {t("settings_help")}
+      </Text>
+      <View style={styles.list}>
+        {([
+          ["help_step1_title", "help_step1_body", "key"],
+          ["help_step2_title", "help_step2_body", "link"],
+          ["help_step3_title", "help_step3_body", "grid"],
+          ["help_step4_title", "help_step4_body", "refresh-cw"],
+          ["help_step5_title", "help_step5_body", "edit-3"],
+          ["help_step6_title", "help_step6_body", "help-circle"],
+        ] as const).map(([titleKey, bodyKey, icon]) => (
+          <View
+            key={titleKey}
+            style={[
+              styles.helpCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                flexDirection: isRTL ? "row-reverse" : "row",
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.helpIcon,
+                { backgroundColor: colors.muted, borderColor: colors.border },
+              ]}
+            >
+              <Feather name={icon} size={16} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text
+                style={[
+                  styles.helpTitle,
+                  { color: colors.foreground, textAlign: isRTL ? "right" : "left" },
+                ]}
+              >
+                {t(titleKey)}
+              </Text>
+              <Text
+                style={[
+                  styles.helpBody,
+                  {
+                    color: colors.mutedForeground,
+                    textAlign: isRTL ? "right" : "left",
+                  },
+                ]}
+              >
+                {t(bodyKey)}
+              </Text>
+            </View>
+          </View>
+        ))}
+      </View>
+
+      <Text
+        style={[
+          styles.section,
+          { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
+        ]}
+      >
         {t("settings_about")}
       </Text>
       <Text
@@ -185,6 +247,74 @@ export default function SettingsScreen() {
       >
         {t("settings_about_text")}
       </Text>
+
+      <Text
+        style={[
+          styles.section,
+          { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
+        ]}
+      >
+        {t("settings_credits")}
+      </Text>
+      <View
+        style={[
+          styles.creditsCard,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}
+      >
+        <Text
+          style={[
+            styles.creditName,
+            { color: colors.foreground, textAlign: isRTL ? "right" : "left" },
+          ]}
+        >
+          ABEDALQADER GHUNMAT
+        </Text>
+        <Text
+          style={[
+            styles.creditRole,
+            { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
+          ]}
+        >
+          {t("credits_developer")}
+        </Text>
+        <Pressable
+          onPress={() => Linking.openURL("tel:+9620775008345").catch(() => {})}
+          style={({ pressed }) => [
+            styles.creditRow,
+            {
+              borderColor: colors.border,
+              flexDirection: isRTL ? "row-reverse" : "row",
+              opacity: pressed ? 0.7 : 1,
+            },
+          ]}
+        >
+          <Feather name="phone" size={14} color={colors.primary} />
+          <Text style={[styles.creditValue, { color: colors.foreground }]}>0775008345</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => Linking.openURL("mailto:ghneimatabed1@icloud.com").catch(() => {})}
+          style={({ pressed }) => [
+            styles.creditRow,
+            {
+              borderColor: colors.border,
+              flexDirection: isRTL ? "row-reverse" : "row",
+              opacity: pressed ? 0.7 : 1,
+            },
+          ]}
+        >
+          <Feather name="mail" size={14} color={colors.primary} />
+          <Text style={[styles.creditValue, { color: colors.foreground }]}>ghneimatabed1@icloud.com</Text>
+        </Pressable>
+        <Text
+          style={[
+            styles.creditBlurb,
+            { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
+          ]}
+        >
+          {t("credits_blurb")}
+        </Text>
+      </View>
 
       <Pressable
         onPress={confirmUnlink}
@@ -283,5 +413,65 @@ const styles = StyleSheet.create({
   logoutText: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
+  },
+  helpCard: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  helpIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  helpTitle: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    marginBottom: 2,
+  },
+  helpBody: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 17,
+  },
+  creditsCard: {
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 6,
+  },
+  creditName: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.3,
+  },
+  creditRole: {
+    fontSize: 11,
+    fontFamily: "Inter_500Medium",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: 6,
+  },
+  creditRow: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  creditValue: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
+  creditBlurb: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 16,
+    marginTop: 6,
   },
 });

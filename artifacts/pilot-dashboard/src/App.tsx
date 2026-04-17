@@ -30,6 +30,7 @@ import Users from "@/pages/Users";
 import AuditLog from "@/pages/AuditLog";
 import HistoricalImport from "@/pages/HistoricalImport";
 import SettingsPage from "@/pages/Settings";
+import Help from "@/pages/Help";
 import NotFound from "@/pages/not-found";
 import AdminOverview from "@/pages/admin/Overview";
 import LicenseKeys from "@/pages/admin/LicenseKeys";
@@ -69,6 +70,7 @@ function SquadronOpsRoutes() {
       <Route path="/audit" component={AuditLog} />
       <Route path="/import" component={HistoricalImport} />
       <Route path="/settings" component={SettingsPage} />
+      <Route path="/help" component={Help} />
       <Route component={NotFound} />
     </Switch>
   );
