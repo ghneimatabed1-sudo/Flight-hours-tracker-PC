@@ -12,7 +12,7 @@
 // they no-op successfully so the existing UI keeps functioning.
 
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { supabase, supabaseConfigured } from "./supabase";
+import { supabase, supabaseConfigured, recordAuditEvent } from "./supabase";
 import {
   PILOTS as MOCK_PILOTS,
   SORTIES as MOCK_SORTIES,
@@ -606,5 +606,94 @@ export function useCreateSquadronUser() {
       };
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+  });
+}
+
+// ── historical import (legacy SqDn App 21.10.16 CSV) ──────────────────
+export interface ImportPayload {
+  pilots: Pilot[];
+  sorties: Sortie[];
+  actor?: string;
+}
+export interface ImportResult {
+  pilotsInserted: number;
+  sortiesInserted: number;
+  mode: "supabase" | "demo";
+}
+
+function tsNow(): string {
+  return new Date().toISOString().replace("T", " ").slice(0, 19);
+}
+
+export function appendDemoAudit(row: AuditRow) {
+  SEED_AUDIT.unshift(row);
+}
+
+export function useImportHistory() {
+  const qc = useQueryClient();
+  return useMutation<ImportResult, Error, ImportPayload>({
+    mutationFn: async ({ pilots, sorties, actor }) => {
+      const stamp = new Date().toISOString();
+      // Tag every imported record so later tooling can distinguish migrated
+      // rows from rows entered through the UI.
+      const taggedPilots = pilots.map(p => ({ ...p, imported: true, importedAt: stamp }));
+      const taggedSorties = sorties.map(s => ({ ...s, imported: true, importedAt: stamp }));
+
+      if (!isLive()) {
+        // Demo mode: persist into the in-memory mock arrays so the rest of
+        // the UI immediately reflects the imported data.
+        for (const p of taggedPilots) {
+          const idx = MOCK_PILOTS.findIndex(x => x.id === p.id);
+          if (idx >= 0) MOCK_PILOTS[idx] = p; else MOCK_PILOTS.push(p);
+        }
+        for (const s of taggedSorties) {
+          const idx = MOCK_SORTIES.findIndex(x => x.id === s.id);
+          if (idx >= 0) MOCK_SORTIES[idx] = s; else MOCK_SORTIES.push(s);
+        }
+        appendDemoAudit({
+          ts: tsNow(),
+          user: actor ?? "ops.lead",
+          action: "Historical Import (imported)",
+          target: `${taggedPilots.length} pilots, ${taggedSorties.length} sorties`,
+        });
+        return { pilotsInserted: taggedPilots.length, sortiesInserted: taggedSorties.length, mode: "demo" as const };
+      }
+
+      // Live Supabase: bulk insert each table. PostgREST treats each .insert
+      // array as a single statement, so the batch is atomic per table; if a
+      // row violates a constraint the whole batch is rejected.
+      const pilotRows = taggedPilots.map(p => ({
+        id: p.id, name: p.name, arabic_name: p.arabicName, rank: p.rank,
+        phone: p.phone, unit: p.unit, available: p.available,
+        data: { ...p, imported: true, importedAt: stamp },
+      }));
+      const { error: pErr } = await supabase!.from("pilots").upsert(pilotRows, { onConflict: "id" });
+      if (pErr) throw new Error(`Pilots import failed: ${pErr.message}`);
+
+      const sortieRows = taggedSorties.map(s => ({
+        id: s.id, pilot_id: s.pilotId, co_pilot_id: s.coPilotId,
+        date: s.date, ac_type: s.acType, ac_number: s.acNumber,
+        sortie_type: s.sortieType, sortie_name: s.name,
+        data: { ...s, imported: true, importedAt: stamp },
+      }));
+      const { error: sErr } = await supabase!.from("sorties").upsert(sortieRows, { onConflict: "id" });
+      if (sErr) throw new Error(`Sorties import failed: ${sErr.message}`);
+
+      await recordAuditEvent({
+        type: "import.history.ok",
+        actor,
+        detail: {
+          imported: true,
+          pilots: taggedPilots.length,
+          sorties: taggedSorties.length,
+        },
+      });
+      return { pilotsInserted: taggedPilots.length, sortiesInserted: taggedSorties.length, mode: "supabase" as const };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pilots"] });
+      qc.invalidateQueries({ queryKey: ["sorties"] });
+      qc.invalidateQueries({ queryKey: ["audit_log"] });
+    },
   });
 }

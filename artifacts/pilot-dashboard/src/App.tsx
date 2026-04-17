@@ -28,6 +28,7 @@ import Units from "@/pages/Units";
 import PdfExports from "@/pages/PdfExports";
 import Users from "@/pages/Users";
 import AuditLog from "@/pages/AuditLog";
+import HistoricalImport from "@/pages/HistoricalImport";
 import SettingsPage from "@/pages/Settings";
 import NotFound from "@/pages/not-found";
 import AdminOverview from "@/pages/admin/Overview";
@@ -66,6 +67,7 @@ function SquadronOpsRoutes() {
       <Route path="/pdf" component={PdfExports} />
       <Route path="/users" component={Users} />
       <Route path="/audit" component={AuditLog} />
+      <Route path="/import" component={HistoricalImport} />
       <Route path="/settings" component={SettingsPage} />
       <Route component={NotFound} />
     </Switch>

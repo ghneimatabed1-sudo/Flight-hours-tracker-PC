@@ -32,6 +32,8 @@ export interface Pilot {
     sim: string;
   };
   available: boolean;
+  imported?: boolean;
+  importedAt?: string;
 }
 
 export interface Sortie {
@@ -52,6 +54,8 @@ export interface Sortie {
   nvg: number;
   sim: number;
   actual: number;
+  imported?: boolean;
+  importedAt?: string;
 }
 
 const RANKS = ["Maj", "Capt", "1st Lt", "Lt Col"];

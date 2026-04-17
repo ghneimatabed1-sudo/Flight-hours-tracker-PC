@@ -6,7 +6,7 @@ import {
   LayoutDashboard, ListChecks, PlusCircle, Users, BadgeCheck, AlertOctagon,
   Trophy, CalendarRange, PalmtreeIcon, UserX, Calendar, ClipboardList,
   ShieldAlert, FileText, Megaphone, Map, Tags, FileDown, UserCog, Settings,
-  Sun, Moon, Wifi, WifiOff, LogOut, Menu, History,
+  Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload,
 } from "lucide-react";
 
 type Item = { p: string; k: TKey; I: typeof LayoutDashboard };
@@ -31,6 +31,7 @@ const ITEMS: readonly Item[] = [
   { p: "/pdf", k: "nav_pdf", I: FileDown },
   { p: "/users", k: "nav_users", I: UserCog },
   { p: "/audit", k: "nav_audit", I: History },
+  { p: "/import", k: "nav_import", I: Upload },
   { p: "/settings", k: "nav_settings", I: Settings },
 ] as const;
 

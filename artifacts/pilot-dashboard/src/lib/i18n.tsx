@@ -53,6 +53,7 @@ const dict = {
     nav_users: "User Manager",
     nav_settings: "Settings",
     nav_audit: "Audit Log",
+    nav_import: "Historical Import",
 
     monthlyTotals: "Monthly Squadron Totals",
     expiringAlert: "Expiring / Expired Currencies",
@@ -269,6 +270,7 @@ const dict = {
     nav_users: "إدارة المستخدمين",
     nav_settings: "الإعدادات",
     nav_audit: "سجل التدقيق",
+    nav_import: "استيراد البيانات السابقة",
 
     monthlyTotals: "إجماليات السرب الشهرية",
     expiringAlert: "صلاحيات منتهية / قاربت على الانتهاء",
