@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { usePilots, useSorties, useNotams } from "@/lib/squadron-data";
+import { computeAllTotals } from "@/lib/calculations";
 import { Link } from "wouter";
 import {
   Plane, MoonStar, Eye, Cpu, Users, Calendar, AlertTriangle,
@@ -59,10 +60,11 @@ export default function Dashboard() {
   const { data: NOTAMS } = useNotams();
   const now = new Date();
 
-  const monthDay = +PILOTS.reduce((a, p) => a + p.monthDay, 0).toFixed(1);
-  const monthNight = +PILOTS.reduce((a, p) => a + p.monthNight, 0).toFixed(1);
-  const monthNvg = +PILOTS.reduce((a, p) => a + p.monthNvg, 0).toFixed(1);
-  const monthSim = +PILOTS.reduce((a, p) => a + p.monthSim, 0).toFixed(1);
+  const totalsById = useMemo(() => computeAllTotals(PILOTS, SORTIES), [PILOTS, SORTIES]);
+  const monthDay = +PILOTS.reduce((a, p) => a + (totalsById[p.id]?.monthDay ?? 0), 0).toFixed(1);
+  const monthNight = +PILOTS.reduce((a, p) => a + (totalsById[p.id]?.monthNight ?? 0), 0).toFixed(1);
+  const monthNvg = +PILOTS.reduce((a, p) => a + (totalsById[p.id]?.monthNvg ?? 0), 0).toFixed(1);
+  const monthSim = +PILOTS.reduce((a, p) => a + (totalsById[p.id]?.monthSim ?? 0), 0).toFixed(1);
   const monthTotal = +(monthDay + monthNight + monthNvg + monthSim).toFixed(1);
 
   const sortiesMonth = SORTIES.filter(
@@ -242,9 +244,9 @@ export default function Dashboard() {
                   />
                 </div>
                 <div className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
-                  <Mini label="D" value={p.monthDay} />
-                  <Mini label="N" value={p.monthNight} />
-                  <Mini label="NVG" value={p.monthNvg} accent="text-rose-300" />
+                  <Mini label="D" value={totalsById[p.id]?.monthDay ?? 0} />
+                  <Mini label="N" value={totalsById[p.id]?.monthNight ?? 0} />
+                  <Mini label="NVG" value={totalsById[p.id]?.monthNvg ?? 0} accent="text-rose-300" />
                 </div>
               </Link>
             );

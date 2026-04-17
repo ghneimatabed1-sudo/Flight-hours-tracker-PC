@@ -12,6 +12,7 @@ import {
   type Pilot,
   type PilotLinkStatus,
 } from "@/lib/squadron-data";
+import { computePilotTotals } from "@/lib/calculations";
 import { useAuth } from "@/lib/auth";
 import {
   ArrowLeft,
@@ -45,7 +46,11 @@ export default function PilotDetail() {
   const { data: PILOTS } = usePilots();
   const { data: SORTIES } = useSorties();
   const p = PILOTS.find(x => x.id === params?.id);
-  if (!p) return <div className="p-6">Pilot not found.</div>;
+  const totals = useMemo(
+    () => (p ? computePilotTotals(p, SORTIES) : null),
+    [p, SORTIES],
+  );
+  if (!p || !totals) return <div className="p-6">Pilot not found.</div>;
   const sorties = SORTIES.filter(s => s.pilotId === p.id || s.coPilotId === p.id).sort((a, b) => b.date.localeCompare(a.date));
 
   return (
@@ -57,11 +62,11 @@ export default function PilotDetail() {
       <div className="grid lg:grid-cols-3 gap-4 mb-4">
         <Card>
           <div className="text-sm font-semibold mb-2">This Month</div>
-          <Stat k="Day" v={p.monthDay} /><Stat k="Night" v={p.monthNight} /><Stat k="NVG" v={p.monthNvg} accent="text-rose-300" /><Stat k="Sim" v={p.monthSim} /><Stat k="Captain" v={p.monthCaptain} />
+          <Stat k="Day" v={totals.monthDay} /><Stat k="Night" v={totals.monthNight} /><Stat k="NVG" v={totals.monthNvg} accent="text-rose-300" /><Stat k="Sim" v={totals.monthSim} /><Stat k="Captain" v={totals.monthCaptain} />
         </Card>
         <Card>
           <div className="text-sm font-semibold mb-2">Grand Totals</div>
-          <Stat k="Day" v={p.totalDay} /><Stat k="Night" v={p.totalNight} /><Stat k="NVG" v={p.totalNvg} accent="text-rose-300" /><Stat k="Sim" v={p.totalSim} /><Stat k="Captain" v={p.totalCaptain} />
+          <Stat k="Day" v={totals.totalDay} /><Stat k="Night" v={totals.totalNight} /><Stat k="NVG" v={totals.totalNvg} accent="text-rose-300" /><Stat k="Sim" v={totals.totalSim} /><Stat k="Captain" v={totals.totalCaptain} />
         </Card>
         <CurrenciesCard pilot={p} />
       </div>

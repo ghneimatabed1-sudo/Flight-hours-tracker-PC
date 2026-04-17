@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { usePilots } from "@/lib/squadron-data";
+import { usePilots, useSorties } from "@/lib/squadron-data";
+import { computeAllTotals } from "@/lib/calculations";
 import { Trophy } from "lucide-react";
 
 const SORTS = [
@@ -17,7 +18,9 @@ export default function Rankings() {
   type SortKey = typeof SORTS[number]["k"];
   const [sortKey, setSortKey] = useState<SortKey>("totalNvg");
   const { data: PILOTS } = usePilots();
-  const sorted = [...PILOTS].sort((a, b) => (b[sortKey] as number) - (a[sortKey] as number));
+  const { data: SORTIES } = useSorties();
+  const totalsById = useMemo(() => computeAllTotals(PILOTS, SORTIES), [PILOTS, SORTIES]);
+  const sorted = [...PILOTS].sort((a, b) => (totalsById[b.id]?.[sortKey] ?? 0) - (totalsById[a.id]?.[sortKey] ?? 0));
   return (
     <div>
       <PageHead title={t("nav_rankings")} actions={
@@ -41,19 +44,23 @@ export default function Rankings() {
             </tr>
           </thead>
           <tbody>
-            {sorted.map((p, i) => (
-              <tr key={p.id} className="border-t border-border row-hover">
-                <td className="px-3 py-2 font-mono">{i + 1}{i === 0 && <Trophy className="inline h-3.5 w-3.5 ml-1 text-amber-400" />}</td>
-                <td className="px-3 py-2">{p.rank} {p.name}</td>
-                <td className="px-3 py-2 text-right font-mono">{p.monthDay}</td>
-                <td className="px-3 py-2 text-right font-mono">{p.monthNight}</td>
-                <td className="px-3 py-2 text-right font-mono text-rose-300">{p.monthNvg}</td>
-                <td className="px-3 py-2 text-right font-mono">{p.totalDay}</td>
-                <td className="px-3 py-2 text-right font-mono">{p.totalNight}</td>
-                <td className="px-3 py-2 text-right font-mono text-rose-300">{p.totalNvg}</td>
-                <td className="px-3 py-2 text-right font-mono">{p.totalCaptain}</td>
-              </tr>
-            ))}
+            {sorted.map((p, i) => {
+              const tot = totalsById[p.id];
+              if (!tot) return null;
+              return (
+                <tr key={p.id} className="border-t border-border row-hover">
+                  <td className="px-3 py-2 font-mono">{i + 1}{i === 0 && <Trophy className="inline h-3.5 w-3.5 ml-1 text-amber-400" />}</td>
+                  <td className="px-3 py-2">{p.rank} {p.name}</td>
+                  <td className="px-3 py-2 text-right font-mono">{tot.monthDay.toFixed(1)}</td>
+                  <td className="px-3 py-2 text-right font-mono">{tot.monthNight.toFixed(1)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-rose-300">{tot.monthNvg.toFixed(1)}</td>
+                  <td className="px-3 py-2 text-right font-mono">{tot.totalDay.toFixed(1)}</td>
+                  <td className="px-3 py-2 text-right font-mono">{tot.totalNight.toFixed(1)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-rose-300">{tot.totalNvg.toFixed(1)}</td>
+                  <td className="px-3 py-2 text-right font-mono">{tot.totalCaptain.toFixed(1)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </Card>
