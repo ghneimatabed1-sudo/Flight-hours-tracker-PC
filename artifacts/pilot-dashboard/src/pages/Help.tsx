@@ -86,7 +86,7 @@ export default function Help() {
               <div className="text-sm font-semibold">{t("help_support_t")}</div>
               <p className="text-xs text-muted-foreground leading-relaxed">{t("help_support_b")}</p>
               <div className="text-xs space-y-0.5 pt-1">
-                <div><span className="text-muted-foreground">{t("creditsDeveloper")}: </span><span className="font-semibold">ABEDALQADER GHUNMAT</span></div>
+                <div><span className="text-muted-foreground">{t("creditsDeveloper")}: </span><span className="font-semibold">Capt. ABEDALQADER GHUNMAT</span></div>
                 <div><span className="text-muted-foreground">{t("creditsPhone")}: </span><a href="tel:+9620775008345" className="text-primary hover:underline">0775008345</a></div>
                 <div><span className="text-muted-foreground">{t("creditsEmail")}: </span><a href="mailto:ghneimatabed1@icloud.com" className="text-primary hover:underline">ghneimatabed1@icloud.com</a></div>
               </div>

@@ -236,7 +236,7 @@ export default function LoginGate() {
               {t("creditsDeveloper")}
             </div>
             <div className="text-sm font-semibold text-foreground tracking-wide mt-0.5">
-              ABEDALQADER GHUNMAT
+              Capt. ABEDALQADER GHUNMAT
             </div>
           </div>
 

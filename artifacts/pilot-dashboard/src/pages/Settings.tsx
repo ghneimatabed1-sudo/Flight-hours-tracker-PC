@@ -48,7 +48,7 @@ export default function Settings() {
           <img src="brand/wings.png" className="h-16 object-contain shrink-0 opacity-95" alt="Pilot Wings" />
           <div className="space-y-1.5 flex-1">
             <div className="text-sm font-semibold gold-grad">{t("creditsTitle")}</div>
-            <div className="text-sm">{t("creditsDeveloper")}: <span className="font-semibold">ABEDALQADER GHUNMAT</span></div>
+            <div className="text-sm">{t("creditsDeveloper")}: <span className="font-semibold">Capt. ABEDALQADER GHUNMAT</span></div>
             <div className="text-sm">{t("creditsPhone")}: <a href="tel:+9620775008345" className="text-primary hover:underline">0775008345</a></div>
             <div className="text-sm">{t("creditsEmail")}: <a href="mailto:ghneimatabed1@icloud.com" className="text-primary hover:underline">ghneimatabed1@icloud.com</a></div>
             <p className="text-xs text-muted-foreground pt-1">{t("creditsBlurb")}</p>

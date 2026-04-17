@@ -202,7 +202,7 @@ export default function LinkScreen() {
             {t("credits_developer")}
           </Text>
           <Text style={[styles.creditsName, { color: colors.foreground }]}>
-            ABEDALQADER GHUNMAT
+            Capt. ABEDALQADER GHUNMAT
           </Text>
 
           <View style={styles.creditsPillRow}>

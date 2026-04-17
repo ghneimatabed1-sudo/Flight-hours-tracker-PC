@@ -327,7 +327,7 @@ export default function SettingsScreen() {
             { color: colors.foreground, textAlign: isRTL ? "right" : "left" },
           ]}
         >
-          ABEDALQADER GHUNMAT
+          Capt. ABEDALQADER GHUNMAT
         </Text>
         <Text
           style={[
