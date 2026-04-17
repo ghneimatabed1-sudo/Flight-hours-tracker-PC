@@ -64,6 +64,41 @@ union all select 'notams',      count(*) from notams       where squadron_id = '
 -- expect: 16, 80, 240, 16, 5, 3
 ```
 
+## One-shot reset & reseed (`pnpm run db:seed`)
+
+For demo environments you can wipe and re-seed in a single command:
+
+```sh
+SUPABASE_DB_URL=postgresql://postgres:PWD@db.<project>.supabase.co:5432/postgres \
+  pnpm --filter @workspace/pilot-dashboard run db:seed
+```
+
+The script (`db-seed.mjs`) does, in order: regenerate `seed.sql` from
+`src/lib/mock.ts`, truncate the operational tables, re-apply every
+migration in `../migrations`, apply the fresh `seed.sql`, then print a
+sanity-check row count. It requires the `psql` CLI on `PATH`.
+
+**Safety guards:**
+
+- Aborts if `SUPABASE_DB_URL` is missing.
+- Refuses to run if the URL contains `prod`, `live`, or `production`
+  unless you also set `I_KNOW_WHAT_IM_DOING=1`.
+- Prints the target host (with credentials masked) and asks for
+  interactive confirmation. Pass `--yes` or set `CI=1` to skip the
+  prompt in scripted environments.
+
+**Sourcing `SUPABASE_DB_URL` safely:**
+
+- Use the **direct connection string** from the Supabase dashboard
+  (Project Settings → Database → Connection string → URI), not the
+  pooled one — migrations need a direct session.
+- This connection uses the `postgres` superuser, so treat it like a
+  service-role key: keep it out of git, out of chat, and out of any
+  shared `.env` that gets committed.
+- Prefer exporting it inline for a single command (as in the example
+  above) or storing it in a local-only `.env.local` that is git-ignored.
+- Never point it at a production project.
+
 ## Re-running
 
 The seed is idempotent for stable-key tables (squadrons, licenses,

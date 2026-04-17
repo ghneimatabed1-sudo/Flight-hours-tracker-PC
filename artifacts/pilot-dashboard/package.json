@@ -9,6 +9,7 @@
     "build": "vite build --config vite.config.ts",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "db:seed": "node supabase/seed/db-seed.mjs",
     "electron:compile": "tsc -p electron/tsconfig.json && node -e \"require('fs').mkdirSync('dist-electron',{recursive:true});require('fs').writeFileSync('dist-electron/package.json',JSON.stringify({type:'commonjs'}))\"",
     "electron:dev": "pnpm run electron:compile && electron dist-electron/main.js",
     "electron:build": "pnpm run build && pnpm run electron:compile && electron-builder --win nsis --config electron-builder.json"
