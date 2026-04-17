@@ -6,7 +6,7 @@ import {
   LayoutDashboard, ListChecks, PlusCircle, Users, BadgeCheck, AlertOctagon,
   Trophy, CalendarRange, PalmtreeIcon, UserX, Calendar, ClipboardList,
   ShieldAlert, FileText, Megaphone, Map, Tags, FileDown, UserCog, Settings,
-  Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle, Archive,
+  Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle, Archive, Bell,
 } from "lucide-react";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
 
@@ -31,6 +31,7 @@ const ITEMS: readonly Item[] = [
   { p: "/units", k: "nav_units", I: Tags },
   { p: "/pdf", k: "nav_pdf", I: FileDown },
   { p: "/users", k: "nav_users", I: UserCog },
+  { p: "/reminders", k: "nav_reminders", I: Bell },
   { p: "/audit", k: "nav_audit", I: History },
   { p: "/import", k: "nav_import", I: Upload },
   { p: "/archives", k: "nav_archives", I: Archive },

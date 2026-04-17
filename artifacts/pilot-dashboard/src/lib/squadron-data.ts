@@ -1012,3 +1012,144 @@ export function useRevokePilotDevices() {
     },
   });
 }
+
+// ── pilot reminder prefs + last-sent log (ops view) ────────────────────
+export type CurrencyKeyName = "day" | "night" | "irt" | "medical" | "sim";
+
+export interface ReminderOverviewRow {
+  pilotId: string;
+  pushEnabled: boolean;
+  expoPushToken: string | null;
+  platform: string | null;
+  thresholds: Partial<Record<CurrencyKeyName, number[]>>;
+  updatedAt: string | null;
+  lastSentAt: string | null;
+  lastSentCurrency: CurrencyKeyName | null;
+  lastSentThresholdDays: number | null;
+  lastSentExpiry: string | null;
+}
+
+let mockReminderOverview: ReminderOverviewRow[] | null = null;
+function seedReminderOverview(): ReminderOverviewRow[] {
+  // Synthetic preview data: opt half the roster in to push, leave the rest
+  // un-configured so the "no reminders" filter in the ops view has data.
+  const today = new Date();
+  return MOCK_PILOTS.map((p, i) => {
+    const enrolled = i % 2 === 0;
+    const updated = new Date(today.getTime() - (i + 1) * 86400000).toISOString();
+    if (!enrolled) {
+      return {
+        pilotId: p.id,
+        pushEnabled: false,
+        expoPushToken: null,
+        platform: null,
+        thresholds: {},
+        updatedAt: null,
+        lastSentAt: null,
+        lastSentCurrency: null,
+        lastSentThresholdDays: null,
+        lastSentExpiry: null,
+      };
+    }
+    const fired = i % 3 === 0;
+    return {
+      pilotId: p.id,
+      pushEnabled: true,
+      expoPushToken: "ExponentPushToken[demo-" + p.id + "]",
+      platform: i % 2 === 0 ? "ios" : "android",
+      thresholds: {
+        day: [14, 7, 1],
+        night: [7],
+        irt: [],
+        medical: [30, 7],
+        sim: [],
+      },
+      updatedAt: updated,
+      lastSentAt: fired ? new Date(today.getTime() - (i + 1) * 3600000).toISOString() : null,
+      lastSentCurrency: fired ? "day" : null,
+      lastSentThresholdDays: fired ? 7 : null,
+      lastSentExpiry: fired ? p.expiry.day : null,
+    };
+  });
+}
+function getMockReminderOverview(): ReminderOverviewRow[] {
+  if (!mockReminderOverview) mockReminderOverview = seedReminderOverview();
+  return mockReminderOverview;
+}
+
+export function useReminderOverview(): UseQueryResult<ReminderOverviewRow[]> & {
+  data: ReminderOverviewRow[];
+} {
+  const q = useQuery<ReminderOverviewRow[]>({
+    queryKey: ["reminder_overview"],
+    queryFn: async () => {
+      if (!isLive()) return [...getMockReminderOverview()];
+      // Pull the squadron's prefs (RLS already scopes by squadron_id) and the
+      // most recent fire from the dedupe log per pilot. We do two reads and
+      // join in JS to avoid relying on a SQL view.
+      const [{ data: prefs, error: prefErr }, { data: notifs, error: notifErr }] =
+        await Promise.all([
+          supabase!
+            .from("pilot_reminder_prefs")
+            .select("pilot_id, thresholds, push_enabled, expo_push_token, platform, updated_at"),
+          // Use the SQL DISTINCT-on equivalent via order + unique grouping in
+          // JS, but ensure we capture the latest fire per pilot regardless of
+          // squadron volume. We page through up to 5k recent rows; ops viewing
+          // is per-squadron so RLS already trims this server-side.
+          supabase!
+            .from("pilot_currency_notifications")
+            .select("pilot_id, currency_key, expiry_date, threshold_days, sent_at")
+            .order("sent_at", { ascending: false })
+            .limit(5000),
+        ]);
+      if (prefErr) throw prefErr;
+      if (notifErr) throw notifErr;
+      const lastByPilot = new Map<string, NonNullable<typeof notifs>[number]>();
+      for (const n of notifs ?? []) {
+        if (!lastByPilot.has(n.pilot_id as string)) {
+          lastByPilot.set(n.pilot_id as string, n);
+        }
+      }
+      const byPilot = new Map<string, ReminderOverviewRow>();
+      for (const r of prefs ?? []) {
+        const last = lastByPilot.get(r.pilot_id as string);
+        byPilot.set(r.pilot_id as string, {
+          pilotId: r.pilot_id as string,
+          pushEnabled: Boolean(r.push_enabled),
+          expoPushToken: (r.expo_push_token as string | null) ?? null,
+          platform: (r.platform as string | null) ?? null,
+          thresholds: (r.thresholds ?? {}) as ReminderOverviewRow["thresholds"],
+          updatedAt: (r.updated_at as string | null) ?? null,
+          lastSentAt: (last?.sent_at as string | null) ?? null,
+          lastSentCurrency: (last?.currency_key as CurrencyKeyName | null) ?? null,
+          lastSentThresholdDays: (last?.threshold_days as number | null) ?? null,
+          lastSentExpiry: (last?.expiry_date as string | null) ?? null,
+        });
+      }
+      // Surface pilots that have a fire log but no prefs row (edge case from
+      // pre-revoke history) so ops still sees their last reminder.
+      for (const [pid, last] of lastByPilot) {
+        if (byPilot.has(pid)) continue;
+        byPilot.set(pid, {
+          pilotId: pid,
+          pushEnabled: false,
+          expoPushToken: null,
+          platform: null,
+          thresholds: {},
+          updatedAt: null,
+          lastSentAt: (last.sent_at as string | null) ?? null,
+          lastSentCurrency: (last.currency_key as CurrencyKeyName | null) ?? null,
+          lastSentThresholdDays: (last.threshold_days as number | null) ?? null,
+          lastSentExpiry: (last.expiry_date as string | null) ?? null,
+        });
+      }
+      return Array.from(byPilot.values());
+    },
+    initialData: () => [...getMockReminderOverview()],
+    staleTime: 30_000,
+  });
+  return {
+    ...q,
+    data: q.data ?? getMockReminderOverview(),
+  } as UseQueryResult<ReminderOverviewRow[]> & { data: ReminderOverviewRow[] };
+}
