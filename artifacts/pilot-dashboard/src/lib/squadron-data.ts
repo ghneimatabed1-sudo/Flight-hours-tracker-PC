@@ -200,7 +200,11 @@ export function useCreateSortie() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (s: Omit<Sortie, "id">) => {
-      if (!isLive()) return { ...s, id: "S" + Date.now() };
+      if (!isLive()) {
+        const created = { ...s, id: "S" + Date.now() } as Sortie;
+        MOCK_SORTIES.push(created);
+        return created;
+      }
       const { data, error } = await supabase!.from("sorties").insert({
         pilot_id: s.pilotId,
         co_pilot_id: s.coPilotId,
@@ -219,6 +223,85 @@ export function useCreateSortie() {
       return rowToSortie(data);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sorties"] }),
+  });
+}
+
+// Update an existing sortie. Demo mode mutates the in-memory mock; live mode
+// patches the Supabase row. Both paths emit a `sortie.update` audit event so
+// commanders can trace who changed which entry.
+export function useUpdateSortie() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { sortie: Sortie; actor?: string }) => {
+      const s = input.sortie;
+      if (!isLive()) {
+        const idx = MOCK_SORTIES.findIndex(x => x.id === s.id);
+        if (idx < 0) throw new Error("sortie_not_found");
+        MOCK_SORTIES[idx] = s;
+        appendDemoAudit({
+          ts: tsNow(),
+          user: input.actor ?? "ops.officer",
+          action: "Sortie edit",
+          target: `${s.id} · ${s.date} · ${s.acNumber}`,
+        });
+        return s;
+      }
+      const { error } = await supabase!.from("sorties").update({
+        pilot_id: s.pilotId, co_pilot_id: s.coPilotId,
+        date: s.date, ac_type: s.acType, ac_number: s.acNumber,
+        sortie_type: s.sortieType, sortie_name: s.name,
+        data: {
+          day1: s.day1, day2: s.day2, dayDual: s.dayDual,
+          night1: s.night1, night2: s.night2, nightDual: s.nightDual,
+          nvg: s.nvg, sim: s.sim, actual: s.actual,
+        },
+      }).eq("id", s.id);
+      if (error) throw error;
+      await recordAuditEvent({
+        type: "sortie.update",
+        actor: input.actor,
+        detail: { id: s.id, date: s.date, acNumber: s.acNumber },
+      });
+      return s;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sorties"] });
+      qc.invalidateQueries({ queryKey: ["audit_log"] });
+    },
+  });
+}
+
+// Delete a sortie. Mirror of useUpdateSortie — demo mode splices the mock,
+// live mode issues a DELETE. Audit event records who deleted what.
+export function useDeleteSortie() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { id: string; actor?: string }) => {
+      if (!isLive()) {
+        const idx = MOCK_SORTIES.findIndex(x => x.id === input.id);
+        if (idx < 0) throw new Error("sortie_not_found");
+        const removed = MOCK_SORTIES.splice(idx, 1)[0];
+        appendDemoAudit({
+          ts: tsNow(),
+          user: input.actor ?? "ops.officer",
+          action: "Sortie delete",
+          target: `${removed.id} · ${removed.date} · ${removed.acNumber}`,
+        });
+        return { id: input.id };
+      }
+      const { error } = await supabase!.from("sorties").delete().eq("id", input.id);
+      if (error) throw error;
+      await recordAuditEvent({
+        type: "sortie.delete",
+        actor: input.actor,
+        detail: { id: input.id },
+      });
+      return { id: input.id };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sorties"] });
+      qc.invalidateQueries({ queryKey: ["audit_log"] });
+    },
   });
 }
 

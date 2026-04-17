@@ -7,6 +7,10 @@ export const squadrons: Squadron[] = [
   { id: "sqn-4", name: "9th Transport Squadron", nameAr: "سرب النقل التاسع", code: "9TS", base: "King Abdullah II AB", baseAr: "قاعدة الملك عبدالله الثاني", wing: "5th Wing", wingAr: "الجناح الخامس", enabled: true, keyHolder: "Lt.Col. Masri" },
   { id: "sqn-5", name: "11th Training Squadron", nameAr: "سرب التدريب الحادي عشر", code: "11TS", base: "Mafraq AB", baseAr: "قاعدة المفرق", wing: "5th Wing", wingAr: "الجناح الخامس", enabled: false, keyHolder: null },
   { id: "sqn-6", name: "14th Recon Squadron", nameAr: "سرب الاستطلاع الرابع عشر", code: "14RS", base: "Marka AB", baseAr: "قاعدة ماركا", wing: "3rd Wing", wingAr: "الجناح الثالث", enabled: true, keyHolder: "Maj. Qudah" },
+  { id: "sqn-7", name: "8th Search & Rescue Squadron", nameAr: "سرب البحث والإنقاذ الثامن", code: "8SAR", base: "King Hussein AB", baseAr: "قاعدة الملك حسين", wing: "2nd Wing", wingAr: "الجناح الثاني", enabled: true, keyHolder: "Maj. Sharif" },
+  { id: "sqn-8", name: "12th VIP Transport Squadron", nameAr: "سرب نقل كبار الشخصيات الثاني عشر", code: "12VIP", base: "King Abdullah II AB", baseAr: "قاعدة الملك عبدالله الثاني", wing: "5th Wing", wingAr: "الجناح الخامس", enabled: true, keyHolder: "Lt.Col. Mansour" },
+  { id: "sqn-9", name: "5th Flight Test Squadron", nameAr: "سرب اختبار الطيران الخامس", code: "5FTS", base: "Mafraq AB", baseAr: "قاعدة المفرق", wing: "5th Wing", wingAr: "الجناح الخامس", enabled: true, keyHolder: "Col. Habash" },
+  { id: "sqn-10", name: "16th Combat SAR Squadron", nameAr: "سرب البحث والإنقاذ القتالي السادس عشر", code: "16CSAR", base: "King Hussein AB", baseAr: "قاعدة الملك حسين", wing: "2nd Wing", wingAr: "الجناح الثاني", enabled: false, keyHolder: null },
 ];
 
 const ranks = [
@@ -78,6 +82,9 @@ export const licenseKeys: LicenseKey[] = [
   { id: "key-4", squadronId: "sqn-4", keyPreview: "EE-9TS-••••-Z03B", status: "locked", issuedAt: "2026-01-08", expiresAt: "2027-01-08", assignedUsername: "ops_9TS", lockedToDevice: "DESKTOP-OPS-9TS", lastSyncAt: "2026-04-14T11:55:00Z" },
   { id: "key-5", squadronId: "sqn-5", keyPreview: "EE-11TS-•••-D55F", status: "revoked", issuedAt: "2025-09-30", expiresAt: null, assignedUsername: "ops_11TS", lockedToDevice: null, lastSyncAt: "2026-01-02T08:11:00Z" },
   { id: "key-6", squadronId: "sqn-6", keyPreview: "EE-14RS-•••-G18N", status: "locked", issuedAt: "2026-03-02", expiresAt: "2026-04-02", assignedUsername: "ops_14RS", lockedToDevice: "DESKTOP-OPS-14RS", lastSyncAt: "2026-04-16T07:30:00Z" },
+  { id: "key-7", squadronId: "sqn-7", keyPreview: "EE-8SAR-•••-H44J", status: "locked", issuedAt: "2026-02-14", expiresAt: "2027-02-14", assignedUsername: "ops_8SAR", lockedToDevice: "DESKTOP-OPS-8SAR", lastSyncAt: "2026-04-16T05:22:00Z" },
+  { id: "key-8", squadronId: "sqn-8", keyPreview: "EE-12VIP-••-T81C", status: "locked", issuedAt: "2026-01-22", expiresAt: "2027-01-22", assignedUsername: "ops_12VIP", lockedToDevice: "DESKTOP-OPS-12VIP", lastSyncAt: "2026-04-15T22:10:00Z" },
+  { id: "key-9", squadronId: "sqn-9", keyPreview: "EE-5FTS-•••-W63L", status: "active", issuedAt: "2026-03-30", expiresAt: "2026-09-30", assignedUsername: "ops_5FTS", lockedToDevice: null, lastSyncAt: null },
 ];
 
 export const commanders: User[] = [

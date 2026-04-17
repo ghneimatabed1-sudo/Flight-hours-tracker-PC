@@ -151,3 +151,14 @@ in `src/lib/archive.ts` runs once. It is **idempotent**.
 - All archive storage is local browser storage on the operator's PC — the
   same model as the rest of the demo-mode dataset. Downloads produce
   `rjaf-archive-YYYY-MM.json` or `rjaf-archive-YYYY.json` for off-PC backup.
+
+## Sortie log edit/delete + 4 more demo squadrons (2026-04-17)
+- `useUpdateSortie` and `useDeleteSortie` hooks added in
+  `src/lib/squadron-data.ts`. Demo mode mutates the in-memory mock array;
+  live mode issues PATCH/DELETE against `sorties`. Both paths emit
+  `sortie.update` / `sortie.delete` audit events with the actor's username.
+- `SortieLog.tsx`: added an "Actions" column with edit (pencil) and delete
+  (trash). Edit opens a modal `SortieEditDialog` with every field of the row.
+  Delete uses `ConfirmDialog` (danger) with date · A/C · pilot summary.
+- mockData: 4 new squadrons (8SAR, 12VIP, 5FTS, 16CSAR) plus matching
+  license keys so HQ users can browse cross-squadron data immediately.
