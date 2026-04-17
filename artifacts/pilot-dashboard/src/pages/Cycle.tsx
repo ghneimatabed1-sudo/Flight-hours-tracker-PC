@@ -3,13 +3,16 @@ import { useI18n } from "@/lib/i18n";
 import { SIX_MONTH_TASKS } from "@/lib/mock";
 import { usePilots, useCurrencies } from "@/lib/squadron-data";
 import { supabaseConfigured } from "@/lib/supabase";
+import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 
 function rng(seed: number) { let s = seed; return () => (s = (s * 9301 + 49297) % 233280) / 233280; }
 
 export default function Cycle() {
   const { t } = useI18n();
-  const { data: PILOTS } = usePilots();
-  const { data: CURR } = useCurrencies();
+  const pilotsQ = usePilots();
+  const currQ = useCurrencies();
+  const { data: PILOTS } = pilotsQ;
+  const { data: CURR } = currQ;
   const lookup = new Map(CURR.map(c => [`${c.pilotId}|${c.task}`, c.status]));
   // In live mode, missing rows mean the pilot has not yet completed the task —
   // never invent a status. The pseudo-random demo statuses are only used when
@@ -25,6 +28,7 @@ export default function Cycle() {
   return (
     <div>
       <PageHead title={t("nav_cycle")} subtitle="Training task tracker — 6-month cycle" />
+      <DataUnavailableBanner queries={[pilotsQ, currQ]} testId="banner-cycle-unavailable" />
       <Card className="!p-0 overflow-x-auto">
         <table className="w-full text-xs">
           <thead className="bg-secondary/50 uppercase tracking-wider text-muted-foreground">
@@ -34,6 +38,13 @@ export default function Cycle() {
             </tr>
           </thead>
           <tbody>
+            {PILOTS.length === 0 && (
+              <tr>
+                <td colSpan={SIX_MONTH_TASKS.length + 1} className="px-3 py-6 text-center text-muted-foreground" data-testid="empty-cycle">
+                  {pilotsQ.isError || currQ.isError ? "—" : t("no_records")}
+                </td>
+              </tr>
+            )}
             {PILOTS.map(p => (
               <tr key={p.id} className="border-t border-border">
                 <td className="px-3 py-2 sticky left-0 bg-card">{p.rank} {p.name}</td>

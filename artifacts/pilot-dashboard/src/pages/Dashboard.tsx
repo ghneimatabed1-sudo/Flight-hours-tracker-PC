@@ -4,6 +4,7 @@ import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { usePilots, useSorties, useNotams } from "@/lib/squadron-data";
 import { computeAllTotals } from "@/lib/calculations";
+import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 import { Link } from "wouter";
 import {
   Plane, MoonStar, Eye, Cpu, Users, Calendar, AlertTriangle,
@@ -55,9 +56,12 @@ function LiveClockStrip({ lang }: { lang: "en" | "ar" }) {
 export default function Dashboard() {
   const { t, lang } = useI18n();
   const { user, squadron } = useAuth();
-  const { data: PILOTS } = usePilots();
-  const { data: SORTIES } = useSorties();
-  const { data: NOTAMS } = useNotams();
+  const pilotsQ = usePilots();
+  const sortiesQ = useSorties();
+  const notamsQ = useNotams();
+  const { data: PILOTS } = pilotsQ;
+  const { data: SORTIES } = sortiesQ;
+  const { data: NOTAMS } = notamsQ;
   const now = new Date();
 
   const totalsById = useMemo(() => computeAllTotals(PILOTS, SORTIES), [PILOTS, SORTIES]);
@@ -90,6 +94,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-4">
+      <DataUnavailableBanner queries={[pilotsQ, sortiesQ, notamsQ]} testId="banner-dashboard-unavailable" />
       {/* ───── Mission Status Bar ───────────────────────── */}
       <div className="rise rise-1 panel scan flex items-center justify-between px-4 py-2.5 text-xs flex-wrap gap-3">
         <div className="flex items-center gap-2 min-w-0">

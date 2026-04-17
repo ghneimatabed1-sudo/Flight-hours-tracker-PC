@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots } from "@/lib/squadron-data";
+import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 
 const TABS = ["day", "night", "irt", "medical", "sim"] as const;
 
@@ -16,7 +17,8 @@ export default function Currency() {
   const { t } = useI18n();
   const [tab, setTab] = useState<typeof TABS[number]>("day");
   const [unit, setUnit] = useState<"All" | "SQDN" | "Attached">("All");
-  const { data: PILOTS } = usePilots();
+  const pilotsQ = usePilots();
+  const { data: PILOTS } = pilotsQ;
 
   const rows = PILOTS
     .filter(p => unit === "All" || (unit === "SQDN" ? p.unit === "SQDN" : p.unit !== "SQDN"))
@@ -33,6 +35,7 @@ export default function Currency() {
           ))}
         </div>
       } />
+      <DataUnavailableBanner queries={[pilotsQ]} testId="banner-currency-unavailable" />
       <div className="flex gap-1 mb-3">
         {TABS.map(k => (
           <button key={k} onClick={() => setTab(k)} className={`px-4 py-2 rounded-md text-sm ${tab === k ? "bg-card border border-border text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
@@ -51,6 +54,13 @@ export default function Currency() {
             </tr>
           </thead>
           <tbody>
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-3 py-6 text-center text-xs text-muted-foreground" data-testid="empty-currency">
+                  {pilotsQ.isError ? "—" : t("no_records")}
+                </td>
+              </tr>
+            )}
             {rows.map(({ p, s, hidden }) => (
               <tr key={p.id} className={`border-t border-border row-hover ${hidden ? "opacity-50" : ""}`}>
                 <td className="px-3 py-2">{p.rank} {p.name}</td>

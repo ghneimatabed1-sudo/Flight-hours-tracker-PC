@@ -3,16 +3,18 @@ import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { supabaseConfigured } from "@/lib/supabase";
 import { useAuditLog } from "@/lib/squadron-data";
+import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 
 export default function AuditLog() {
   const { t } = useI18n();
   const { fingerprint } = useAuth();
-  const { data: rows, isLoading, error } = useAuditLog();
+  const auditQ = useAuditLog();
+  const { data: rows, isLoading } = auditQ;
 
   return (
     <div>
       <PageHead title={t("nav_audit")} subtitle={supabaseConfigured ? "Live from server · with PC fingerprint" : "Demo data · connect Supabase for live history"} />
-      {error && <div className="mb-3 text-xs text-rose-300">{(error as Error).message}</div>}
+      <DataUnavailableBanner queries={[auditQ]} testId="banner-audit-unavailable" />
       <Card className="!p-0 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
@@ -20,7 +22,13 @@ export default function AuditLog() {
           </thead>
           <tbody>
             {isLoading && rows.length === 0 && <tr><td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">Loading…</td></tr>}
-            {!isLoading && rows.length === 0 && <tr><td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">No audit events yet.</td></tr>}
+            {!isLoading && rows.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground" data-testid="empty-audit">
+                  {auditQ.isError ? "—" : "No audit events yet."}
+                </td>
+              </tr>
+            )}
             {rows.map((e, i) => (
               <tr key={i} className="border-t border-border row-hover">
                 <td className="px-3 py-2 font-mono">{e.ts}</td>

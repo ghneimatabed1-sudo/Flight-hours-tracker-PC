@@ -1,13 +1,16 @@
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots, useLeaves } from "@/lib/squadron-data";
+import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 export default function Leaves() {
   const { t } = useI18n();
-  const { data: PILOTS } = usePilots();
-  const { data: LEAVES } = useLeaves();
+  const pilotsQ = usePilots();
+  const leavesQ = useLeaves();
+  const { data: PILOTS } = pilotsQ;
+  const { data: LEAVES } = leavesQ;
   const byId = new Map(LEAVES.map(l => [l.pilotId, l]));
   const data = PILOTS.map(p => {
     const lr = byId.get(p.id) ?? { months: Array(12).fill(0), total: 0 };
@@ -16,6 +19,7 @@ export default function Leaves() {
   return (
     <div>
       <PageHead title={t("nav_leaves")} subtitle="Monthly leave days · yearly totals" />
+      <DataUnavailableBanner queries={[pilotsQ, leavesQ]} testId="banner-leaves-unavailable" />
       <Card className="!p-0 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-secondary/50 uppercase tracking-wider text-xs text-muted-foreground">
@@ -26,6 +30,13 @@ export default function Leaves() {
             </tr>
           </thead>
           <tbody>
+            {data.length === 0 && (
+              <tr>
+                <td colSpan={MONTHS.length + 2} className="px-3 py-6 text-center text-xs text-muted-foreground" data-testid="empty-leaves">
+                  {pilotsQ.isError || leavesQ.isError ? "—" : t("no_records")}
+                </td>
+              </tr>
+            )}
             {data.map(({ p, months, total }) => (
               <tr key={p.id} className="border-t border-border row-hover">
                 <td className="px-3 py-2">{p.name}</td>

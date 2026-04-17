@@ -3,14 +3,16 @@ import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots, useUpdatePilot, useCreatePilot, useDeletePilot, type Pilot } from "@/lib/squadron-data";
 import { Link } from "wouter";
-import { Plus, Search, Pencil, Trash2, X, Loader2, AlertCircle, FileDown } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, X, Loader2, FileDown } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 
 export default function Roster() {
   const { t } = useI18n();
   const [q, setQ] = useState("");
   const [importedOnly, setImportedOnly] = useState(false);
-  const { data: PILOTS, isLoading, isError, error, refetch, isFetching } = usePilots();
+  const pilotsQ = usePilots();
+  const { data: PILOTS, isLoading, isFetching } = pilotsQ;
   const updatePilot = useUpdatePilot();
   const createPilot = useCreatePilot();
   const deletePilot = useDeletePilot();
@@ -117,12 +119,7 @@ export default function Roster() {
         </div>
       } />
       {err && <div className="mb-3 text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-md px-3 py-2">{err}</div>}
-      {isError && (
-        <div className="mb-3 text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-md px-3 py-2 flex items-center justify-between gap-3" data-testid="error-pilots">
-          <span className="flex items-center gap-2"><AlertCircle className="h-4 w-4" /> {t("errorLoading")}: {(error as Error)?.message ?? ""}</span>
-          <button onClick={() => refetch()} className="px-2 py-1 rounded bg-destructive/20 hover:bg-destructive/30">{t("retry")}</button>
-        </div>
-      )}
+      <DataUnavailableBanner queries={[pilotsQ]} testId="banner-roster-unavailable" />
       {isLoading && PILOTS.length === 0 && (
         <div className="flex items-center justify-center py-12 text-sm text-muted-foreground" data-testid="loading-pilots">
           <Loader2 className="h-4 w-4 me-2 animate-spin" /> {t("loading")}
@@ -147,6 +144,13 @@ export default function Roster() {
               </tr>
             </thead>
             <tbody>
+              {list.length === 0 && !isLoading && (
+                <tr>
+                  <td colSpan={11} className="px-3 py-6 text-center text-xs text-muted-foreground" data-testid="empty-pilots">
+                    {pilotsQ.isError ? "—" : t("no_records")}
+                  </td>
+                </tr>
+              )}
               {list.map((p: Pilot) => (
                 <tr key={p.id} className="border-t border-border row-hover">
                   <td className="px-3 py-2 font-mono">{p.id}</td>

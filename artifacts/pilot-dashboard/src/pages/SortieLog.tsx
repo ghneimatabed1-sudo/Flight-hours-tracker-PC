@@ -4,6 +4,7 @@ import { useI18n } from "@/lib/i18n";
 import { usePilots, useSorties, useUpdateSortie, useDeleteSortie } from "@/lib/squadron-data";
 import { useAuth } from "@/lib/auth";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 import { Search, Filter, Pencil, Trash2 } from "lucide-react";
 import type { Sortie } from "@/lib/mock";
 
@@ -14,8 +15,10 @@ export default function SortieLog() {
   const [type, setType] = useState("All");
   const [editing, setEditing] = useState<Sortie | null>(null);
   const [deleting, setDeleting] = useState<Sortie | null>(null);
-  const { data: PILOTS } = usePilots();
-  const { data: SORTIES } = useSorties();
+  const pilotsQ = usePilots();
+  const sortiesQ = useSorties();
+  const { data: PILOTS } = pilotsQ;
+  const { data: SORTIES } = sortiesQ;
   const updateMut = useUpdateSortie();
   const deleteMut = useDeleteSortie();
 
@@ -51,6 +54,8 @@ export default function SortieLog() {
         </div>
       } />
 
+      <DataUnavailableBanner queries={[pilotsQ, sortiesQ]} testId="banner-sortielog-unavailable" />
+
       <Card className="!p-0 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -65,6 +70,13 @@ export default function SortieLog() {
               </tr>
             </thead>
             <tbody>
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={17} className="px-3 py-6 text-center text-xs text-muted-foreground" data-testid="empty-sorties">
+                    {pilotsQ.isError || sortiesQ.isError ? "—" : t("no_records")}
+                  </td>
+                </tr>
+              )}
               {rows.map(s => (
                 <tr key={s.id} className="border-t border-border row-hover" data-testid={`row-sortie-${s.id}`}>
                   <Td mono>{s.date}</Td>

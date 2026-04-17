@@ -5,12 +5,15 @@ import { usePilots, useUnavailable, useCreateUnavailable, useDeleteUnavailable, 
 import { useToast } from "@/hooks/use-toast";
 import { Plus, UserX, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 
 export default function Unavailable() {
   const { t } = useI18n();
   const { toast } = useToast();
-  const { data: PILOTS } = usePilots();
-  const { data: items } = useUnavailable();
+  const pilotsQ = usePilots();
+  const unavailQ = useUnavailable();
+  const { data: PILOTS } = pilotsQ;
+  const { data: items } = unavailQ;
   const create = useCreateUnavailable();
   const remove = useDeleteUnavailable();
   const [pid, setPid] = useState(PILOTS[0]?.id ?? "");
@@ -43,6 +46,7 @@ export default function Unavailable() {
   return (
     <div>
       <PageHead title={t("nav_unavail")} subtitle="Date range + reason per pilot" />
+      <DataUnavailableBanner queries={[pilotsQ, unavailQ]} testId="banner-unavail-unavailable" />
       <div className="grid lg:grid-cols-3 gap-4">
         <Card className="lg:col-span-2 !p-0 overflow-hidden">
           <table className="w-full text-sm">
@@ -70,7 +74,11 @@ export default function Unavailable() {
                 </tr>
               ))}
               {items.length === 0 && (
-                <tr><td colSpan={5} className="px-3 py-6 text-center text-xs text-muted-foreground">No pilots marked unavailable.</td></tr>
+                <tr>
+                  <td colSpan={5} className="px-3 py-6 text-center text-xs text-muted-foreground" data-testid="empty-unavailable">
+                    {unavailQ.isError ? "—" : "No pilots marked unavailable."}
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>

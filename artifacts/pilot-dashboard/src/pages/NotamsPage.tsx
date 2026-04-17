@@ -5,11 +5,13 @@ import { useNotams, useCreateNotam, useUpdateNotam, useDeleteNotam, type NotamRo
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Megaphone, Pencil, Trash2, Check, X } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 
 export default function NotamsPage() {
   const { t } = useI18n();
   const { toast } = useToast();
-  const { data: list } = useNotams();
+  const notamsQ = useNotams();
+  const { data: list } = notamsQ;
   const create = useCreateNotam();
   const update = useUpdateNotam();
   const remove = useDeleteNotam();
@@ -53,8 +55,14 @@ export default function NotamsPage() {
   return (
     <div>
       <PageHead title={t("nav_notams")} subtitle="Navigation notices by date" />
+      <DataUnavailableBanner queries={[notamsQ]} testId="banner-notams-unavailable" />
       <div className="grid lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-2">
+          {list.length === 0 && (
+            <Card data-testid="empty-notams" className="text-center text-xs text-muted-foreground py-6">
+              {notamsQ.isError ? "—" : t("no_records")}
+            </Card>
+          )}
           {list.map(n => (
             <Card key={n.id} className="flex gap-3 items-start">
               <Megaphone className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
