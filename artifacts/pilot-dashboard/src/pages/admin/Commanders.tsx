@@ -27,17 +27,25 @@ const scopeKeys: Record<CommanderScope, "scopeSquadron" | "scopeFlight" | "scope
   hq: "scopeHQ",
 };
 
+// A "tier" is a single selector that combines role + scope for the UI.
+// Internally the store still holds role ∈ {commander, ops} and a
+// CommanderScope, but the Super Admin only ever picks one tier here.
+type Tier = "hq" | "base" | "wing" | "squadron" | "flight" | "ops";
+
+function tierToRoleScope(tier: Tier): { role: AccountRole; scope?: CommanderScope } {
+  if (tier === "ops") return { role: "ops" };
+  return { role: "commander", scope: tier as CommanderScope };
+}
+
 export default function Commanders() {
   const { t, lang } = useI18n();
   const [list, setList] = useState<CommanderRecord[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
-  // Role defaults to "commander" to preserve the old flow for existing users;
-  // Super Admin can flip to "ops" to create a flight operations account that
-  // has no squadron visibility controls (operates this PC's squadron only).
-  const [role, setRole] = useState<AccountRole>("commander");
-  const [scope, setScope] = useState<CommanderScope>("squadron");
+  // A single selector whose options mirror the scope names plus "Ops Officer".
+  // Translates to (role, scope) internally when creating the account.
+  const [tier, setTier] = useState<Tier>("squadron");
   const [selSqns, setSelSqns] = useState<string[]>([]);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -62,9 +70,10 @@ export default function Commanders() {
     setCreateError(null);
     if (!username.trim()) { setCreateError(t("missingUsername")); return; }
     if (!name.trim()) { setCreateError(t("missingName")); return; }
-    // Squadron-visibility rules only apply to commanders. Ops officers run
-    // this PC's squadron implicitly — the store ignores scope/squadronIds.
-    if (role === "commander" && selSqns.length === 0 && scope !== "hq") {
+    const { role, scope } = tierToRoleScope(tier);
+    // Squadron-visibility rules only apply to non-HQ commanders. HQ auto-gets
+    // every squadron; ops officers implicitly operate this PC's squadron.
+    if (role === "commander" && scope !== "hq" && selSqns.length === 0) {
       setCreateError(t("pickAtLeastOneSquadron"));
       return;
     }
@@ -75,7 +84,7 @@ export default function Commanders() {
       username: username.trim(),
       displayName: name.trim(),
       role,
-      scope: role === "commander" ? scope : undefined,
+      scope,
       squadronIds: sqnIds,
     });
     if (!res.ok || !res.record || !res.initialPassword) {
@@ -89,7 +98,7 @@ export default function Commanders() {
     }
     refresh();
     setCreateOpen(false);
-    setName(""); setUsername(""); setRole("commander"); setScope("squadron"); setSelSqns([]);
+    setName(""); setUsername(""); setTier("squadron"); setSelSqns([]);
     setCredsShow({ username: res.record.username, password: res.initialPassword });
   }
 
@@ -197,36 +206,25 @@ export default function Commanders() {
             </div>
             <div>
               <Label>{t("accountRole")}</Label>
-              <Select value={role} onValueChange={(v: string) => setRole(v as AccountRole)}>
+              <Select value={tier} onValueChange={(v: string) => setTier(v as Tier)}>
                 <SelectTrigger data-testid="select-role"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="commander">{t("roleCommander")}</SelectItem>
+                  <SelectItem value="hq">{t("scopeHQ")}</SelectItem>
+                  <SelectItem value="base">{t("scopeBase")}</SelectItem>
+                  <SelectItem value="wing">{t("scopeWing")}</SelectItem>
+                  <SelectItem value="squadron">{t("scopeSquadron")}</SelectItem>
+                  <SelectItem value="flight">{t("scopeFlight")}</SelectItem>
                   <SelectItem value="ops">{t("roleOps")}</SelectItem>
                 </SelectContent>
               </Select>
-              {role === "ops" && (
+              {tier === "hq" && (
+                <p className="text-xs text-muted-foreground mt-1">{t("hqScopeHint")}</p>
+              )}
+              {tier === "ops" && (
                 <p className="text-xs text-muted-foreground mt-1">{t("opsRoleHint")}</p>
               )}
             </div>
-            {role === "commander" && (
-              <div>
-                <Label>{t("scope")}</Label>
-                <Select value={scope} onValueChange={(v: string) => setScope(v as CommanderScope)}>
-                  <SelectTrigger data-testid="select-scope"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="hq">{t("scopeHQ")}</SelectItem>
-                    <SelectItem value="base">{t("scopeBase")}</SelectItem>
-                    <SelectItem value="wing">{t("scopeWing")}</SelectItem>
-                    <SelectItem value="squadron">{t("scopeSquadron")}</SelectItem>
-                    <SelectItem value="flight">{t("scopeFlight")}</SelectItem>
-                  </SelectContent>
-                </Select>
-                {scope === "hq" && (
-                  <p className="text-xs text-muted-foreground mt-1">{t("hqScopeHint")}</p>
-                )}
-              </div>
-            )}
-            {role === "commander" && scope !== "hq" && (
+            {tier !== "hq" && tier !== "ops" && (
               <div>
                 <Label>{t("authorizedSquadrons")}</Label>
                 <p className="text-xs text-muted-foreground mb-1">{t("authorizedSquadronsHint")}</p>
