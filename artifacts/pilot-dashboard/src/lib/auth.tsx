@@ -2,6 +2,17 @@ import { createContext, useContext, useEffect, useMemo, useState, ReactNode } fr
 import { supabase, supabaseConfigured, validateLicenseRemote, recordAuditEvent } from "./supabase";
 import { commanders, SUPER_ADMIN } from "./mockData";
 import type { User } from "./types";
+import { generateSecret, otpauthURL, verifyTotp } from "./totp";
+
+const ADMIN_TOTP_SECRET_KEY = "rjaf.adminTotp.secret";
+const ADMIN_TOTP_ISSUER = "RJAF Pilot Dashboard";
+
+interface PendingAdmin {
+  user: User;
+  mode: "enroll" | "verify";
+  secret: string;
+  otpauth: string;
+}
 
 interface SquadronConfig {
   name: string;
@@ -17,10 +28,19 @@ interface AuthState {
   failedAttempts: number;
   lockedUntil: number | null;
 }
+interface LoginResult {
+  ok: boolean;
+  error?: string;
+  requires2fa?: "enroll" | "verify";
+}
 interface AuthCtx extends AuthState {
   activateLicense: (key: string) => Promise<{ ok: boolean; error?: string }>;
   configureSquadron: (cfg: SquadronConfig) => void;
-  login: (username: string, password: string) => Promise<{ ok: boolean; error?: string }>;
+  login: (username: string, password: string) => Promise<LoginResult>;
+  verifyAdminTotp: (code: string) => Promise<{ ok: boolean; error?: string }>;
+  cancelAdminTotp: () => void;
+  pendingAdmin: { mode: "enroll" | "verify"; secret: string; otpauth: string } | null;
+  adminTotpEnrolled: boolean;
   logout: () => void;
   releaseLicense: () => void;
   backendMode: "supabase" | "demo";
@@ -91,6 +111,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     failedAttempts: Number(localStorage.getItem("rjaf.fails") || 0),
     lockedUntil: Number(localStorage.getItem("rjaf.lockUntil") || 0) || null,
   }));
+  const [pending, setPending] = useState<PendingAdmin | null>(null);
+  const [adminTotpEnrolled, setAdminTotpEnrolled] = useState<boolean>(
+    () => !!localStorage.getItem(ADMIN_TOTP_SECRET_KEY),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -160,6 +184,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (hqExpected !== password) return await recordFail("bad_credentials");
         const hqUser = lookupHQUser(username);
         if (!hqUser) return await recordFail("unknown_hq_user");
+
+        // Super admin must complete a real TOTP step (enrollment first time, then
+        // verification on every subsequent sign-in) before the panel unlocks.
+        if (hqUser.role === "super_admin") {
+          const existing = localStorage.getItem(ADMIN_TOTP_SECRET_KEY);
+          if (existing) {
+            setPending({
+              user: hqUser,
+              mode: "verify",
+              secret: existing,
+              otpauth: otpauthURL(existing, hqUser.username, ADMIN_TOTP_ISSUER),
+            });
+            await recordAuditEvent({ type: "login.2fa.required", actor: username, detail: { stage: "verify" } });
+            return { ok: false, requires2fa: "verify" };
+          }
+          const secret = generateSecret();
+          setPending({
+            user: hqUser,
+            mode: "enroll",
+            secret,
+            otpauth: otpauthURL(secret, hqUser.username, ADMIN_TOTP_ISSUER),
+          });
+          await recordAuditEvent({ type: "login.2fa.required", actor: username, detail: { stage: "enroll" } });
+          return { ok: false, requires2fa: "enroll" };
+        }
+
         localStorage.setItem("rjaf.user", JSON.stringify(hqUser));
         localStorage.removeItem("rjaf.fails");
         localStorage.removeItem("rjaf.lockUntil");
@@ -198,9 +248,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState(s => ({ ...s, user, failedAttempts: 0, lockedUntil: null }));
       return { ok: true };
     },
+    pendingAdmin: pending
+      ? { mode: pending.mode, secret: pending.secret, otpauth: pending.otpauth }
+      : null,
+    adminTotpEnrolled,
+    verifyAdminTotp: async (code) => {
+      if (!pending) return { ok: false, error: "no_pending" };
+      const now = Date.now();
+      if (state.lockedUntil && state.lockedUntil > now) {
+        return { ok: false, error: "locked" };
+      }
+      const ok = await verifyTotp(pending.secret, code);
+      if (!ok) {
+        const fails = state.failedAttempts + 1;
+        const lockedUntil = fails >= 5 ? now + 5 * 60_000 : null;
+        localStorage.setItem("rjaf.fails", String(fails));
+        if (lockedUntil) localStorage.setItem("rjaf.lockUntil", String(lockedUntil));
+        await recordAuditEvent({
+          type: "login.2fa.failed",
+          actor: pending.user.username,
+          detail: { stage: pending.mode, fails },
+        });
+        setState(s => ({ ...s, failedAttempts: fails, lockedUntil }));
+        if (lockedUntil) setPending(null);
+        return { ok: false, error: lockedUntil ? "locked" : "bad" };
+      }
+      if (pending.mode === "enroll") {
+        localStorage.setItem(ADMIN_TOTP_SECRET_KEY, pending.secret);
+        setAdminTotpEnrolled(true);
+        await recordAuditEvent({
+          type: "login.2fa.enrolled",
+          actor: pending.user.username,
+        });
+      }
+      const hqUser = pending.user;
+      localStorage.setItem("rjaf.user", JSON.stringify(hqUser));
+      localStorage.removeItem("rjaf.fails");
+      localStorage.removeItem("rjaf.lockUntil");
+      await recordAuditEvent({
+        type: "login.ok",
+        actor: hqUser.username,
+        detail: { role: hqUser.role, twoFactor: true },
+      });
+      setPending(null);
+      setState(s => ({ ...s, user: hqUser, failedAttempts: 0, lockedUntil: null }));
+      return { ok: true };
+    },
+    cancelAdminTotp: () => {
+      setPending(null);
+    },
     logout: () => {
       if (supabase) supabase.auth.signOut();
       localStorage.removeItem("rjaf.user");
+      setPending(null);
       setState(s => ({ ...s, user: null }));
     },
     releaseLicense: () => {
@@ -211,7 +311,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem("rjaf.squadronId");
       setState(s => ({ ...s, licensed: false, user: null }));
     },
-  }), [state]);
+  }), [state, pending, adminTotpEnrolled]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
