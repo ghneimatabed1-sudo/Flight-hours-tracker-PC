@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
+import { usePilots, useSorties } from "@/lib/squadron-data";
 import { FileDown, FileText, Loader2, Globe } from "lucide-react";
 import {
   exportAuthorizationReport,
@@ -16,6 +17,8 @@ type ExportKey = "auth" | "data" | "totals" | "summary";
 export default function PdfExports() {
   const { t, lang } = useI18n();
   const { squadron } = useAuth();
+  const { data: pilots } = usePilots();
+  const { data: sorties } = useSorties();
   const [busy, setBusy] = useState<ExportKey | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The PDFs follow the app's current language by default but the operator
@@ -46,10 +49,10 @@ export default function PdfExports() {
     setBusy(key);
     setError(null);
     try {
-      if (key === "auth") await exportAuthorizationReport(sqdn, pdfLang);
-      else if (key === "data") await exportPilotDataPages(sqdn, pdfLang);
-      else if (key === "totals") await exportTotalsPage(sqdn, pdfLang);
-      else if (key === "summary") await exportSquadronSummary(sqdn, pdfLang);
+      if (key === "auth") await exportAuthorizationReport(sqdn, pilots, pdfLang);
+      else if (key === "data") await exportPilotDataPages(sqdn, pilots, pdfLang);
+      else if (key === "totals") await exportTotalsPage(sqdn, pilots, pdfLang);
+      else if (key === "summary") await exportSquadronSummary(sqdn, pilots, sorties, pdfLang);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to generate PDF");
     } finally {

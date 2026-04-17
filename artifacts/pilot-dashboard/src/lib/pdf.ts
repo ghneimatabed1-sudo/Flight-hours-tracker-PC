@@ -2,7 +2,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 // @ts-expect-error - arabic-reshaper ships only a CommonJS factory with no types.
 import ArabicReshaper from "arabic-reshaper";
-import { PILOTS, SORTIES, type Pilot } from "./mock";
+import type { Pilot, Sortie } from "./mock";
 
 export type PdfLang = "en" | "ar";
 
@@ -232,12 +232,12 @@ function tableStyles(lang: PdfLang) {
 }
 
 // ---------- Authorization Report ----------
-export async function exportAuthorizationReport(sqdn: SquadronInfo, lang: PdfLang = "en") {
+export async function exportAuthorizationReport(sqdn: SquadronInfo, pilots: Pilot[], lang: PdfLang = "en") {
   const emblem = await loadEmblem();
   const doc = await setupDoc(lang);
   drawHeader(doc, sqdn, tr("authReport", lang), emblem, lang);
 
-  const rows = PILOTS.map((p) => [
+  const rows = pilots.map((p) => [
     p.id,
     pilotName(p, lang),
     shape(p.unit),
@@ -277,11 +277,11 @@ export async function exportAuthorizationReport(sqdn: SquadronInfo, lang: PdfLan
 }
 
 // ---------- Pilot Data Pages ----------
-export async function exportPilotDataPages(sqdn: SquadronInfo, lang: PdfLang = "en") {
+export async function exportPilotDataPages(sqdn: SquadronInfo, pilots: Pilot[], lang: PdfLang = "en") {
   const emblem = await loadEmblem();
   const doc = await setupDoc(lang);
 
-  PILOTS.forEach((p, idx) => {
+  pilots.forEach((p, idx) => {
     if (idx > 0) doc.addPage();
     drawHeader(doc, sqdn, `${tr("pilotDataPage", lang)} · ${p.id}`, emblem, lang);
 
@@ -341,12 +341,12 @@ export async function exportPilotDataPages(sqdn: SquadronInfo, lang: PdfLang = "
 }
 
 // ---------- Total's Page ----------
-export async function exportTotalsPage(sqdn: SquadronInfo, lang: PdfLang = "en") {
+export async function exportTotalsPage(sqdn: SquadronInfo, pilots: Pilot[], lang: PdfLang = "en") {
   const emblem = await loadEmblem();
   const doc = await setupDoc(lang);
   drawHeader(doc, sqdn, tr("totalsPage", lang), emblem, lang);
 
-  const rows = PILOTS.map((p) => [
+  const rows = pilots.map((p) => [
     p.id,
     pilotName(p, lang),
     shape(p.unit),
@@ -358,7 +358,7 @@ export async function exportTotalsPage(sqdn: SquadronInfo, lang: PdfLang = "en")
     (p.monthDay + p.monthNight + p.monthNvg).toFixed(1),
   ]);
 
-  const sum = (k: keyof Pilot) => PILOTS.reduce((s, p) => s + (p[k] as number), 0);
+  const sum = (k: keyof Pilot) => pilots.reduce((s, p) => s + (p[k] as number), 0);
   rows.push([
     "",
     shape(tr("squadron_total", lang)),
@@ -395,7 +395,7 @@ export async function exportTotalsPage(sqdn: SquadronInfo, lang: PdfLang = "en")
 }
 
 // ---------- Squadron Summary ----------
-export async function exportSquadronSummary(sqdn: SquadronInfo, lang: PdfLang = "en") {
+export async function exportSquadronSummary(sqdn: SquadronInfo, pilots: Pilot[], sorties: Sortie[], lang: PdfLang = "en") {
   const emblem = await loadEmblem();
   const doc = await setupDoc(lang);
 
@@ -432,16 +432,16 @@ export async function exportSquadronSummary(sqdn: SquadronInfo, lang: PdfLang = 
   doc.addPage();
   drawHeader(doc, sqdn, tr("squadronSnapshot", lang), emblem, lang);
 
-  const totalPilots = PILOTS.length;
-  const available = PILOTS.filter((p) => p.available).length;
-  const expSoon = PILOTS.filter((p) => {
+  const totalPilots = pilots.length;
+  const available = pilots.filter((p) => p.available).length;
+  const expSoon = pilots.filter((p) => {
     const t = Math.min(
       ...Object.values(p.expiry).map((d) => new Date(d).getTime() - Date.now()),
     );
     return t < 30 * 86400000;
   }).length;
-  const sortieCount = SORTIES.length;
-  const totalHrs = SORTIES.reduce((s, x) => s + x.actual, 0);
+  const sortieCount = sorties.length;
+  const totalHrs = sorties.reduce((s, x) => s + x.actual, 0);
 
   autoTable(doc, {
     startY: 44,
@@ -469,7 +469,7 @@ export async function exportSquadronSummary(sqdn: SquadronInfo, lang: PdfLang = 
       shape(tr("col_pilot", lang)), shape(tr("col_day", lang)), shape(tr("col_night", lang)),
       shape(tr("col_nvg", lang)), shape(tr("col_sim", lang)),
     ]],
-    body: PILOTS.map((p) => [
+    body: pilots.map((p) => [
       pilotName(p, lang),
       p.monthDay.toFixed(1),
       p.monthNight.toFixed(1),
