@@ -95,13 +95,18 @@ async function makeFingerprint(): Promise<string> {
 
 const DEMO_KEY_PREFIXES = ["RJAF-", "DEMO-"];
 
+// Static credentials for HQ users *other than* the super admin. The super
+// admin's password is held only on the server (SUPER_ADMIN_PASSWORD_HASH)
+// and validated by the super-admin-2fa edge function — never by the
+// client. In demo mode (no Supabase) we still accept "admin123" so the
+// in-browser preview can log in.
 const HQ_CREDS: Record<string, string> = {
-  admin: "admin123",
   commander1: "commander",
   wing1: "commander",
   base1: "commander",
   hq1: "commander",
 };
+const DEMO_SUPER_ADMIN_PASSWORD = "admin123";
 
 function lookupHQUser(username: string): User | null {
   const u = username.trim().toLowerCase();
@@ -120,13 +125,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     lockedUntil: Number(localStorage.getItem("rjaf.lockUntil") || 0) || null,
   }));
   const [pending, setPending] = useState<PendingAdmin | null>(null);
-  // Held in memory only between the password step and the TOTP step so the
-  // edge function can re-authenticate the verify call. Never persisted.
-  const pendingPasswordRef = useRef<string>("");
-  // Optimistic local cache only — the authoritative answer for whether a
-  // super admin has enrolled lives in `super_admin_2fa` server-side.
+  // Short-lived HMAC challenge token returned by the edge function's "start"
+  // step, presented back to "verify". Held in memory only — never persisted.
+  // Replaces the previous practice of stashing the raw password.
+  const pendingTokenRef = useRef<string>("");
+  // Whether the super admin has finished enrollment. In Supabase mode this
+  // is hydrated from the server's "start" response. The localStorage key is
+  // only consulted as a hint for the demo (no-Supabase) path.
   const [adminTotpEnrolled, setAdminTotpEnrolled] = useState<boolean>(
-    () => !!localStorage.getItem(ADMIN_TOTP_SECRET_KEY),
+    () => supabaseConfigured ? false : !!localStorage.getItem(ADMIN_TOTP_SECRET_KEY),
   );
 
   useEffect(() => {
@@ -222,81 +229,75 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
 
       // HQ users (super admin, commanders) skip license/squadron setup entirely.
-      const hqExpected = HQ_CREDS[username.trim().toLowerCase()];
-      if (hqExpected) {
-        if (hqExpected !== password) return await recordFail("bad_credentials");
-        const hqUser = lookupHQUser(username);
-        if (!hqUser) return await recordFail("unknown_hq_user");
+      const u = username.trim().toLowerCase();
+      const hqUser = lookupHQUser(username);
 
-        // Super admin must complete a real TOTP step (enrollment first time, then
-        // verification on every subsequent sign-in) before the panel unlocks.
-        if (hqUser.role === "super_admin") {
-          // Server-backed flow (production / any installation with Supabase).
-          // The secret lives in super_admin_2fa, never in localStorage, and
-          // verification is performed by the super-admin-2fa edge function.
-          if (supabaseConfigured && supabase) {
-            // Stash the password in component state for the verify step.
-            // The edge function authenticates every call with it, so we
-            // need it again after the user types their TOTP code. It
-            // never leaves memory and is wiped when the pending state
-            // clears.
-            pendingPasswordRef.current = password;
-            try {
-              const { data: status } = await supabase.functions.invoke("super-admin-2fa", {
-                body: { action: "status", username: hqUser.username, password },
-              });
-              if (status?.lockedUntil && status.lockedUntil > Date.now()) {
-                localStorage.setItem("rjaf.lockUntil", String(status.lockedUntil));
-                setState(s => ({ ...s, lockedUntil: status.lockedUntil }));
+      // Super admin path: password is validated server-side by the edge
+      // function (Supabase mode). The client doesn't know the password.
+      if (hqUser && hqUser.role === "super_admin") {
+        if (supabaseConfigured && supabase) {
+          try {
+            const { data, error } = await supabase.functions.invoke("super-admin-2fa", {
+              body: { action: "start", username: hqUser.username, password },
+            });
+            if (error || !data?.ok) {
+              const reason = data?.error ?? "auth_failed";
+              if (reason === "locked" && data?.lockedUntil) {
+                localStorage.setItem("rjaf.lockUntil", String(data.lockedUntil));
+                setState(s => ({ ...s, lockedUntil: data.lockedUntil }));
                 return { ok: false, error: "locked" };
               }
-              if (status?.enrolled) {
-                setPending({ user: hqUser, mode: "verify", secret: "", otpauth: "" });
-                setAdminTotpEnrolled(true);
-                await recordAuditEvent({ type: "login.2fa.required", actor: username, detail: { stage: "verify" } });
-                return { ok: false, requires2fa: "verify" };
-              }
-              const { data: enroll, error: enrollErr } = await supabase.functions.invoke("super-admin-2fa", {
-                body: { action: "enroll", username: hqUser.username, password },
-              });
-              if (enrollErr || !enroll?.ok) {
-                return { ok: false, error: enroll?.error ?? "enroll_failed" };
-              }
-              setPending({
-                user: hqUser, mode: "enroll",
-                secret: enroll.secret as string,
-                otpauth: enroll.otpauth as string,
-              });
-              await recordAuditEvent({ type: "login.2fa.required", actor: username, detail: { stage: "enroll" } });
-              return { ok: false, requires2fa: "enroll" };
-            } catch (e: unknown) {
-              return { ok: false, error: e instanceof Error ? e.message : "totp_server_error" };
+              return await recordFail(reason === "unauthorized" ? "bad_credentials" : reason);
             }
-          }
-
-          // Demo-only fallback: keep the in-browser preview working when
-          // Supabase isn't configured at all.
-          const existing = localStorage.getItem(ADMIN_TOTP_SECRET_KEY);
-          if (existing) {
+            pendingTokenRef.current = data.token as string;
+            const enrolled = !!data.enrolled;
+            setAdminTotpEnrolled(enrolled);
             setPending({
               user: hqUser,
-              mode: "verify",
-              secret: existing,
-              otpauth: otpauthURL(existing, hqUser.username, ADMIN_TOTP_ISSUER),
+              mode: enrolled ? "verify" : "enroll",
+              secret: (data.secret as string) ?? "",
+              otpauth: (data.otpauth as string) ?? "",
             });
-            await recordAuditEvent({ type: "login.2fa.required", actor: username, detail: { stage: "verify" } });
-            return { ok: false, requires2fa: "verify" };
+            await recordAuditEvent({
+              type: "login.2fa.required",
+              actor: username,
+              detail: { stage: enrolled ? "verify" : "enroll" },
+            });
+            return { ok: false, requires2fa: enrolled ? "verify" : "enroll" };
+          } catch (e: unknown) {
+            return { ok: false, error: e instanceof Error ? e.message : "totp_server_error" };
           }
-          const secret = generateSecret();
+        }
+
+        // Demo-only fallback: in-browser preview without Supabase. The
+        // hardcoded demo password is the only thing the client knows.
+        if (password !== DEMO_SUPER_ADMIN_PASSWORD) return await recordFail("bad_credentials");
+        const existing = localStorage.getItem(ADMIN_TOTP_SECRET_KEY);
+        if (existing) {
           setPending({
             user: hqUser,
-            mode: "enroll",
-            secret,
-            otpauth: otpauthURL(secret, hqUser.username, ADMIN_TOTP_ISSUER),
+            mode: "verify",
+            secret: existing,
+            otpauth: otpauthURL(existing, hqUser.username, ADMIN_TOTP_ISSUER),
           });
-          await recordAuditEvent({ type: "login.2fa.required", actor: username, detail: { stage: "enroll" } });
-          return { ok: false, requires2fa: "enroll" };
+          await recordAuditEvent({ type: "login.2fa.required", actor: username, detail: { stage: "verify" } });
+          return { ok: false, requires2fa: "verify" };
         }
+        const secret = generateSecret();
+        setPending({
+          user: hqUser,
+          mode: "enroll",
+          secret,
+          otpauth: otpauthURL(secret, hqUser.username, ADMIN_TOTP_ISSUER),
+        });
+        await recordAuditEvent({ type: "login.2fa.required", actor: username, detail: { stage: "enroll" } });
+        return { ok: false, requires2fa: "enroll" };
+      }
+
+      const hqExpected = HQ_CREDS[u];
+      if (hqExpected) {
+        if (hqExpected !== password) return await recordFail("bad_credentials");
+        if (!hqUser) return await recordFail("unknown_hq_user");
 
         localStorage.setItem("rjaf.user", JSON.stringify(hqUser));
         localStorage.removeItem("rjaf.fails");
@@ -356,7 +357,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             body: {
               action: "verify",
               username: pending.user.username,
-              password: pendingPasswordRef.current,
+              token: pendingTokenRef.current,
               code,
             },
           });
@@ -380,7 +381,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             actor: hqUser.username,
             detail: { role: hqUser.role, twoFactor: true },
           });
-          pendingPasswordRef.current = "";
+          pendingTokenRef.current = "";
           setPending(null);
           setState(s => ({ ...s, user: hqUser, failedAttempts: 0, lockedUntil: null }));
           return { ok: true };
@@ -427,7 +428,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { ok: true };
     },
     cancelAdminTotp: () => {
-      pendingPasswordRef.current = "";
+      pendingTokenRef.current = "";
       setPending(null);
     },
     logout: () => {

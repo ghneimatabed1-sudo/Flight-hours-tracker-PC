@@ -1,34 +1,43 @@
 // Supabase Edge Function: super-admin-2fa
 //
-// Server-side authority for the super-admin TOTP secret. The browser never
-// stores the secret beyond the brief enrollment window; verification of
-// every subsequent login goes through this function. The TOTP seed itself
+// Server-side authority for the super-admin login + TOTP secret. The
+// browser does not know the super-admin password and never holds the
+// TOTP seed beyond the brief enrollment window. Verification of every
+// subsequent login goes through this function. The TOTP seed itself
 // lives in `super_admin_2fa` (RLS denies all client access; only this
 // function holds the service role key needed to read it).
 //
-// Actions (POST { action, username, password, code? }):
-//   - "status"  → { enrolled: boolean, lockedUntil: number | null }
-//   - "enroll"  → if not yet enrolled, returns { secret, otpauth } so the
-//                 user can scan into their authenticator. Idempotent: if
-//                 a pending (un-verified) enrollment already exists the
-//                 same secret is returned, never rotated. Refuses if the
-//                 user has already finished enrollment.
-//   - "verify"  → validates the 6-digit code against the stored secret.
-//                 On success, finalises any pending enrollment and bumps
-//                 last_verified_at. On failure, increments failed_attempts;
-//                 5 in a row → 5-minute lock.
+// Actions (POST { action, ... }):
+//   - "start"  { username, password }
+//       → validates password against SUPER_ADMIN_PASSWORD_HASH
+//       → returns { ok, token, enrolled, lockedUntil, secret?, otpauth? }
+//       The token is a short-lived (5 min) HMAC-signed proof bound to
+//       the username; subsequent calls authenticate with it instead of
+//       resending the password. If a pending (un-verified) enrollment
+//       row exists, the SAME secret is returned (idempotent — never
+//       rotated on retries, so a QR already scanned stays valid).
 //
-// Authorization: every call requires the super admin's password in the
-// body. The function checks it against SUPER_ADMIN_PASSWORD_HASH (a
-// SHA-256 hex digest, set as a Supabase secret). With this check in
-// place, an unauthenticated attacker cannot lock out the admin or
-// trigger an enrollment they shouldn't see — they would have to know
-// the password too. Wrong-password attempts are NOT counted toward the
-// TOTP lockout (the client-side login counter handles that).
+//   - "verify" { username, token, code }
+//       → validates token, then the 6-digit TOTP code against the
+//       stored secret. On success, finalises any pending enrollment
+//       and bumps last_verified_at. On failure, increments
+//       failed_attempts; 5 in a row → 5-minute lock.
 //
-// Deploy:  supabase functions deploy super-admin-2fa --no-verify-jwt
-//          supabase secrets set SUPER_ADMIN_PASSWORD_HASH=<sha256-hex>
-// (No JWT check on purpose — login happens *before* the user has a JWT.)
+// Authorization model:
+//   - The super-admin password is held only on the server, as a SHA-256
+//     hex hash in SUPER_ADMIN_PASSWORD_HASH. The client never sees it
+//     and never has a hardcoded copy.
+//   - HMAC-signed challenge tokens (CHALLENGE_SECRET) bind the password
+//     step to the TOTP step so an attacker cannot skip "start" and call
+//     "verify" directly.
+//   - Wrong-password attempts return 401 and are NOT counted toward the
+//     TOTP lockout (the client-side login counter handles that).
+//
+// Deploy:
+//   supabase functions deploy super-admin-2fa --no-verify-jwt
+//   supabase secrets set SUPER_ADMIN_PASSWORD_HASH=<sha256-hex>
+//   supabase secrets set CHALLENGE_SECRET=<random 32+ byte string>
+// (No JWT check on purpose — this IS the login.)
 
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -42,28 +51,15 @@ const corsHeaders = {
 const ISSUER = "RJAF Pilot Dashboard";
 const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_MS = 5 * 60_000;
+const TOKEN_TTL_MS = 5 * 60_000;
 const B32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 interface Body {
-  action?: "status" | "enroll" | "verify";
+  action?: "start" | "verify";
   username?: string;
   password?: string;
+  token?: string;
   code?: string;
-}
-
-async function sha256Hex(s: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return Array.from(new Uint8Array(buf))
-    .map(b => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-// Constant-time string compare to avoid timing oracles on the password hash.
-function timingSafeEq(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let r = 0;
-  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return r === 0;
 }
 
 function reply(payload: Record<string, unknown>, status = 200) {
@@ -71,6 +67,48 @@ function reply(payload: Record<string, unknown>, status = 200) {
     status,
     headers: { ...corsHeaders, "content-type": "application/json" },
   });
+}
+
+// ── Hashing / constant-time compare ───────────────────────────────────────
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+function timingSafeEq(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let r = 0;
+  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
+
+// ── Challenge tokens (HMAC-SHA256) ────────────────────────────────────────
+async function hmacSha256Hex(keyStr: string, msg: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(keyStr),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+  );
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg)));
+  return Array.from(sig).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+async function issueToken(secret: string, username: string): Promise<string> {
+  const exp = Date.now() + TOKEN_TTL_MS;
+  const payload = `${exp}|${username}`;
+  const mac = await hmacSha256Hex(secret, payload);
+  return btoa(`${payload}|${mac}`).replace(/=+$/, "");
+}
+async function verifyToken(secret: string, username: string, token: string): Promise<boolean> {
+  let decoded: string;
+  try { decoded = atob(token); } catch { return false; }
+  const parts = decoded.split("|");
+  if (parts.length !== 3) return false;
+  const [expStr, tokUser, mac] = parts;
+  const exp = Number(expStr);
+  if (!Number.isFinite(exp) || exp < Date.now()) return false;
+  if (tokUser !== username) return false;
+  const expected = await hmacSha256Hex(secret, `${expStr}|${tokUser}`);
+  return timingSafeEq(mac, expected);
 }
 
 // ── TOTP / Base32 (Web Crypto, same algorithm as src/lib/totp.ts) ─────────
@@ -157,10 +195,7 @@ Deno.serve(async (req: Request) => {
 
   const action = body.action;
   const username = (body.username ?? "").trim().toLowerCase();
-  const password = body.password ?? "";
-  if (!action || !username || !password) {
-    return reply({ ok: false, error: "missing_fields" }, 400);
-  }
+  if (!action || !username) return reply({ ok: false, error: "missing_fields" }, 400);
 
   // @ts-ignore Deno is provided by the Edge runtime
   const url = Deno.env.get("SUPABASE_URL");
@@ -168,69 +203,86 @@ Deno.serve(async (req: Request) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   // @ts-ignore Deno is provided by the Edge runtime
   const expectedHash = (Deno.env.get("SUPER_ADMIN_PASSWORD_HASH") ?? "").toLowerCase();
-  if (!url || !serviceKey || !expectedHash) {
+  // @ts-ignore Deno is provided by the Edge runtime
+  const challengeSecret = Deno.env.get("CHALLENGE_SECRET") ?? "";
+  if (!url || !serviceKey || !expectedHash || !challengeSecret) {
     return reply({ ok: false, error: "server_misconfigured" }, 500);
-  }
-
-  // Authenticate the caller. Without this check the endpoint would let
-  // anyone enroll/lock the super-admin account.
-  const providedHash = (await sha256Hex(password)).toLowerCase();
-  if (!timingSafeEq(providedHash, expectedHash)) {
-    return reply({ ok: false, error: "unauthorized" }, 401);
   }
 
   const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
 
-  const { data: row } = await admin
-    .from("super_admin_2fa")
-    .select("*")
-    .eq("username", username)
-    .maybeSingle();
+  if (action === "start") {
+    const password = body.password ?? "";
+    if (!password) return reply({ ok: false, error: "missing_fields" }, 400);
 
-  const lockedNow = row?.locked_until && new Date(row.locked_until).getTime() > Date.now();
-
-  if (action === "status") {
-    return reply({
-      ok: true,
-      enrolled: !!row?.enrolled_at,
-      lockedUntil: lockedNow ? new Date(row!.locked_until).getTime() : null,
-    });
-  }
-
-  if (action === "enroll") {
-    if (lockedNow) return reply({ ok: false, error: "locked" }, 423);
-    if (row?.enrolled_at) return reply({ ok: false, error: "already_enrolled" }, 409);
-
-    // Idempotent: if a pending (un-verified) enrollment already exists,
-    // return the SAME secret. Rotating it on every call would invalidate
-    // the QR an admin may have already scanned in another window.
-    if (row?.secret_b32) {
-      return reply({
-        ok: true,
-        secret: row.secret_b32,
-        otpauth: otpauthURL(row.secret_b32, username),
-      });
+    // Constant-time password check.
+    const providedHash = (await sha256Hex(password)).toLowerCase();
+    if (!timingSafeEq(providedHash, expectedHash)) {
+      return reply({ ok: false, error: "unauthorized" }, 401);
     }
 
-    const secret = generateSecret();
-    const { error: upErr } = await admin
+    const { data: row } = await admin
       .from("super_admin_2fa")
-      .insert({
-        username,
-        secret_b32: secret,
-        enrolled_at: null,
-        failed_attempts: 0,
-        locked_until: null,
-        updated_at: new Date().toISOString(),
-      });
-    if (upErr) return reply({ ok: false, error: "store_failed", detail: upErr.message }, 500);
-    return reply({ ok: true, secret, otpauth: otpauthURL(secret, username) });
+      .select("*")
+      .eq("username", username)
+      .maybeSingle();
+
+    const lockedNow = row?.locked_until && new Date(row.locked_until).getTime() > Date.now();
+    if (lockedNow) {
+      return reply({
+        ok: false,
+        error: "locked",
+        lockedUntil: new Date(row!.locked_until).getTime(),
+      }, 423);
+    }
+
+    const token = await issueToken(challengeSecret, username);
+
+    if (row?.enrolled_at) {
+      return reply({ ok: true, token, enrolled: true, lockedUntil: null });
+    }
+
+    // Pending enrollment: idempotent — return the existing secret if
+    // there's already one in flight, otherwise mint a fresh one.
+    let secret = row?.secret_b32 as string | undefined;
+    if (!secret) {
+      secret = generateSecret();
+      const { error: upErr } = await admin
+        .from("super_admin_2fa")
+        .insert({
+          username,
+          secret_b32: secret,
+          enrolled_at: null,
+          failed_attempts: 0,
+          locked_until: null,
+          updated_at: new Date().toISOString(),
+        });
+      if (upErr) return reply({ ok: false, error: "store_failed", detail: upErr.message }, 500);
+    }
+
+    return reply({
+      ok: true, token, enrolled: false, lockedUntil: null,
+      secret, otpauth: otpauthURL(secret, username),
+    });
   }
 
   if (action === "verify") {
     const code = (body.code ?? "").trim();
-    if (!/^\d{6}$/.test(code)) return reply({ ok: false, error: "bad_input" }, 400);
+    const token = body.token ?? "";
+    if (!/^\d{6}$/.test(code) || !token) return reply({ ok: false, error: "bad_input" }, 400);
+
+    if (!(await verifyToken(challengeSecret, username, token))) {
+      return reply({ ok: false, error: "unauthorized" }, 401);
+    }
+
+    const { data: row } = await admin
+      .from("super_admin_2fa")
+      .select("*")
+      .eq("username", username)
+      .maybeSingle();
     if (!row) return reply({ ok: false, error: "not_enrolled" }, 404);
+
+    const lockedNow = row.locked_until && new Date(row.locked_until).getTime() > Date.now();
     if (lockedNow) return reply({ ok: false, error: "locked" }, 423);
 
     const ok = await verifyTotp(row.secret_b32, code);
@@ -245,10 +297,7 @@ Deno.serve(async (req: Request) => {
         updated_at: new Date().toISOString(),
       }).eq("username", username);
       await admin.from("audit_log").insert({
-        squadron_id: null,
-        type: "super_admin.2fa.failed",
-        actor: username,
-        detail: { fails },
+        squadron_id: null, type: "super_admin.2fa.failed", actor: username, detail: { fails },
       }).then(() => {}, () => {});
       return reply({ ok: false, error: lockUntil ? "locked" : "bad", fails });
     }
@@ -264,8 +313,7 @@ Deno.serve(async (req: Request) => {
     await admin.from("audit_log").insert({
       squadron_id: null,
       type: wasEnrollment ? "super_admin.2fa.enrolled" : "super_admin.2fa.verified",
-      actor: username,
-      detail: {},
+      actor: username, detail: {},
     }).then(() => {}, () => {});
 
     return reply({ ok: true, enrolled: true });
