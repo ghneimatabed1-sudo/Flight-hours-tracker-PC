@@ -105,3 +105,30 @@ Notes:
   `undoConfirmBody`, `undoneRemoved`, `exportXlsx`.
 - Pre-existing TS errors in button-group.tsx, calendar.tsx, dashboard/Commanders.tsx
   and dashboard/PilotDetail.tsx remain untouched (out of scope).
+
+## License-key per-username binding (2026-04-17)
+A license key now binds to **both** a hardware fingerprint **and** an operator
+username. The same key string typed by a different person will not unlock the
+desktop app.
+
+- **Type change**: `LicenseKey.assignedUsername: string` (required).
+- **Generator (Super Admin)**: new "Operator username" input + new "Custom (days)"
+  duration option that opens a numeric days input (1–3650). Existing presets
+  (1d/2d/1m/3m/6m/1y/3y/never) still available.
+- **Activation (Login.tsx)**: now requires the operator username in addition to
+  the key. Mismatch returns "This key is not assigned to that username."
+- **Local registry** (`src/lib/license-registry.ts`): localStorage-backed mirror
+  (`rjaf.licenseRegistry`) of every issued key. Seeded on first read from the
+  static `mockData.licenseKeys` so the table survives page reload. Registry
+  stores the full key string in a private `_fullKey` field — never displayed,
+  used only by `lookupLicenseKey()`. Demo-mode activation calls this; the
+  legacy DEMO-/RJAF- prefix path is kept as a fallback for the seeded smoke
+  test only.
+- **Supabase path**: `validateLicenseRemote(key, fingerprint, username)` now
+  posts username to the `validate-license` edge function, which must check
+  `assignedUsername`.
+- **Audit**: `license.activate.ok` and `license.activate.failed` now carry the
+  username as `actor` so the audit log shows who tried.
+- **i18n**: EN/AR keys: operatorUsername, operatorUsernamePh,
+  operatorUsernameHelp, duration_custom, invalidDuration, issuedToLine,
+  assignedTo. ("days" key already existed.)

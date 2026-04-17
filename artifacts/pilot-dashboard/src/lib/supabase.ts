@@ -20,11 +20,12 @@ export interface LicenseValidationResult {
 
 export async function validateLicenseRemote(
   key: string,
-  fingerprint: string
+  fingerprint: string,
+  username: string
 ): Promise<LicenseValidationResult> {
   if (!supabase) return { ok: false, error: "supabase_not_configured" };
   const { data, error } = await supabase.functions.invoke("validate-license", {
-    body: { key, fingerprint },
+    body: { key, fingerprint, username },
   });
   if (error) return { ok: false, error: error.message };
   const payload = data as Partial<LicenseValidationResult> | null;

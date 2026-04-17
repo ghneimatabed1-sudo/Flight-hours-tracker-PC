@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 import { supabase, supabaseConfigured, validateLicenseRemote, recordAuditEvent } from "./supabase";
+import { lookupLicenseKey } from "./license-registry";
 import { commanders, SUPER_ADMIN } from "./mockData";
 import type { User } from "./types";
 import { generateSecret, otpauthURL, verifyTotp } from "./totp";
@@ -34,7 +35,7 @@ interface LoginResult {
   requires2fa?: "enroll" | "verify";
 }
 interface AuthCtx extends AuthState {
-  activateLicense: (key: string) => Promise<{ ok: boolean; error?: string }>;
+  activateLicense: (key: string, username: string) => Promise<{ ok: boolean; error?: string }>;
   configureSquadron: (cfg: SquadronConfig) => void;
   login: (username: string, password: string) => Promise<LoginResult>;
   verifyAdminTotp: (code: string) => Promise<{ ok: boolean; error?: string }>;
@@ -127,8 +128,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthCtx>(() => ({
     ...state,
     backendMode: supabaseConfigured ? "supabase" : "demo",
-    activateLicense: async (key) => {
+    activateLicense: async (key, username) => {
       const k = key.trim().toUpperCase();
+      const u = (username ?? "").trim();
+      if (!u) {
+        return { ok: false, error: "Enter the username this license was issued to." };
+      }
       if (k.length < 12) {
         return { ok: false, error: "Invalid license key format. Keys are issued by the Super Admin." };
       }
@@ -137,27 +142,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { ok: false, error: "License server not configured. Contact your Super Admin to provision this installation." };
       }
       if (supabaseConfigured) {
-        const res = await validateLicenseRemote(k, state.fingerprint);
+        const res = await validateLicenseRemote(k, state.fingerprint, u);
         if (!res.ok) {
-          await recordAuditEvent({ type: "license.activate.failed", detail: { key: k.slice(0, 8) + "…", reason: res.error } });
+          await recordAuditEvent({ type: "license.activate.failed", actor: u, detail: { key: k.slice(0, 8) + "…", reason: res.error } });
           return { ok: false, error: res.error ?? "License rejected by server." };
         }
         localStorage.setItem("rjaf.licensed", "1");
         localStorage.setItem("rjaf.licenseKey", k);
+        localStorage.setItem("rjaf.licenseUser", u);
         localStorage.setItem("rjaf.licenseBoundFp", state.fingerprint);
         if (res.squadronId) localStorage.setItem("rjaf.squadronId", res.squadronId);
-        await recordAuditEvent({ type: "license.activate.ok", detail: { squadronId: res.squadronId } });
+        await recordAuditEvent({ type: "license.activate.ok", actor: u, detail: { squadronId: res.squadronId } });
         setState(s => ({ ...s, licensed: true }));
         return { ok: true };
       }
-      if (!DEMO_KEY_PREFIXES.some(p => k.startsWith(p))) {
-        return { ok: false, error: "Invalid license key format. Keys are issued by the Super Admin." };
+      // Demo mode: validate against the local registry written by the Super
+      // Admin LicenseKeys page. The legacy DEMO-/RJAF- prefix shortcut is kept
+      // as a fallback so the smoke-test seed key still opens the app, but a
+      // username is still required for the audit trail.
+      const lookup = lookupLicenseKey(k, u);
+      if (lookup.ok) {
+        localStorage.setItem("rjaf.licensed", "1");
+        localStorage.setItem("rjaf.licenseKey", k);
+        localStorage.setItem("rjaf.licenseUser", u);
+        localStorage.setItem("rjaf.licenseBoundFp", state.fingerprint);
+        setState(s => ({ ...s, licensed: true }));
+        return { ok: true };
       }
-      localStorage.setItem("rjaf.licensed", "1");
-      localStorage.setItem("rjaf.licenseKey", k);
-      localStorage.setItem("rjaf.licenseBoundFp", state.fingerprint);
-      setState(s => ({ ...s, licensed: true }));
-      return { ok: true };
+      if (lookup.reason === "wrong_username") {
+        return { ok: false, error: "This key is not assigned to that username." };
+      }
+      if (lookup.reason === "revoked") {
+        return { ok: false, error: "This license key has been revoked." };
+      }
+      if (lookup.reason === "expired") {
+        return { ok: false, error: "This license key has expired." };
+      }
+      // Unknown key — fall back to the legacy DEMO-/RJAF- prefix so the seed
+      // smoke-test path still works for first-time evaluators.
+      if (DEMO_KEY_PREFIXES.some(p => k.startsWith(p))) {
+        localStorage.setItem("rjaf.licensed", "1");
+        localStorage.setItem("rjaf.licenseKey", k);
+        localStorage.setItem("rjaf.licenseUser", u);
+        localStorage.setItem("rjaf.licenseBoundFp", state.fingerprint);
+        setState(s => ({ ...s, licensed: true }));
+        return { ok: true };
+      }
+      return { ok: false, error: "Invalid license key format. Keys are issued by the Super Admin." };
     },
     configureSquadron: (cfg) => {
       localStorage.setItem("rjaf.squadron", JSON.stringify(cfg));
@@ -306,6 +337,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     releaseLicense: () => {
       localStorage.removeItem("rjaf.licensed");
       localStorage.removeItem("rjaf.licenseKey");
+      localStorage.removeItem("rjaf.licenseUser");
       localStorage.removeItem("rjaf.licenseBoundFp");
       localStorage.removeItem("rjaf.user");
       localStorage.removeItem("rjaf.squadronId");

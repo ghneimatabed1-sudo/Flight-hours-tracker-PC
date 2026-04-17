@@ -72,12 +72,12 @@ export const pilots: Pilot[] = (() => {
 })();
 
 export const licenseKeys: LicenseKey[] = [
-  { id: "key-1", squadronId: "sqn-1", keyPreview: "EE-1FS-••••-A91X", status: "locked", issuedAt: "2025-11-04", expiresAt: "2026-11-04", lockedToDevice: "DESKTOP-OPS-1FS", lastSyncAt: "2026-04-16T09:14:00Z" },
-  { id: "key-2", squadronId: "sqn-2", keyPreview: "EE-2AS-••••-K22M", status: "locked", issuedAt: "2025-12-11", expiresAt: "2028-12-11", lockedToDevice: "DESKTOP-OPS-2AS", lastSyncAt: "2026-04-15T18:02:00Z" },
-  { id: "key-3", squadronId: "sqn-3", keyPreview: "EE-7RS-••••-Q77P", status: "active", issuedAt: "2026-02-20", expiresAt: "2026-08-20", lockedToDevice: null, lastSyncAt: null },
-  { id: "key-4", squadronId: "sqn-4", keyPreview: "EE-9TS-••••-Z03B", status: "locked", issuedAt: "2026-01-08", expiresAt: "2027-01-08", lockedToDevice: "DESKTOP-OPS-9TS", lastSyncAt: "2026-04-14T11:55:00Z" },
-  { id: "key-5", squadronId: "sqn-5", keyPreview: "EE-11TS-•••-D55F", status: "revoked", issuedAt: "2025-09-30", expiresAt: null, lockedToDevice: null, lastSyncAt: "2026-01-02T08:11:00Z" },
-  { id: "key-6", squadronId: "sqn-6", keyPreview: "EE-14RS-•••-G18N", status: "locked", issuedAt: "2026-03-02", expiresAt: "2026-04-02", lockedToDevice: "DESKTOP-OPS-14RS", lastSyncAt: "2026-04-16T07:30:00Z" },
+  { id: "key-1", squadronId: "sqn-1", keyPreview: "EE-1FS-••••-A91X", status: "locked", issuedAt: "2025-11-04", expiresAt: "2026-11-04", assignedUsername: "ops_1FS", lockedToDevice: "DESKTOP-OPS-1FS", lastSyncAt: "2026-04-16T09:14:00Z" },
+  { id: "key-2", squadronId: "sqn-2", keyPreview: "EE-2AS-••••-K22M", status: "locked", issuedAt: "2025-12-11", expiresAt: "2028-12-11", assignedUsername: "ops_2AS", lockedToDevice: "DESKTOP-OPS-2AS", lastSyncAt: "2026-04-15T18:02:00Z" },
+  { id: "key-3", squadronId: "sqn-3", keyPreview: "EE-7RS-••••-Q77P", status: "active", issuedAt: "2026-02-20", expiresAt: "2026-08-20", assignedUsername: "ops_7RS", lockedToDevice: null, lastSyncAt: null },
+  { id: "key-4", squadronId: "sqn-4", keyPreview: "EE-9TS-••••-Z03B", status: "locked", issuedAt: "2026-01-08", expiresAt: "2027-01-08", assignedUsername: "ops_9TS", lockedToDevice: "DESKTOP-OPS-9TS", lastSyncAt: "2026-04-14T11:55:00Z" },
+  { id: "key-5", squadronId: "sqn-5", keyPreview: "EE-11TS-•••-D55F", status: "revoked", issuedAt: "2025-09-30", expiresAt: null, assignedUsername: "ops_11TS", lockedToDevice: null, lastSyncAt: "2026-01-02T08:11:00Z" },
+  { id: "key-6", squadronId: "sqn-6", keyPreview: "EE-14RS-•••-G18N", status: "locked", issuedAt: "2026-03-02", expiresAt: "2026-04-02", assignedUsername: "ops_14RS", lockedToDevice: "DESKTOP-OPS-14RS", lastSyncAt: "2026-04-16T07:30:00Z" },
 ];
 
 export const commanders: User[] = [

@@ -4,11 +4,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { licenseKeys as initialKeys, squadrons } from "@/lib/mockData";
+import { squadrons } from "@/lib/mockData";
 import type { LicenseKey, LicenseDuration } from "@/lib/types";
-import { addDuration } from "@/lib/types";
+import { addDuration, addDays } from "@/lib/types";
+import { listLicenseKeys, registerLicenseKey, updateLicenseKey } from "@/lib/license-registry";
 import { fmtDate, fmtDateTime } from "@/lib/format";
-import { KeyRound, Copy, Check } from "lucide-react";
+import { KeyRound, Copy, Check, User as UserIcon } from "lucide-react";
 
 function genKey(code: string): string {
   const rnd = Array.from({ length: 16 }, () => Math.floor(Math.random() * 36).toString(36).toUpperCase()).join("");
@@ -16,33 +17,56 @@ function genKey(code: string): string {
 }
 
 const DURATIONS: LicenseDuration[] = ["1d", "2d", "1m", "3m", "6m", "1y", "3y", "never"];
+// Sentinel value used by the duration <Select> to mean "use the custom days
+// input below". Kept outside the LicenseDuration type so it never leaks into
+// addDuration() or the persisted record.
+const CUSTOM_DURATION = "__custom__";
 
 export default function LicenseKeys() {
   const { t, lang } = useI18n();
-  const [keys, setKeys] = useState<LicenseKey[]>(initialKeys);
+  const [keys, setKeys] = useState<LicenseKey[]>(() => listLicenseKeys());
   const [genFor, setGenFor] = useState<string>("");
-  const [genDuration, setGenDuration] = useState<LicenseDuration>("1y");
+  const [genUsername, setGenUsername] = useState<string>("");
+  const [genDuration, setGenDuration] = useState<LicenseDuration | typeof CUSTOM_DURATION>("1y");
+  const [genCustomDays, setGenCustomDays] = useState<string>("5");
   const [genOpen, setGenOpen] = useState(false);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Resolve the picked duration (preset or custom) into an ISO expiry date.
+  // Returns null for "never expires" or invalid custom input.
+  function resolveExpiry(issuedAt: string): { expiresAt: string | null; valid: boolean } {
+    if (genDuration === CUSTOM_DURATION) {
+      const n = Number(genCustomDays);
+      if (!Number.isFinite(n) || n <= 0) return { expiresAt: null, valid: false };
+      return { expiresAt: addDays(issuedAt, n), valid: true };
+    }
+    return { expiresAt: addDuration(issuedAt, genDuration), valid: true };
+  }
+
   function handleGenerate() {
     const sqn = squadrons.find(s => s.id === genFor);
     if (!sqn) return;
+    const username = genUsername.trim();
+    if (!username) return;
+    const issuedAt = new Date().toISOString().slice(0, 10);
+    const { expiresAt, valid } = resolveExpiry(issuedAt);
+    if (!valid) return;
     const full = genKey(sqn.code);
     setNewKey(full);
-    const issuedAt = new Date().toISOString().slice(0, 10);
     const newRecord: LicenseKey = {
       id: "key-" + Math.random().toString(36).slice(2, 8),
       squadronId: sqn.id,
       keyPreview: `EE-${sqn.code}-••••-${full.slice(-4)}`,
       status: "active",
       issuedAt,
-      expiresAt: addDuration(issuedAt, genDuration),
+      expiresAt,
+      assignedUsername: username,
       lockedToDevice: null,
       lastSyncAt: null,
     };
-    setKeys(k => [newRecord, ...k]);
+    registerLicenseKey({ fullKey: full, meta: newRecord });
+    setKeys(() => listLicenseKeys());
   }
 
   function isExpired(k: LicenseKey): boolean {
@@ -56,17 +80,19 @@ export default function LicenseKeys() {
   }
 
   function revoke(id: string) {
-    setKeys(ks => ks.map(k => k.id === id ? { ...k, status: "revoked" } : k));
+    updateLicenseKey(id, { status: "revoked" });
+    setKeys(() => listLicenseKeys());
   }
   function release(id: string) {
-    setKeys(ks => ks.map(k => k.id === id ? { ...k, status: "active", lockedToDevice: null } : k));
+    updateLicenseKey(id, { status: "active", lockedToDevice: null });
+    setKeys(() => listLicenseKeys());
   }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-xl font-bold flex items-center gap-2"><KeyRound className="h-5 w-5" />{t("licenseKeys")}</h2>
-        <Button onClick={() => { setGenOpen(true); setNewKey(null); setGenFor(""); }} data-testid="button-generate">
+        <Button onClick={() => { setGenOpen(true); setNewKey(null); setGenFor(""); setGenUsername(""); setGenDuration("1y"); setGenCustomDays("5"); }} data-testid="button-generate">
           {t("generateKey")}
         </Button>
       </div>
@@ -79,6 +105,7 @@ export default function LicenseKeys() {
                 <tr className="border-b border-border bg-muted/40 text-muted-foreground">
                   <th className="text-start py-2 px-3">{t("squadron")}</th>
                   <th className="text-start py-2 px-3">{t("key")}</th>
+                  <th className="text-start py-2 px-3">{t("assignedTo")}</th>
                   <th className="text-start py-2 px-3">{t("status")}</th>
                   <th className="text-start py-2 px-3">{t("issued")}</th>
                   <th className="text-start py-2 px-3">{t("expires")}</th>
@@ -94,6 +121,7 @@ export default function LicenseKeys() {
                     <tr key={k.id} className="border-b border-border/60" data-testid={`row-key-${k.id}`}>
                       <td className="py-2 px-3 font-medium">{sqn ? (lang === "ar" ? sqn.nameAr : sqn.name) : "—"}</td>
                       <td className="py-2 px-3 font-mono text-xs">{k.keyPreview}</td>
+                      <td className="py-2 px-3 text-xs" data-testid={`text-assigned-${k.id}`}>{k.assignedUsername || "—"}</td>
                       <td className="py-2 px-3">
                         {statusLabel(k.status)}
                         {isExpired(k) && k.status !== "revoked" ? (
@@ -143,24 +171,61 @@ export default function LicenseKeys() {
                 </Select>
               </div>
               <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-1.5">
+                  <UserIcon className="h-3.5 w-3.5" /> {t("operatorUsername")}
+                </label>
+                <input
+                  value={genUsername}
+                  onChange={e => setGenUsername(e.target.value)}
+                  placeholder={t("operatorUsernamePh")}
+                  className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
+                  data-testid="input-username"
+                  autoComplete="off"
+                />
+                <p className="text-[11px] text-muted-foreground">{t("operatorUsernameHelp")}</p>
+              </div>
+              <div className="space-y-2">
                 <label className="text-sm font-medium">{t("licenseDuration")}</label>
-                <Select value={genDuration} onValueChange={(v) => setGenDuration(v as LicenseDuration)}>
+                <Select value={genDuration} onValueChange={(v) => setGenDuration(v as LicenseDuration | typeof CUSTOM_DURATION)}>
                   <SelectTrigger data-testid="select-duration"><SelectValue placeholder={t("selectDuration")} /></SelectTrigger>
                   <SelectContent>
                     {DURATIONS.map(d => (
                       <SelectItem key={d} value={d} data-testid={`option-duration-${d}`}>{t(`duration_${d}` as const)}</SelectItem>
                     ))}
+                    <SelectItem value={CUSTOM_DURATION} data-testid="option-duration-custom">{t("duration_custom")}</SelectItem>
                   </SelectContent>
                 </Select>
+                {genDuration === CUSTOM_DURATION && (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={3650}
+                      step={1}
+                      value={genCustomDays}
+                      onChange={e => setGenCustomDays(e.target.value)}
+                      className="w-24 px-3 py-2 rounded-md bg-input border border-border text-sm tabular-nums"
+                      data-testid="input-custom-days"
+                    />
+                    <span className="text-xs text-muted-foreground">{t("days")}</span>
+                  </div>
+                )}
                 <p className="text-xs text-muted-foreground" data-testid="text-expiry-preview">
-                  {genDuration === "never"
-                    ? t("neverExpires")
-                    : `${t("expires")}: ${fmtDate(addDuration(new Date().toISOString().slice(0, 10), genDuration)!, lang)}`}
+                  {(() => {
+                    const today = new Date().toISOString().slice(0, 10);
+                    const { expiresAt, valid } = resolveExpiry(today);
+                    if (!valid) return t("invalidDuration");
+                    if (!expiresAt) return t("neverExpires");
+                    return `${t("expires")}: ${fmtDate(expiresAt, lang)}`;
+                  })()}
                 </p>
               </div>
             </div>
           ) : (
             <div className="space-y-3">
+              <div className="text-xs text-muted-foreground">
+                {t("issuedToLine").replace("{user}", genUsername)}
+              </div>
               <div className="font-mono text-sm bg-muted p-3 rounded border break-all" data-testid="text-newkey">{newKey}</div>
               <Button
                 variant="outline"
@@ -177,7 +242,13 @@ export default function LicenseKeys() {
             {!newKey ? (
               <>
                 <Button variant="outline" onClick={() => setGenOpen(false)}>{t("cancel")}</Button>
-                <Button onClick={handleGenerate} disabled={!genFor} data-testid="button-confirm-gen">{t("generateKey")}</Button>
+                <Button
+                  onClick={handleGenerate}
+                  disabled={!genFor || !genUsername.trim() || (genDuration === CUSTOM_DURATION && !(Number(genCustomDays) > 0))}
+                  data-testid="button-confirm-gen"
+                >
+                  {t("generateKey")}
+                </Button>
               </>
             ) : (
               <Button onClick={() => setGenOpen(false)} data-testid="button-done">{t("done")}</Button>

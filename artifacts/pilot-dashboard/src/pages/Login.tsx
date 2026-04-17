@@ -12,6 +12,7 @@ export default function LoginGate() {
   const { t, lang, setLang } = useI18n();
 
   const [licenseKey, setLicenseKey] = useState("DEMO-RJAF-1234-5678");
+  const [licUsername, setLicUsername] = useState("");
   const [licError, setLicError] = useState<string | null>(null);
 
   const [name, setName] = useState("Royal Squadron");
@@ -44,7 +45,8 @@ export default function LoginGate() {
 
   const submitLicense = async (e: React.FormEvent) => {
     e.preventDefault();
-    const r = await activateLicense(licenseKey);
+    setLicError(null);
+    const r = await activateLicense(licenseKey, licUsername);
     if (!r.ok) setLicError(r.error || "Invalid");
   };
   const submitSetup = (e: React.FormEvent) => {
@@ -172,10 +174,27 @@ export default function LoginGate() {
               </div>
               <p className="text-xs text-muted-foreground">{t("licensePrompt")}</p>
               <div>
-                <label className="text-xs text-muted-foreground">{t("licenseKey")}</label>
-                <input value={licenseKey} onChange={e => setLicenseKey(e.target.value)}
+                <label htmlFor="lic-user" className="text-xs text-muted-foreground">{t("operatorUsername")}</label>
+                <input
+                  id="lic-user"
+                  data-testid="input-license-username"
+                  value={licUsername}
+                  onChange={e => setLicUsername(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm"
+                  placeholder={t("operatorUsernamePh")}
+                  autoComplete="username"
+                />
+              </div>
+              <div>
+                <label htmlFor="lic-key" className="text-xs text-muted-foreground">{t("licenseKey")}</label>
+                <input
+                  id="lic-key"
+                  data-testid="input-license-key"
+                  value={licenseKey}
+                  onChange={e => setLicenseKey(e.target.value)}
                   className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border font-mono text-sm tracking-wider"
-                  placeholder="RJAF-XXXX-XXXX-XXXX" />
+                  placeholder="EE-XXX-XXXX-XXXX-XXXX-XXXX"
+                />
               </div>
               <div className="text-[11px] text-muted-foreground flex items-center gap-1">
                 <KeyRound className="h-3 w-3" /> {t("bindNotice")}

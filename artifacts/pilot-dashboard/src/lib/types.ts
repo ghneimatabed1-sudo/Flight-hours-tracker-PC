@@ -51,6 +51,10 @@ export interface LicenseKey {
   // The desktop client refuses activation past this date and existing
   // installations are signed out on next license check.
   expiresAt: string | null;
+  // The exact operator username this key was issued for. Activation rejects
+  // any other username — the same key string with a different name will not
+  // unlock the desktop app. Case-insensitive when comparing.
+  assignedUsername: string;
   lockedToDevice: string | null;
   lastSyncAt: string | null;
 }
@@ -71,6 +75,16 @@ export function addDuration(fromIsoDate: string, d: LicenseDuration): string | n
     case "1y": t.setFullYear(t.getFullYear() + 1); break;
     case "3y": t.setFullYear(t.getFullYear() + 3); break;
   }
+  return t.toISOString().slice(0, 10);
+}
+
+// Custom duration in whole days — used when the super admin wants something
+// the preset list doesn't cover (e.g. "5 days" for a temporary handover).
+export function addDays(fromIsoDate: string, days: number): string | null {
+  if (!Number.isFinite(days) || days <= 0) return null;
+  const t = new Date(fromIsoDate);
+  if (Number.isNaN(t.getTime())) return null;
+  t.setDate(t.getDate() + Math.floor(days));
   return t.toISOString().slice(0, 10);
 }
 
