@@ -6,17 +6,28 @@
 // lives in `super_admin_2fa` (RLS denies all client access; only this
 // function holds the service role key needed to read it).
 //
-// Actions (POST { action, username, code? }):
+// Actions (POST { action, username, password, code? }):
 //   - "status"  → { enrolled: boolean, lockedUntil: number | null }
-//   - "enroll"  → if not yet enrolled, generates a fresh secret, stores it,
-//                 returns { secret, otpauth } once. The next "verify" call
-//                 with that secret seals the enrollment.
+//   - "enroll"  → if not yet enrolled, returns { secret, otpauth } so the
+//                 user can scan into their authenticator. Idempotent: if
+//                 a pending (un-verified) enrollment already exists the
+//                 same secret is returned, never rotated. Refuses if the
+//                 user has already finished enrollment.
 //   - "verify"  → validates the 6-digit code against the stored secret.
-//                 On success, completes pending enrollment (sets
-//                 enrolled_at) and updates last_verified_at. On failure,
-//                 increments failed_attempts; 5 in a row → 5-minute lock.
+//                 On success, finalises any pending enrollment and bumps
+//                 last_verified_at. On failure, increments failed_attempts;
+//                 5 in a row → 5-minute lock.
+//
+// Authorization: every call requires the super admin's password in the
+// body. The function checks it against SUPER_ADMIN_PASSWORD_HASH (a
+// SHA-256 hex digest, set as a Supabase secret). With this check in
+// place, an unauthenticated attacker cannot lock out the admin or
+// trigger an enrollment they shouldn't see — they would have to know
+// the password too. Wrong-password attempts are NOT counted toward the
+// TOTP lockout (the client-side login counter handles that).
 //
 // Deploy:  supabase functions deploy super-admin-2fa --no-verify-jwt
+//          supabase secrets set SUPER_ADMIN_PASSWORD_HASH=<sha256-hex>
 // (No JWT check on purpose — login happens *before* the user has a JWT.)
 
 // deno-lint-ignore-file no-explicit-any
@@ -36,7 +47,23 @@ const B32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 interface Body {
   action?: "status" | "enroll" | "verify";
   username?: string;
+  password?: string;
   code?: string;
+}
+
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+// Constant-time string compare to avoid timing oracles on the password hash.
+function timingSafeEq(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let r = 0;
+  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
 }
 
 function reply(payload: Record<string, unknown>, status = 200) {
@@ -130,13 +157,27 @@ Deno.serve(async (req: Request) => {
 
   const action = body.action;
   const username = (body.username ?? "").trim().toLowerCase();
-  if (!action || !username) return reply({ ok: false, error: "missing_fields" }, 400);
+  const password = body.password ?? "";
+  if (!action || !username || !password) {
+    return reply({ ok: false, error: "missing_fields" }, 400);
+  }
 
   // @ts-ignore Deno is provided by the Edge runtime
   const url = Deno.env.get("SUPABASE_URL");
   // @ts-ignore Deno is provided by the Edge runtime
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!url || !serviceKey) return reply({ ok: false, error: "server_misconfigured" }, 500);
+  // @ts-ignore Deno is provided by the Edge runtime
+  const expectedHash = (Deno.env.get("SUPER_ADMIN_PASSWORD_HASH") ?? "").toLowerCase();
+  if (!url || !serviceKey || !expectedHash) {
+    return reply({ ok: false, error: "server_misconfigured" }, 500);
+  }
+
+  // Authenticate the caller. Without this check the endpoint would let
+  // anyone enroll/lock the super-admin account.
+  const providedHash = (await sha256Hex(password)).toLowerCase();
+  if (!timingSafeEq(providedHash, expectedHash)) {
+    return reply({ ok: false, error: "unauthorized" }, 401);
+  }
 
   const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
 
@@ -159,17 +200,29 @@ Deno.serve(async (req: Request) => {
   if (action === "enroll") {
     if (lockedNow) return reply({ ok: false, error: "locked" }, 423);
     if (row?.enrolled_at) return reply({ ok: false, error: "already_enrolled" }, 409);
+
+    // Idempotent: if a pending (un-verified) enrollment already exists,
+    // return the SAME secret. Rotating it on every call would invalidate
+    // the QR an admin may have already scanned in another window.
+    if (row?.secret_b32) {
+      return reply({
+        ok: true,
+        secret: row.secret_b32,
+        otpauth: otpauthURL(row.secret_b32, username),
+      });
+    }
+
     const secret = generateSecret();
     const { error: upErr } = await admin
       .from("super_admin_2fa")
-      .upsert({
+      .insert({
         username,
         secret_b32: secret,
         enrolled_at: null,
         failed_attempts: 0,
         locked_until: null,
         updated_at: new Date().toISOString(),
-      }, { onConflict: "username" });
+      });
     if (upErr) return reply({ ok: false, error: "store_failed", detail: upErr.message }, 500);
     return reply({ ok: true, secret, otpauth: otpauthURL(secret, username) });
   }

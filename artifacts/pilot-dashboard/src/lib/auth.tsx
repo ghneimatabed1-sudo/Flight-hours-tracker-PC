@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import { supabase, supabaseConfigured, validateLicenseRemote, recordAuditEvent } from "./supabase";
 import { lookupLicenseKey } from "./license-registry";
 import { commanders, SUPER_ADMIN } from "./mockData";
@@ -120,6 +120,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     lockedUntil: Number(localStorage.getItem("rjaf.lockUntil") || 0) || null,
   }));
   const [pending, setPending] = useState<PendingAdmin | null>(null);
+  // Held in memory only between the password step and the TOTP step so the
+  // edge function can re-authenticate the verify call. Never persisted.
+  const pendingPasswordRef = useRef<string>("");
   // Optimistic local cache only — the authoritative answer for whether a
   // super admin has enrolled lives in `super_admin_2fa` server-side.
   const [adminTotpEnrolled, setAdminTotpEnrolled] = useState<boolean>(
@@ -232,9 +235,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // The secret lives in super_admin_2fa, never in localStorage, and
           // verification is performed by the super-admin-2fa edge function.
           if (supabaseConfigured && supabase) {
+            // Stash the password in component state for the verify step.
+            // The edge function authenticates every call with it, so we
+            // need it again after the user types their TOTP code. It
+            // never leaves memory and is wiped when the pending state
+            // clears.
+            pendingPasswordRef.current = password;
             try {
               const { data: status } = await supabase.functions.invoke("super-admin-2fa", {
-                body: { action: "status", username: hqUser.username },
+                body: { action: "status", username: hqUser.username, password },
               });
               if (status?.lockedUntil && status.lockedUntil > Date.now()) {
                 localStorage.setItem("rjaf.lockUntil", String(status.lockedUntil));
@@ -248,7 +257,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 return { ok: false, requires2fa: "verify" };
               }
               const { data: enroll, error: enrollErr } = await supabase.functions.invoke("super-admin-2fa", {
-                body: { action: "enroll", username: hqUser.username },
+                body: { action: "enroll", username: hqUser.username, password },
               });
               if (enrollErr || !enroll?.ok) {
                 return { ok: false, error: enroll?.error ?? "enroll_failed" };
@@ -344,7 +353,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (supabaseConfigured && supabase) {
         try {
           const { data, error } = await supabase.functions.invoke("super-admin-2fa", {
-            body: { action: "verify", username: pending.user.username, code },
+            body: {
+              action: "verify",
+              username: pending.user.username,
+              password: pendingPasswordRef.current,
+              code,
+            },
           });
           if (error || !data?.ok) {
             const isLocked = data?.error === "locked";
@@ -366,6 +380,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             actor: hqUser.username,
             detail: { role: hqUser.role, twoFactor: true },
           });
+          pendingPasswordRef.current = "";
           setPending(null);
           setState(s => ({ ...s, user: hqUser, failedAttempts: 0, lockedUntil: null }));
           return { ok: true };
@@ -412,6 +427,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { ok: true };
     },
     cancelAdminTotp: () => {
+      pendingPasswordRef.current = "";
       setPending(null);
     },
     logout: () => {
