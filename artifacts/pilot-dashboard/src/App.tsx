@@ -41,6 +41,8 @@ import LicenseKeys from "@/pages/admin/LicenseKeys";
 import Commanders from "@/pages/admin/Commanders";
 import AdminSquadrons from "@/pages/admin/Squadrons";
 import AdminAuditLog from "@/pages/admin/AuditLog";
+import RemindersSchedule from "@/pages/admin/RemindersSchedule";
+import ReminderLog from "@/pages/admin/ReminderLog";
 import CommanderOverview from "@/pages/dashboard/Overview";
 import PilotsTable from "@/pages/dashboard/PilotsTable";
 import DashboardPilotDetail from "@/pages/dashboard/PilotDetail";
@@ -88,6 +90,8 @@ function AdminRoutes() {
       <Route path="/admin/commanders" component={Commanders} />
       <Route path="/admin/squadrons" component={AdminSquadrons} />
       <Route path="/admin/audit" component={AdminAuditLog} />
+      <Route path="/admin/reminders" component={RemindersSchedule} />
+      <Route path="/admin/reminders/log" component={ReminderLog} />
       <Route component={NotFound} />
     </Switch>
   );
