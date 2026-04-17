@@ -187,68 +187,60 @@ export default function LinkScreen() {
           </Text>
         ) : null}
 
-        {/* Contact card — visible before linking so a pilot who doesn't
-            have their military number / link code knows who to ask. */}
-        <View
-          style={[
-            styles.creditsCard,
-            { backgroundColor: colors.card, borderColor: colors.border },
-          ]}
-        >
-          <Text
-            style={[
-              styles.creditsTitle,
-              { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
-            ]}
-          >
-            {t("settings_credits")}
-          </Text>
-          <Text
-            style={[
-              styles.creditsName,
-              { color: colors.foreground, textAlign: isRTL ? "right" : "left" },
-            ]}
-          >
-            ABEDALQADER GHUNMAT
-          </Text>
-          <Text
-            style={[
-              styles.creditsRole,
-              { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
-            ]}
-          >
+        {/* Contact strip — subtle, centered, visible before linking so a
+            pilot without a military number / code knows who to ask. */}
+        <View style={styles.creditsWrap}>
+          <View style={styles.creditsDividerRow}>
+            <View style={[styles.creditsDivider, { backgroundColor: colors.border }]} />
+            <Text style={[styles.creditsTitle, { color: colors.primary }]}>
+              {t("settings_credits")}
+            </Text>
+            <View style={[styles.creditsDivider, { backgroundColor: colors.border }]} />
+          </View>
+
+          <Text style={[styles.creditsRole, { color: colors.mutedForeground }]}>
             {t("credits_developer")}
           </Text>
-          <Pressable
-            onPress={() => Linking.openURL("tel:+9620775008345").catch(() => {})}
-            style={[
-              styles.creditsRow,
-              { borderColor: colors.border, flexDirection: isRTL ? "row-reverse" : "row" },
-            ]}
-          >
-            <Feather name="phone" size={14} color={colors.primary} />
-            <Text style={[styles.creditsValue, { color: colors.foreground }]}>
-              +962 77 500 8345
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => Linking.openURL("mailto:ghneimatabed1@icloud.com").catch(() => {})}
-            style={[
-              styles.creditsRow,
-              { borderColor: colors.border, flexDirection: isRTL ? "row-reverse" : "row" },
-            ]}
-          >
-            <Feather name="mail" size={14} color={colors.primary} />
-            <Text style={[styles.creditsValue, { color: colors.foreground }]}>
-              ghneimatabed1@icloud.com
-            </Text>
-          </Pressable>
-          <Text
-            style={[
-              styles.creditsBlurb,
-              { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
-            ]}
-          >
+          <Text style={[styles.creditsName, { color: colors.foreground }]}>
+            ABEDALQADER GHUNMAT
+          </Text>
+
+          <View style={styles.creditsPillRow}>
+            <Pressable
+              onPress={() => Linking.openURL("tel:+9620775008345").catch(() => {})}
+              style={({ pressed }) => [
+                styles.creditsPill,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <Feather name="phone" size={12} color={colors.primary} />
+              <Text style={[styles.creditsPillText, { color: colors.foreground }]}>
+                +962 77 500 8345
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => Linking.openURL("mailto:ghneimatabed1@icloud.com").catch(() => {})}
+              style={({ pressed }) => [
+                styles.creditsPill,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <Feather name="mail" size={12} color={colors.primary} />
+              <Text style={[styles.creditsPillText, { color: colors.foreground }]}>
+                ghneimatabed1@icloud.com
+              </Text>
+            </Pressable>
+          </View>
+
+          <Text style={[styles.creditsBlurb, { color: colors.mutedForeground }]}>
             {t("credits_blurb")}
           </Text>
         </View>
@@ -333,46 +325,66 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     marginTop: 4,
   },
-  creditsCard: {
-    marginTop: 18,
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    gap: 4,
-  },
-  creditsTitle: {
-    fontSize: 11,
-    fontFamily: "Inter_600SemiBold",
-    letterSpacing: 0.6,
-    textTransform: "uppercase",
-    marginBottom: 4,
-  },
-  creditsName: {
-    fontSize: 15,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: 0.3,
-  },
-  creditsRole: {
-    fontSize: 11,
-    fontFamily: "Inter_500Medium",
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-    marginBottom: 6,
-  },
-  creditsRow: {
+  creditsWrap: {
+    marginTop: 24,
     alignItems: "center",
     gap: 8,
-    paddingVertical: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
   },
-  creditsValue: {
-    fontSize: 13,
+  creditsDividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "stretch",
+    gap: 10,
+    marginBottom: 4,
+  },
+  creditsDivider: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+  },
+  creditsTitle: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 2,
+    textTransform: "uppercase",
+  },
+  creditsRole: {
+    fontSize: 10,
+    fontFamily: "Inter_500Medium",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  creditsName: {
+    fontSize: 14,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.4,
+    marginBottom: 4,
+  },
+  creditsPillRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 2,
+  },
+  creditsPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  creditsPillText: {
+    fontSize: 12,
     fontFamily: "Inter_500Medium",
   },
   creditsBlurb: {
     fontSize: 11,
     fontFamily: "Inter_400Regular",
     lineHeight: 16,
+    textAlign: "center",
     marginTop: 6,
+    paddingHorizontal: 16,
   },
 });

@@ -220,34 +220,51 @@ export default function LoginGate() {
           )}
         </div>
 
-        {/* Contact card — visible on every login screen (license entry,
-            squadron setup, sign-in, 2FA) so anyone who installed the app
-            without a license key knows who to reach for one. */}
-        <div className="panel p-4 mt-4 text-xs">
-          <div className="text-[11px] font-semibold gold-grad uppercase tracking-wider mb-1.5">
-            {t("creditsTitle")}
+        {/* Contact strip — subtle, centered, visible on every login screen
+            so anyone without a license key can find the developer. */}
+        <div className="mt-6 flex flex-col items-center gap-2.5">
+          <div className="flex items-center gap-3 w-full">
+            <div className="h-px flex-1 bg-gradient-to-r from-transparent to-border" />
+            <div className="text-[10px] uppercase tracking-[0.2em] gold-grad font-semibold">
+              {t("creditsTitle")}
+            </div>
+            <div className="h-px flex-1 bg-gradient-to-l from-transparent to-border" />
           </div>
-          <div className="text-foreground">
-            {t("creditsDeveloper")}: <span className="font-semibold">ABEDALQADER GHUNMAT</span>
+
+          <div className="text-center">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              {t("creditsDeveloper")}
+            </div>
+            <div className="text-sm font-semibold text-foreground tracking-wide mt-0.5">
+              ABEDALQADER GHUNMAT
+            </div>
           </div>
-          <div className="flex items-center gap-2 mt-1.5 text-muted-foreground">
-            <Phone className="h-3 w-3 text-amber-400 shrink-0" />
-            <a href="tel:+9620775008345" className="text-primary hover:underline" data-testid="link-credits-phone">
+
+          <div className="flex flex-wrap justify-center gap-2">
+            <a
+              href="tel:+9620775008345"
+              data-testid="link-credits-phone"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-secondary/40 hover:bg-secondary hover:border-amber-400/40 transition text-[11px] font-medium text-foreground"
+            >
+              <Phone className="h-3 w-3 text-amber-400" />
               +962 77 500 8345
             </a>
-          </div>
-          <div className="flex items-center gap-2 mt-1 text-muted-foreground">
-            <Mail className="h-3 w-3 text-amber-400 shrink-0" />
-            <a href="mailto:ghneimatabed1@icloud.com" className="text-primary hover:underline break-all" data-testid="link-credits-email">
+            <a
+              href="mailto:ghneimatabed1@icloud.com"
+              data-testid="link-credits-email"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-secondary/40 hover:bg-secondary hover:border-amber-400/40 transition text-[11px] font-medium text-foreground"
+            >
+              <Mail className="h-3 w-3 text-amber-400" />
               ghneimatabed1@icloud.com
             </a>
           </div>
-          <p className="text-[10px] text-muted-foreground mt-2 leading-snug">
+
+          <p className="text-[10px] text-muted-foreground text-center leading-snug max-w-xs px-2">
             {t("creditsBlurb")}
           </p>
         </div>
 
-        <div className="text-[10px] text-center text-muted-foreground mt-4">
+        <div className="text-[10px] text-center text-muted-foreground mt-5">
           © RJAF — Encrypted in transit (TLS) and at rest. Audit logged.
         </div>
       </div>
