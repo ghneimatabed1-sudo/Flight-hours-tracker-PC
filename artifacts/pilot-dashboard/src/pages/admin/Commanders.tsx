@@ -122,11 +122,11 @@ export default function Commanders() {
               <Select value={scope} onValueChange={(v: string) => setScope(v as CommanderScope)}>
                 <SelectTrigger data-testid="select-scope"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="flight">{t("scopeFlight")}</SelectItem>
-                  <SelectItem value="squadron">{t("scopeSquadron")}</SelectItem>
-                  <SelectItem value="wing">{t("scopeWing")}</SelectItem>
-                  <SelectItem value="base">{t("scopeBase")}</SelectItem>
                   <SelectItem value="hq">{t("scopeHQ")}</SelectItem>
+                  <SelectItem value="base">{t("scopeBase")}</SelectItem>
+                  <SelectItem value="wing">{t("scopeWing")}</SelectItem>
+                  <SelectItem value="squadron">{t("scopeSquadron")}</SelectItem>
+                  <SelectItem value="flight">{t("scopeFlight")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
