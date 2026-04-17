@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { pilots, squadrons } from "@/lib/mockData";
-import { pilotWorstStatus, fmtDate } from "@/lib/format";
+import { pilotWorstStatus, currencyStatus, fmtDate } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ChevronLeft, Eye, Plane, Calendar, Award } from "lucide-react";
 
@@ -72,9 +72,7 @@ export default function PilotDetail() {
         <CardContent>
           <div className="grid sm:grid-cols-2 gap-3">
             {currencies.map(c => {
-              const target = new Date(c.date).getTime();
-              const diff = Math.floor((target - Date.now()) / 86400000);
-              const status: "current" | "warning" | "expired" = diff < 0 ? "expired" : diff <= 30 ? "warning" : "current";
+              const status = currencyStatus(c.date);
               return (
                 <div key={c.label} className="flex items-center justify-between rounded-md border p-3">
                   <div>

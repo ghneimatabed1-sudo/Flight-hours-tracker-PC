@@ -23,7 +23,7 @@ export default function PilotsTable() {
 
   const [q, setQ] = useState("");
   const [sqnFilter, setSqnFilter] = useState<string>("__all");
-  const [statusFilter, setStatusFilter] = useState<"all" | CurrencyStatus>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "current" | "warning" | "expired">("all");
   const [sortKey, setSortKey] = useState<SortKey>("callSign");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
@@ -37,7 +37,14 @@ export default function PilotsTable() {
     let l = pilots.filter(p => myIds.has(p.squadronId));
     if (focusedSqnId) l = l.filter(p => p.squadronId === focusedSqnId);
     else if (sqnFilter !== "__all") l = l.filter(p => p.squadronId === sqnFilter);
-    if (statusFilter !== "all") l = l.filter(p => pilotWorstStatus(p) === statusFilter);
+    if (statusFilter !== "all") {
+      l = l.filter(p => {
+        const s = pilotWorstStatus(p);
+        if (statusFilter === "expired") return s === "expired" || s === "critical";
+        if (statusFilter === "warning") return s === "warning" || s === "expiringSoon";
+        return s === "current";
+      });
+    }
     if (q.trim()) {
       const s = q.toLowerCase().trim();
       l = l.filter(p => p.fullName.toLowerCase().includes(s) || p.fullNameAr.includes(s) || p.callSign.toLowerCase().includes(s));
@@ -66,7 +73,10 @@ export default function PilotsTable() {
       : `${t("pilotReport")} — ${t("allSquadrons")}`;
 
   function statusLabel(s: CurrencyStatus): string {
-    return s === "current" ? t("current") : s === "warning" ? t("warning") : t("expired");
+    if (s === "expired") return t("expired");
+    if (s === "critical" || s === "expiringSoon") return t("expiringSoon");
+    if (s === "warning") return t("warning");
+    return t("current");
   }
 
   function exportCsv() {
@@ -211,7 +221,7 @@ export default function PilotsTable() {
           <SelectContent>
             <SelectItem value="all">{t("all")}</SelectItem>
             <SelectItem value="current">{t("current")}</SelectItem>
-            <SelectItem value="warning">{t("warning")}</SelectItem>
+            <SelectItem value="warning">{t("expiringSoon")}</SelectItem>
             <SelectItem value="expired">{t("expired")}</SelectItem>
           </SelectContent>
         </Select>

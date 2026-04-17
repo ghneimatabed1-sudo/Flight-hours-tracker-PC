@@ -15,8 +15,8 @@ export default function CommanderOverview() {
   const myIds = new Set(user.squadronIds);
   const mySqns = squadrons.filter(s => myIds.has(s.id));
   const myPilots = pilots.filter(p => myIds.has(p.squadronId));
-  const expired = myPilots.filter(p => pilotWorstStatus(p) === "expired").length;
-  const warning = myPilots.filter(p => pilotWorstStatus(p) === "warning").length;
+  const expired = myPilots.filter(p => { const s = pilotWorstStatus(p); return s === "expired" || s === "critical"; }).length;
+  const warning = myPilots.filter(p => { const s = pilotWorstStatus(p); return s === "warning" || s === "expiringSoon"; }).length;
 
   const stats = [
     { icon: <Plane className="h-5 w-5" />, label: t("totalSquadrons"), value: mySqns.length },
@@ -50,8 +50,8 @@ export default function CommanderOverview() {
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {mySqns.map(s => {
             const sp = pilots.filter(p => p.squadronId === s.id);
-            const e = sp.filter(p => pilotWorstStatus(p) === "expired").length;
-            const w = sp.filter(p => pilotWorstStatus(p) === "warning").length;
+            const e = sp.filter(p => { const s = pilotWorstStatus(p); return s === "expired" || s === "critical"; }).length;
+            const w = sp.filter(p => { const s = pilotWorstStatus(p); return s === "warning" || s === "expiringSoon"; }).length;
             const c = sp.length - e - w;
             return (
               <Link key={s.id} href={`/dashboard/squadron/${s.id}`}>

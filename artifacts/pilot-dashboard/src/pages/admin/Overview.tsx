@@ -8,8 +8,8 @@ import { StatusBadge } from "@/components/StatusBadge";
 export default function AdminOverview() {
   const { t, lang } = useI18n();
   const enabledSquadrons = squadrons.filter(s => s.enabled);
-  const expired = pilots.filter(p => pilotWorstStatus(p) === "expired").length;
-  const warning = pilots.filter(p => pilotWorstStatus(p) === "warning").length;
+  const expired = pilots.filter(p => { const s = pilotWorstStatus(p); return s === "expired" || s === "critical"; }).length;
+  const warning = pilots.filter(p => { const s = pilotWorstStatus(p); return s === "warning" || s === "expiringSoon"; }).length;
   const activeKeys = licenseKeys.filter(k => k.status !== "revoked").length;
 
   const stats = [
@@ -58,8 +58,8 @@ export default function AdminOverview() {
               <tbody>
                 {squadrons.map(s => {
                   const sp = pilots.filter(p => p.squadronId === s.id);
-                  const e = sp.filter(p => pilotWorstStatus(p) === "expired").length;
-                  const w = sp.filter(p => pilotWorstStatus(p) === "warning").length;
+                  const e = sp.filter(p => { const s = pilotWorstStatus(p); return s === "expired" || s === "critical"; }).length;
+                  const w = sp.filter(p => { const s = pilotWorstStatus(p); return s === "warning" || s === "expiringSoon"; }).length;
                   return (
                     <tr key={s.id} className="border-b border-border/60 hover:bg-accent/40" data-testid={`row-sqn-${s.id}`}>
                       <td className="py-2 px-2 font-medium">{lang === "ar" ? s.nameAr : s.name}</td>

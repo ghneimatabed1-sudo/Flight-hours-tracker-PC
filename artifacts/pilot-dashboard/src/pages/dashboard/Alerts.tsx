@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { pilots, squadrons } from "@/lib/mockData";
 import { currencyStatus, fmtDate } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
+import type { CurrencyStatus } from "@/lib/types";
 import { AlertTriangle } from "lucide-react";
 
 export default function Alerts() {
@@ -14,7 +15,8 @@ export default function Alerts() {
   if (!user) return null;
   const myIds = new Set(user.squadronIds);
 
-  const items: Array<{ pilotId: string; pilot: string; sqn: string; type: string; date: string; status: "expired" | "warning" }> = [];
+  type AlertItem = { pilotId: string; pilot: string; sqn: string; type: string; date: string; status: CurrencyStatus };
+  const items: AlertItem[] = [];
   for (const p of pilots) {
     if (!myIds.has(p.squadronId)) continue;
     const sqn = squadrons.find(s => s.id === p.squadronId);
@@ -37,13 +39,14 @@ export default function Alerts() {
       }
     }
   }
+  const rank: Record<CurrencyStatus, number> = { current: 0, warning: 1, expiringSoon: 2, critical: 3, expired: 4 };
   items.sort((a, b) => {
-    if (a.status !== b.status) return a.status === "expired" ? -1 : 1;
+    if (a.status !== b.status) return rank[b.status] - rank[a.status];
     return new Date(a.date).getTime() - new Date(b.date).getTime();
   });
 
-  const expired = items.filter(i => i.status === "expired");
-  const warning = items.filter(i => i.status === "warning");
+  const expired = items.filter(i => i.status === "expired" || i.status === "critical");
+  const warning = items.filter(i => i.status === "warning" || i.status === "expiringSoon");
 
   return (
     <div className="space-y-4">
@@ -55,7 +58,7 @@ export default function Alerts() {
   );
 }
 
-function Section({ title, items, t }: { title: string; items: Array<{ pilotId: string; pilot: string; sqn: string; type: string; date: string; status: "expired" | "warning" }>; t: (k: never) => string }) {
+function Section({ title, items, t }: { title: string; items: Array<{ pilotId: string; pilot: string; sqn: string; type: string; date: string; status: CurrencyStatus }>; t: (k: never) => string }) {
   const { lang } = useI18n();
   return (
     <Card>
