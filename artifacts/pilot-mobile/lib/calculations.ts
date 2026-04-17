@@ -6,6 +6,10 @@ export interface PilotTotals {
   totalNvg: number;
   totalSim: number;
   totalCaptain: number;
+  // Hours flown as the non-captain crew member (second pilot / co-pilot).
+  // Derived as grandTotal − totalCaptain so it always stays consistent with
+  // whatever definition of "captain" the upstream sortie uses.
+  totalSecondPilot: number;
   grandTotal: number;
   monthDay: number;
   monthNight: number;
@@ -14,6 +18,12 @@ export interface PilotTotals {
   monthCaptain: number;
   monthTotal: number;
   sortiesThisMonth: number;
+  // Year-to-date rollups, split into calendar halves so the pilot can see
+  // training load in the first and second half of the current year at a
+  // glance (matches the old APK's "1st 6 / 2nd 6" cards).
+  h1Hours: number;
+  h2Hours: number;
+  yearHours: number;
 }
 
 function safeNum(n: unknown): number {
@@ -40,6 +50,10 @@ export function computeTotals(
     aNvg = 0,
     aSim = 0,
     aCap = 0;
+  // Half-year buckets (sum of day + night only; matches old APK which
+  // tracked "flight hours" per half and kept sim/NVG separate).
+  let h1 = 0,
+    h2 = 0;
 
   for (const s of sorties) {
     const day = safeNum(s.day);
@@ -68,6 +82,13 @@ export function computeTotals(
         mCap += cap;
         mCount += 1;
       }
+      // Half-year bucketing uses only the current calendar year so the
+      // pilot never sees last year's flights counted in "this year's" halves.
+      if (y === yyyy) {
+        const flightOnly = day + night;
+        if (m <= 5) h1 += flightOnly;
+        else h2 += flightOnly;
+      }
     }
   }
 
@@ -77,13 +98,15 @@ export function computeTotals(
   const totalSim = safeNum(profile.openingSim) + aSim;
   const totalCaptain = safeNum(profile.openingCaptain) + aCap;
 
+  const grandTotal = totalDay + totalNight;
   return {
     totalDay,
     totalNight,
     totalNvg,
     totalSim,
     totalCaptain,
-    grandTotal: totalDay + totalNight,
+    totalSecondPilot: Math.max(0, grandTotal - totalCaptain),
+    grandTotal,
     monthDay: mDay,
     monthNight: mNight,
     monthNvg: mNvg,
@@ -91,6 +114,9 @@ export function computeTotals(
     monthCaptain: mCap,
     monthTotal: mDay + mNight,
     sortiesThisMonth: mCount,
+    h1Hours: h1,
+    h2Hours: h2,
+    yearHours: h1 + h2,
   };
 }
 

@@ -179,6 +179,37 @@ export default function HomeScreen() {
         <Stat label={t("home_nvg").toUpperCase()} value={formatHours(totals.totalNvg)} isRTL={isRTL} />
       </View>
 
+      {/* ── Year breakdown (1st half / 2nd half / total) ──── */}
+      <View style={[styles.row, styles.gap]}>
+        <Stat
+          label={t("home_h1")}
+          value={formatHours(totals.h1Hours)}
+          hint={t("home_h1_hint")}
+          isRTL={isRTL}
+        />
+        <Stat
+          label={t("home_h2")}
+          value={formatHours(totals.h2Hours)}
+          hint={t("home_h2_hint")}
+          isRTL={isRTL}
+        />
+      </View>
+
+      <View style={[styles.row, styles.gap]}>
+        <Stat
+          label={t("home_year")}
+          value={formatHours(totals.yearHours)}
+          hint={String(new Date().getFullYear())}
+          emphasis
+          isRTL={isRTL}
+        />
+        <Stat
+          label={t("home_second_pilot")}
+          value={formatHours(totals.totalSecondPilot)}
+          isRTL={isRTL}
+        />
+      </View>
+
       {/* ── Sync card ─────────────────────────── */}
       <View
         style={[
