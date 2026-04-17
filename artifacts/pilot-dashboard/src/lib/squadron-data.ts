@@ -137,8 +137,65 @@ export function useUpdatePilot() {
           totalCaptain: p.totalCaptain,
           expiry: p.expiry,
           hiddenCurrencies: p.hiddenCurrencies,
+          qualifications: p.qualifications,
+          lastSimDate: p.lastSimDate,
         },
       }).eq("id", p.id).select().single();
+      if (error) throw error;
+      return rowToPilot(data);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pilots"] }),
+  });
+}
+
+export function useCreatePilot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: Pilot) => {
+      if (!isLive()) {
+        const arr = getMockPilots();
+        if (arr.some(x => x.id === p.id)) {
+          throw new Error(`Pilot ID ${p.id} already exists`);
+        }
+        arr.unshift(p);
+        return p;
+      }
+      const { data, error } = await supabase!.from("pilots").insert({
+        id: p.id,
+        name: p.name,
+        arabic_name: p.arabicName,
+        rank: p.rank,
+        phone: p.phone,
+        unit: p.unit,
+        available: p.available,
+        data: {
+          name: p.name,
+          arabicName: p.arabicName,
+          rank: p.rank,
+          phone: p.phone,
+          address: p.address,
+          unit: p.unit,
+          available: p.available,
+          openingDay: p.openingDay,
+          openingNight: p.openingNight,
+          openingNvg: p.openingNvg,
+          doctorNote: p.doctorNote,
+          monthDay: p.monthDay,
+          monthNight: p.monthNight,
+          monthNvg: p.monthNvg,
+          monthSim: p.monthSim,
+          monthCaptain: p.monthCaptain,
+          totalDay: p.totalDay,
+          totalNight: p.totalNight,
+          totalNvg: p.totalNvg,
+          totalSim: p.totalSim,
+          totalCaptain: p.totalCaptain,
+          expiry: p.expiry,
+          hiddenCurrencies: p.hiddenCurrencies,
+          qualifications: p.qualifications,
+          lastSimDate: p.lastSimDate,
+        },
+      }).select().single();
       if (error) throw error;
       return rowToPilot(data);
     },
