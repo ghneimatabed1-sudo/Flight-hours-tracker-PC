@@ -4,9 +4,15 @@
 // importing arrays from `mock.ts` directly. When VITE_SUPABASE_URL /
 // VITE_SUPABASE_ANON_KEY are set, hooks talk to the real Supabase project
 // (and Row Level Security on `squadron_id` keeps each squadron in its own
-// silo). When the env vars are missing — which is what the hosted preview
-// runs in — hooks fall back to the seed data in `mock.ts` so the demo
-// preview keeps working without a backend.
+// silo). When the env vars are missing — demo mode — hooks fall back to the
+// seed data in `mock.ts` so the hosted preview keeps working without a
+// backend.
+//
+// IMPORTANT: when Supabase IS configured but a query fails, hooks surface the
+// error (no silent fallback to seed data). Downstream consumers — especially
+// PDF exports — must treat an empty/errored result as "data unavailable", not
+// as "no records exist". Substituting mock pilots/hours into an official
+// authorization report would be unsafe.
 //
 // Mutations only attempt to write when Supabase is configured; in demo mode
 // they no-op successfully so the existing UI keeps functioning.
@@ -80,10 +86,12 @@ export function usePilots(): UseQueryResult<Pilot[]> & { data: Pilot[] } {
       if (error) throw error;
       return (data ?? []).map(rowToPilot);
     },
-    initialData: () => [...getMockPilots()],
+    initialData: isLive() ? undefined : () => [...getMockPilots()],
     staleTime: 30_000,
+    retry: isLive() ? 1 : false,
   });
-  return { ...q, data: q.data ?? getMockPilots() } as UseQueryResult<Pilot[]> & { data: Pilot[] };
+  const fallback: Pilot[] = isLive() ? [] : getMockPilots();
+  return { ...q, data: q.data ?? fallback } as UseQueryResult<Pilot[]> & { data: Pilot[] };
 }
 
 export function useUpdatePilot() {
@@ -190,10 +198,12 @@ export function useSorties(): UseQueryResult<Sortie[]> & { data: Sortie[] } {
       if (error) throw error;
       return (data ?? []).map(rowToSortie);
     },
-    initialData: MOCK_SORTIES,
+    initialData: isLive() ? undefined : MOCK_SORTIES,
     staleTime: 30_000,
+    retry: isLive() ? 1 : false,
   });
-  return { ...q, data: q.data ?? MOCK_SORTIES } as UseQueryResult<Sortie[]> & { data: Sortie[] };
+  const fallback: Sortie[] = isLive() ? [] : MOCK_SORTIES;
+  return { ...q, data: q.data ?? fallback } as UseQueryResult<Sortie[]> & { data: Sortie[] };
 }
 
 export function useCreateSortie() {
@@ -327,9 +337,11 @@ export function useNotams(): UseQueryResult<NotamRow[]> & { data: NotamRow[] } {
         text: r.body as string,
       }));
     },
-    initialData: () => [...getMockNotams()],
+    initialData: isLive() ? undefined : () => [...getMockNotams()],
+    retry: isLive() ? 1 : false,
   });
-  return { ...q, data: q.data ?? getMockNotams() } as UseQueryResult<NotamRow[]> & { data: NotamRow[] };
+  const fallback: NotamRow[] = isLive() ? [] : getMockNotams();
+  return { ...q, data: q.data ?? fallback } as UseQueryResult<NotamRow[]> & { data: NotamRow[] };
 }
 
 export function useCreateNotam() {
@@ -410,9 +422,11 @@ export function useDutyWeek(): UseQueryResult<DutyDay[]> & { data: DutyDay[] } {
         rcm: (r.rcm as string) ?? "",
       }));
     },
-    initialData: MOCK_DUTY_WEEK,
+    initialData: isLive() ? undefined : MOCK_DUTY_WEEK,
+    retry: isLive() ? 1 : false,
   });
-  return { ...q, data: q.data ?? MOCK_DUTY_WEEK } as UseQueryResult<DutyDay[]> & { data: DutyDay[] };
+  const fallback: DutyDay[] = isLive() ? [] : MOCK_DUTY_WEEK;
+  return { ...q, data: q.data ?? fallback } as UseQueryResult<DutyDay[]> & { data: DutyDay[] };
 }
 
 // ── leaves (annual breakdown) ───────────────────────────────────────────
@@ -430,9 +444,11 @@ export function useLeaves(): UseQueryResult<LeaveRow[]> & { data: LeaveRow[] } {
         return { pilotId: r.pilot_id as string, months, total: months.reduce((a, b) => a + b, 0) };
       });
     },
-    initialData: seedLeaves(),
+    initialData: isLive() ? undefined : seedLeaves(),
+    retry: isLive() ? 1 : false,
   });
-  return { ...q, data: q.data ?? seedLeaves() } as UseQueryResult<LeaveRow[]> & { data: LeaveRow[] };
+  const fallback: LeaveRow[] = isLive() ? [] : seedLeaves();
+  return { ...q, data: q.data ?? fallback } as UseQueryResult<LeaveRow[]> & { data: LeaveRow[] };
 }
 
 function seedLeaves(): LeaveRow[] {
@@ -467,9 +483,11 @@ export function useUnavailable(): UseQueryResult<UnavailEntry[]> & { data: Unava
         reason: (r.reason as string) ?? "—",
       }));
     },
-    initialData: () => [...getMockUnavail()],
+    initialData: isLive() ? undefined : () => [...getMockUnavail()],
+    retry: isLive() ? 1 : false,
   });
-  return { ...q, data: q.data ?? getMockUnavail() } as UseQueryResult<UnavailEntry[]> & { data: UnavailEntry[] };
+  const fallback: UnavailEntry[] = isLive() ? [] : getMockUnavail();
+  return { ...q, data: q.data ?? fallback } as UseQueryResult<UnavailEntry[]> & { data: UnavailEntry[] };
 }
 
 function seedUnavailable(): UnavailEntry[] {
@@ -544,9 +562,11 @@ export function useSchedule(): UseQueryResult<ScheduleEntry[]> & { data: Schedul
         fuel: (r.fuel as string) ?? "",
       }));
     },
-    initialData: seedSchedule(),
+    initialData: isLive() ? undefined : seedSchedule(),
+    retry: isLive() ? 1 : false,
   });
-  return { ...q, data: q.data ?? seedSchedule() } as UseQueryResult<ScheduleEntry[]> & { data: ScheduleEntry[] };
+  const fallback: ScheduleEntry[] = isLive() ? [] : seedSchedule();
+  return { ...q, data: q.data ?? fallback } as UseQueryResult<ScheduleEntry[]> & { data: ScheduleEntry[] };
 }
 
 function seedSchedule(): ScheduleEntry[] {
@@ -576,6 +596,7 @@ export function useCurrencies(): UseQueryResult<CurrencyRow[]> & { data: Currenc
       }));
     },
     initialData: [],
+    retry: isLive() ? 1 : false,
   });
   return { ...q, data: q.data ?? [] } as UseQueryResult<CurrencyRow[]> & { data: CurrencyRow[] };
 }
@@ -602,9 +623,11 @@ export function useSquadronUsers(): UseQueryResult<AppUser[]> & { data: AppUser[
         created: String(r.created_at).slice(0, 10),
       }));
     },
-    initialData: () => [...getMockUsers()],
+    initialData: isLive() ? undefined : () => [...getMockUsers()],
+    retry: isLive() ? 1 : false,
   });
-  return { ...q, data: q.data ?? getMockUsers() } as UseQueryResult<AppUser[]> & { data: AppUser[] };
+  const fallback: AppUser[] = isLive() ? [] : getMockUsers();
+  return { ...q, data: q.data ?? fallback } as UseQueryResult<AppUser[]> & { data: AppUser[] };
 }
 
 function seedUsers(): AppUser[] {
@@ -651,9 +674,11 @@ export function useAuditLog(): UseQueryResult<AuditRow[]> & { data: AuditRow[] }
           : "—",
       }));
     },
-    initialData: SEED_AUDIT,
+    initialData: isLive() ? undefined : SEED_AUDIT,
+    retry: isLive() ? 1 : false,
   });
-  return { ...q, data: q.data ?? SEED_AUDIT } as UseQueryResult<AuditRow[]> & { data: AuditRow[] };
+  const fallback: AuditRow[] = isLive() ? [] : SEED_AUDIT;
+  return { ...q, data: q.data ?? fallback } as UseQueryResult<AuditRow[]> & { data: AuditRow[] };
 }
 
 export interface CreateSquadronUserInput {

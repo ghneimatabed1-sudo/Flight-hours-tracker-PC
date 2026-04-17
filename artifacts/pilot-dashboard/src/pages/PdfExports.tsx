@@ -3,7 +3,8 @@ import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { usePilots, useSorties } from "@/lib/squadron-data";
-import { FileDown, FileText, Loader2, Globe } from "lucide-react";
+import { supabaseConfigured } from "@/lib/supabase";
+import { FileDown, FileText, Loader2, Globe, AlertTriangle, Info } from "lucide-react";
 import {
   exportAuthorizationReport,
   exportPilotDataPages,
@@ -17,8 +18,18 @@ type ExportKey = "auth" | "data" | "totals" | "summary";
 export default function PdfExports() {
   const { t, lang } = useI18n();
   const { squadron } = useAuth();
-  const { data: pilots } = usePilots();
-  const { data: sorties } = useSorties();
+  const pilotsQ = usePilots();
+  const sortiesQ = useSorties();
+  const pilots = pilotsQ.data;
+  const sorties = sortiesQ.data;
+  // When Supabase is configured but a query fails, we must NOT generate a PDF
+  // — the data layer no longer falls back to seed data, so a report would
+  // either be empty or contain stale cached rows. Surface the failure and
+  // disable the export buttons until the connection recovers.
+  const isDemo = !supabaseConfigured;
+  const dataUnavailable = !isDemo && (pilotsQ.isError || sortiesQ.isError);
+  const dataLoading = !isDemo && (pilotsQ.isLoading || sortiesQ.isLoading);
+  const fetchError = pilotsQ.error ?? sortiesQ.error;
   const [busy, setBusy] = useState<ExportKey | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The PDFs follow the app's current language by default but the operator
@@ -46,6 +57,10 @@ export default function PdfExports() {
   };
 
   async function run(key: ExportKey) {
+    if (dataUnavailable) {
+      setError(t("pdf_data_unavailable"));
+      return;
+    }
     setBusy(key);
     setError(null);
     try {
@@ -83,6 +98,36 @@ export default function PdfExports() {
           </button>
         </div>
       </div>
+      {isDemo && (
+        <div
+          data-testid="banner-pdf-demo"
+          className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200 flex items-start gap-2"
+        >
+          <Info className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>{t("pdf_demo_notice")}</span>
+        </div>
+      )}
+      {dataUnavailable && (
+        <div
+          data-testid="banner-pdf-unavailable"
+          className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300 flex items-start gap-2"
+        >
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <div className="font-medium">{t("pdf_data_unavailable")}</div>
+            {fetchError instanceof Error && (
+              <div className="text-xs text-red-300/80 mt-0.5">{fetchError.message}</div>
+            )}
+          </div>
+          <button
+            onClick={() => { pilotsQ.refetch(); sortiesQ.refetch(); }}
+            data-testid="button-pdf-retry"
+            className="px-2 py-1 rounded-md border border-red-500/40 text-xs hover:bg-red-500/20"
+          >
+            {t("pdf_retry")}
+          </button>
+        </div>
+      )}
       {error && (
         <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
           {error}
@@ -91,6 +136,7 @@ export default function PdfExports() {
       <div className="grid md:grid-cols-2 gap-3">
         {EXPORTS.map((e) => {
           const isBusy = busy === e.key;
+          const disabled = busy !== null || dataUnavailable || dataLoading;
           return (
             <Card key={e.key} className="flex items-start gap-3">
               <FileText className="h-8 w-8 text-amber-400 shrink-0" />
@@ -100,9 +146,10 @@ export default function PdfExports() {
               </div>
               <button
                 onClick={() => run(e.key)}
-                disabled={busy !== null}
+                disabled={disabled}
+                title={dataUnavailable ? t("pdf_data_unavailable") : undefined}
                 data-testid={`button-pdf-${e.key}`}
-                className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm inline-flex items-center gap-1.5 disabled:opacity-60"
+                className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
                 PDF
