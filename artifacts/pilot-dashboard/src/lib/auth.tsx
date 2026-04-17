@@ -33,7 +33,7 @@ const DEFAULT_ADMIN_PASSWORD_HASH = "e25d97cfa9c1ef91c61b0f84a92a19fcbaa490ebde6
 // system owner walk up to any squadron PC and force a new super admin
 // password without knowing the current one. The plaintext is held by the
 // system owner off-device; only this SHA-256 hash ships in the binary.
-const MASTER_RECOVERY_HASH = "a4b76b3727d60e63de1cc47250f155bc42df0f0ac5beb2794b2d764b98fca441";
+const MASTER_RECOVERY_HASH = "c9d4a017bbd57ee911131a6d1054a2bc4ff1c642e99656b7b381f9265211b6bc";
 // Per-PC role lock chosen by the Super Admin on the Security page. When set,
 // the login screen hides every role except the locked one, and login() /
 // activateLicense() refuse to authenticate any user whose role doesn't match.
