@@ -19,6 +19,8 @@ export default function AddSortie() {
     pilotExtName: "", pilotExtSqn: "",
     coPilotExtName: "", coPilotExtSqn: "",
     sortieType: "Training", name: "NAV",
+    condition: "Day" as "Day" | "Night" | "NVG",
+    remarks: "",
     day1: 0, day2: 0, dayDual: 0,
     night1: 0, night2: 0, nightDual: 0,
     nvg: 0, sim: 0, actual: 0,
@@ -40,6 +42,8 @@ export default function AddSortie() {
         pilotExternal: pilotExt ? { name: form.pilotExtName.trim(), squadron: form.pilotExtSqn.trim() } : undefined,
         coPilotExternal: coPilotExt ? { name: form.coPilotExtName.trim(), squadron: form.coPilotExtSqn.trim() } : undefined,
         sortieType: form.sortieType, name: form.name,
+        condition: form.condition,
+        remarks: form.remarks.trim() || undefined,
         day1: form.day1, day2: form.day2, dayDual: form.dayDual,
         night1: form.night1, night2: form.night2, nightDual: form.nightDual,
         nvg: form.nvg, sim: form.sim, actual: form.actual,
@@ -64,6 +68,43 @@ export default function AddSortie() {
             <Field label={t("acNumber")} value={form.acNumber} onChange={v => set("acNumber", v)} placeholder="e.g. 832" />
             <Select label={t("sortieType")} value={form.sortieType} onChange={v => set("sortieType", v)} opts={["Training", "Mission", "Check Ride", "FCF", "Transport"]} />
             <Field label={t("sortieName")} value={form.name} onChange={v => set("name", v)} className="md:col-span-2" />
+          </div>
+
+          <div className="border-t border-border pt-3">
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{t("condition")}</div>
+            <div className="flex items-center gap-2" data-testid="condition-selector">
+              {(["Day", "Night", "NVG"] as const).map(opt => (
+                <button
+                  type="button"
+                  key={opt}
+                  onClick={() => set("condition", opt)}
+                  data-testid={`button-condition-${opt}`}
+                  className={`px-4 py-2 rounded-md text-sm font-medium border transition-colors ${
+                    form.condition === opt
+                      ? opt === "NVG"
+                        ? "bg-rose-500/20 border-rose-400 text-rose-200"
+                        : "bg-primary/20 border-primary text-primary"
+                      : "bg-secondary border-border text-muted-foreground hover:bg-secondary/80"
+                  }`}
+                >
+                  {t(opt === "Day" ? "conditionDay" : opt === "Night" ? "conditionNight" : "conditionNVG")}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block">
+              <span className="text-xs text-muted-foreground">{t("remarks")}</span>
+              <textarea
+                value={form.remarks}
+                onChange={e => set("remarks", e.target.value)}
+                placeholder={t("remarksPlaceholder")}
+                rows={2}
+                data-testid="input-remarks"
+                className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm resize-none"
+              />
+            </label>
           </div>
 
           <div className="border-t border-border pt-3 space-y-3">

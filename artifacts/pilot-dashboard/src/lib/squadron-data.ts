@@ -244,6 +244,8 @@ function rowToSortie(r: Record<string, unknown>): Sortie {
     nvg: Number(data.nvg ?? 0),
     sim: Number(data.sim ?? 0),
     actual: Number(data.actual ?? 0),
+    condition: data.condition,
+    remarks: data.remarks,
   };
 }
 
@@ -286,6 +288,8 @@ export function useCreateSortie() {
           day1: s.day1, day2: s.day2, dayDual: s.dayDual,
           night1: s.night1, night2: s.night2, nightDual: s.nightDual,
           nvg: s.nvg, sim: s.sim, actual: s.actual,
+          condition: s.condition,
+          remarks: s.remarks,
           pilotExternal: s.pilotExternal,
           coPilotExternal: s.coPilotExternal,
         },
@@ -325,6 +329,8 @@ export function useUpdateSortie() {
           day1: s.day1, day2: s.day2, dayDual: s.dayDual,
           night1: s.night1, night2: s.night2, nightDual: s.nightDual,
           nvg: s.nvg, sim: s.sim, actual: s.actual,
+          condition: s.condition,
+          remarks: s.remarks,
           pilotExternal: s.pilotExternal,
           coPilotExternal: s.coPilotExternal,
         },

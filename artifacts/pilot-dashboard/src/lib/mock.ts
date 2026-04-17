@@ -84,6 +84,15 @@ export interface Sortie {
   nvg: number;
   sim: number;
   actual: number;
+  // Primary flight condition selected by the ops officer. Independent from
+  // per-category hour fields (which stay as the authoritative breakdown) but
+  // gives a single-glance "this was a Day / Night / NVG sortie" tag used by
+  // the sortie log and the mobile app.
+  condition?: "Day" | "Night" | "NVG";
+  // Free-text remarks entered by the ops officer (maintenance note, weather
+  // abort, sortie cut short, etc.). Visible on the sortie log and on the
+  // pilot's mobile app detail view.
+  remarks?: string;
   imported?: boolean;
   importedAt?: string;
 }

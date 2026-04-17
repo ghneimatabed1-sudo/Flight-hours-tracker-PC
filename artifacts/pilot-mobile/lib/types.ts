@@ -34,6 +34,8 @@ export interface SortieRecord {
   nvg: number;
   sim: number;
   total: number;
+  condition?: "Day" | "Night" | "NVG";
+  remarks?: string;
 }
 
 export interface PilotSnapshot {

@@ -35,6 +35,15 @@ export function SortieRow({ sortie }: Props) {
   if (sortie.nvg > 0) breakdown.push(`NVG ${formatHours(sortie.nvg)}`);
   if (sortie.sim > 0) breakdown.push(`Sim ${formatHours(sortie.sim)}`);
 
+  const conditionBg =
+    sortie.condition === "NVG" ? "#b91c1c33" :
+    sortie.condition === "Night" ? "#1e3a8a55" :
+    sortie.condition === "Day" ? colors.primary + "33" : undefined;
+  const conditionFg =
+    sortie.condition === "NVG" ? "#fecaca" :
+    sortie.condition === "Night" ? "#bfdbfe" :
+    sortie.condition === "Day" ? colors.primary : undefined;
+
   return (
     <View
       style={[
@@ -76,6 +85,36 @@ export function SortieRow({ sortie }: Props) {
           .filter(Boolean)
           .join("  ·  ")}
       </Text>
+      {(sortie.condition || sortie.remarks) ? (
+        <View
+          style={[
+            styles.conditionRow,
+            { flexDirection: isRTL ? "row-reverse" : "row" },
+          ]}
+        >
+          {sortie.condition && conditionBg && conditionFg ? (
+            <View style={[styles.conditionTag, { backgroundColor: conditionBg }]}>
+              <Text style={[styles.conditionText, { color: conditionFg }]}>
+                {sortie.condition.toUpperCase()}
+              </Text>
+            </View>
+          ) : null}
+          {sortie.remarks ? (
+            <Text
+              style={[
+                styles.remarks,
+                {
+                  color: colors.mutedForeground,
+                  textAlign: isRTL ? "right" : "left",
+                },
+              ]}
+              numberOfLines={2}
+            >
+              {sortie.remarks}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
       <View
         style={[
           styles.footer,
@@ -141,5 +180,26 @@ const styles = StyleSheet.create({
   total: {
     fontSize: 16,
     fontFamily: "Inter_700Bold",
+  },
+  conditionRow: {
+    marginTop: 4,
+    alignItems: "center",
+    gap: 8,
+  },
+  conditionTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  conditionText: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.6,
+  },
+  remarks: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    fontStyle: "italic",
+    flex: 1,
   },
 });

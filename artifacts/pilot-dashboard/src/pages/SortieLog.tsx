@@ -204,6 +204,28 @@ function SortieEditDialog({ sortie, pilots, busy, onCancel, onSave }: SortieEdit
             </L>
             <L label={t("sortieName")} className="md:col-span-3"><input value={form.name} onChange={e => set("name", e.target.value)} className={I} /></L>
           </div>
+          <div className="border-t border-border pt-3">
+            <div className="text-xs text-muted-foreground mb-1">{t("condition")}</div>
+            <div className="flex items-center gap-2">
+              {(["Day", "Night", "NVG"] as const).map(opt => (
+                <button
+                  type="button"
+                  key={opt}
+                  onClick={() => set("condition", opt)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium border ${
+                    form.condition === opt
+                      ? opt === "NVG" ? "bg-rose-500/20 border-rose-400 text-rose-200" : "bg-primary/20 border-primary text-primary"
+                      : "bg-secondary border-border text-muted-foreground"
+                  }`}
+                >
+                  {t(opt === "Day" ? "conditionDay" : opt === "Night" ? "conditionNight" : "conditionNVG")}
+                </button>
+              ))}
+            </div>
+          </div>
+          <L label={t("remarks")}>
+            <textarea value={form.remarks ?? ""} onChange={e => set("remarks", e.target.value)} rows={2} className={I + " resize-none"} />
+          </L>
           <div className="grid grid-cols-3 gap-3 border-t border-border pt-3">
             {(["day1","day2","dayDual","night1","night2","nightDual","nvg","sim","actual"] as const).map(k => (
               <L key={k} label={t(k as never) ?? k}>

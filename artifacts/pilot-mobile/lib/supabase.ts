@@ -132,6 +132,8 @@ function rowsToSnapshot(
       nvg: num(sd.nvg),
       sim: num(sd.sim),
       total,
+      condition: sd.condition as "Day" | "Night" | "NVG" | undefined,
+      remarks: str(sd.remarks) ?? undefined,
     };
   });
 
