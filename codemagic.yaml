@@ -9,13 +9,13 @@ workflows:
     scripts:
       - name: Ensure pnpm
         script: |
-          corepack enable
-          corepack prepare pnpm@9.12.0 --activate
+          rm -f $HOME/package.json
+          npm install -g pnpm@9.12.0 --force
           pnpm --version
       - name: Install dependencies (workspace root)
         script: |
           cd $CM_BUILD_DIR
-          pnpm install --no-frozen-lockfile
+          pnpm install --no-frozen-lockfile --ignore-scripts=false
       - name: Expo prebuild (android)
         working_directory: artifacts/pilot-mobile
         script: |
@@ -50,12 +50,13 @@ workflows:
     scripts:
       - name: Ensure pnpm
         script: |
-          corepack enable
-          corepack prepare pnpm@9.12.0 --activate
+          rm -f $HOME/package.json
+          npm install -g pnpm@9.12.0 --force
+          pnpm --version
       - name: Install dependencies (workspace root)
         script: |
           cd $CM_BUILD_DIR
-          pnpm install --no-frozen-lockfile
+          pnpm install --no-frozen-lockfile --ignore-scripts=false
       - name: Expo prebuild (ios)
         working_directory: artifacts/pilot-mobile
         script: |
@@ -106,12 +107,13 @@ workflows:
     scripts:
       - name: Ensure pnpm
         script: |
-          corepack enable
-          corepack prepare pnpm@9.12.0 --activate
+          rm -f $HOME/package.json
+          npm install -g pnpm@9.12.0 --force
+          pnpm --version
       - name: Install dependencies (workspace root)
         script: |
           cd $CM_BUILD_DIR
-          pnpm install --no-frozen-lockfile
+          pnpm install --no-frozen-lockfile --ignore-scripts=false
       - name: Expo prebuild (ios)
         working_directory: artifacts/pilot-mobile
         script: |
