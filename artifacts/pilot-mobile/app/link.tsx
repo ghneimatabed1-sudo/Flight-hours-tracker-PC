@@ -4,6 +4,7 @@ import { Stack, useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
+  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -185,6 +186,72 @@ export default function LinkScreen() {
             {t("link_demo_hint")}
           </Text>
         ) : null}
+
+        {/* Contact card — visible before linking so a pilot who doesn't
+            have their military number / link code knows who to ask. */}
+        <View
+          style={[
+            styles.creditsCard,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <Text
+            style={[
+              styles.creditsTitle,
+              { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
+            ]}
+          >
+            {t("settings_credits")}
+          </Text>
+          <Text
+            style={[
+              styles.creditsName,
+              { color: colors.foreground, textAlign: isRTL ? "right" : "left" },
+            ]}
+          >
+            ABEDALQADER GHUNMAT
+          </Text>
+          <Text
+            style={[
+              styles.creditsRole,
+              { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
+            ]}
+          >
+            {t("credits_developer")}
+          </Text>
+          <Pressable
+            onPress={() => Linking.openURL("tel:+9620775008345").catch(() => {})}
+            style={[
+              styles.creditsRow,
+              { borderColor: colors.border, flexDirection: isRTL ? "row-reverse" : "row" },
+            ]}
+          >
+            <Feather name="phone" size={14} color={colors.primary} />
+            <Text style={[styles.creditsValue, { color: colors.foreground }]}>
+              +962 77 500 8345
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => Linking.openURL("mailto:ghneimatabed1@icloud.com").catch(() => {})}
+            style={[
+              styles.creditsRow,
+              { borderColor: colors.border, flexDirection: isRTL ? "row-reverse" : "row" },
+            ]}
+          >
+            <Feather name="mail" size={14} color={colors.primary} />
+            <Text style={[styles.creditsValue, { color: colors.foreground }]}>
+              ghneimatabed1@icloud.com
+            </Text>
+          </Pressable>
+          <Text
+            style={[
+              styles.creditsBlurb,
+              { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
+            ]}
+          >
+            {t("credits_blurb")}
+          </Text>
+        </View>
       </KeyboardAwareScrollView>
     </View>
   );
@@ -265,5 +332,47 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Inter_400Regular",
     marginTop: 4,
+  },
+  creditsCard: {
+    marginTop: 18,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 4,
+  },
+  creditsTitle: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
+  creditsName: {
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.3,
+  },
+  creditsRole: {
+    fontSize: 11,
+    fontFamily: "Inter_500Medium",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: 6,
+  },
+  creditsRow: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  creditsValue: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
+  creditsBlurb: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 16,
+    marginTop: 6,
   },
 });

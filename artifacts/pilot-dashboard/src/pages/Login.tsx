@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
-import { ShieldCheck, Languages, KeyRound, Smartphone } from "lucide-react";
+import { ShieldCheck, Languages, KeyRound, Smartphone, Phone, Mail } from "lucide-react";
 import QRCode from "qrcode";
 
 export default function LoginGate() {
@@ -218,6 +218,33 @@ export default function LoginGate() {
               <button className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90">{t("save")}</button>
             </form>
           )}
+        </div>
+
+        {/* Contact card — visible on every login screen (license entry,
+            squadron setup, sign-in, 2FA) so anyone who installed the app
+            without a license key knows who to reach for one. */}
+        <div className="panel p-4 mt-4 text-xs">
+          <div className="text-[11px] font-semibold gold-grad uppercase tracking-wider mb-1.5">
+            {t("creditsTitle")}
+          </div>
+          <div className="text-foreground">
+            {t("creditsDeveloper")}: <span className="font-semibold">ABEDALQADER GHUNMAT</span>
+          </div>
+          <div className="flex items-center gap-2 mt-1.5 text-muted-foreground">
+            <Phone className="h-3 w-3 text-amber-400 shrink-0" />
+            <a href="tel:+9620775008345" className="text-primary hover:underline" data-testid="link-credits-phone">
+              +962 77 500 8345
+            </a>
+          </div>
+          <div className="flex items-center gap-2 mt-1 text-muted-foreground">
+            <Mail className="h-3 w-3 text-amber-400 shrink-0" />
+            <a href="mailto:ghneimatabed1@icloud.com" className="text-primary hover:underline break-all" data-testid="link-credits-email">
+              ghneimatabed1@icloud.com
+            </a>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-2 leading-snug">
+            {t("creditsBlurb")}
+          </p>
         </div>
 
         <div className="text-[10px] text-center text-muted-foreground mt-4">
