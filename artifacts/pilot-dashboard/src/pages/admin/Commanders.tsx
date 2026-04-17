@@ -11,8 +11,9 @@ import { commanders as initial, squadrons } from "@/lib/mockData";
 import type { CommanderScope, User } from "@/lib/types";
 import { Users, Plus, Trash2, KeyRound } from "lucide-react";
 
-const scopeKeys: Record<CommanderScope, "scopeSquadron" | "scopeWing" | "scopeBase" | "scopeHQ"> = {
+const scopeKeys: Record<CommanderScope, "scopeSquadron" | "scopeFlight" | "scopeWing" | "scopeBase" | "scopeHQ"> = {
   squadron: "scopeSquadron",
+  flight: "scopeFlight",
   wing: "scopeWing",
   base: "scopeBase",
   hq: "scopeHQ",
@@ -122,6 +123,7 @@ export default function Commanders() {
                 <SelectTrigger data-testid="select-scope"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="squadron">{t("scopeSquadron")}</SelectItem>
+                  <SelectItem value="flight">{t("scopeFlight")}</SelectItem>
                   <SelectItem value="wing">{t("scopeWing")}</SelectItem>
                   <SelectItem value="base">{t("scopeBase")}</SelectItem>
                   <SelectItem value="hq">{t("scopeHQ")}</SelectItem>

@@ -1,6 +1,6 @@
 export type Role = "super_admin" | "commander" | "ops" | "deputy" | "admin";
 
-export type CommanderScope = "squadron" | "wing" | "base" | "hq";
+export type CommanderScope = "flight" | "squadron" | "wing" | "base" | "hq";
 
 export interface User {
   id?: string;
