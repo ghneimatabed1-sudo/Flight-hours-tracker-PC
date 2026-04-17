@@ -264,7 +264,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!u) {
         return { ok: false, error: "Enter the username this license was issued to." };
       }
-      if (k.length < 12) {
+      // Install keys are typically 12+ chars but the baked-in seed install
+      // key is 9 chars, so the floor is 8 for compatibility. Real issued
+      // keys minted by the Super Admin are still long random strings.
+      if (k.length < 8) {
         return { ok: false, error: "Invalid license key format. Keys are issued by the Super Admin." };
       }
       const packaged = await isPackagedDesktop();
