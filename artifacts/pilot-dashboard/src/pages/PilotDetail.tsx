@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRoute, Link } from "wouter";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
@@ -138,7 +138,6 @@ function statusBadge(t: ReturnType<typeof useI18n>["t"], status: PilotLinkStatus
 function MobileAccessCard({ pilotId }: { pilotId: string }) {
   const { t } = useI18n();
   const { user } = useAuth();
-  const statusQ = usePilotLinkStatus(pilotId);
   const issue = useIssueLinkCode();
   const revoke = useRevokePilotDevices();
   const [code, setCode] = useState<string | null>(null);
@@ -148,11 +147,49 @@ function MobileAccessCard({ pilotId }: { pilotId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [revokedNotice, setRevokedNotice] = useState(false);
 
+  // Clear all transient state when the user navigates to a different pilot —
+  // never leak a previous pilot's one-time code onto a different page.
+  useEffect(() => {
+    setCode(null);
+    setCodeExpiresAt(null);
+    setCopied(false);
+    setError(null);
+    setRevokedNotice(false);
+  }, [pilotId]);
+
+  // While a code is showing, poll status every 5s so we can auto-clear the
+  // displayed code as soon as the pilot consumes it on the mobile app
+  // (the server marks pilot_link_codes.consumed_at, which removes the row
+  //  from our pendingCode query).
+  const statusQ = usePilotLinkStatus(pilotId);
+  useEffect(() => {
+    if (!code) return;
+    const id = setInterval(() => statusQ.refetch(), 5000);
+    return () => clearInterval(id);
+  }, [code, statusQ]);
+
   useEffect(() => {
     if (!codeExpiresAt) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [codeExpiresAt]);
+
+  // Auto-clear the displayed code once the server reports it was consumed.
+  // We only flip from "showing" to "cleared" once we've actually observed the
+  // pendingCode in the server's status (avoids racing the post-issue refetch:
+  // the local `code` is set immediately, but status may briefly still be the
+  // pre-issue snapshot with pendingCode === null).
+  const sawPendingForLocalCode = useRef(false);
+  useEffect(() => {
+    if (!code) { sawPendingForLocalCode.current = false; return; }
+    if (statusQ.data?.pendingCode) {
+      sawPendingForLocalCode.current = true;
+    } else if (sawPendingForLocalCode.current && statusQ.data && statusQ.data.pendingCode === null) {
+      setCode(null);
+      setCodeExpiresAt(null);
+      sawPendingForLocalCode.current = false;
+    }
+  }, [code, statusQ.data]);
 
   const remainingMs = codeExpiresAt ? Math.max(0, +new Date(codeExpiresAt) - now) : 0;
   const expired = Boolean(codeExpiresAt) && remainingMs <= 0;

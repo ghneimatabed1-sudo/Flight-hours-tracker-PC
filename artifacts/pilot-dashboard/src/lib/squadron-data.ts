@@ -806,13 +806,23 @@ export function useRevokePilotDevices() {
         for (const c of mockCodes) if (c.pilotId === pilotId && c.consumedAt === null) c.consumedAt = now;
         return { revoked: n };
       }
+      const nowIso = new Date().toISOString();
       const { data, error } = await supabase!
         .from("pilot_devices")
-        .update({ revoked_at: new Date().toISOString() })
+        .update({ revoked_at: nowIso })
         .eq("pilot_id", pilotId)
         .is("revoked_at", null)
         .select("token_hash");
       if (error) throw error;
+      // Also burn any outstanding unconsumed link codes so a previously issued
+      // code can't be used to relink after a revoke. RLS already restricts this
+      // to the caller's squadron.
+      const { error: codeErr } = await supabase!
+        .from("pilot_link_codes")
+        .update({ consumed_at: nowIso })
+        .eq("pilot_id", pilotId)
+        .is("consumed_at", null);
+      if (codeErr) throw codeErr;
       const revoked = (data ?? []).length;
       await recordAuditEvent({ type: "mobile.device.revoked", actor, detail: { pilotId, devices: revoked } });
       return { revoked };
