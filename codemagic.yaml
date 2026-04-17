@@ -69,7 +69,7 @@ workflows:
         working_directory: artifacts/pilot-mobile/ios
         script: |
           set -e
-          WORKSPACE=$(ls *.xcworkspace | head -1)
+          WORKSPACE=$(ls -d *.xcworkspace | head -1)
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)
           xcodebuild -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
@@ -133,7 +133,7 @@ workflows:
       - name: Build signed IPA
         working_directory: artifacts/pilot-mobile/ios
         script: |
-          WORKSPACE=$(ls *.xcworkspace | head -1)
+          WORKSPACE=$(ls -d *.xcworkspace | head -1)
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)
           xcode-project build-ipa \
             --workspace "$WORKSPACE" \
