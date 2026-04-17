@@ -67,3 +67,12 @@ This is enforced server-side via the `validate-license` Supabase Edge Function p
 the `lockedToDevice` field on license keys and the `licenseBoundFp` fingerprint stored
 in the desktop client's localStorage. If the same key is presented from a different
 hardware fingerprint, validation must fail and ops needs HQ to issue a fresh key.
+
+## License-key validity durations
+LicenseKey.expiresAt (ISO date string or null=never) is now part of the type.
+The super admin's "Generate Key" dialog (admin/LicenseKeys.tsx) lets the user
+pick from: 1d, 2d, 1m, 3m, 6m, 1y, 3y, never. addDuration() in lib/types.ts
+computes the expiresAt from the issue date. The keys table shows the expiry
+column and flags expired keys with a red "Expired" badge alongside the status.
+The server-side validate-license Edge Function should reject any key whose
+expiresAt is in the past.

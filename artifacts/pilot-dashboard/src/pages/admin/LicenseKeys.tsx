@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { licenseKeys as initialKeys, squadrons } from "@/lib/mockData";
-import type { LicenseKey } from "@/lib/types";
+import type { LicenseKey, LicenseDuration } from "@/lib/types";
+import { addDuration } from "@/lib/types";
 import { fmtDate, fmtDateTime } from "@/lib/format";
 import { KeyRound, Copy, Check } from "lucide-react";
 
@@ -14,10 +15,13 @@ function genKey(code: string): string {
   return `EE-${code}-${rnd.slice(0, 4)}-${rnd.slice(4, 8)}-${rnd.slice(8, 12)}-${rnd.slice(12, 16)}`;
 }
 
+const DURATIONS: LicenseDuration[] = ["1d", "2d", "1m", "3m", "6m", "1y", "3y", "never"];
+
 export default function LicenseKeys() {
   const { t, lang } = useI18n();
   const [keys, setKeys] = useState<LicenseKey[]>(initialKeys);
   const [genFor, setGenFor] = useState<string>("");
+  const [genDuration, setGenDuration] = useState<LicenseDuration>("1y");
   const [genOpen, setGenOpen] = useState(false);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -27,16 +31,22 @@ export default function LicenseKeys() {
     if (!sqn) return;
     const full = genKey(sqn.code);
     setNewKey(full);
+    const issuedAt = new Date().toISOString().slice(0, 10);
     const newRecord: LicenseKey = {
       id: "key-" + Math.random().toString(36).slice(2, 8),
       squadronId: sqn.id,
       keyPreview: `EE-${sqn.code}-••••-${full.slice(-4)}`,
       status: "active",
-      issuedAt: new Date().toISOString().slice(0, 10),
+      issuedAt,
+      expiresAt: addDuration(issuedAt, genDuration),
       lockedToDevice: null,
       lastSyncAt: null,
     };
     setKeys(k => [newRecord, ...k]);
+  }
+
+  function isExpired(k: LicenseKey): boolean {
+    return Boolean(k.expiresAt) && +new Date(k.expiresAt!) < Date.now();
   }
 
   function statusLabel(s: LicenseKey["status"]) {
@@ -71,6 +81,7 @@ export default function LicenseKeys() {
                   <th className="text-start py-2 px-3">{t("key")}</th>
                   <th className="text-start py-2 px-3">{t("status")}</th>
                   <th className="text-start py-2 px-3">{t("issued")}</th>
+                  <th className="text-start py-2 px-3">{t("expires")}</th>
                   <th className="text-start py-2 px-3">{t("device")}</th>
                   <th className="text-start py-2 px-3">{t("lastSync")}</th>
                   <th className="text-end py-2 px-3"></th>
@@ -83,8 +94,16 @@ export default function LicenseKeys() {
                     <tr key={k.id} className="border-b border-border/60" data-testid={`row-key-${k.id}`}>
                       <td className="py-2 px-3 font-medium">{sqn ? (lang === "ar" ? sqn.nameAr : sqn.name) : "—"}</td>
                       <td className="py-2 px-3 font-mono text-xs">{k.keyPreview}</td>
-                      <td className="py-2 px-3">{statusLabel(k.status)}</td>
+                      <td className="py-2 px-3">
+                        {statusLabel(k.status)}
+                        {isExpired(k) && k.status !== "revoked" ? (
+                          <span className="ms-1 inline-flex rounded px-2 py-0.5 text-xs font-medium bg-red-100 text-red-900 dark:bg-red-950 dark:text-red-200" data-testid={`badge-expired-${k.id}`}>{t("expiredKey")}</span>
+                        ) : null}
+                      </td>
                       <td className="py-2 px-3 tabular-nums">{fmtDate(k.issuedAt, lang)}</td>
+                      <td className="py-2 px-3 tabular-nums" data-testid={`text-expires-${k.id}`}>
+                        {k.expiresAt ? fmtDate(k.expiresAt, lang) : <span className="text-muted-foreground">{t("neverExpires")}</span>}
+                      </td>
                       <td className="py-2 px-3 font-mono text-xs">{k.lockedToDevice ?? "—"}</td>
                       <td className="py-2 px-3 tabular-nums">{k.lastSyncAt ? fmtDateTime(k.lastSyncAt, lang) : "—"}</td>
                       <td className="py-2 px-3 text-end space-x-2 rtl:space-x-reverse">
@@ -111,16 +130,34 @@ export default function LicenseKeys() {
             {newKey && <DialogDescription>{t("newKeyHelp")}</DialogDescription>}
           </DialogHeader>
           {!newKey ? (
-            <div className="space-y-3">
-              <label className="text-sm font-medium">{t("squadron")}</label>
-              <Select value={genFor} onValueChange={setGenFor}>
-                <SelectTrigger data-testid="select-squadron"><SelectValue placeholder={t("selectSquadron")} /></SelectTrigger>
-                <SelectContent>
-                  {squadrons.map(s => (
-                    <SelectItem key={s.id} value={s.id}>{lang === "ar" ? s.nameAr : s.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t("squadron")}</label>
+                <Select value={genFor} onValueChange={setGenFor}>
+                  <SelectTrigger data-testid="select-squadron"><SelectValue placeholder={t("selectSquadron")} /></SelectTrigger>
+                  <SelectContent>
+                    {squadrons.map(s => (
+                      <SelectItem key={s.id} value={s.id}>{lang === "ar" ? s.nameAr : s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t("licenseDuration")}</label>
+                <Select value={genDuration} onValueChange={(v) => setGenDuration(v as LicenseDuration)}>
+                  <SelectTrigger data-testid="select-duration"><SelectValue placeholder={t("selectDuration")} /></SelectTrigger>
+                  <SelectContent>
+                    {DURATIONS.map(d => (
+                      <SelectItem key={d} value={d} data-testid={`option-duration-${d}`}>{t(`duration_${d}` as const)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground" data-testid="text-expiry-preview">
+                  {genDuration === "never"
+                    ? t("neverExpires")
+                    : `${t("expires")}: ${fmtDate(addDuration(new Date().toISOString().slice(0, 10), genDuration)!, lang)}`}
+                </p>
+              </div>
             </div>
           ) : (
             <div className="space-y-3">
