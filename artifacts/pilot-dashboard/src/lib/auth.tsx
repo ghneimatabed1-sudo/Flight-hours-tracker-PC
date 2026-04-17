@@ -128,7 +128,11 @@ interface AuthCtx extends AuthState {
   activateLicense: (key: string, username: string) => Promise<{ ok: boolean; error?: string }>;
   configureSquadron: (cfg: SquadronConfig) => void;
   login: (username: string, password: string) => Promise<LoginResult>;
-  verifyAdminTotp: (code: string) => Promise<{ ok: boolean; error?: string; recoveryCodes?: string[] }>;
+  // `masterKey` is only required when the current pending step is an initial
+  // 2FA enrollment — it prevents a Super-Admin-password-only attacker from
+  // planting their own Authenticator secret on a fresh PC. Ignored during a
+  // normal "verify" step.
+  verifyAdminTotp: (code: string, masterKey?: string) => Promise<{ ok: boolean; error?: string; recoveryCodes?: string[] }>;
   // Mints a fresh set of recovery codes for the signed-in super admin
   // after re-confirming a current 6-digit TOTP code. Old codes are
   // invalidated server-side. Returns the new plaintext codes once.
@@ -524,7 +528,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ? { mode: pending.mode, secret: pending.secret, otpauth: pending.otpauth }
       : null,
     adminTotpEnrolled,
-    verifyAdminTotp: async (code) => {
+    verifyAdminTotp: async (code, masterKey) => {
       if (!pending) return { ok: false, error: "no_pending" };
       const now = Date.now();
       if (state.lockedUntil && state.lockedUntil > now) {
@@ -535,6 +539,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const usedRecoveryShape = isRecoveryCodeShape(trimmed);
       if (!isTotpShape(trimmed) && !usedRecoveryShape) {
         return { ok: false, error: "bad" };
+      }
+
+      // Enrollment is a privileged action because it plants the 2FA secret
+      // that all future logins on this PC will trust. Require the Master
+      // Recovery Key here, so knowing only the Super Admin password is not
+      // enough to register a new Authenticator against this PC.
+      if (pending.mode === "enroll") {
+        const mk = (masterKey ?? "").trim();
+        if (!mk) return { ok: false, error: "master_required" };
+        const mkHash = await sha256Hex(mk);
+        if (mkHash !== MASTER_RECOVERY_HASH) {
+          await recordAuditEvent({
+            type: "login.2fa.enroll_blocked",
+            actor: pending.user.username,
+            detail: { reason: "bad_master" },
+          });
+          return { ok: false, error: "bad_master" };
+        }
       }
 
       // Server-backed verification path (production). The secret never
