@@ -271,14 +271,15 @@ export function useSorties(): UseQueryResult<Sortie[]> & { data: Sortie[] } {
 }
 
 // Currency auto-refresh: when a Day/Night/NVG sortie is logged, push the
-// affected pilots' expiry dates forward to sortie-date + 60 days (standard
-// RJAF UH-60M currency window). Never moves an expiry backwards — if the
-// pilot already has a later date on record (from a more recent sortie), we
-// keep the later one. Applies to both P1 and P2. Day condition refreshes
-// `day`; Night and NVG conditions refresh `night` (UH-60M night ops are
-// flown on NVG, so they share a currency per squadron SOP).
-const CURRENCY_WINDOW_DAYS = 60;
-function bumpDate(current: string, sortieDate: string, days = CURRENCY_WINDOW_DAYS): string {
+// affected pilots' expiry dates forward to sortie-date + N days (default
+// 60 per RJAF UH-60M SOP; ops officer can override per-squadron via
+// Settings). Never moves an expiry backwards — if the pilot already has a
+// later date on record (from a more recent sortie), we keep the later one.
+// Applies to both P1 and P2. Day condition refreshes `day`; Night and NVG
+// conditions refresh `night` (UH-60M night ops are flown on NVG, so they
+// share a currency per squadron SOP).
+import { getCurrencyWindow } from "./currency-settings";
+function bumpDate(current: string, sortieDate: string, days: number): string {
   const d = new Date(sortieDate);
   if (isNaN(d.getTime())) return current;
   d.setDate(d.getDate() + days);
@@ -293,16 +294,17 @@ async function refreshCurrenciesForSortie(
   persist: (p: Pilot) => Promise<void>,
 ) {
   if (!s.condition) return;
+  const w = getCurrencyWindow();
   const ids = [s.pilotId, s.coPilotId].filter(Boolean);
   for (const id of ids) {
     const p = getPilot(id);
     if (!p) continue;
     const next = { ...p.expiry };
     if (s.condition === "Day") {
-      next.day = bumpDate(p.expiry.day, s.date);
+      next.day = bumpDate(p.expiry.day, s.date, w.day);
     } else {
       // Night or NVG both credit the night/NVG currency window.
-      next.night = bumpDate(p.expiry.night, s.date);
+      next.night = bumpDate(p.expiry.night, s.date, w.nvg);
     }
     if (next.day === p.expiry.day && next.night === p.expiry.night) continue;
     await persist({ ...p, expiry: next });

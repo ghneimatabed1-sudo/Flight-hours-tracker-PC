@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
+import { useCurrencyWindow, DEFAULT_CURRENCY_WINDOW } from "@/lib/currency-settings";
 
 export default function Settings() {
   const { t, lang, setLang } = useI18n();
@@ -11,6 +12,29 @@ export default function Settings() {
   const [base, setBase] = useState(squadron?.base || "");
   const [saved, setSaved] = useState(false);
   const save = (e: React.FormEvent) => { e.preventDefault(); configureSquadron({ name, number: num, base }); setSaved(true); setTimeout(() => setSaved(false), 1500); };
+
+  const [curWindow, setCurWindow] = useCurrencyWindow();
+  const [curDay, setCurDay] = useState<string>(String(curWindow.day));
+  const [curNvg, setCurNvg] = useState<string>(String(curWindow.nvg));
+  const [curSaved, setCurSaved] = useState(false);
+  const saveCurrencyWindow = (e: React.FormEvent) => {
+    e.preventDefault();
+    const d = parseInt(curDay, 10);
+    const n = parseInt(curNvg, 10);
+    setCurWindow({
+      day: Number.isFinite(d) && d > 0 ? d : DEFAULT_CURRENCY_WINDOW.day,
+      nvg: Number.isFinite(n) && n > 0 ? n : DEFAULT_CURRENCY_WINDOW.nvg,
+    });
+    setCurSaved(true);
+    setTimeout(() => setCurSaved(false), 1500);
+  };
+  const resetCurrencyWindow = () => {
+    setCurDay(String(DEFAULT_CURRENCY_WINDOW.day));
+    setCurNvg(String(DEFAULT_CURRENCY_WINDOW.nvg));
+    setCurWindow({ ...DEFAULT_CURRENCY_WINDOW });
+    setCurSaved(true);
+    setTimeout(() => setCurSaved(false), 1500);
+  };
 
   return (
     <div>
@@ -43,6 +67,50 @@ export default function Settings() {
           <div className="text-sm font-semibold">Auto-Update</div>
           <p className="text-xs text-muted-foreground">When a new version is released, the desktop app updates itself silently. Currently on v1.0.0.</p>
           <button className="px-3 py-1.5 rounded-md text-sm bg-secondary border border-border">Check for updates</button>
+        </Card>
+        <Card className="lg:col-span-2 space-y-3">
+          <form onSubmit={saveCurrencyWindow} className="space-y-3">
+            <div className="text-sm font-semibold">{t("currencyWindowTitle")}</div>
+            <p className="text-xs text-muted-foreground">{t("currencyWindowBlurb")}</p>
+            <div className="grid grid-cols-2 gap-3 max-w-md">
+              <label className="block">
+                <span className="text-xs text-muted-foreground">{t("dayCurrencyDays")}</span>
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={curDay}
+                    onChange={e => setCurDay(e.target.value)}
+                    data-testid="input-currency-window-day"
+                    className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm font-mono"
+                  />
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">{t("days")}</span>
+                </div>
+              </label>
+              <label className="block">
+                <span className="text-xs text-muted-foreground">{t("nvgCurrencyDays")}</span>
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={curNvg}
+                    onChange={e => setCurNvg(e.target.value)}
+                    data-testid="input-currency-window-nvg"
+                    className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm font-mono"
+                  />
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">{t("days")}</span>
+                </div>
+              </label>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button type="submit" className="px-4 py-2 rounded-md bg-primary text-primary-foreground font-medium text-sm" data-testid="button-save-currency-window">{t("save_changes")}</button>
+              <button type="button" onClick={resetCurrencyWindow} className="px-4 py-2 rounded-md bg-secondary border border-border text-sm" data-testid="button-reset-currency-window">{t("resetDefaults")}</button>
+              {curSaved && <span className="text-emerald-300 text-sm">✔</span>}
+              <span className="text-[11px] text-muted-foreground ms-auto">{t("currentWindow")}: Day <span className="font-mono">{curWindow.day}d</span> · NVG <span className="font-mono">{curWindow.nvg}d</span></span>
+            </div>
+          </form>
         </Card>
         <Card className="lg:col-span-2 flex items-center gap-5">
           <img src="brand/wings.png" className="h-16 object-contain shrink-0 opacity-95" alt="Pilot Wings" />
