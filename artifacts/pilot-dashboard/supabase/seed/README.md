@@ -2,8 +2,23 @@
 
 This folder contains the demo seed for a freshly provisioned Supabase
 project. Running it gives the app the same baseline data the in-memory
-preview shows: one squadron, 16 pilots, 80 sorties, currencies, leaves,
-duty roster, NOTAMs, and today's flight schedule.
+preview shows **across four demo squadrons** so Eagle Eye HQ commanders
+can immediately compare squadrons on the cross-squadron pilot table and
+dashboards. Per squadron: 16 pilots, 80 sorties, 240 currencies, 16
+annual-leave rows, 5 duty days, 2 unavailability windows, 3 NOTAMs, and
+today's 4-slot flight schedule.
+
+### Seeded squadrons
+
+| # | UUID                                   | Squadron                         | Base                      | Pilot IDs  | License key             | Admin email               |
+| - | -------------------------------------- | -------------------------------- | ------------------------- | ---------- | ----------------------- | ------------------------- |
+| 1 | `00000000-0000-0000-0000-000000000001` | 7th Squadron                     | King Abdullah II Air Base | P001–P016  | `DEMO-RJAF-1234-5678`   | `admin@demo.rjaf.local`   |
+| 2 | `00000000-0000-0000-0000-000000000002` | 8th Search & Rescue Squadron     | King Hussein Air Base     | P101–P116  | `DEMO-RJAF-8SAR-0002`   | `admin@8sar.rjaf.local`   |
+| 3 | `00000000-0000-0000-0000-000000000003` | 12th VIP Transport Squadron      | Marka Air Base            | P201–P216  | `DEMO-RJAF-12VIP-0003`  | `admin@12vip.rjaf.local`  |
+| 4 | `00000000-0000-0000-0000-000000000004` | 5th Flight Test Squadron         | Mafraq Air Base           | P301–P316  | `DEMO-RJAF-5FTS-0004`   | `admin@5fts.rjaf.local`   |
+
+Every admin uses password `admin123`. Pilot IDs are prefixed per-squadron
+(`P001+`, `P101+`, `P201+`, `P301+`) so they never collide.
 
 ## Files
 
@@ -27,41 +42,49 @@ duty roster, NOTAMs, and today's flight schedule.
    ```sh
    psql "$SUPABASE_SERVICE_ROLE_URL" -f seed.sql
    ```
-   The seed creates a ready-to-use admin account in one step:
-   - **Email:** `admin@demo.rjaf.local`
-   - **Password:** `admin123`
-   - `app_metadata`: `{"squadron_id": "00000000-0000-0000-0000-000000000001", "role": "admin"}`
-   Change the password immediately for any non-demo environment.
-3. **Activate the license** in the desktop app using the seeded key:
+   The seed creates **four ready-to-use admin accounts** (one per
+   squadron) — see the table at the top of this README for each
+   squadron's email and license key. Every admin uses password
+   `admin123` and has its `app_metadata.squadron_id` pre-set so RLS
+   scopes the session to that squadron only. Change every password
+   immediately for any non-demo environment.
+3. **Activate the license** in the desktop app using any seeded key —
+   each squadron has its own, so you can activate as many physical
+   desktops as you have seeded squadrons. The first squadron's key is
    `DEMO-RJAF-1234-5678`.
 
 ## What gets seeded
 
-| Table         | Rows | Notes                                                   |
-| ------------- | ---- | ------------------------------------------------------- |
-| `squadrons`   | 1    | Fixed UUID `00000000-0000-0000-0000-000000000001`        |
-| `licenses`    | 1    | `DEMO-RJAF-1234-5678`, expires in 365 days              |
-| `pilots`      | 16   | Same names/ranks/hours as the in-memory preview         |
-| `sorties`     | 80   | Same count as the preview; dates relative to `CURRENT_DATE` |
-| `currencies`  | 240  | 16 pilots × 15 six-month tasks                          |
-| `leaves`      | 16   | One row per pilot for the current calendar year         |
-| `duty_week`   | 5    | Sun–Thu standing roster                                 |
-| `unavailable` | 2    | Sample medical leave / course attendance                |
-| `notams`      | 3    | Recent NOTAMs                                           |
-| `schedule`    | 4    | Today's flight line                                     |
+Per-squadron counts (multiplied by 4 for the total seed):
+
+| Table         | Rows/sqn | Total | Notes                                                    |
+| ------------- | -------- | ----- | -------------------------------------------------------- |
+| `squadrons`   | 1        | 4     | Fixed UUIDs `…0001`–`…0004`                              |
+| `licenses`    | 1        | 4     | One demo key per squadron, each expires in 365 days      |
+| `pilots`      | 16       | 64    | Pilot IDs prefixed per squadron so they never collide    |
+| `sorties`     | 80       | 320   | Dates relative to `CURRENT_DATE`                         |
+| `currencies`  | 240      | 960   | 16 pilots × 15 six-month tasks                           |
+| `leaves`      | 16       | 64    | One row per pilot for the current calendar year          |
+| `duty_week`   | 5        | 20    | Sun–Thu standing roster                                  |
+| `unavailable` | 2        | 8     | Sample medical leave / course attendance                 |
+| `notams`      | 3        | 12    | Recent NOTAMs (per-squadron `notam_no` prefix)           |
+| `schedule`    | 4        | 16    | Today's flight line                                      |
+| `auth.users`  | 1        | 4     | One demo admin per squadron (`admin@…`/`admin123`)       |
 
 ## Verifying
 
-Right after running the seed, these counts should match (one squadron):
+Right after running the seed, these totals should match (all four
+squadrons combined):
 
 ```sql
-select 'pilots'      as t, count(*) from pilots      where squadron_id = '00000000-0000-0000-0000-000000000001'
-union all select 'sorties',     count(*) from sorties      where squadron_id = '00000000-0000-0000-0000-000000000001'
-union all select 'currencies',  count(*) from currencies   where squadron_id = '00000000-0000-0000-0000-000000000001'
-union all select 'leaves',      count(*) from leaves       where squadron_id = '00000000-0000-0000-0000-000000000001'
-union all select 'duty_week',   count(*) from duty_week    where squadron_id = '00000000-0000-0000-0000-000000000001'
-union all select 'notams',      count(*) from notams       where squadron_id = '00000000-0000-0000-0000-000000000001';
--- expect: 16, 80, 240, 16, 5, 3
+select 'squadrons'   as t, count(*) from squadrons
+union all select 'pilots',     count(*) from pilots
+union all select 'sorties',    count(*) from sorties
+union all select 'currencies', count(*) from currencies
+union all select 'leaves',     count(*) from leaves
+union all select 'duty_week',  count(*) from duty_week
+union all select 'notams',     count(*) from notams;
+-- expect: 4, 64, 320, 960, 64, 20, 12
 ```
 
 ## One-shot reset & reseed (`pnpm run db:seed`)
