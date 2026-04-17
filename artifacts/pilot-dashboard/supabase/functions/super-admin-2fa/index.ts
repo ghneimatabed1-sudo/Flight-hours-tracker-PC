@@ -49,10 +49,21 @@ const corsHeaders = {
 };
 
 const ISSUER = "RJAF Pilot Dashboard";
-const LOCKOUT_THRESHOLD = 5;
+const ALLOWED_USERNAME = "admin";          // only principal this function serves
+const LOCKOUT_THRESHOLD = 5;                // bad TOTP codes → TOTP lockout
 const LOCKOUT_MS = 5 * 60_000;
+const PW_FAIL_THRESHOLD = 10;               // bad passwords in window → pw lockout
+const PW_FAIL_WINDOW_MS = 10 * 60_000;
+const PW_LOCKOUT_MS = 15 * 60_000;
 const TOKEN_TTL_MS = 5 * 60_000;
 const B32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+// In-memory password-failure counter, per username. Survives only as long
+// as the edge function instance is warm — that's intentional: it slows down
+// online brute force without needing extra storage. The TOTP lockout below
+// is the durable, persisted one. Keyed by username so a wrong password for
+// one principal can't lock another.
+const pwFails = new Map<string, { count: number; firstAt: number; lockedUntil: number }>();
 
 interface Body {
   action?: "start" | "verify";
@@ -197,6 +208,14 @@ Deno.serve(async (req: Request) => {
   const username = (body.username ?? "").trim().toLowerCase();
   if (!action || !username) return reply({ ok: false, error: "missing_fields" }, 400);
 
+  // Defence in depth: this function only serves the configured super-admin
+  // principal. Even though the UI never submits anything else today, a
+  // future bug or a direct caller poking at the endpoint shouldn't be able
+  // to create rows for other usernames or probe alternative principals.
+  if (username !== ALLOWED_USERNAME) {
+    return reply({ ok: false, error: "unauthorized" }, 401);
+  }
+
   // @ts-ignore Deno is provided by the Edge runtime
   const url = Deno.env.get("SUPABASE_URL");
   // @ts-ignore Deno is provided by the Edge runtime
@@ -215,11 +234,27 @@ Deno.serve(async (req: Request) => {
     const password = body.password ?? "";
     if (!password) return reply({ ok: false, error: "missing_fields" }, 400);
 
+    // Server-side throttle for bad password attempts. With JWT verification
+    // disabled this is the main brake on online password brute-force.
+    const now = Date.now();
+    const fail = pwFails.get(username);
+    if (fail && fail.lockedUntil > now) {
+      return reply({ ok: false, error: "locked", lockedUntil: fail.lockedUntil }, 429);
+    }
+
     // Constant-time password check.
     const providedHash = (await sha256Hex(password)).toLowerCase();
     if (!timingSafeEq(providedHash, expectedHash)) {
+      const cur = (fail && now - fail.firstAt < PW_FAIL_WINDOW_MS)
+        ? fail
+        : { count: 0, firstAt: now, lockedUntil: 0 };
+      cur.count += 1;
+      if (cur.count >= PW_FAIL_THRESHOLD) cur.lockedUntil = now + PW_LOCKOUT_MS;
+      pwFails.set(username, cur);
       return reply({ ok: false, error: "unauthorized" }, 401);
     }
+    // Successful password clears the throttle.
+    pwFails.delete(username);
 
     const { data: row } = await admin
       .from("super_admin_2fa")
