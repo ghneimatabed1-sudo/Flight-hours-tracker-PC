@@ -13,7 +13,7 @@ const ADMIN_TOTP_SECRET_KEY = "rjaf.adminTotp.secret";
 const ADMIN_TOTP_RECOVERY_KEY = "rjaf.adminTotp.recovery";
 const ADMIN_TOTP_REMAINING_KEY = "rjaf.adminTotp.remaining";
 // SHA-256 hex of the current super admin password. Only consulted in demo
-// mode (no Supabase): when set, overrides the hardcoded DEMO_SUPER_ADMIN_PASSWORD.
+// mode (no Supabase): when set, overrides the DEFAULT_ADMIN_PASSWORD_HASH.
 // In Supabase mode the real hash lives server-side in SUPER_ADMIN_PASSWORD_HASH.
 const ADMIN_PASSWORD_HASH_KEY = "rjaf.admin.passwordHash";
 const ADMIN_TOTP_ISSUER = "RJAF Pilot Dashboard";
@@ -181,7 +181,11 @@ const HQ_CREDS: Record<string, string> = {
   base1: "commander",
   hq1: "commander",
 };
-const DEMO_SUPER_ADMIN_PASSWORD = "admin123";
+// Default super admin password — stored as a SHA-256 hash so the raw password
+// never lives in the source. When a super admin changes their password via
+// Settings → Security, the new hash is written to ADMIN_PASSWORD_HASH_KEY in
+// localStorage and overrides this default on that device only.
+const DEFAULT_ADMIN_PASSWORD_HASH = "e25d97cfa9c1ef91c61b0f84a92a19fcbaa490ebde6e91387b1b2cd0be403af1";
 
 function lookupHQUser(username: string): User | null {
   const u = username.trim().toLowerCase();
@@ -383,8 +387,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (storedHash) {
             const attemptHash = await sha256Hex(password);
             if (attemptHash !== storedHash) return await recordFail("bad_credentials");
-          } else if (password !== DEMO_SUPER_ADMIN_PASSWORD) {
-            return await recordFail("bad_credentials");
+          } else {
+            const attemptHash = await sha256Hex(password);
+            if (attemptHash !== DEFAULT_ADMIN_PASSWORD_HASH) {
+              return await recordFail("bad_credentials");
+            }
           }
         }
         const existing = localStorage.getItem(ADMIN_TOTP_SECRET_KEY);
@@ -639,9 +646,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await recordAuditEvent({ type: "admin.password.change.failed", actor: u.username, detail: { reason: "bad_current" } });
           return { ok: false, error: "bad_current" };
         }
-      } else if (currentPassword !== DEMO_SUPER_ADMIN_PASSWORD) {
-        await recordAuditEvent({ type: "admin.password.change.failed", actor: u.username, detail: { reason: "bad_current" } });
-        return { ok: false, error: "bad_current" };
+      } else {
+        const attemptHash = await sha256Hex(currentPassword);
+        if (attemptHash !== DEFAULT_ADMIN_PASSWORD_HASH) {
+          await recordAuditEvent({ type: "admin.password.change.failed", actor: u.username, detail: { reason: "bad_current" } });
+          return { ok: false, error: "bad_current" };
+        }
       }
 
       const newHash = await sha256Hex(np);
