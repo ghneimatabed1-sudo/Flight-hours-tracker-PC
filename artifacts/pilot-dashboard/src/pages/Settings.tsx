@@ -44,6 +44,13 @@ export default function Settings() {
           <p className="text-xs text-muted-foreground">When a new version is released, the desktop app updates itself silently. Currently on v1.0.0.</p>
           <button className="px-3 py-1.5 rounded-md text-sm bg-secondary border border-border">Check for updates</button>
         </Card>
+        <Card className="space-y-2 lg:col-span-2">
+          <div className="text-sm font-semibold gold-grad">{t("creditsTitle")}</div>
+          <div className="text-sm">{t("creditsDeveloper")}: <span className="font-semibold">ABEDALQADER GHUNMAT</span></div>
+          <div className="text-sm">{t("creditsPhone")}: <a href="tel:+9620775008345" className="text-primary hover:underline">0775008345</a></div>
+          <div className="text-sm">{t("creditsEmail")}: <a href="mailto:ghneimatabed1@icloud.com" className="text-primary hover:underline">ghneimatabed1@icloud.com</a></div>
+          <p className="text-xs text-muted-foreground pt-1">{t("creditsBlurb")}</p>
+        </Card>
       </div>
     </div>
   );

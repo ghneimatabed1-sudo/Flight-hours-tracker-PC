@@ -197,6 +197,11 @@ const dict = {
     squadronView: "Squadron View",
     hqAppName: "Eagle Eye HQ",
     langToggle: "العربية",
+    creditsTitle: "Credits",
+    creditsDeveloper: "Developed by",
+    creditsPhone: "Phone",
+    creditsEmail: "Email",
+    creditsBlurb: "For support, feedback, or questions about this system, please contact the developer.",
   },
   ar: {
     appName: "عمليات أسراب القوات الجوية الملكية الأردنية",
@@ -391,6 +396,11 @@ const dict = {
     squadronView: "عرض السرب",
     hqAppName: "عين النسر للقيادة",
     langToggle: "English",
+    creditsTitle: "اعتمادات",
+    creditsDeveloper: "تطوير",
+    creditsPhone: "هاتف",
+    creditsEmail: "بريد إلكتروني",
+    creditsBlurb: "للدعم أو الملاحظات أو الاستفسارات حول هذا النظام، يرجى التواصل مع المطور.",
   },
 } as const;
 

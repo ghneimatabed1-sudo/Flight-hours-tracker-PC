@@ -51,7 +51,7 @@ const EN: Dict = {
   settings_logout_confirm: "Unlink this device? Cached data will be cleared.",
   settings_about: "About",
   settings_about_text:
-    "Read-only viewer for your flight hours. All entries are made by your squadron operations officer.",
+    "Read-only viewer for your flight hours. All entries are made by your squadron operations officer.\n\nDeveloped by ABEDALQADER GHUNMAT\nPhone: 0775008345\nEmail: ghneimatabed1@icloud.com",
   cancel: "Cancel",
   confirm: "Confirm",
   not_set: "Not set",
@@ -102,7 +102,7 @@ const AR: Dict = {
   settings_logout_confirm: "إلغاء ربط هذا الجهاز؟ سيتم مسح البيانات المخزنة.",
   settings_about: "حول",
   settings_about_text:
-    "عارض للقراءة فقط لساعات طيرانك. جميع الإدخالات يقوم بها ضابط عمليات السرب.",
+    "عارض للقراءة فقط لساعات طيرانك. جميع الإدخالات يقوم بها ضابط عمليات السرب.\n\nتطوير: عبدالقادر غنيمات\nهاتف: 0775008345\nبريد إلكتروني: ghneimatabed1@icloud.com",
   cancel: "إلغاء",
   confirm: "تأكيد",
   not_set: "غير محدد",
