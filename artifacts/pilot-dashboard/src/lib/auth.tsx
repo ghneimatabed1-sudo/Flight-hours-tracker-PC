@@ -90,6 +90,10 @@ interface AuthCtx extends AuthState {
   configureSquadron: (cfg: SquadronConfig) => void;
   login: (username: string, password: string) => Promise<LoginResult>;
   verifyAdminTotp: (code: string) => Promise<{ ok: boolean; error?: string; recoveryCodes?: string[] }>;
+  // Mints a fresh set of recovery codes for the signed-in super admin
+  // after re-confirming a current 6-digit TOTP code. Old codes are
+  // invalidated server-side. Returns the new plaintext codes once.
+  regenerateRecoveryCodes: (code: string) => Promise<{ ok: boolean; error?: string; recoveryCodes?: string[] }>;
   cancelAdminTotp: () => void;
   pendingAdmin: { mode: "enroll" | "verify"; secret: string; otpauth: string } | null;
   adminTotpEnrolled: boolean;
@@ -538,6 +542,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setPending(null);
       setState(s => ({ ...s, user: hqUser, failedAttempts: 0, lockedUntil: null }));
       return { ok: true };
+    },
+    regenerateRecoveryCodes: async (code) => {
+      const u = state.user;
+      if (!u || u.role !== "super_admin") return { ok: false, error: "unauthorized" };
+      const trimmed = code.trim();
+      if (!isTotpShape(trimmed)) return { ok: false, error: "bad" };
+
+      if (supabaseConfigured && supabase) {
+        try {
+          const { data, error } = await supabase.functions.invoke("super-admin-2fa", {
+            body: { action: "regenerate", username: u.username, code: trimmed },
+          });
+          if (error || !data?.ok) {
+            const reason = data?.error ?? "totp_server_error";
+            return { ok: false, error: reason === "locked" ? "locked" : (reason === "bad" ? "bad" : reason) };
+          }
+          // Server already wrote the audit row; don't duplicate from the client.
+          const recoveryCodes: string[] = Array.isArray(data.recoveryCodes) ? data.recoveryCodes : [];
+          return { ok: true, recoveryCodes };
+        } catch (e: unknown) {
+          return { ok: false, error: e instanceof Error ? e.message : "totp_server_error" };
+        }
+      }
+
+      // Demo-only path: re-verify against the locally stored secret and
+      // overwrite the stored recovery code hashes.
+      const secret = localStorage.getItem(ADMIN_TOTP_SECRET_KEY);
+      if (!secret) return { ok: false, error: "not_enrolled" };
+      const ok = await verifyTotp(secret, trimmed);
+      if (!ok) return { ok: false, error: "bad" };
+      const fresh = generateDemoRecoveryCodes();
+      const hashed: StoredRecoveryCode[] = await Promise.all(
+        fresh.map(async c => ({
+          hash: await sha256Hex(normalizeRecoveryCode(c)),
+          usedAt: null,
+        })),
+      );
+      writeDemoRecoveryCodes(hashed);
+      await recordAuditEvent({
+        type: "super_admin.2fa.recovery_regenerated",
+        actor: u.username,
+        detail: { count: fresh.length },
+      });
+      return { ok: true, recoveryCodes: fresh };
     },
     pendingRecoveryCodes,
     ackRecoveryCodes: () => {

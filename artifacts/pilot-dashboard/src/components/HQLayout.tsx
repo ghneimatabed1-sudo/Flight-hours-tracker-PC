@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { useI18n, type Key } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge } from "lucide-react";
+import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock } from "lucide-react";
 import emblem from "@assets/rjaf_emblem.png";
 
 interface NavItem {
@@ -30,6 +30,7 @@ export function HQLayout({ children }: { children: ReactNode }) {
         { path: "/admin/squadrons", labelKey: "squadrons", icon: <Plane className="h-4 w-4" /> },
         { path: "/admin/reminders", labelKey: "remindersSchedule", icon: <AlarmClock className="h-4 w-4" /> },
         { path: "/admin/audit", labelKey: "auditLog", icon: <ListChecks className="h-4 w-4" /> },
+        { path: "/admin/security", labelKey: "nav_security", icon: <Lock className="h-4 w-4" /> },
       ]
     : [
         { path: "/dashboard", labelKey: "overview", icon: <BarChart3 className="h-4 w-4" /> },

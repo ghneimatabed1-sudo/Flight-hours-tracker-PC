@@ -71,7 +71,7 @@ const B32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const pwFails = new Map<string, { count: number; firstAt: number; lockedUntil: number }>();
 
 interface Body {
-  action?: "start" | "verify";
+  action?: "start" | "verify" | "regenerate";
   username?: string;
   password?: string;
   token?: string;
@@ -441,6 +441,66 @@ Deno.serve(async (req: Request) => {
       ...(recoveryCodes ? { recoveryCodes } : {}),
       ...(recoveryMatched ? { usedRecoveryCode: true } : {}),
     });
+  }
+
+  if (action === "regenerate") {
+    // Mints a fresh set of recovery codes for an already-enrolled super
+    // admin, after re-confirming a current 6-digit TOTP code. Old codes
+    // are invalidated by being overwritten with the new hash array. The
+    // authenticator enrollment (secret_b32) is left untouched.
+    const rawCode = (body.code ?? "").trim();
+    if (!/^\d{6}$/.test(rawCode)) return reply({ ok: false, error: "bad_input" }, 400);
+
+    const { data: row } = await admin
+      .from("super_admin_2fa")
+      .select("*")
+      .eq("username", username)
+      .maybeSingle();
+    if (!row || !row.enrolled_at) return reply({ ok: false, error: "not_enrolled" }, 404);
+
+    const lockedNow = row.locked_until && new Date(row.locked_until).getTime() > Date.now();
+    if (lockedNow) return reply({ ok: false, error: "locked" }, 423);
+
+    const totpOk = await verifyTotp(row.secret_b32, rawCode);
+    if (!totpOk) {
+      const fails = (row.failed_attempts ?? 0) + 1;
+      const lockUntil = fails >= LOCKOUT_THRESHOLD
+        ? new Date(Date.now() + LOCKOUT_MS).toISOString()
+        : null;
+      await admin.from("super_admin_2fa").update({
+        failed_attempts: fails,
+        locked_until: lockUntil,
+        updated_at: new Date().toISOString(),
+      }).eq("username", username);
+      await admin.from("audit_log").insert({
+        squadron_id: null,
+        type: "super_admin.2fa.failed",
+        actor: username,
+        detail: { fails, mode: "totp", op: "regenerate" },
+      }).then(() => {}, () => {});
+      return reply({ ok: false, error: lockUntil ? "locked" : "bad", fails });
+    }
+
+    const recoveryCodes = generateRecoveryCodes();
+    const hashes = await Promise.all(
+      recoveryCodes.map(c => sha256Hex(normalizeRecoveryCode(c))),
+    );
+    await admin.from("super_admin_2fa").update({
+      recovery_code_hashes: hashes,
+      recovery_code_used_at: hashes.map(() => null),
+      last_verified_at: new Date().toISOString(),
+      failed_attempts: 0,
+      locked_until: null,
+      updated_at: new Date().toISOString(),
+    }).eq("username", username);
+    await admin.from("audit_log").insert({
+      squadron_id: null,
+      type: "super_admin.2fa.recovery_regenerated",
+      actor: username,
+      detail: { count: recoveryCodes.length },
+    }).then(() => {}, () => {});
+
+    return reply({ ok: true, recoveryCodes });
   }
 
   return reply({ ok: false, error: "unknown_action" }, 400);
