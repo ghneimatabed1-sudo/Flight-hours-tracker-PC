@@ -48,6 +48,7 @@ import CommanderOverview from "@/pages/dashboard/Overview";
 import PilotsTable from "@/pages/dashboard/PilotsTable";
 import DashboardPilotDetail from "@/pages/dashboard/PilotDetail";
 import Alerts from "@/pages/dashboard/Alerts";
+import Simulator from "@/pages/dashboard/Simulator";
 
 function SquadronOpsRoutes() {
   return (
@@ -108,6 +109,7 @@ function CommanderRoutes() {
       <Route path="/dashboard/squadron/:id" component={PilotsTable} />
       <Route path="/dashboard/pilot/:id" component={DashboardPilotDetail} />
       <Route path="/dashboard/alerts" component={Alerts} />
+      <Route path="/dashboard/simulator" component={Simulator} />
       <Route component={NotFound} />
     </Switch>
   );
