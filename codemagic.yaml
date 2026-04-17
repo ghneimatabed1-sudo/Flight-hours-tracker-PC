@@ -30,7 +30,7 @@ workflows:
     publishing:
       email:
         recipients:
-          - YOUR_EMAIL@example.com
+          - ghneimatabed1@icloud.com
         notify:
           success: true
           failure: true
@@ -73,7 +73,7 @@ workflows:
     publishing:
       email:
         recipients:
-          - YOUR_EMAIL@example.com
+          - ghneimatabed1@icloud.com
         notify:
           success: true
           failure: true
