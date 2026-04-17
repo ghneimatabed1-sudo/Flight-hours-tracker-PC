@@ -697,3 +697,129 @@ export function useImportHistory() {
     },
   });
 }
+
+// ── mobile link codes & device revocation ───────────────────────────────
+//
+// Server-side trust model lives in 0002_mobile_link.sql. The dashboard side
+// only ever:
+//   * calls issue_pilot_link_code(pilotId) RPC to get a fresh plaintext code
+//     (the RPC invalidates any previous unconsumed code for the same pilot),
+//   * UPDATEs pilot_devices.revoked_at to revoke a phone, and
+//   * SELECTs from pilot_devices / pilot_link_codes for status display.
+// In demo mode (no Supabase) we keep an in-memory mock of the same shape so
+// the UI is fully exercisable in the hosted preview.
+
+// Mirrors the SQL default `expires_at default (now() + interval '7 days')` in
+// 0002_mobile_link.sql so demo and live show the same countdown.
+const LINK_CODE_TTL_MS = 7 * 24 * 60 * 60_000;
+
+export interface PilotLinkStatus {
+  device: { linkedAt: string; lastSeenAt: string; revokedAt: string | null } | null;
+  pendingCode: { expiresAt: string } | null;
+}
+
+interface MockDevice { pilotId: string; linkedAt: string; lastSeenAt: string; revokedAt: string | null }
+interface MockCode   { pilotId: string; expiresAt: string; consumedAt: string | null }
+const mockDevices: MockDevice[] = [];
+const mockCodes: MockCode[] = [];
+
+function mockStatus(pilotId: string): PilotLinkStatus {
+  const dev = mockDevices.filter(d => d.pilotId === pilotId).sort((a, b) => b.linkedAt.localeCompare(a.linkedAt))[0] ?? null;
+  const code = mockCodes.find(c => c.pilotId === pilotId && c.consumedAt === null && c.expiresAt > new Date().toISOString()) ?? null;
+  return {
+    device: dev ? { linkedAt: dev.linkedAt, lastSeenAt: dev.lastSeenAt, revokedAt: dev.revokedAt } : null,
+    pendingCode: code ? { expiresAt: code.expiresAt } : null,
+  };
+}
+
+export function usePilotLinkStatus(pilotId: string | undefined): UseQueryResult<PilotLinkStatus> {
+  return useQuery<PilotLinkStatus>({
+    queryKey: ["pilot_link_status", pilotId],
+    enabled: Boolean(pilotId),
+    queryFn: async () => {
+      if (!pilotId) return { device: null, pendingCode: null };
+      if (!isLive()) return mockStatus(pilotId);
+      const [{ data: devRows, error: devErr }, { data: codeRows, error: codeErr }] = await Promise.all([
+        supabase!.from("pilot_devices")
+          .select("linked_at,last_seen_at,revoked_at")
+          .eq("pilot_id", pilotId)
+          .order("linked_at", { ascending: false })
+          .limit(1),
+        supabase!.from("pilot_link_codes")
+          .select("expires_at,consumed_at")
+          .eq("pilot_id", pilotId)
+          .is("consumed_at", null)
+          .gt("expires_at", new Date().toISOString())
+          .order("issued_at", { ascending: false })
+          .limit(1),
+      ]);
+      if (devErr) throw devErr;
+      if (codeErr) throw codeErr;
+      const d = devRows?.[0];
+      const c = codeRows?.[0];
+      return {
+        device: d ? { linkedAt: String(d.linked_at), lastSeenAt: String(d.last_seen_at), revokedAt: d.revoked_at ? String(d.revoked_at) : null } : null,
+        pendingCode: c ? { expiresAt: String(c.expires_at) } : null,
+      };
+    },
+    staleTime: 5_000,
+  });
+}
+
+export function useIssueLinkCode() {
+  const qc = useQueryClient();
+  return useMutation<{ code: string; expiresAt: string }, Error, { pilotId: string; actor?: string }>({
+    mutationFn: async ({ pilotId, actor }) => {
+      if (!isLive()) {
+        // Invalidate previous unconsumed codes for this pilot, mirroring the SQL.
+        for (const c of mockCodes) if (c.pilotId === pilotId && c.consumedAt === null) c.consumedAt = new Date().toISOString();
+        const code = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
+        const expiresAt = new Date(Date.now() + LINK_CODE_TTL_MS).toISOString();
+        mockCodes.push({ pilotId, expiresAt, consumedAt: null });
+        return { code, expiresAt };
+      }
+      const { data, error } = await supabase!.rpc("issue_pilot_link_code", { p_pilot_id: pilotId });
+      if (error) throw error;
+      const code = String(data ?? "");
+      if (!code) throw new Error("Server did not return a code");
+      await recordAuditEvent({ type: "mobile.code.issued", actor, detail: { pilotId } });
+      return { code, expiresAt: new Date(Date.now() + LINK_CODE_TTL_MS).toISOString() };
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["pilot_link_status", vars.pilotId] });
+      qc.invalidateQueries({ queryKey: ["audit_log"] });
+    },
+  });
+}
+
+export function useRevokePilotDevices() {
+  const qc = useQueryClient();
+  return useMutation<{ revoked: number }, Error, { pilotId: string; actor?: string }>({
+    mutationFn: async ({ pilotId, actor }) => {
+      if (!isLive()) {
+        let n = 0;
+        const now = new Date().toISOString();
+        for (const d of mockDevices) {
+          if (d.pilotId === pilotId && d.revokedAt === null) { d.revokedAt = now; n++; }
+        }
+        // Also expire any outstanding unconsumed code.
+        for (const c of mockCodes) if (c.pilotId === pilotId && c.consumedAt === null) c.consumedAt = now;
+        return { revoked: n };
+      }
+      const { data, error } = await supabase!
+        .from("pilot_devices")
+        .update({ revoked_at: new Date().toISOString() })
+        .eq("pilot_id", pilotId)
+        .is("revoked_at", null)
+        .select("token_hash");
+      if (error) throw error;
+      const revoked = (data ?? []).length;
+      await recordAuditEvent({ type: "mobile.device.revoked", actor, detail: { pilotId, devices: revoked } });
+      return { revoked };
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["pilot_link_status", vars.pilotId] });
+      qc.invalidateQueries({ queryKey: ["audit_log"] });
+    },
+  });
+}
