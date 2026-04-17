@@ -107,6 +107,17 @@ async function main() {
   run(process.execPath, [GENERATOR]);
   if (!existsSync(SEED_SQL)) die(`seed.sql was not produced at ${SEED_SQL}`);
 
+  // Reset to a true clean slate before migrations. The migrations in this
+  // project (0001_init, 0002_mobile_link) are not all rerun-safe — they
+  // contain bare `create policy ...` statements that fail on a database
+  // where the policy already exists. Dropping and recreating the `public`
+  // schema gives every migration a fresh canvas, and works equally well
+  // on a brand-new Supabase project where nothing exists yet. Supabase
+  // system tables live in `auth`, `storage`, and `extensions`, so this
+  // does not touch them.
+  step("Resetting public schema (clean slate)");
+  runPsql(["-c", "drop schema if exists public cascade; create schema public; grant all on schema public to postgres; grant usage on schema public to anon, authenticated, service_role;"]);
+
   step("Applying migrations");
   const migrations = readdirSync(MIGRATIONS_DIR)
     .filter(f => f.endsWith(".sql"))
@@ -116,36 +127,6 @@ async function main() {
     console.log(`  - ${m}`);
     runPsql(["-f", join(MIGRATIONS_DIR, m)]);
   }
-
-  // Truncate AFTER migrations so this works on a brand-new project where
-  // the tables don't exist yet. `truncate ... if exists` keeps it resilient
-  // to partial schemas / future renames.
-  // PostgreSQL has no `truncate ... if exists`, so we filter through
-  // to_regclass and build the statement dynamically. This stays safe on a
-  // brand-new project where some tables haven't been created yet.
-  step("Resetting operational tables");
-  run("psql", [url, "-v", "ON_ERROR_STOP=1", "-c", `
-    do $$
-    declare
-      candidates text[] := array[
-        'pilot_link_codes','pilot_devices','audit_log','schedule','notams',
-        'unavailable','duty_week','leaves','currencies','sorties','pilots',
-        'licenses','squadrons'
-      ];
-      present text[] := array[]::text[];
-      t text;
-    begin
-      foreach t in array candidates loop
-        if to_regclass('public.' || t) is not null then
-          present := present || t;
-        end if;
-      end loop;
-      if array_length(present, 1) is not null then
-        execute 'truncate table ' || array_to_string(present, ', ')
-             || ' restart identity cascade';
-      end if;
-    end $$;
-  `]);
 
   step("Applying seed.sql");
   runPsql(["-f", SEED_SQL]);
