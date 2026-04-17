@@ -39,6 +39,9 @@ export interface Pilot {
   nightCurrencyDate: string;
   irtCurrencyDate: string;
   medicalCurrencyDate: string;
+  // Pilot qualifications (e.g. "MTP", "QHI", "IP"). Manually entered by ops
+  // officer; displayed as badges on commander / HQ views.
+  qualifications?: string[];
 }
 
 export interface LicenseKey {

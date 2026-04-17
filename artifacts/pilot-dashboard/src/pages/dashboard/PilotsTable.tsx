@@ -256,7 +256,20 @@ export default function PilotsTable() {
                   return (
                     <tr key={p.id} className="border-b border-border/60 hover:bg-accent/30" data-testid={`row-pilot-${p.id}`}>
                       <td className="py-2 px-3 font-mono text-xs">{p.callSign}</td>
-                      <td className="py-2 px-3 font-medium whitespace-nowrap">{lang === "ar" ? p.fullNameAr : p.fullName}</td>
+                      <td className="py-2 px-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-medium">{lang === "ar" ? p.fullNameAr : p.fullName}</span>
+                          {p.qualifications?.map(q => (
+                            <span
+                              key={q}
+                              className="inline-flex items-center rounded border border-amber-400/40 bg-amber-400/10 px-1 py-0 text-[9px] font-semibold tracking-wider text-amber-600 dark:text-amber-300"
+                              data-testid={`qual-${p.id}-${q}`}
+                            >
+                              {q}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
                       <td className="py-2 px-3 text-xs">{sqn ? (lang === "ar" ? sqn.nameAr : sqn.code) : ""}</td>
                       <td className="py-2 px-3 text-end tabular-nums">{p.nvgTotalHours}</td>
                       <td className="py-2 px-3 text-end tabular-nums">{p.monthlyHours.toFixed(1)}</td>

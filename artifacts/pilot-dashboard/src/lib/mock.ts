@@ -39,6 +39,9 @@ export interface Pilot {
   available: boolean;
   imported?: boolean;
   importedAt?: string;
+  // Pilot qualifications (e.g. "MTP", "QHI", "IP"). Manually entered by ops
+  // officer; reflected on commander / HQ dashboards.
+  qualifications?: string[];
 }
 
 export type CurrencyKey = "day" | "night" | "irt" | "medical" | "sim";

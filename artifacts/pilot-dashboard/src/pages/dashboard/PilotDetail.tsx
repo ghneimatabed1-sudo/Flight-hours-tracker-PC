@@ -40,11 +40,27 @@ export default function PilotDetail() {
           <h2 className="text-2xl font-bold">{lang === "ar" ? pilot.fullNameAr : pilot.fullName}</h2>
           <p className="text-sm text-muted-foreground font-mono">{pilot.callSign} · {lang === "ar" ? squadron.nameAr : squadron.name}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <StatusBadge status={pilotWorstStatus(pilot)} />
           <Badge variant="outline" className="gap-1"><Eye className="h-3 w-3" />{t("readOnly")}</Badge>
         </div>
       </div>
+
+      {pilot.qualifications && pilot.qualifications.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap" data-testid="pilot-qualifications">
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+            {t("qualifications")}:
+          </span>
+          {pilot.qualifications.map(q => (
+            <span
+              key={q}
+              className="inline-flex items-center rounded-md border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[11px] font-semibold tracking-wider text-amber-600 dark:text-amber-300"
+            >
+              {q}
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="grid sm:grid-cols-3 gap-4">
         <Card>

@@ -182,6 +182,24 @@ function PilotEditDialog({ pilot, onClose, onSave, saving }: { pilot: Pilot; onC
             </label>
             <Field label={t("address")} value={p.address || ""} onChange={v => set("address", v)} testId="input-address" />
             <Field label={t("doctorNote")} value={p.doctorNote || ""} onChange={v => set("doctorNote", v)} testId="input-doctorNote" />
+            <label className="block text-xs col-span-2">
+              <span className="text-muted-foreground">{t("qualifications")}</span>
+              <input
+                type="text"
+                value={(p.qualifications || []).join(", ")}
+                onChange={e => {
+                  const tags = e.target.value
+                    .split(",")
+                    .map(s => s.trim().toUpperCase())
+                    .filter(Boolean);
+                  set("qualifications", Array.from(new Set(tags)));
+                }}
+                placeholder="MTP, QHI, IP"
+                data-testid="input-qualifications"
+                className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm font-mono tracking-wider"
+              />
+              <span className="block mt-1 text-[10px] text-muted-foreground">{t("qualificationsHelp")}</span>
+            </label>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <NumField label={t("openingDay")} value={p.openingDay} onChange={v => set("openingDay", v)} testId="input-openingDay" />

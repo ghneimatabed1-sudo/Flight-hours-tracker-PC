@@ -68,6 +68,18 @@ export const pilots: Pilot[] = (() => {
         nightCurrencyDate: dateOffset(night),
         irtCurrencyDate: dateOffset(irt),
         medicalCurrencyDate: dateOffset(med),
+        qualifications: (() => {
+          const pool = ["MTP", "QHI", "IP", "NVG", "TAC"];
+          const roll = r();
+          if (roll < 0.55) return [];
+          const n = roll < 0.85 ? 1 : 2;
+          const picked: string[] = [];
+          for (let k = 0; k < n; k++) {
+            const q = pool[Math.floor(r() * pool.length)];
+            if (q && !picked.includes(q)) picked.push(q);
+          }
+          return picked;
+        })(),
       });
       pid++;
     }
