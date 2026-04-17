@@ -106,7 +106,8 @@ export default function Layout({ children }: { children: ReactNode }) {
               <Sun className="hidden" />
             </button>
             <div className="hidden md:flex items-center gap-2 ml-2 pl-3 border-l border-border">
-              <div className="text-right rtl:text-left leading-tight">
+              <div className="text-right rtl:text-left leading-tight" data-testid="text-signed-in-as">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t("signedInAs")}</div>
                 <div className="text-sm font-medium">{user?.displayName}</div>
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{user?.role}</div>
               </div>
