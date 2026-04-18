@@ -55,6 +55,51 @@ export default function LicenseKeys() {
   const [setupOk, setSetupOk] = useState<string | null>(null);
   const [setupCredentials, setSetupCredentials] = useState<{ username: string; password: string; roleLabel: string } | null>(null);
   const [credCopied, setCredCopied] = useState(false);
+  // Duration this PC's setup will be valid for. Mirrors the Generate-Key
+  // flow but is applied locally: for Ops PCs it's baked into the auto-minted
+  // license, for commander/HQ PCs it's stored as `rjaf.localExpiresAt` and
+  // enforced on every launch (the app refuses to start past that date).
+  const [setupDuration, setSetupDuration] = useState<LicenseDuration | typeof CUSTOM_DURATION>("1y");
+  const [setupCustomDays, setSetupCustomDays] = useState<string>("30");
+  function resolveSetupExpiry(issuedAt: string): { expiresAt: string | null; valid: boolean } {
+    if (setupDuration === CUSTOM_DURATION) {
+      const n = Number(setupCustomDays);
+      if (!Number.isFinite(n) || n <= 0) return { expiresAt: null, valid: false };
+      return { expiresAt: addDays(issuedAt, n), valid: true };
+    }
+    return { expiresAt: addDuration(issuedAt, setupDuration), valid: true };
+  }
+  // "Change this device" — clears the local role lock, license binding,
+  // squadron, fingerprint, and local user accounts so the Super Admin can
+  // re-set this PC up for a different commander, role, or squadron without
+  // reinstalling the app. The cloud is untouched (no data loss).
+  const [changeOpen, setChangeOpen] = useState(false);
+  const [changeBusy, setChangeBusy] = useState(false);
+  function performChangeDevice() {
+    setChangeBusy(true);
+    try {
+      // License + role binding
+      localStorage.removeItem("rjaf.licenseKey");
+      localStorage.removeItem("rjaf.assignedRole");
+      localStorage.removeItem("rjaf.authorizedSquadronIds");
+      localStorage.removeItem("rjaf.localExpiresAt");
+      localStorage.removeItem("rjaf.pcRoleLock");
+      localStorage.removeItem("rjaf.squadron");
+      localStorage.removeItem("rjaf.squadronId");
+      localStorage.removeItem("rjaf.pcDeviceName");
+      // Local user accounts on this PC
+      localStorage.removeItem("rjaf.commanders");
+      localStorage.removeItem("rjaf.commanderPwHashes");
+      localStorage.removeItem("rjaf.opsAccount");
+      localStorage.removeItem("rjaf.supabaseCreds");
+    } finally {
+      setChangeBusy(false);
+      setChangeOpen(false);
+      // Force a clean restart so AuthProvider reads the wiped state and
+      // the operator lands back at the Sign-In / Activation screen.
+      setTimeout(() => { window.location.reload(); }, 200);
+    }
+  }
 
   // Local accounts list (commanders + ops) shown inside the Setup dialog so
   // the Super Admin can delete a stale entry that's blocking re-creation,
@@ -307,7 +352,12 @@ export default function LicenseKeys() {
       if (setupRole === "ops") {
         const sqnCode = sqnNumber.replace(/[^0-9A-Z]/gi, "").toUpperCase().slice(0, 4) || "SQN";
         const issuedAt = new Date().toISOString().slice(0, 10);
-        const expiresAt = addDuration(issuedAt, "never");
+        const setupExpiry = resolveSetupExpiry(issuedAt);
+        if (!setupExpiry.valid) {
+          setSetupErr(lang === "ar" ? "أدخل مدة صحيحة." : "Enter a valid duration.");
+          return;
+        }
+        const expiresAt = setupExpiry.expiresAt;
         const fullKey = genKey(sqnCode);
         const rec: LicenseKey = {
           id: "key-" + Math.random().toString(36).slice(2, 8),
@@ -382,6 +432,22 @@ export default function LicenseKeys() {
           password: createdPassword,
           roleLabel: roleLabel(setupRole),
         });
+      }
+      // For non-Ops roles, persist the chosen expiry locally so the launch
+      // gate can lock the PC out when the period ends. (Ops PCs already
+      // have it baked into the auto-minted license above.)
+      if (setupRole !== "ops" && setupRole !== "super_admin") {
+        const issuedAt = new Date().toISOString().slice(0, 10);
+        const setupExpiry = resolveSetupExpiry(issuedAt);
+        if (!setupExpiry.valid) {
+          setSetupErr(lang === "ar" ? "أدخل مدة صحيحة." : "Enter a valid duration.");
+          return;
+        }
+        if (setupExpiry.expiresAt) {
+          localStorage.setItem("rjaf.localExpiresAt", setupExpiry.expiresAt);
+        } else {
+          localStorage.removeItem("rjaf.localExpiresAt");
+        }
       }
       setSetupOk(
         lang === "ar"
@@ -558,6 +624,10 @@ export default function LicenseKeys() {
           <Button variant="outline" onClick={openSetup} data-testid="button-setup-device">
             <Wrench className="h-4 w-4 me-1" />
             {lang === "ar" ? "إعداد هذا الجهاز" : "Set up this device"}
+          </Button>
+          <Button variant="outline" onClick={() => setChangeOpen(true)} data-testid="button-change-device" title={lang === "ar" ? "نقل/تغيير جهاز قائد" : "Move or repurpose this commander PC"}>
+            <Wrench className="h-4 w-4 me-1" />
+            {lang === "ar" ? "تغيير هذا الجهاز" : "Change this device"}
           </Button>
           <Button onClick={() => { setGenOpen(true); setNewKey(null); setGenFor(""); setGenUsername(""); setGenDuration("1y"); setGenCustomDays("5"); setGenRole("ops"); setGenAuthSqns([]); }} data-testid="button-generate">
             {t("generateKey")}
@@ -1007,6 +1077,52 @@ export default function LicenseKeys() {
                 />
               </div>
 
+              {/* Duration this PC will stay licensed for. After it expires, the
+                  PC locks until a Super Admin re-issues / re-runs setup. */}
+              <div className="space-y-2 rounded-md border border-blue-300/40 bg-blue-50/60 dark:bg-blue-950/30 p-3">
+                <label className="text-sm font-medium text-blue-900 dark:text-blue-200">
+                  {lang === "ar" ? "مدة صلاحية هذا الجهاز" : "How long this PC stays valid"}
+                </label>
+                <Select value={setupDuration} onValueChange={(v) => setSetupDuration(v as LicenseDuration | typeof CUSTOM_DURATION)}>
+                  <SelectTrigger data-testid="select-setup-duration"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {DURATIONS.map(d => (
+                      <SelectItem key={d} value={d} data-testid={`option-setup-duration-${d}`}>{t(`duration_${d}` as const)}</SelectItem>
+                    ))}
+                    <SelectItem value={CUSTOM_DURATION} data-testid="option-setup-duration-custom">{t("duration_custom")}</SelectItem>
+                  </SelectContent>
+                </Select>
+                {setupDuration === CUSTOM_DURATION && (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={3650}
+                      step={1}
+                      value={setupCustomDays}
+                      onChange={e => setSetupCustomDays(e.target.value)}
+                      className="w-24 px-3 py-2 rounded-md bg-input border border-border text-sm tabular-nums"
+                      data-testid="input-setup-custom-days"
+                    />
+                    <span className="text-xs text-muted-foreground">{t("days")}</span>
+                  </div>
+                )}
+                <p className="text-[11px] text-muted-foreground" data-testid="text-setup-expiry-preview">
+                  {(() => {
+                    const today = new Date().toISOString().slice(0, 10);
+                    const { expiresAt, valid } = resolveSetupExpiry(today);
+                    if (!valid) return lang === "ar" ? "مدة غير صحيحة" : "Invalid duration";
+                    if (!expiresAt) return lang === "ar" ? "بدون انتهاء" : "Never expires";
+                    return (lang === "ar" ? "ينتهي في: " : "Expires: ") + fmtDate(expiresAt, lang);
+                  })()}
+                </p>
+                <p className="text-[10px] text-blue-900/70 dark:text-blue-200/70">
+                  {lang === "ar"
+                    ? "بعد انتهاء المدة سيتم قفل هذا الجهاز حتى يقوم المدير العام بإعداده من جديد."
+                    : "When this period ends, the PC locks until a Super Admin re-runs setup."}
+                </p>
+              </div>
+
               {roleNeedsAccount(setupRole) && (
                 <div className="space-y-3 rounded-md border border-amber-300/40 bg-amber-50/60 dark:bg-amber-950/30 p-3">
                   <div className="text-[12px] font-semibold text-amber-900 dark:text-amber-200">
@@ -1138,6 +1254,46 @@ export default function LicenseKeys() {
                 </Button>
               </>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* "Change this device" — wipes the local PC binding so the Super Admin
+          can re-set this PC up for a different person/role/squadron, or
+          repurpose the same PC after a commander handover. The CLOUD is
+          untouched, so no flight data is lost. */}
+      <Dialog open={changeOpen} onOpenChange={setChangeOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{lang === "ar" ? "تغيير هذا الجهاز" : "Change this device"}</DialogTitle>
+            <DialogDescription>
+              {lang === "ar"
+                ? "سيتم مسح ربط هذا الجهاز بالقائد/السرب/الرخصة الحاليين، ومسح الحسابات المحلية، ليبدأ الإعداد من جديد. لن يتم حذف أي بيانات طيران من السحابة."
+                : "This will clear this PC's link to the current commander, squadron, license and local sign-in accounts so you can set it up fresh. NO flight data is deleted from the cloud — only this PC's local bindings are reset."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 text-sm">
+            <p className="font-medium">{lang === "ar" ? "متى تستخدم هذا الخيار:" : "When to use this:"}</p>
+            <ul className="list-disc ms-5 space-y-1 text-[12.5px] text-muted-foreground">
+              <li>{lang === "ar" ? "قائد سلَّم جهازه وستعيد تخصيصه لقائد آخر." : "A commander hands their PC back and you're reassigning it to someone else."}</li>
+              <li>{lang === "ar" ? "نفس الجهاز سيغيّر دوره (مثلاً من Ops إلى قائد سرب)." : "Same PC needs a new role (e.g. Ops → Squadron Commander)."}</li>
+              <li>{lang === "ar" ? "نقل إعداد إلى جهاز جديد لنفس القائد بعد ربط الجهاز الجديد." : "Migrating setup to a brand-new PC after binding the new device."}</li>
+            </ul>
+            <div className="mt-3 rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/40 p-2 text-[12px]">
+              {lang === "ar"
+                ? "بعد التأكيد سيتم إعادة تشغيل التطبيق تلقائياً، وستحتاج لإصدار مفتاح جديد أو تشغيل (إعداد هذا الجهاز) من جديد."
+                : "After confirming, the app reloads automatically. You'll then either issue a new license key or run \"Set up this device\" again."}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setChangeOpen(false)} data-testid="button-change-cancel">
+              {lang === "ar" ? "إلغاء" : "Cancel"}
+            </Button>
+            <Button variant="destructive" disabled={changeBusy} onClick={performChangeDevice} data-testid="button-change-confirm">
+              {changeBusy
+                ? (lang === "ar" ? "جارٍ المسح..." : "Resetting...")
+                : (lang === "ar" ? "نعم، اعد ضبط هذا الجهاز" : "Yes, reset this PC")}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
