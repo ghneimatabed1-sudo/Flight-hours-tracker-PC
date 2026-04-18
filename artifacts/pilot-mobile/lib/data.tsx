@@ -46,10 +46,11 @@ interface AppDataValue {
   remoteEnabled: boolean;
   // Local device-lock state.
   // `hasPassword` is true when the pilot has already created a password.
-  // `unlocked` is an in-memory flag that becomes true after the pilot types
-  //   the correct password (or creates one). Cold-launch always starts
-  //   `unlocked=false` so the app re-prompts on every open if a password is
-  //   set.
+  // `unlocked` becomes true after the pilot creates their password or
+  // types it in once on a fresh install. It's then persisted in the
+  // lock record (`trusted: true`) so subsequent cold launches auto-
+  // unlock — the password only returns as a gate after an explicit
+  // sign-out or password change.
   hasPassword: boolean;
   unlocked: boolean;
   linkAccount: (
@@ -64,7 +65,7 @@ interface AppDataValue {
     currentPw: string,
     newPw: string
   ) => Promise<{ ok: boolean; error?: "wrong_current" }>;
-  signOut: () => void;
+  signOut: () => Promise<void>;
 }
 
 const Ctx = createContext<AppDataValue | null>(null);
@@ -82,10 +83,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [refreshing, setRefreshing] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const [lock, setLock] = useState<LockRecord | null>(null);
-  // Fresh launch always starts locked — the pilot must enter their password
-  // (if one is set) before seeing any hours. The flag flips to true after a
-  // successful unlock or right after the password is created for the first
-  // time.
+  // Cold launch starts unlocked iff the stored lock record is marked as
+  // `trusted` (i.e. the pilot has previously typed or created the password
+  // on this device). Otherwise the lock screen is shown. The useEffect
+  // below hydrates this from SecureStore once storage has loaded.
   const [unlocked, setUnlocked] = useState(false);
   // Latest link kept in a ref so the polling/realtime closures always see the
   // current token without resubscribing on every state change.
@@ -121,6 +122,13 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setLink(storedLink);
       setSnapshot(storedSnap);
       setLock(storedLock);
+      // Pre-unlock if this device has been trusted on a prior launch.
+      // Records written before the `trusted` flag existed are treated as
+      // trusted too (undefined → true) so upgraders don't get locked out
+      // of their own device after an app update.
+      if (storedLock) {
+        setUnlocked(storedLock.trusted !== false);
+      }
       setReady(true);
 
       if (storedLink && supabaseConfigured && storedLink.pilotId) {
@@ -253,7 +261,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     if (clean.length < 4) return { ok: false };
     const salt = await generateSalt();
     const hash = await hashPassword(clean, salt);
-    const rec: LockRecord = { salt, hash };
+    // Mark the device as trusted at creation — the pilot has just proven
+    // ownership, so we don't want to prompt again on the next launch.
+    const rec: LockRecord = { salt, hash, trusted: true };
     await saveLock(rec);
     setLock(rec);
     setUnlocked(true);
@@ -265,6 +275,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       if (!lock) return { ok: false };
       const h = await hashPassword(pw.trim(), lock.salt);
       if (h === lock.hash) {
+        // Persist the trusted bit so subsequent cold launches bypass the
+        // lock screen until an explicit sign-out.
+        const rec: LockRecord = { ...lock, trusted: true };
+        await saveLock(rec);
+        setLock(rec);
         setUnlocked(true);
         return { ok: true };
       }
@@ -281,7 +296,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         // No existing password — treat as first-time setup.
         const salt = await generateSalt();
         const hash = await hashPassword(clean, salt);
-        const rec: LockRecord = { salt, hash };
+        const rec: LockRecord = { salt, hash, trusted: true };
         await saveLock(rec);
         setLock(rec);
         setUnlocked(true);
@@ -293,7 +308,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       }
       const salt = await generateSalt();
       const hash = await hashPassword(clean, salt);
-      const rec: LockRecord = { salt, hash };
+      const rec: LockRecord = { salt, hash, trusted: true };
       await saveLock(rec);
       setLock(rec);
       setUnlocked(true);
@@ -302,11 +317,18 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     [lock]
   );
 
-  // Sign out locks the app but keeps the pilot-device pairing intact. On
-  // re-entry the pilot types their password — no new pairing code needed.
-  const signOut = useCallback(() => {
+  // Sign out locks the app but keeps the pilot-device pairing intact. We
+  // also persist `trusted: false` on the lock record so subsequent cold
+  // launches surface the lock screen again — without this, the persisted
+  // trusted bit would silently re-unlock the app on the next launch.
+  const signOut = useCallback(async () => {
+    if (lock) {
+      const rec: LockRecord = { ...lock, trusted: false };
+      await saveLock(rec);
+      setLock(rec);
+    }
     setUnlocked(false);
-  }, []);
+  }, [lock]);
 
   const value = useMemo<AppDataValue>(
     () => ({

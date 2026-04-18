@@ -127,7 +127,7 @@ export default function SettingsScreen() {
   // re-entry the pilot types their password — no new pairing code required.
   const confirmSignOut = () => {
     const proceed = () => {
-      signOut();
+      void signOut();
       try {
         router.replace("/lock" as never);
       } catch {

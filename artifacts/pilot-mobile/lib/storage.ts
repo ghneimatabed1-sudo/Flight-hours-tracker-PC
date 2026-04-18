@@ -82,9 +82,19 @@ export async function saveSnapshot(snap: PilotSnapshot): Promise<void> {
 
 // Local device-lock password. Stored as { salt, hash } — we never keep
 // the plaintext. Absent when the pilot has not created a password yet.
+//
+// `trusted` flips to true once the pilot has successfully entered (or just
+// created) their password on this device. It's persisted so the app does
+// NOT re-prompt for the password on every cold launch — the intended UX
+// is "set it once, then the device is trusted until you sign out". An
+// explicit sign-out (Settings → Sign out) or change-password flow flips
+// it back to false so the lock screen shows again on next open.
+// Older records written before this flag existed are treated as trusted
+// so an app upgrade doesn't lock the user out of their own device.
 export interface LockRecord {
   salt: string;
   hash: string;
+  trusted?: boolean;
 }
 
 export async function loadLock(): Promise<LockRecord | null> {
