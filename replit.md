@@ -75,3 +75,6 @@ The system is built as a pnpm workspace monorepo.
 - **`xlsx` package:** For XLSX export functionality.
 - **CodeMagic:** CI/CD for the `pilot-mobile` Expo application.
 - **Authenticator Apps:** (e.g., Google Authenticator, Authy, 1Password) for Super Admin TOTP.
+# v1.0.5 — Monthly Report
+
+Ops-only `/monthly-report` page renders ORFG RCN Forms 1, 2, 3, 4 and the Arabic roster sheet. Engine in `src/lib/monthly-report.ts` computes per-pilot day/night/dual hours, IF totals, currency state (C/R/N/C/U/R), and mission-bucket sortie/hour breakdown directly from `usePilots` + `useSorties`. A small wizard collects only the values that vary month-to-month (squadron strength, OPS/attached/course/sick, morale, planned vs achieved, four abort categories, five lectures, next-month plan with ammo, optional per-pilot status/remarks overrides). User inputs persist to `localStorage` under `rjaf.monthlyReport.YYYY-MM`. Forms render as printable HTML with `@media print` page breaks; the toolbar's Print / Save PDF button uses `window.print()`. Sidebar entry gated to `user.role === "ops"`. EN+AR strings under `monthlyReport*` and `nav_monthly_report`. Build: dashboard-windows-installer.yml triggered on main after wiping the previous run + artifact.
