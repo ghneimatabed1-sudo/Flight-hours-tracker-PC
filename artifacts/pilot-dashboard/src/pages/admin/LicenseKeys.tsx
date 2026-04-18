@@ -61,30 +61,47 @@ export default function LicenseKeys() {
   // or reset the password on a forgotten account — without leaving the page.
   const [localAccounts, setLocalAccounts] = useState<CommanderRecord[]>([]);
   const [resetCreds, setResetCreds] = useState<{ username: string; password: string } | null>(null);
+  // Inline two-click delete confirmation. Tracks which row id is currently
+  // armed for deletion. We deliberately do NOT use window.confirm() inside
+  // the Setup dialog: the native popup steals focus from Radix's focus
+  // trap, and when it closes the Delete button has already been unmounted,
+  // leaving the dialog inert — user reported all inputs became unclickable.
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   function refreshLocalAccounts(): void {
     try { setLocalAccounts(listCommanders()); } catch { setLocalAccounts([]); }
   }
   useEffect(() => {
-    if (setupOpen) refreshLocalAccounts();
-    else { setResetCreds(null); }
+    if (setupOpen) {
+      refreshLocalAccounts();
+    } else {
+      setResetCreds(null);
+      setPendingDeleteId(null);
+    }
   }, [setupOpen]);
 
-  async function handleDeleteLocalAccount(rec: CommanderRecord) {
-    const ok = window.confirm(
-      lang === "ar"
-        ? `حذف الحساب "${rec.username}" نهائياً من هذا الجهاز؟`
-        : `Delete the local account "${rec.username}" from this PC? This cannot be undone.`,
-    );
-    if (!ok) return;
+  function handleDeleteLocalAccount(rec: CommanderRecord) {
+    // First click arms; second click within the same render confirms.
+    if (pendingDeleteId !== rec.id) {
+      setPendingDeleteId(rec.id);
+      return;
+    }
+    // Move focus off the about-to-be-unmounted button BEFORE we mutate
+    // state, so the dialog's focus trap doesn't end up pointing at a
+    // detached node — the same class of bug as the native-confirm freeze.
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     deleteCommander(rec.id);
     try { clearSupabaseCreds(rec.username); } catch { /* swallow */ }
-    refreshLocalAccounts();
+    setPendingDeleteId(null);
     setResetCreds(null);
+    refreshLocalAccounts();
   }
   async function handleResetLocalAccount(rec: CommanderRecord) {
     const newPw = await resetCommanderPassword(rec.id);
     if (!newPw) return;
     setResetCreds({ username: rec.username, password: newPw });
+    setPendingDeleteId(null);
     refreshLocalAccounts();
   }
 
@@ -672,12 +689,14 @@ export default function LicenseKeys() {
                         </Button>
                         <Button
                           size="sm"
-                          variant="destructive"
+                          variant={pendingDeleteId === rec.id ? "destructive" : "outline"}
                           className="h-7 px-2 text-[11px]"
                           onClick={() => handleDeleteLocalAccount(rec)}
                           data-testid={`button-localacct-delete-${rec.username}`}
                         >
-                          {lang === "ar" ? "حذف" : "Delete"}
+                          {pendingDeleteId === rec.id
+                            ? (lang === "ar" ? "تأكيد الحذف؟" : "Confirm?")
+                            : (lang === "ar" ? "حذف" : "Delete")}
                         </Button>
                       </div>
                     ))}
