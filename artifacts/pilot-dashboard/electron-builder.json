@@ -1,7 +1,7 @@
 {
   "appId": "jo.gov.rjaf.squadron-ops",
   "productName": "RJAF Squadron Ops",
-  "copyright": "© Royal Jordanian Air Force",
+  "copyright": "© Captain Abed Ghneimat — Royal Jordanian Air Force",
   "directories": {
     "output": "release",
     "buildResources": "public/brand"
@@ -16,7 +16,7 @@
   "win": {
     "target": [{ "target": "nsis", "arch": ["x64"] }],
     "icon": "public/brand/emblem.png",
-    "publisherName": "Royal Jordanian Air Force",
+    "publisherName": "Captain Abed Ghneimat",
     "artifactName": "RJAF-SquadronOps-Setup-${version}.${ext}"
   },
   "nsis": {
