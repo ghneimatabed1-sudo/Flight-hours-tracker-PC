@@ -1349,6 +1349,114 @@ export function useReminderOverview(): UseQueryResult<ReminderOverviewRow[]> & {
   } as UseQueryResult<ReminderOverviewRow[]> & { data: ReminderOverviewRow[] };
 }
 
+// ── demo seed (preview only) ────────────────────────────────────────────
+//
+// Populates the in-memory mock arrays with one day of sample sorties so a
+// squadron commander can preview the Flight Records page without waiting
+// for real data to be entered. No-op in live (Supabase) mode — the real
+// backend is the source of truth there. Records created here are tagged
+// with `importedAt === DEMO_SEED_TAG` so `clearDemoSeed()` can remove
+// only the demo records and leave any real ops-officer entries alone.
+
+const DEMO_SEED_TAG = "DEMO_SEED";
+
+function todayIsoLocal(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function emptyExpiry(): Pilot["expiry"] {
+  return { day: "", night: "", irt: "", medical: "", sim: "" };
+}
+
+function makeDemoPilots(): Pilot[] {
+  const base = (overrides: Partial<Pilot>): Pilot => ({
+    id: "",
+    name: "",
+    arabicName: "",
+    rank: "",
+    phone: "",
+    address: "",
+    unit: "SQDN",
+    openingDay: 0, openingNight: 0, openingNvg: 0,
+    monthDay: 0, monthNight: 0, monthNvg: 0, monthSim: 0, monthCaptain: 0,
+    totalDay: 0, totalNight: 0, totalNvg: 0, totalSim: 0, totalCaptain: 0,
+    expiry: emptyExpiry(),
+    available: true,
+    imported: true,
+    importedAt: DEMO_SEED_TAG,
+    ...overrides,
+  });
+  return [
+    base({ id: "D-1001", rank: "Maj",  name: "Hamzah Al-Shurman", arabicName: "حمزة الشرمان", callSign: "EAGLE-01", qualifications: ["IP", "NVG"] }),
+    base({ id: "D-1002", rank: "Capt", name: "Ali Al-Zoubi",       arabicName: "علي الزعبي",    callSign: "EAGLE-02", qualifications: ["MTP"] }),
+    base({ id: "D-1003", rank: "Capt", name: "Khalid Al-Tarawneh", arabicName: "خالد الطراونة", callSign: "EAGLE-03" }),
+    base({ id: "D-1004", rank: "1Lt",  name: "Omar Al-Masri",      arabicName: "عمر المصري",    callSign: "EAGLE-04" }),
+  ];
+}
+
+function makeDemoSorties(date: string): Sortie[] {
+  const s = (overrides: Partial<Sortie>): Sortie => ({
+    id: "",
+    date,
+    acType: "UH-60M",
+    acNumber: "",
+    pilotId: "",
+    coPilotId: "",
+    sortieType: "",
+    name: "",
+    day1: 0, day2: 0, dayDual: 0,
+    night1: 0, night2: 0, nightDual: 0,
+    nvg: 0, sim: 0, actual: 0,
+    imported: true,
+    importedAt: DEMO_SEED_TAG,
+    ...overrides,
+  });
+  return [
+    s({ id: "DS-1", acNumber: "1801", pilotId: "D-1001", coPilotId: "D-1002", sortieType: "MSN DAY", name: "Troop Insertion — Al-Jafr",           day1: 1.8, actual: 1.8, condition: "Day",   remarks: "Clear skies, winds 090/08." }),
+    s({ id: "DS-2", acNumber: "1801", pilotId: "D-1001", coPilotId: "D-1003", sortieType: "NAV",     name: "Low-level Nav — King Hussein Route",  day1: 1.5, actual: 1.5, condition: "Day" }),
+    s({ id: "DS-3", acNumber: "1803", pilotId: "D-1002", coPilotId: "D-1004", sortieType: "GH",      name: "General Handling + Autos",            day2: 1.3, dayDual: 1.3, actual: 1.3, condition: "Day" }),
+    s({ id: "DS-4", acNumber: "1805", pilotId: "D-1003", coPilotId: "D-1001", sortieType: "MSN NVG", name: "NVG Mission — Dead Sea Corridor",     nvg: 2.0, night1: 2.0, actual: 2.0, condition: "NVG", remarks: "Illum 28%. Handoffs at WP3." }),
+    s({ id: "DS-5", acNumber: "1805", pilotId: "D-1002", coPilotId: "D-1004", sortieType: "CRS NVG", name: "NVG Crosscountry — Azraq",            nvg: 1.7, night1: 1.7, actual: 1.7, condition: "NVG" }),
+    s({ id: "DS-6", acNumber: "1803", pilotId: "D-1001", coPilotId: "D-1002", sortieType: "EMER",    name: "Emergencies Procedures Refresher",    day1: 0.9, actual: 0.9, condition: "Day", remarks: "EP set B. Satisfactory." }),
+  ];
+}
+
+export function isDemoSeedLoaded(): boolean {
+  if (isLive()) return false;
+  return MOCK_SORTIES.some((x) => x.importedAt === DEMO_SEED_TAG);
+}
+
+export function seedDemoDay(): void {
+  if (isLive()) return;
+  if (isDemoSeedLoaded()) return;
+  const arr = getMockPilots();
+  const demoPilots = makeDemoPilots();
+  for (const p of demoPilots) {
+    if (!arr.some((x) => x.id === p.id)) arr.unshift(p);
+  }
+  const demoSorties = makeDemoSorties(todayIsoLocal());
+  MOCK_SORTIES.push(...demoSorties);
+}
+
+export function clearDemoSeed(): void {
+  if (isLive()) return;
+  const arr = getMockPilots();
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i].importedAt === DEMO_SEED_TAG) arr.splice(i, 1);
+  }
+  for (let i = MOCK_SORTIES.length - 1; i >= 0; i--) {
+    if (MOCK_SORTIES[i].importedAt === DEMO_SEED_TAG) MOCK_SORTIES.splice(i, 1);
+  }
+}
+
+export function canSeedDemo(): boolean {
+  return !isLive();
+}
+
 // ── backup / restore helpers ────────────────────────────────────────────
 //
 // The offline squadron deployment keeps its operational data in the module
