@@ -575,7 +575,7 @@ export default function FlightProgram() {
               value={prog.fltCmdr}
               onChange={(e) => update("fltCmdr", e.target.value)}
               placeholder="LTC AUDEH …………."
-              className="w-full bg-transparent border-b border-black outline-none px-1 text-[11px]"
+              className="w-full bg-transparent border-b border-black outline-none px-1 text-[11px] text-center"
               data-testid="input-flt-cmdr"
             />
           </div>
@@ -585,7 +585,7 @@ export default function FlightProgram() {
               value={prog.sqdnCmdr}
               onChange={(e) => update("sqdnCmdr", e.target.value)}
               placeholder="LTC. BILAL ………………"
-              className="w-full bg-transparent border-b border-black outline-none px-1 text-[11px]"
+              className="w-full bg-transparent border-b border-black outline-none px-1 text-[11px] text-center"
               data-testid="input-sqdn-cmdr"
             />
           </div>
@@ -646,7 +646,7 @@ function CellInput({
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={`w-full bg-transparent outline-none px-1 py-0.5 text-[10px] ${mono ? "font-mono" : ""}`}
+        className={`w-full bg-transparent outline-none px-1 py-0.5 text-[10px] text-center ${mono ? "font-mono" : ""}`}
       />
     </td>
   );
