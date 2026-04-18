@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { squadrons } from "@/lib/mockData";
 import type { LicenseKey, LicenseDuration } from "@/lib/types";
 import { addDuration, addDays } from "@/lib/types";
-import { listLicenseKeys, registerLicenseKey, updateLicenseKey } from "@/lib/license-registry";
+import { listLicenseKeys, registerLicenseKey, updateLicenseKey, removeLicenseKey } from "@/lib/license-registry";
 import { fmtDate, fmtDateTime } from "@/lib/format";
 import { KeyRound, Copy, Check, User as UserIcon } from "lucide-react";
 
@@ -87,6 +87,20 @@ export default function LicenseKeys() {
     updateLicenseKey(id, { status: "active", lockedToDevice: null });
     setKeys(() => listLicenseKeys());
   }
+  // Hard-delete: wipes the row from the registry entirely. Used after an
+  // operator uninstalls and the super admin wants the entry gone — not just
+  // revoked. Confirmation prompt prevents accidental clicks.
+  function hardDelete(k: LicenseKey) {
+    const sqn = squadrons.find(s => s.id === k.squadronId);
+    const sqnName = sqn ? (lang === "ar" ? sqn.nameAr : sqn.name) : "—";
+    const who = k.assignedUsername || "—";
+    const msg = lang === "ar"
+      ? `حذف نهائي للمفتاح المخصص لـ "${who}" (${sqnName})؟\n\nلن تتمكن من تفعيل هذا المفتاح مجدداً. سيتعين إصدار مفتاح جديد.`
+      : `Permanently delete the key issued to "${who}" (${sqnName})?\n\nThis key string can never be activated again. A new key must be issued.`;
+    if (!window.confirm(msg)) return;
+    removeLicenseKey(k.id);
+    setKeys(() => listLicenseKeys());
+  }
 
   return (
     <div className="space-y-4">
@@ -141,6 +155,7 @@ export default function LicenseKeys() {
                         {k.status !== "revoked" && (
                           <Button size="sm" variant="destructive" onClick={() => revoke(k.id)} data-testid={`button-revoke-${k.id}`}>{t("revoke")}</Button>
                         )}
+                        <Button size="sm" variant="destructive" onClick={() => hardDelete(k)} data-testid={`button-delete-${k.id}`}>{t("delete")}</Button>
                       </td>
                     </tr>
                   );

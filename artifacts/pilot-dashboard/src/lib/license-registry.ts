@@ -68,6 +68,17 @@ export function updateLicenseKey(id: string, patch: Partial<LicenseKey>): void {
   saveRegistry(next);
 }
 
+// Hard-delete a license key from the registry. Super-admin only — used when
+// an operator has uninstalled their PC copy and the row should disappear
+// entirely (not just be marked revoked). Once removed, the key string can
+// never be re-activated; a fresh key must be issued.
+export function removeLicenseKey(id: string): void {
+  ensureSeeded();
+  const list = loadRegistry();
+  const next = list.filter(k => k.id !== id);
+  saveRegistry(next);
+}
+
 export interface LookupResult {
   ok: boolean;
   reason?:

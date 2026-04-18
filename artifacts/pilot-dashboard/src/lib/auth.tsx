@@ -194,6 +194,8 @@ declare global {
     rjafElectron?: {
       hardwareFingerprint?: () => Promise<string>;
       isPackaged?: () => Promise<boolean>;
+      pickBackupFolder?: () => Promise<string | null>;
+      writeBackupFile?: (folder: string, filename: string, content: string) => Promise<string>;
     };
   }
 }
