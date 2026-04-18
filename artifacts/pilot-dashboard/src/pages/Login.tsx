@@ -472,6 +472,14 @@ export default function LoginGate() {
         <div className="text-[10px] text-center text-muted-foreground mt-5">
           © RJAF — Encrypted in transit (TLS) and at rest. Audit logged.
         </div>
+        <div className="text-[11px] text-center mt-2">
+          <span
+            className="uppercase tracking-[0.2em] font-semibold bg-gradient-to-r from-amber-400 via-amber-200 to-amber-400 bg-clip-text text-transparent select-none"
+            data-testid="text-credit-login"
+          >
+            Developed by Capt. ABEDALQADER GHUNMAT
+          </span>
+        </div>
       </div>
     </div>
   );
