@@ -1,0 +1,14 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "0P_4p5zo8yEKCfhCMIbHS"
+uri = "file://attached_assets/briefing/RJAF_Squadron_Ops_Briefing.pdf"
+type = "pdf"
+title = "RJAF Squadron Ops — Command Briefing (PDF)"
+
+[[outputs]]
+id = "7mW8UrYeFIx-GUG0wzMRn"
+uri = "file://attached_assets/briefing/RJAF_Squadron_Ops_Briefing.md"
+type = "text"
+title = "RJAF Squadron Ops — Command Briefing (editable Markdown source)"
