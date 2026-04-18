@@ -67,10 +67,22 @@ export default function LicenseKeys() {
         return;
       }
 
-      auth.configureSquadron({ name: sqnName, number: sqnNumber, base: sqnBase });
-      auth.setPcDeviceName(setupDeviceName.trim());
-      auth.setPcRoleLock(setupRole);
+      // Block setup until the per-PC fingerprint has actually resolved —
+      // otherwise the auto-activated license gets bound to "FP-PENDING" and
+      // refuses to validate again next launch when the real fingerprint
+      // appears.
+      if (!auth.fingerprint || auth.fingerprint === "FP-PENDING") {
+        setSetupErr(lang === "ar"
+          ? "جارٍ تجهيز معرف الجهاز. أعد المحاولة بعد لحظات."
+          : "Device fingerprint still initializing. Try again in a moment.");
+        return;
+      }
 
+      // For Ops PCs, mint + activate the license FIRST. Only if activation
+      // succeeds do we commit the role lock / squadron / device name. This
+      // prevents a partial-commit state where the PC is locked to "ops"
+      // but has no working license — which would lock the admin out with
+      // no way back in short of Master Recovery.
       if (setupRole === "ops") {
         const sqnCode = sqnNumber.replace(/[^0-9A-Z]/gi, "").toUpperCase().slice(0, 4) || "SQN";
         const issuedAt = new Date().toISOString().slice(0, 10);
@@ -91,10 +103,14 @@ export default function LicenseKeys() {
         setKeys(() => listLicenseKeys());
         const res = await auth.activateLicense(fullKey, setupOpsUsername.trim());
         if (!res.ok) {
-          setSetupErr(res.error ?? "License activation failed.");
+          setSetupErr(res.error ?? "License activation failed. Role lock NOT applied.");
           return;
         }
       }
+
+      auth.configureSquadron({ name: sqnName, number: sqnNumber, base: sqnBase });
+      auth.setPcDeviceName(setupDeviceName.trim());
+      auth.setPcRoleLock(setupRole);
 
       setSetupOk(
         lang === "ar"

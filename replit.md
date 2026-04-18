@@ -1,209 +1,77 @@
-# Workspace
+# Overview
 
-## Overview
+This project is a pnpm workspace monorepo using TypeScript, designed to build a comprehensive flight hours management system for the Royal Jordanian Air Force (RJAF). It includes a web-based command dashboard ("Eagle Eye HQ") for super administrators and commanders, and a mobile application for pilots.
 
-pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
+The system aims to provide:
+- **Centralized Administration:** Super admin panel for system overview, license key management, commander accounts, squadron control, and audit logging.
+- **Operational Oversight:** Commander dashboard for multi-squadron overview, pilot tracking, and alerts.
+- **Pilot Management:** Detailed pilot profiles, currency tracking, and sortie logging.
+- **Data Archiving:** Local, periodic archiving of operational data for historical analysis and backup.
+- **Secure Access:** Role-based access control, TOTP for super admin, and license key binding to hardware and user.
+- **Multilingual Support:** Full English and Arabic (RTL) localization.
 
-## Stack
+The business vision is to modernize RJAF's flight operations management, improve data accuracy, enhance decision-making through real-time insights, and streamline administrative tasks.
 
-- **Monorepo tool**: pnpm workspaces
-- **Node.js version**: 24
-- **Package manager**: pnpm
-- **TypeScript version**: 5.9
-- **API framework**: Express 5
-- **Database**: PostgreSQL + Drizzle ORM
-- **Validation**: Zod (`zod/v4`), `drizzle-zod`
-- **API codegen**: Orval (from OpenAPI spec)
-- **Build**: esbuild (CJS bundle)
+# User Preferences
 
-## Key Commands
+- **Communication Style:** All updates and changes should be clearly documented and explained.
+- **Workflow:** Prioritize iterative development.
+- **Interaction:** Ask before making major architectural changes or significant modifications to existing features.
+- **Data Preservation:** Updates must be additive. Existing pilots, logs, monthly summaries, ops officer accounts, license keys, squadron attachments, and admin settings MUST survive every release. Breaking changes (field renames, removals, storage key changes) require explicit user sign-off before shipping. LocalStorage keys should remain stable across releases. New schema fields must be optional and default to a sensible empty value.
+- **Code Changes:** Pre-existing TypeScript errors should remain untouched unless directly related to the current task.
 
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- `pnpm --filter @workspace/api-server run dev` — run API server locally
+# System Architecture
 
-See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
+The system is built as a pnpm workspace monorepo.
 
-## Artifacts
+**Core Technologies:**
+- **Node.js:** v24
+- **TypeScript:** v5.9
+- **Package Manager:** pnpm
+- **API Framework:** Express 5
+- **Database:** PostgreSQL with Drizzle ORM
+- **Validation:** Zod (`zod/v4`), `drizzle-zod`
+- **API Codegen:** Orval (from OpenAPI spec)
+- **Build Tool:** esbuild (CJS bundle)
 
-### pilot-dashboard (web)
-Eagle Eye HQ — Royal Jordanian Air Force command dashboard. Two role-based views:
-- **Super Admin Panel** (`/admin/*`): system overview, license keys (generate/revoke/release), commander accounts (create/delete/reset), squadrons (enable/disable), audit log.
-- **Commander Dashboard** (`/dashboard/*`): read-only multi-squadron overview, cross-squadron pilot table with sort/filter, squadron drill-down, pilot detail, expired/expiring alerts.
+**Monorepo Structure:**
+- Each package in the monorepo manages its own dependencies.
+- `pnpm-workspace` skill is used for workspace structure, TypeScript setup, and package details.
 
-Auth is mocked via localStorage (`src/lib/auth.tsx`) with 30-min idle timeout and 5-attempt lockout, ready to be swapped for Supabase Auth. The super admin (`admin`) is gated behind a real RFC 6238 TOTP second factor (see `src/lib/totp.ts`): on first sign-in a QR code + base32 secret are shown for enrollment with any authenticator app (Google Authenticator, Authy, 1Password, etc.), and every subsequent sign-in requires a fresh 6-digit code. The secret persists in localStorage key `rjaf.adminTotp.secret`. Wrong codes count toward the same 5-attempt lockout. Commander 2FA stays optional for now. Mock data lives in `src/lib/mockData.ts`. Bilingual EN/AR with full RTL support via `src/lib/i18n.tsx`. Demo credentials: `admin / admin123` (super admin), `commander1 / commander`, `wing1`, `base1`, `hq1` (commanders, all use password `commander`).
+**UI/UX and Features:**
+- **`pilot-dashboard` (Web):**
+    - **Super Admin Panel (`/admin/*`):** System overview, license key generation/revocation, commander account management, squadron enable/disable, audit log.
+    - **Commander Dashboard (`/dashboard/*`):** Read-only multi-squadron overview, sortable/filterable pilot table, squadron drill-down, pilot detail, expiring/expired alerts.
+    - **Authentication:** Mocked via localStorage with 30-min idle timeout and 5-attempt lockout. Super admin uses RFC 6238 TOTP. Ready for Supabase Auth integration.
+    - **Internationalization:** Bilingual EN/AR with full RTL support.
+    - **Pilot Currency Hiding:** UI to toggle visibility of specific pilot currencies, excluding them from alerts and displaying as "N/A".
+    - **Historical Import Management:** `useUndoLastImport` hook allows undoing the last CSV import by tracking `rjaf.lastImportStamp`.
+    - **XLSX Export:** PilotsTable includes functionality to export data to XLSX format.
+    - **Loading/Error States:** Implemented for data fetching operations with spinners and error banners.
+    - **Sortie Log Management:** Edit and delete functionality for sortie logs via modal dialogs and confirmation.
+    - **Archiving:** Idempotent, client-side monthly and yearly data archiving stored in `localStorage`, with a dedicated `/archives` page for viewing and JSON downloads.
+- **`pilot-mobile` (Mobile):** Expo app built for iOS/Android.
 
-Squadron Ops desktop screens (22 pages under the squadron role) consume data via React Query hooks in `src/lib/squadron-data.ts`. Each hook checks `isLive()` (true when both `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set + the Supabase client constructed) and either calls Supabase or returns persistent in-memory mock data so the preview keeps working without env vars. The Supabase schema and squadron-isolated RLS policies live in `artifacts/pilot-dashboard/supabase/migrations/0001_init.sql` (every table filters on `auth.squadron_id()` from the JWT `app_metadata.squadron_id` claim). License activation is handled by the `validate-license` Edge Function (`supabase/functions/validate-license/`) which binds keys to PC fingerprints, rejects mismatches, and writes audit events via the service role.
+**Technical Implementations:**
+- **Supabase Integration:**
+    - `isLive()` function checks for `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to switch between live Supabase data and in-memory mock data.
+    - Supabase schema and squadron-isolated Row Level Security (RLS) policies are defined in migrations.
+    - Edge Functions handle specific logic (e.g., `validate-license`).
+    - Seed scripts are used to populate demo data, including multiple squadrons and admin users with specific `app_metadata.squadron_id` claims for RLS.
+- **License Key Management:**
+    - License keys bind to both a hardware fingerprint (`lockedToDevice`) and an operator username (`assignedUsername`).
+    - `expiresAt` field controls license validity duration.
+    - Super admin interface allows generating keys with various durations and assigning usernames.
+    - Client-side license registry (`src/lib/license-registry.ts`) mirrors issued keys.
+    - Server-side validation via `validate-license` Edge Function enforces key uniqueness, expiry, device binding, and username binding.
+    - Audit logs record `license.activate.ok` and `license.activate.failed` events with actor username.
+- **Audit Logging:** System-wide audit logging for key actions (e.g., import, undo, sortie updates, license activation).
+- **Data Preservation Policy:** Strict adherence to additive updates; existing data and localStorage keys must be stable. New schema fields must be optional.
 
-#### Provisioning a fresh Supabase project
+# External Dependencies
 
-Run this once per new project so the app loads with realistic data:
-
-All paths below are relative to `artifacts/pilot-dashboard/`.
-
-1. **Apply migrations** (Supabase SQL editor or `supabase db push` from `artifacts/pilot-dashboard/`):
-   - `supabase/migrations/0001_init.sql`
-   - `supabase/migrations/0002_mobile_link.sql`
-2. **Run the seed** with the **service role** (RLS would otherwise block the inserts, and the admin provisioning at the end writes directly to `auth.users` / `auth.identities`). The seed lives at `supabase/seed/seed.sql` and is generated by `supabase/seed/generate-seed.mjs` from the same deterministic mock data the in-memory preview uses. It populates **four demo squadrons** so Eagle Eye HQ commanders can compare squadrons on the cross-squadron pilot table and overview dashboards immediately after seeding. Each squadron gets 16 pilots (IDs prefixed per squadron so they never collide), 80 sorties, 240 currency rows, leaves, duty roster, NOTAMs, today's flight schedule, **and its own ready-to-use admin auth user** with `app_metadata.squadron_id` and `role=admin` already set so RLS scopes the session correctly. Re-running is idempotent (stable-key tables upsert; UUID-keyed, date-keyed, and the demo admin rows are wiped per-squadron before reinsert).
-
-   | UUID                                   | Squadron                       | Base                      | Pilot IDs | License key             | Admin email               |
-   | -------------------------------------- | ------------------------------ | ------------------------- | --------- | ----------------------- | ------------------------- |
-   | `00000000-0000-0000-0000-000000000001` | 7th Squadron                   | King Abdullah II Air Base | P001–P016 | `DEMO-RJAF-1234-5678`   | `admin@demo.rjaf.local`   |
-   | `00000000-0000-0000-0000-000000000002` | 8th Search & Rescue Squadron   | King Hussein Air Base     | P101–P116 | `DEMO-RJAF-8SAR-0002`   | `admin@8sar.rjaf.local`   |
-   | `00000000-0000-0000-0000-000000000003` | 12th VIP Transport Squadron    | Marka Air Base            | P201–P216 | `DEMO-RJAF-12VIP-0003`  | `admin@12vip.rjaf.local`  |
-   | `00000000-0000-0000-0000-000000000004` | 5th Flight Test Squadron       | Mafraq Air Base           | P301–P316 | `DEMO-RJAF-5FTS-0004`   | `admin@5fts.rjaf.local`   |
-
-   All four admins share password `admin123`.
-3. **Set client env vars** `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` so `isLive()` flips on.
-4. **Activate the license** in the desktop app with any of the seeded keys above (e.g. `DEMO-RJAF-1234-5678`), then sign in with the matching admin credentials. **Change every admin password immediately for any non-demo environment.**
-
-Many seeded fields (pilot expiry dates, leave year, etc.) are baked at generator-run time, so re-run `node supabase/seed/generate-seed.mjs` before provisioning a new environment to keep those dates realistic. After seeding, a quick `select count(*) from pilots; select count(*) from sorties;` (expect 64 / 320 for all four squadrons) confirms success.
-
-See `supabase/seed/README.md` for full details and the per-table row counts.
-
-## Per-pilot currency hiding
-The Pilot type has `hiddenCurrencies?: ("day"|"night"|"irt"|"medical"|"sim")[]`. Currencies in this list:
-- render as "N/A" on PilotDetail, the Currency tab, and ExpiredAfter
-- are excluded from the Dashboard expiring/expired alert
-- are persisted inside the `pilots.data` JSONB blob (no schema migration needed)
-Toggle UI lives on the Currencies card on /pilot/:id (Eye/EyeOff per row).
-
-## License-key uniqueness invariant
-A license key MUST be usable on exactly one PC (or one mobile pilot device) at a time.
-This is enforced server-side via the `validate-license` Supabase Edge Function plus
-the `lockedToDevice` field on license keys and the `licenseBoundFp` fingerprint stored
-in the desktop client's localStorage. If the same key is presented from a different
-hardware fingerprint, validation must fail and ops needs HQ to issue a fresh key.
-
-## License-key validity durations
-LicenseKey.expiresAt (ISO date string or null=never) is now part of the type.
-The super admin's "Generate Key" dialog (admin/LicenseKeys.tsx) lets the user
-pick from: 1d, 2d, 1m, 3m, 6m, 1y, 3y, never. addDuration() in lib/types.ts
-computes the expiresAt from the issue date. The keys table shows the expiry
-column and flags expired keys with a red "Expired" badge alongside the status.
-The server-side validate-license Edge Function should reject any key whose
-expiresAt is in the past.
-
-## Batch shipped 2026-04-17 (small queue items)
-- **#19 Imported-only filter** on Roster: header toggle filters PILOTS by `imported` flag.
-- **#20 Undo last CSV import**: `useUndoLastImport` hook + button on HistoricalImport.
-  Tracks `rjaf.lastImportStamp` in localStorage on every successful import; undo
-  deletes pilots+sorties whose `data->>importedAt` matches (sorties first because
-  of the FK from sorties.pilot_id). Demo mode mirrors the same behaviour against
-  the in-memory arrays. Audit-logs both `import.history.ok` and
-  `import.history.undone` with row counts.
-- **#22 Reset & reseed helper**: `supabase/seed/reset-and-reseed.sh`. Truncates
-  pilots/sorties/notams/schedule/audit_log/squadrons/licenses/pilot_link_codes/
-  pilot_devices with CASCADE, re-applies migrations, then runs seed.sql. Requires
-  DATABASE_URL pointed at the direct Postgres connection (service role bypasses
-  RLS, which is required because seed rows have no JWT claim yet).
-- **#25 XLSX export** on commander PilotsTable: `xlsx` package, button next to the
-  CSV/Print buttons. Filename pattern matches the CSV export.
-- **#14 (partial) loading/error states** on Roster: `usePilots()` is destructured
-  for `isLoading`/`isError`/`refetch`/`isFetching`; spinner on first load, error
-  banner with retry button, and a "syncing" hint in the subtitle on refetch.
-- **#21** — `mockData.ts` already had 6 squadrons across 3 wings, and the
-  Supabase seed has now been expanded to four demo squadrons too (see the
-  provisioning section above and the 2026-04-17 changelog entry) so HQ
-  cross-squadron views have data in live mode as well as in preview.
-
-Notes:
-- i18n keys added (EN/AR): `importedOnly`, `noImportedYet`, `loading`,
-  `errorLoading`, `retry`, `undoLastImport`, `undoLastImportHelp`,
-  `undoConfirmBody`, `undoneRemoved`, `exportXlsx`.
-- Pre-existing TS errors in button-group.tsx, calendar.tsx, dashboard/Commanders.tsx
-  and dashboard/PilotDetail.tsx remain untouched (out of scope).
-
-## License-key per-username binding (2026-04-17)
-A license key now binds to **both** a hardware fingerprint **and** an operator
-username. The same key string typed by a different person will not unlock the
-desktop app.
-
-- **Type change**: `LicenseKey.assignedUsername: string` (required).
-- **Generator (Super Admin)**: new "Operator username" input + new "Custom (days)"
-  duration option that opens a numeric days input (1–3650). Existing presets
-  (1d/2d/1m/3m/6m/1y/3y/never) still available.
-- **Activation (Login.tsx)**: now requires the operator username in addition to
-  the key. Mismatch returns "This key is not assigned to that username."
-- **Local registry** (`src/lib/license-registry.ts`): localStorage-backed mirror
-  (`rjaf.licenseRegistry`) of every issued key. Seeded on first read from the
-  static `mockData.licenseKeys` so the table survives page reload. Registry
-  stores the full key string in a private `_fullKey` field — never displayed,
-  used only by `lookupLicenseKey()`. Demo-mode activation calls this; the
-  legacy DEMO-/RJAF- prefix path is kept as a fallback for the seeded smoke
-  test only.
-- **Supabase path**: `validateLicenseRemote(key, fingerprint, username)` now
-  posts username to the `validate-license` edge function, which must check
-  `assignedUsername`.
-- **Audit**: `license.activate.ok` and `license.activate.failed` now carry the
-  username as `actor` so the audit log shows who tried.
-- **i18n**: EN/AR keys: operatorUsername, operatorUsernamePh,
-  operatorUsernameHelp, duration_custom, invalidDuration, issuedToLine,
-  assignedTo. ("days" key already existed.)
-
-## Auto archive (monthly + yearly) (2026-04-17)
-On every app boot for an authenticated Squadron Ops user, `runArchiveCheck()`
-in `src/lib/archive.ts` runs once. It is **idempotent**.
-
-- For each completed month between the last archived month and the current
-  month, it writes a snapshot to `localStorage` under
-  `rjaf.archive.YYYY-MM`. The snapshot contains every sortie whose `date`
-  starts with `YYYY-MM`, the participating pilots, and totals (sortie count,
-  pilot count, flight hours).
-- After writing months, if all 12 months of a calendar year are present, it
-  composes a yearly archive at `rjaf.archive.YYYY`.
-- A cursor at `rjaf.archive.lastRun` (last archived `YYYY-MM`) prevents
-  re-archiving on subsequent boots.
-- New page `/archives` (sidebar entry "Archives" / "الأرشيف") lists all
-  archives and offers a JSON download per archive plus a manual "Check now".
-- All archive storage is local browser storage on the operator's PC — the
-  same model as the rest of the demo-mode dataset. Downloads produce
-  `rjaf-archive-YYYY-MM.json` or `rjaf-archive-YYYY.json` for off-PC backup.
-
-## Sortie log edit/delete + 4 more demo squadrons (2026-04-17)
-- `useUpdateSortie` and `useDeleteSortie` hooks added in
-  `src/lib/squadron-data.ts`. Demo mode mutates the in-memory mock array;
-  live mode issues PATCH/DELETE against `sorties`. Both paths emit
-  `sortie.update` / `sortie.delete` audit events with the actor's username.
-- `SortieLog.tsx`: added an "Actions" column with edit (pencil) and delete
-  (trash). Edit opens a modal `SortieEditDialog` with every field of the row.
-  Delete uses `ConfirmDialog` (danger) with date · A/C · pilot summary.
-- mockData: 4 new squadrons (8SAR, 12VIP, 5FTS, 16CSAR) plus matching
-  license keys so HQ users can browse cross-squadron data immediately.
-- Supabase seed (`supabase/seed/generate-seed.mjs`): refactored to emit
-  **four** demo squadrons instead of one so the HQ cross-squadron views
-  have real data in live mode too. Per-squadron RNG seed, pilot-ID
-  prefix (P001/P101/P201/P301), UUID, license key, NOTAM prefix, and
-  admin auth user. Total seed now: 4 squadrons · 64 pilots · 320
-  sorties · 960 currencies · 4 auth admins (all `admin123`). Keys:
-  `DEMO-RJAF-1234-5678`, `DEMO-RJAF-8SAR-0002`, `DEMO-RJAF-12VIP-0003`,
-  `DEMO-RJAF-5FTS-0004`. Admin emails: `admin@demo.rjaf.local`,
-  `admin@8sar.rjaf.local`, `admin@12vip.rjaf.local`,
-  `admin@5fts.rjaf.local`. README + replit.md updated with the full
-  squadron table.
-
-## Flight Hours System — Data Preservation Policy
-
-**Updates must be additive.** Existing pilots, logs, monthly summaries, ops
-officer accounts, license keys, squadron attachments, and admin settings MUST
-survive every release. Breaking changes (field renames, removals, storage key
-changes) require explicit user sign-off before shipping.
-
-- LocalStorage keys are stable across releases. Never rename. Current keys:
-  `rjaf.lang`, `rjaf.auth`, `rjaf.license`, `rjaf.licenseKeys`,
-  `rjaf.hqContext`, plus the mock-data buckets.
-- New schema fields must be optional and default to a sensible empty value
-  (e.g. `flightName?: string`). Legacy records without the field keep working.
-- The install license key `MG3H7HM22` is seeded in `mockData.ts`
-  (id `seed-install-key`, never expires, unbound to operator). Do not remove.
-- Recent additive changes:
-  - Unified Admin → Access Accounts Role/Scope into a single **Tier** dropdown
-    (HQ / Base / Wing / Squadron / Flight / Ops Officer).
-  - Added optional **Flight Name** field on pilot profiles — shown on the
-    commander pilots table, pilot detail header, and mobile home screen.
-- CodeMagic CI config lives at **repo root** (`codemagic.yaml`). The iOS/
-  Android workflows build the Expo app in `artifacts/pilot-mobile`. The user
-  connects GitHub → CodeMagic via codemagic.io UI; the signing group is named
-  `codemagic` (lowercase).
+- **Supabase:** Used for database (PostgreSQL), authentication (planned), and Edge Functions (for `validate-license`).
+- **React Query:** For data fetching and state management in the web application.
+- **`xlsx` package:** For XLSX export functionality.
+- **CodeMagic:** CI/CD for the `pilot-mobile` Expo application.
+- **Authenticator Apps:** (e.g., Google Authenticator, Authy, 1Password) for Super Admin TOTP.
