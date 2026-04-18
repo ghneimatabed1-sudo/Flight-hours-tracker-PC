@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { usePilots } from "@/lib/squadron-data";
 import { Button } from "@/components/ui/button";
-import { Printer, Save } from "lucide-react";
+import { Printer, Save, Settings } from "lucide-react";
 import emblem from "@assets/rjaf_emblem.png";
 import heloCobra from "@assets/fp_media/image1.jpg";
 import heloBlackhawk from "@assets/fp_media/image2.jpg";
@@ -46,6 +46,8 @@ interface AcNeed {
 interface Program {
   date: string;
   mode: Mode;
+  airbase: string;
+  squadron: string;
   dayRows: Row[];
   nightRows: Row[];
   mainBriefer: string;
@@ -62,8 +64,36 @@ interface Program {
   sqdnCmdr: string;
 }
 
+interface Defaults {
+  airbase: string;
+  squadron: string;
+  fltCmdr: string;
+  sqdnCmdr: string;
+}
+
 const STORAGE_PREFIX = "rjaf.flightProgram.";
+const DEFAULTS_KEY = "rjaf.flightProgram.defaults";
 const DEFAULT_AC_TYPE = "UH-60M";
+const FACTORY_DEFAULTS: Defaults = {
+  airbase: "KING ABDULLAH II AIRBASE",
+  squadron: "NO.8 SQDN",
+  fltCmdr: "",
+  sqdnCmdr: "",
+};
+
+const loadDefaults = (): Defaults => {
+  try {
+    const raw = localStorage.getItem(DEFAULTS_KEY);
+    if (!raw) return { ...FACTORY_DEFAULTS };
+    return { ...FACTORY_DEFAULTS, ...(JSON.parse(raw) as Partial<Defaults>) };
+  } catch {
+    return { ...FACTORY_DEFAULTS };
+  }
+};
+
+const saveDefaults = (d: Defaults) => {
+  localStorage.setItem(DEFAULTS_KEY, JSON.stringify(d));
+};
 
 const emptyRow = (dn: string): Row => ({
   dn,
@@ -81,9 +111,11 @@ const emptyRow = (dn: string): Row => ({
   atcLanding: "",
 });
 
-const emptyProgram = (date: string): Program => ({
+const emptyProgram = (date: string, defaults: Defaults): Program => ({
   date,
   mode: "DAY_AND_NVG",
+  airbase: defaults.airbase,
+  squadron: defaults.squadron,
   dayRows: Array.from({ length: 6 }, () => emptyRow("D")),
   nightRows: Array.from({ length: 6 }, () => emptyRow("NVG")),
   mainBriefer: "",
@@ -96,18 +128,18 @@ const emptyProgram = (date: string): Program => ({
   reportingTime: "",
   acNeededDay: { main: "", stby: "" },
   acNeededNight: { main: "", stby: "" },
-  fltCmdr: "",
-  sqdnCmdr: "",
+  fltCmdr: defaults.fltCmdr,
+  sqdnCmdr: defaults.sqdnCmdr,
 });
 
-const loadProgram = (date: string): Program => {
+const loadProgram = (date: string, defaults: Defaults): Program => {
   try {
     const raw = localStorage.getItem(STORAGE_PREFIX + date);
-    if (!raw) return emptyProgram(date);
+    if (!raw) return emptyProgram(date, defaults);
     const parsed = JSON.parse(raw) as Partial<Program>;
-    return { ...emptyProgram(date), ...parsed };
+    return { ...emptyProgram(date, defaults), ...parsed };
   } catch {
-    return emptyProgram(date);
+    return emptyProgram(date, defaults);
   }
 };
 
@@ -127,16 +159,18 @@ export default function FlightProgram() {
   const PILOTS = pilotsQ.data;
 
   const todayIso = new Date().toISOString().slice(0, 10);
+  const [defaults, setDefaults] = useState<Defaults>(() => loadDefaults());
   const [date, setDate] = useState<string>(todayIso);
-  const [prog, setProg] = useState<Program>(() => loadProgram(todayIso));
+  const [prog, setProg] = useState<Program>(() => loadProgram(todayIso, loadDefaults()));
   const [savedFlash, setSavedFlash] = useState(false);
+  const [showDefaults, setShowDefaults] = useState(false);
 
   // When the date changes, swap to the program for that date (or a fresh
   // one if none has been saved yet). This mirrors the Excel workflow where
   // each day is its own sheet.
   useEffect(() => {
-    setProg(loadProgram(date));
-  }, [date]);
+    setProg(loadProgram(date, defaults));
+  }, [date, defaults]);
 
   const pilotOptions = useMemo(
     () =>
@@ -215,7 +249,78 @@ export default function FlightProgram() {
           <Printer className="h-3.5 w-3.5 me-1" />
           {t("print")}
         </Button>
+        <Button size="sm" variant="outline" onClick={() => setShowDefaults((v) => !v)} data-testid="button-fp-defaults">
+          <Settings className="h-3.5 w-3.5 me-1" />
+          Defaults
+        </Button>
       </div>
+
+      {/* Defaults panel — values here are applied automatically to every
+          new day's program so the user doesn't re-type them. Changing
+          defaults does not retroactively alter previously-saved days. */}
+      {showDefaults && (
+        <div className="no-print border border-border rounded-md p-3 bg-secondary/30 grid md:grid-cols-2 gap-3 text-sm">
+          <label className="flex flex-col gap-1">
+            <span className="font-semibold text-xs">Airbase (default)</span>
+            <input
+              value={defaults.airbase}
+              onChange={(e) => setDefaults((d) => ({ ...d, airbase: e.target.value }))}
+              className="px-2 py-1.5 rounded-md bg-input border border-border"
+              data-testid="input-default-airbase"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="font-semibold text-xs">Squadron (default)</span>
+            <input
+              value={defaults.squadron}
+              onChange={(e) => setDefaults((d) => ({ ...d, squadron: e.target.value }))}
+              className="px-2 py-1.5 rounded-md bg-input border border-border"
+              data-testid="input-default-squadron"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="font-semibold text-xs">FLT.CMDR (default)</span>
+            <input
+              value={defaults.fltCmdr}
+              onChange={(e) => setDefaults((d) => ({ ...d, fltCmdr: e.target.value }))}
+              className="px-2 py-1.5 rounded-md bg-input border border-border"
+              data-testid="input-default-fltcmdr"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="font-semibold text-xs">SQDN.CMDR (default)</span>
+            <input
+              value={defaults.sqdnCmdr}
+              onChange={(e) => setDefaults((d) => ({ ...d, sqdnCmdr: e.target.value }))}
+              className="px-2 py-1.5 rounded-md bg-input border border-border"
+              data-testid="input-default-sqdncmdr"
+            />
+          </label>
+          <div className="md:col-span-2 flex gap-2 items-center">
+            <Button
+              size="sm"
+              onClick={() => {
+                saveDefaults(defaults);
+                // Also fill blanks on the current program from the new defaults.
+                setProg((p) => ({
+                  ...p,
+                  airbase: p.airbase || defaults.airbase,
+                  squadron: p.squadron || defaults.squadron,
+                  fltCmdr: p.fltCmdr || defaults.fltCmdr,
+                  sqdnCmdr: p.sqdnCmdr || defaults.sqdnCmdr,
+                }));
+                setShowDefaults(false);
+              }}
+              data-testid="button-save-defaults"
+            >
+              Save defaults
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Applied to new days automatically. Existing days keep their values unless blank.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Printable form. Kept as a single bordered sheet so it prints like
           the original Excel schedule. */}
@@ -236,8 +341,18 @@ export default function FlightProgram() {
           <div className="flex flex-col items-center">
             <img src={emblem} alt="" className="h-20 w-20 object-contain" />
             <div className="text-center leading-tight mt-1">
-              <div className="text-sm font-bold">KING ABDULLAH II AIRBASE</div>
-              <div className="text-sm font-bold">NO.8 SQDN</div>
+              <input
+                value={prog.airbase}
+                onChange={(e) => update("airbase", e.target.value)}
+                className="text-sm font-bold bg-transparent text-center outline-none hover:bg-yellow-50 focus:bg-yellow-50 w-[24ch]"
+                data-testid="input-airbase"
+              />
+              <input
+                value={prog.squadron}
+                onChange={(e) => update("squadron", e.target.value)}
+                className="text-sm font-bold bg-transparent text-center outline-none hover:bg-yellow-50 focus:bg-yellow-50 w-[18ch] block mx-auto"
+                data-testid="input-squadron"
+              />
               <div className="text-base font-bold underline tracking-wider mt-0.5">FLIGHT SCHEDULE</div>
             </div>
           </div>
