@@ -268,4 +268,12 @@ html, body, #root {
   .print-header h1 { font-size: 16px; font-weight: 700; margin: 0; }
   .print-header .meta { font-size: 10.5px; color: #333; text-align: end; }
   tr { page-break-inside: avoid; }
+
+  /* Hide app chrome on every printout — sidebar, topbar, scroll padding.
+     Without this the browser captures the whole window and the printable
+     content gets pushed off the page. */
+  aside, header { display: none !important; }
+  main { padding: 0 !important; margin: 0 !important; overflow: visible !important; }
+  .min-h-screen { min-height: 0 !important; }
+  body * { box-shadow: none !important; }
 }
