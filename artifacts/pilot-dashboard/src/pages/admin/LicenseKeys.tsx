@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useI18n } from "@/lib/i18n";
 import { useAuth, type PcRoleLock } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,8 +9,8 @@ import { squadrons } from "@/lib/mockData";
 import type { LicenseKey, LicenseDuration } from "@/lib/types";
 import { addDuration, addDays } from "@/lib/types";
 import { listLicenseKeys, registerLicenseKey, updateLicenseKey, removeLicenseKey } from "@/lib/license-registry";
-import { registerLicenseRemote, provisionCommanderRemote, storeSupabaseCreds, supabaseConfigured } from "@/lib/supabase";
-import { createCommander, generateInitialPassword, type AccountRole } from "@/lib/commander-store";
+import { registerLicenseRemote, provisionCommanderRemote, storeSupabaseCreds, clearSupabaseCreds, supabaseConfigured } from "@/lib/supabase";
+import { createCommander, deleteCommander, listCommanders, resetCommanderPassword, generateInitialPassword, type AccountRole, type CommanderRecord } from "@/lib/commander-store";
 import type { CommanderScope } from "@/lib/types";
 import { fmtDate, fmtDateTime } from "@/lib/format";
 import { KeyRound, Copy, Check, User as UserIcon, Wrench, Lock, Shuffle } from "lucide-react";
@@ -55,6 +55,38 @@ export default function LicenseKeys() {
   const [setupOk, setSetupOk] = useState<string | null>(null);
   const [setupCredentials, setSetupCredentials] = useState<{ username: string; password: string; roleLabel: string } | null>(null);
   const [credCopied, setCredCopied] = useState(false);
+
+  // Local accounts list (commanders + ops) shown inside the Setup dialog so
+  // the Super Admin can delete a stale entry that's blocking re-creation,
+  // or reset the password on a forgotten account — without leaving the page.
+  const [localAccounts, setLocalAccounts] = useState<CommanderRecord[]>([]);
+  const [resetCreds, setResetCreds] = useState<{ username: string; password: string } | null>(null);
+  function refreshLocalAccounts(): void {
+    try { setLocalAccounts(listCommanders()); } catch { setLocalAccounts([]); }
+  }
+  useEffect(() => {
+    if (setupOpen) refreshLocalAccounts();
+    else { setResetCreds(null); }
+  }, [setupOpen]);
+
+  async function handleDeleteLocalAccount(rec: CommanderRecord) {
+    const ok = window.confirm(
+      lang === "ar"
+        ? `حذف الحساب "${rec.username}" نهائياً من هذا الجهاز؟`
+        : `Delete the local account "${rec.username}" from this PC? This cannot be undone.`,
+    );
+    if (!ok) return;
+    deleteCommander(rec.id);
+    try { clearSupabaseCreds(rec.username); } catch { /* swallow */ }
+    refreshLocalAccounts();
+    setResetCreds(null);
+  }
+  async function handleResetLocalAccount(rec: CommanderRecord) {
+    const newPw = await resetCommanderPassword(rec.id);
+    if (!newPw) return;
+    setResetCreds({ username: rec.username, password: newPw });
+    refreshLocalAccounts();
+  }
 
   // Squadron data is only meaningful for roles that operate at squadron
   // scope. HQ Commander and Super Admin sit above squadrons, so the form
@@ -611,6 +643,69 @@ export default function LicenseKeys() {
             </div>
           ) : (
             <div className="space-y-4">
+              {/* Existing local accounts on THIS PC. Lets the Super Admin
+                  delete a stale entry that's blocking re-creation (the
+                  "username already exists" trap), or reset a forgotten
+                  password — without leaving the Setup dialog. */}
+              {localAccounts.length > 0 && (
+                <details className="rounded border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 p-2">
+                  <summary className="cursor-pointer text-sm font-medium text-amber-900 dark:text-amber-100">
+                    {lang === "ar"
+                      ? `الحسابات المحلية الموجودة (${localAccounts.length})`
+                      : `Existing local accounts on this PC (${localAccounts.length})`}
+                  </summary>
+                  <div className="mt-2 space-y-1.5">
+                    {localAccounts.map((rec) => (
+                      <div key={rec.id} className="flex items-center justify-between gap-2 rounded bg-white dark:bg-black/30 p-1.5 text-xs">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-mono font-bold truncate" data-testid={`text-localacct-${rec.username}`}>{rec.username}</div>
+                          <div className="text-[10px] text-muted-foreground truncate">{rec.role} · {rec.displayName}</div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-[11px]"
+                          onClick={() => handleResetLocalAccount(rec)}
+                          data-testid={`button-localacct-reset-${rec.username}`}
+                        >
+                          {lang === "ar" ? "إعادة كلمة السر" : "Reset PW"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="h-7 px-2 text-[11px]"
+                          onClick={() => handleDeleteLocalAccount(rec)}
+                          data-testid={`button-localacct-delete-${rec.username}`}
+                        >
+                          {lang === "ar" ? "حذف" : "Delete"}
+                        </Button>
+                      </div>
+                    ))}
+                    {resetCreds && (
+                      <div className="rounded border border-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 p-2 text-[11px] text-emerald-900 dark:text-emerald-100">
+                        <div className="font-bold mb-1">
+                          {lang === "ar" ? "كلمة المرور الجديدة (تظهر مرة واحدة):" : "New password (shown once):"}
+                        </div>
+                        <div className="font-mono">
+                          <span className="text-muted-foreground">User:</span> <span className="font-bold">{resetCreds.username}</span>
+                          {"  "}
+                          <span className="text-muted-foreground">Pass:</span> <span className="font-bold tracking-wider">{resetCreds.password}</span>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="mt-1 h-6 px-2 text-[10px]"
+                          onClick={() => navigator.clipboard.writeText(`${resetCreds.username} / ${resetCreds.password}`)}
+                          data-testid="button-localacct-copy-reset"
+                        >
+                          {lang === "ar" ? "نسخ" : "Copy"}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </details>
+              )}
+
               <div className="space-y-2">
                 <label className="text-sm font-medium">{lang === "ar" ? "دور هذا الجهاز" : "Role for this PC"}</label>
                 <Select value={setupRole} onValueChange={(v) => setSetupRole(v as SetupRoleUI)}>
