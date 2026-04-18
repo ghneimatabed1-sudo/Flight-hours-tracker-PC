@@ -1,5 +1,15 @@
 import type { PilotProfile, SortieRecord } from "./types";
 
+export interface HalfYearBreakdown {
+  day: number;
+  night: number;
+  nvg: number;
+  sim: number;
+  captain: number;
+  total: number;
+  sorties: number;
+}
+
 export interface PilotTotals {
   totalDay: number;
   totalNight: number;
@@ -11,6 +21,7 @@ export interface PilotTotals {
   // whatever definition of "captain" the upstream sortie uses.
   totalSecondPilot: number;
   grandTotal: number;
+  totalSorties: number;
   monthDay: number;
   monthNight: number;
   monthNvg: number;
@@ -21,10 +32,22 @@ export interface PilotTotals {
   // Year-to-date rollups, split into calendar halves so the pilot can see
   // training load in the first and second half of the current year at a
   // glance (matches the old APK's "1st 6 / 2nd 6" cards).
+  h1: HalfYearBreakdown;
+  h2: HalfYearBreakdown;
   h1Hours: number;
   h2Hours: number;
   yearHours: number;
 }
+
+const emptyHalf = (): HalfYearBreakdown => ({
+  day: 0,
+  night: 0,
+  nvg: 0,
+  sim: 0,
+  captain: 0,
+  total: 0,
+  sorties: 0,
+});
 
 function safeNum(n: unknown): number {
   const v = typeof n === "number" ? n : Number(n ?? 0);
@@ -50,10 +73,10 @@ export function computeTotals(
     aNvg = 0,
     aSim = 0,
     aCap = 0;
-  // Half-year buckets (sum of day + night only; matches old APK which
-  // tracked "flight hours" per half and kept sim/NVG separate).
-  let h1 = 0,
-    h2 = 0;
+  // Half-year buckets (full category breakdown, matches old APK
+  // "1st 6 months / 2nd 6 months" summary page).
+  const h1: HalfYearBreakdown = emptyHalf();
+  const h2: HalfYearBreakdown = emptyHalf();
 
   for (const s of sorties) {
     const day = safeNum(s.day);
@@ -85,9 +108,14 @@ export function computeTotals(
       // Half-year bucketing uses only the current calendar year so the
       // pilot never sees last year's flights counted in "this year's" halves.
       if (y === yyyy) {
-        const flightOnly = day + night;
-        if (m <= 5) h1 += flightOnly;
-        else h2 += flightOnly;
+        const bucket = m <= 5 ? h1 : h2;
+        bucket.day += day;
+        bucket.night += night;
+        bucket.nvg += nvg;
+        bucket.sim += sim;
+        bucket.captain += cap;
+        bucket.total += day + night;
+        bucket.sorties += 1;
       }
     }
   }
@@ -107,6 +135,7 @@ export function computeTotals(
     totalCaptain,
     totalSecondPilot: Math.max(0, grandTotal - totalCaptain),
     grandTotal,
+    totalSorties: sorties.length,
     monthDay: mDay,
     monthNight: mNight,
     monthNvg: mNvg,
@@ -114,9 +143,11 @@ export function computeTotals(
     monthCaptain: mCap,
     monthTotal: mDay + mNight,
     sortiesThisMonth: mCount,
-    h1Hours: h1,
-    h2Hours: h2,
-    yearHours: h1 + h2,
+    h1,
+    h2,
+    h1Hours: h1.total,
+    h2Hours: h2.total,
+    yearHours: h1.total + h2.total,
   };
 }
 

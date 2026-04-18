@@ -179,35 +179,92 @@ export default function HomeScreen() {
         <Stat label={t("home_nvg").toUpperCase()} value={formatHours(totals.totalNvg)} isRTL={isRTL} />
       </View>
 
-      {/* ── Year breakdown (1st half / 2nd half / total) ──── */}
-      <View style={[styles.row, styles.gap]}>
-        <Stat
-          label={t("home_h1")}
-          value={formatHours(totals.h1Hours)}
-          hint={t("home_h1_hint")}
-          isRTL={isRTL}
+      {/* ── Half-year breakdown table (matches old APK summary page) ──── */}
+      <View style={[styles.table, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.tableTitle, { color: colors.foreground, textAlign: align }]}>
+          {t("home_breakdown_title")}
+        </Text>
+        <Text style={[styles.tableHint, { color: colors.mutedForeground, textAlign: align }]}>
+          {`${t("home_breakdown_hint")} · ${new Date().getFullYear()}`}
+        </Text>
+
+        <View style={[styles.tblHead, { borderColor: colors.border, flexDirection: rowDir }]}>
+          <Text style={[styles.tblCellLabel, { color: colors.mutedForeground }]}>{""}</Text>
+          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_day")}</Text>
+          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_night")}</Text>
+          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_nvg")}</Text>
+          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_sim")}</Text>
+          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_total")}</Text>
+        </View>
+
+        <BreakdownRow
+          label={`${t("home_h1")} · ${t("home_h1_hint")}`}
+          sub={`${totals.h1.sorties} ${t("home_col_sorties")}`}
+          cells={[totals.h1.day, totals.h1.night, totals.h1.nvg, totals.h1.sim, totals.h1.total]}
+          rowDir={rowDir}
         />
-        <Stat
-          label={t("home_h2")}
-          value={formatHours(totals.h2Hours)}
-          hint={t("home_h2_hint")}
-          isRTL={isRTL}
+        <BreakdownRow
+          label={`${t("home_h2")} · ${t("home_h2_hint")}`}
+          sub={`${totals.h2.sorties} ${t("home_col_sorties")}`}
+          cells={[totals.h2.day, totals.h2.night, totals.h2.nvg, totals.h2.sim, totals.h2.total]}
+          rowDir={rowDir}
+        />
+        <BreakdownRow
+          label={t("home_year")}
+          sub={`${totals.h1.sorties + totals.h2.sorties} ${t("home_col_sorties")}`}
+          cells={[
+            totals.h1.day + totals.h2.day,
+            totals.h1.night + totals.h2.night,
+            totals.h1.nvg + totals.h2.nvg,
+            totals.h1.sim + totals.h2.sim,
+            totals.yearHours,
+          ]}
+          emphasis
+          rowDir={rowDir}
         />
       </View>
 
-      <View style={[styles.row, styles.gap]}>
-        <Stat
-          label={t("home_year")}
-          value={formatHours(totals.yearHours)}
-          hint={String(new Date().getFullYear())}
+      {/* ── Career totals (career = opening balance + every logged sortie) ──── */}
+      <View style={[styles.table, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.tableTitle, { color: colors.foreground, textAlign: align }]}>
+          {t("home_career_title")}
+        </Text>
+        <Text style={[styles.tableHint, { color: colors.mutedForeground, textAlign: align }]}>
+          {`${t("home_career_hint")} · ${totals.totalSorties} ${t("home_col_sorties")}`}
+        </Text>
+
+        <View style={[styles.tblHead, { borderColor: colors.border, flexDirection: rowDir }]}>
+          <Text style={[styles.tblCellLabel, { color: colors.mutedForeground }]}>{""}</Text>
+          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_day")}</Text>
+          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_night")}</Text>
+          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_nvg")}</Text>
+          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_sim")}</Text>
+          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_pic")}</Text>
+        </View>
+
+        <BreakdownRow
+          label={t("home_total_hours")}
+          sub=""
+          cells={[totals.totalDay, totals.totalNight, totals.totalNvg, totals.totalSim, totals.totalCaptain]}
           emphasis
-          isRTL={isRTL}
+          rowDir={rowDir}
         />
-        <Stat
-          label={t("home_second_pilot")}
-          value={formatHours(totals.totalSecondPilot)}
-          isRTL={isRTL}
-        />
+        <View style={[styles.tblGrandRow, { borderColor: colors.border, flexDirection: rowDir }]}>
+          <Text style={[styles.tblCellLabel, { color: colors.foreground }]}>
+            {`${t("home_total_hours")}  (D+N)`}
+          </Text>
+          <Text style={[styles.tblGrandValue, { color: colors.primary }]}>
+            {formatHours(totals.grandTotal)}
+          </Text>
+        </View>
+        <View style={[styles.tblGrandRow, { borderColor: colors.border, flexDirection: rowDir }]}>
+          <Text style={[styles.tblCellLabel, { color: colors.foreground }]}>
+            {t("home_second_pilot")}
+          </Text>
+          <Text style={[styles.tblGrandValue, { color: colors.foreground }]}>
+            {formatHours(totals.totalSecondPilot)}
+          </Text>
+        </View>
       </View>
 
       {/* ── Sync card ─────────────────────────── */}
@@ -270,6 +327,58 @@ function HeroChip({ label, value, accent }: { label: string; value: string; acce
     <View style={styles.chip}>
       <Text style={[styles.chipLabel, { color: colors.mutedForeground }]}>{label}</Text>
       <Text style={[styles.chipValue, { color: accent ?? colors.foreground }]}>{value}</Text>
+    </View>
+  );
+}
+
+function BreakdownRow({
+  label,
+  sub,
+  cells,
+  emphasis,
+  rowDir,
+}: {
+  label: string;
+  sub: string;
+  cells: number[];
+  emphasis?: boolean;
+  rowDir: "row" | "row-reverse";
+}) {
+  const colors = useColors();
+  return (
+    <View
+      style={[
+        styles.tblRow,
+        {
+          borderColor: colors.border,
+          flexDirection: rowDir,
+          backgroundColor: emphasis ? colors.primary + "14" : "transparent",
+        },
+      ]}
+    >
+      <View style={styles.tblLabelCell}>
+        <Text style={[styles.tblLabel, { color: colors.foreground, fontWeight: emphasis ? "700" : "600" }]}>
+          {label}
+        </Text>
+        {sub ? (
+          <Text style={[styles.tblSub, { color: colors.mutedForeground }]}>{sub}</Text>
+        ) : null}
+      </View>
+      {cells.map((v, i) => (
+        <Text
+          key={i}
+          style={[
+            styles.tblCell,
+            styles.tblCellValue,
+            {
+              color: emphasis && i === cells.length - 1 ? colors.primary : colors.foreground,
+              fontWeight: emphasis ? "700" : "500",
+            },
+          ]}
+        >
+          {formatHours(v)}
+        </Text>
+      ))}
     </View>
   );
 }
@@ -381,6 +490,86 @@ const styles = StyleSheet.create({
   // grids
   row: { flexDirection: "row", gap: 12 },
   gap: { marginTop: 0 },
+
+  // breakdown table
+  table: {
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 14,
+    gap: 4,
+  },
+  tableTitle: {
+    fontSize: 14,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.3,
+  },
+  tableHint: {
+    fontSize: 10,
+    fontFamily: "Inter_500Medium",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+    marginBottom: 8,
+  },
+  tblHead: {
+    alignItems: "center",
+    paddingVertical: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  tblRow: {
+    alignItems: "center",
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRadius: 4,
+  },
+  tblLabelCell: {
+    flex: 1.6,
+    paddingHorizontal: 4,
+  },
+  tblLabel: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+  },
+  tblSub: {
+    fontSize: 9,
+    fontFamily: "Inter_500Medium",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    marginTop: 2,
+  },
+  tblCell: {
+    flex: 1,
+    textAlign: "center",
+    fontVariant: ["tabular-nums"],
+  },
+  tblCellHead: {
+    fontSize: 10,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+  },
+  tblCellValue: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+  },
+  tblCellLabel: {
+    flex: 1.6,
+    fontSize: 10,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+    paddingHorizontal: 4,
+  },
+  tblGrandRow: {
+    alignItems: "center",
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  tblGrandValue: {
+    fontSize: 18,
+    fontFamily: "Inter_700Bold",
+    fontVariant: ["tabular-nums"],
+    paddingHorizontal: 4,
+  },
 
   // sync
   syncRow: {
