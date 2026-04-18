@@ -59,10 +59,47 @@ function createWindow() {
 
   Menu.setApplicationMenu(null);
 
+  // ── Diagnostics so we never ship another silent blue-screen ─────────
+  // If the renderer fails to load (bad path, missing asset, ESM blocked
+  // under file://) or crashes, write a log under userData and pop a
+  // dialog so the operator can take a screenshot for support.
+  const logFile = path.join(app.getPath("userData"), "renderer-error.log");
+  const logErr = (label: string, detail: string) => {
+    const line = `[${new Date().toISOString()}] ${label}: ${detail}\n`;
+    try { fs.appendFileSync(logFile, line); } catch { /* best effort */ }
+    if (!isDev) {
+      try { mainWindow?.webContents.openDevTools({ mode: "detach" }); } catch { /* ignore */ }
+      dialog.showErrorBox(
+        "RJAF Squadron Ops — startup error",
+        `${label}\n\n${detail}\n\nA log was written to:\n${logFile}\n\n` +
+        `Please send this file to the Super Admin.`,
+      );
+    }
+  };
+
+  // Types are loose here because electron typings aren't included in this
+  // project's tsconfig (matches the rest of this file).
+  mainWindow.webContents.on("did-fail-load", ((_e: unknown, code: number, desc: string, url: string) => {
+    logErr("did-fail-load", `code=${code} url=${url} ${desc}`);
+  }) as never);
+  mainWindow.webContents.on("render-process-gone", ((_e: unknown, details: { reason: string; exitCode: number }) => {
+    logErr("render-process-gone", `reason=${details.reason} exitCode=${details.exitCode}`);
+  }) as never);
+  mainWindow.webContents.on("preload-error", ((_e: unknown, preloadPath: string, error: Error) => {
+    logErr("preload-error", `${preloadPath}: ${error.message}`);
+  }) as never);
+
   if (isDev) {
     mainWindow.loadURL("http://localhost:5173/");
   } else {
-    mainWindow.loadFile(path.join(__dirname, "..", "dist", "public", "index.html"));
+    const indexPath = path.join(__dirname, "..", "dist", "public", "index.html");
+    if (!fs.existsSync(indexPath)) {
+      logErr("missing-index", `index.html not found at ${indexPath}`);
+      return;
+    }
+    mainWindow.loadFile(indexPath).catch((err: Error) => {
+      logErr("loadFile-rejected", err?.message || String(err));
+    });
   }
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
