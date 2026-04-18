@@ -154,6 +154,19 @@ const dayOfWeek = (iso: string, lang: string): string => {
   return d.toLocaleDateString(lang === "ar" ? "ar" : "en-US", { weekday: "long" });
 };
 
+// Human-readable date for the printed sheet: "18 APR 2026" / "18 أبريل 2026".
+// Keeps the form looking like a real signed document instead of a raw ISO.
+const formatDate = (iso: string, lang: string): string => {
+  if (!iso) return "";
+  const d = new Date(iso + "T00:00:00");
+  const out = d.toLocaleDateString(lang === "ar" ? "ar" : "en-US", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+  return lang === "ar" ? out : out.toUpperCase();
+};
+
 export default function FlightProgram() {
   const { t, lang, dir } = useI18n();
   const pilotsQ = usePilots();
@@ -447,10 +460,10 @@ export default function FlightProgram() {
         {/* Day + Date row */}
         <div className="flex items-center justify-between border-t border-b border-black py-1 px-1">
           <div className="font-semibold">
-            DAY : <span className="font-normal">{dayOfWeek(date, lang) || "________"}</span>
+            DAY : <span className="font-normal">{dayOfWeek(date, lang)}</span>
           </div>
           <div className="font-semibold">
-            DATE : <span className="font-normal font-mono">{date || "00-00-0000"}</span>
+            DATE : <span className="font-normal">{formatDate(date, lang)}</span>
           </div>
         </div>
 
