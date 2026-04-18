@@ -41,11 +41,20 @@ jobs:
       - name: Install Electron toolchain
         run: pnpm add -D electron@^32 electron-builder@^25 electron-updater@^6
 
+      - name: Inject INSTALL_PASSWORD define into installer.nsh
+        # NSIS does not read OS environment variables — !ifndef checks only
+        # NSIS defines. Prepend a !define so the .nsh script sees the value.
+        env:
+          INSTALL_PASSWORD: ${{ secrets.INSTALL_PASSWORD || 'rjaf-install-change-me' }}
+        shell: pwsh
+        run: |
+          $nsh = "build/installer.nsh"
+          $original = Get-Content $nsh -Raw
+          $define = "!define INSTALL_PASSWORD `"$env:INSTALL_PASSWORD`"`r`n"
+          Set-Content -Path $nsh -Value ($define + $original) -NoNewline
+
       - name: Build Windows installer
         env:
-          # Master install password required by build/installer.nsh before
-          # files are written on the target PC. Override with a repo secret
-          # named INSTALL_PASSWORD for real releases.
           INSTALL_PASSWORD: ${{ secrets.INSTALL_PASSWORD || 'rjaf-install-change-me' }}
           # vite.config.ts requires PORT (dev server) and BASE_PATH (asset
           # base href) at build time. PORT is unused for production builds
