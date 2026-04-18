@@ -216,14 +216,21 @@ export default function Roster() {
 function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pilot; onClose: () => void; onSave: (p: Pilot) => void; saving: boolean; isNew?: boolean }) {
   const { t } = useI18n();
   const [p, setP] = useState<Pilot>(pilot);
-  const set = <K extends keyof Pilot>(k: K, v: Pilot[K]) => setP({ ...p, [k]: v });
+  // Functional updater — without this, rapid keystrokes can read a stale `p`
+  // closure when React batches updates inside Electron's renderer, making
+  // the field appear "frozen" after the first character. Reported by ops.
+  const set = <K extends keyof Pilot>(k: K, v: Pilot[K]) => setP(prev => ({ ...prev, [k]: v }));
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     onSave(p);
   };
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-card border border-border rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+    // NOTE: no backdrop-blur. Chromium's backdrop-filter on Windows w/ HW
+    // accel can intermittently swallow keyboard events from inputs sitting
+    // *behind* it (the inputs render in their own compositor layer). Pure
+    // black/60 is just as visible and never breaks input.
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onClose} data-testid="overlay-pilot-edit">
+      <div className="bg-card border border-border rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-border">
           <div className="text-base font-semibold gold-grad">{isNew ? t("add") : t("edit")} — {p.id}</div>
           <button onClick={onClose} className="p-1 rounded hover:bg-secondary"><X className="h-4 w-4" /></button>
@@ -231,9 +238,9 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
         <form onSubmit={submit} className="p-4 space-y-3" data-testid="form-edit-pilot">
           <div className="grid grid-cols-2 gap-3">
             {isNew && (
-              <Field label="ID" value={p.id} onChange={v => set("id", v)} testId="input-id" />
+              <Field label="ID" value={p.id} onChange={v => set("id", v)} testId="input-id" autoFocus />
             )}
-            <Field label={t("callSign")} value={p.callSign || ""} onChange={v => set("callSign", v)} testId="input-callSign" />
+            <Field label={t("callSign")} value={p.callSign || ""} onChange={v => set("callSign", v)} testId="input-callSign" autoFocus={!isNew} />
             <Field label={t("flightName")} value={p.flightName || ""} onChange={v => set("flightName", v)} testId="input-flightName" />
             <Field label={t("name")} value={p.name} onChange={v => set("name", v)} testId="input-name" />
             <Field label={t("arabicName")} value={p.arabicName} onChange={v => set("arabicName", v)} testId="input-arabicName" />
@@ -313,11 +320,19 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
   );
 }
 
-function Field({ label, value, onChange, type = "text", testId }: { label: string; value: string; onChange: (v: string) => void; type?: string; testId?: string }) {
+function Field({ label, value, onChange, type = "text", testId, autoFocus }: { label: string; value: string; onChange: (v: string) => void; type?: string; testId?: string; autoFocus?: boolean }) {
   return (
     <label className="block text-xs">
       <span className="text-muted-foreground">{label}</span>
-      <input type={type} value={value} onChange={e => onChange(e.target.value)} data-testid={testId} className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm" />
+      <input
+        type={type}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        data-testid={testId}
+        autoComplete="off"
+        autoFocus={autoFocus}
+        className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm"
+      />
     </label>
   );
 }
