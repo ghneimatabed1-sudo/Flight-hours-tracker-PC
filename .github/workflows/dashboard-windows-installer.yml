@@ -1,0 +1,57 @@
+name: Build Windows Installer (RJAF Squadron Ops)
+
+# Produces the signed NSIS .exe for the PC app. Runs on windows-latest
+# because electron-builder cannot cross-compile Windows installers from
+# Linux without Wine. The resulting installer is uploaded as a workflow
+# artifact you can download from the Actions tab.
+#
+# Triggers:
+#   - manual (workflow_dispatch) — build on demand
+#   - push of a v* tag          — cut a release
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-exe:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: artifacts/pilot-dashboard
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install workspace deps
+        run: pnpm install --frozen-lockfile=false
+        working-directory: .
+
+      - name: Install Electron toolchain
+        run: pnpm add -D electron@^32 electron-builder@^25 electron-updater@^6
+
+      - name: Build Windows installer
+        env:
+          # Master install password required by build/installer.nsh before
+          # files are written on the target PC. Override with a repo secret
+          # named INSTALL_PASSWORD for real releases.
+          INSTALL_PASSWORD: ${{ secrets.INSTALL_PASSWORD || 'rjaf-install-change-me' }}
+        run: pnpm run electron:build
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: RJAF-SquadronOps-Installer
+          path: artifacts/pilot-dashboard/release/*.exe
+          if-no-files-found: error

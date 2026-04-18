@@ -20,7 +20,11 @@
     },
     "android": {
       "package": "com.rjaf.pilotlogbook",
-      "versionCode": 1
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/emblem.png",
+        "backgroundColor": "#ffffff"
+      }
     },
     "web": {
       "favicon": "./assets/images/emblem.png"
