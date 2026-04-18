@@ -13,7 +13,7 @@
  * See ELECTRON_BUILD.md for the full instructions including installer
  * password protection, code signing, and electron-updater configuration.
  */
-import { app, BrowserWindow, Menu, shell, ipcMain } from "electron";
+import { app, BrowserWindow, Menu, shell, ipcMain, dialog } from "electron";
 import { autoUpdater } from "electron-updater";
 import * as path from "path";
 import * as fs from "fs";
@@ -100,3 +100,32 @@ ipcMain.handle("rjaf:offlineQueuePath", () => {
   return dir;
 });
 ipcMain.handle("rjaf:isPackaged", () => app.isPackaged);
+
+// ── Backup file-system bridge ───────────────────────────────────────────
+// Lets the renderer ask the user to pick a folder, and write the encrypted
+// .rjafbackup file directly to disk. Without these handlers the renderer
+// falls back to a normal browser download into the user's Downloads folder.
+ipcMain.handle("rjaf:pickBackupFolder", async () => {
+  if (!mainWindow) return null;
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: "Choose backup folder",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (res.canceled || res.filePaths.length === 0) return null;
+  return res.filePaths[0];
+});
+
+ipcMain.handle(
+  "rjaf:writeBackupFile",
+  async (_evt, folder: string, filename: string, content: string) => {
+    if (!folder || !filename) throw new Error("folder and filename are required");
+    // Sanity: refuse path-traversal in filename, must stay flat in the chosen folder.
+    if (filename.includes("/") || filename.includes("\\") || filename.includes("..")) {
+      throw new Error("invalid filename");
+    }
+    if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
+    const full = path.join(folder, filename);
+    await fs.promises.writeFile(full, content, "utf8");
+    return full;
+  }
+);
