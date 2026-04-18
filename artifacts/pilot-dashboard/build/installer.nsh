@@ -1,14 +1,17 @@
 ; Custom NSIS for password-gated installation.
 ;
-; IMPORTANT: The previous version put nsDialogs inside `customInit` (which is
-; injected into `.onInit`). nsDialogs cannot be used in `.onInit` because the
-; installer's main window doesn't exist yet — `nsDialogs::Create` returns
-; "error" and the macro silently `Abort`s. The visible symptom was: user
-; clicks Yes on UAC and the installer disappears with no message.
-;
-; This version moves the password prompt to a proper custom Page inserted
-; after the directory-chooser page, where nsDialogs works correctly. Wrong
-; password keeps the user on the same page so they can retry.
+; History:
+;  v1: nsDialogs in customInit (.onInit) — silently aborted because the
+;      installer's main window doesn't exist that early.
+;  v2: moved to a custom Page via customPageAfterChangeDir, but referenced
+;      MUI_HEADER_TEXT which isn't defined when this file is first parsed
+;      (electron-builder !includes us BEFORE MUI2.nsh).
+;  v3: include nsDialogs.nsh + LogicLib.nsh at the top so those macros are
+;      available when the Function bodies are parsed; skip MUI_HEADER_TEXT
+;      and use a plain label inside the dialog instead.
+
+!include "nsDialogs.nsh"
+!include "LogicLib.nsh"
 
 !ifndef INSTALL_PASSWORD
   !error "INSTALL_PASSWORD is required. Set the environment variable INSTALL_PASSWORD before running electron-builder."
@@ -20,31 +23,26 @@
 Var RjafPwdInput
 Var RjafPwdEntered
 
-!macro customHeader
-  !include "nsDialogs.nsh"
-  !include "LogicLib.nsh"
-!macroend
-
 ; electron-builder injects this macro between MUI_PAGE_DIRECTORY and
-; MUI_PAGE_INSTFILES. That's the right spot: window already exists, no
-; files have been written yet.
+; MUI_PAGE_INSTFILES. Window already exists by then, so nsDialogs works.
 !macro customPageAfterChangeDir
   Page custom RjafPwdPageShow RjafPwdPageLeave
 !macroend
 
 Function RjafPwdPageShow
-  !insertmacro MUI_HEADER_TEXT "Installation Password" "Authorization required to continue."
-
   nsDialogs::Create 1018
   Pop $0
   ${If} $0 == error
     Abort
   ${EndIf}
 
-  ${NSD_CreateLabel} 0 0 100% 36u "Enter the master installation password issued by the RJAF Super Admin:"
+  ${NSD_CreateLabel} 0 0 100% 16u "RJAF Squadron Ops — Installation Password"
   Pop $1
 
-  ${NSD_CreatePassword} 0 50u 100% 14u ""
+  ${NSD_CreateLabel} 0 22u 100% 30u "Enter the master installation password issued by the RJAF Super Admin to continue."
+  Pop $2
+
+  ${NSD_CreatePassword} 0 60u 100% 14u ""
   Pop $RjafPwdInput
   ${NSD_SetFocus} $RjafPwdInput
 
