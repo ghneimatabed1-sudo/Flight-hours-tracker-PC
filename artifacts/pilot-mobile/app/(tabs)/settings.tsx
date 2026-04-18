@@ -374,74 +374,6 @@ export default function SettingsScreen() {
         {t("settings_about_text")}
       </Text>
 
-      <Text
-        style={[
-          styles.section,
-          { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
-        ]}
-      >
-        {t("settings_credits")}
-      </Text>
-      <View
-        style={[
-          styles.creditsCard,
-          { backgroundColor: colors.card, borderColor: colors.border },
-        ]}
-      >
-        <Text
-          style={[
-            styles.creditName,
-            { color: colors.foreground, textAlign: isRTL ? "right" : "left" },
-          ]}
-        >
-          Capt. ABEDALQADER GHUNMAT
-        </Text>
-        <Text
-          style={[
-            styles.creditRole,
-            { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
-          ]}
-        >
-          {t("credits_developer")}
-        </Text>
-        <Pressable
-          onPress={() => Linking.openURL("tel:+9620775008345").catch(() => {})}
-          style={({ pressed }) => [
-            styles.creditRow,
-            {
-              borderColor: colors.border,
-              flexDirection: isRTL ? "row-reverse" : "row",
-              opacity: pressed ? 0.7 : 1,
-            },
-          ]}
-        >
-          <Feather name="phone" size={14} color={colors.primary} />
-          <Text style={[styles.creditValue, { color: colors.foreground }]}>0775008345</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => Linking.openURL("mailto:ghneimatabed1@icloud.com").catch(() => {})}
-          style={({ pressed }) => [
-            styles.creditRow,
-            {
-              borderColor: colors.border,
-              flexDirection: isRTL ? "row-reverse" : "row",
-              opacity: pressed ? 0.7 : 1,
-            },
-          ]}
-        >
-          <Feather name="mail" size={14} color={colors.primary} />
-          <Text style={[styles.creditValue, { color: colors.foreground }]}>ghneimatabed1@icloud.com</Text>
-        </Pressable>
-        <Text
-          style={[
-            styles.creditBlurb,
-            { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
-          ]}
-        >
-          {t("credits_blurb")}
-        </Text>
-      </View>
-
       {/* ── Export logbook ─────────────────────────────
           Gives the pilot a personal copy of their hours they can keep
           on iCloud / Drive / email. The PC is still the source of truth. */}
@@ -627,6 +559,79 @@ export default function SettingsScreen() {
           {t("settings_unlink")}
         </Text>
       </Pressable>
+
+      {/* ── Credits (foot of page) ─────────────────────────────
+          Moved to the very bottom of Settings so it mirrors the old
+          mobile app's layout: an unobtrusive attribution block with
+          tappable phone + email the pilot can use to reach the
+          developer for support. */}
+      <Text
+        style={[
+          styles.section,
+          { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
+        ]}
+      >
+        {t("settings_credits")}
+      </Text>
+      <View
+        style={[
+          styles.creditsCard,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}
+      >
+        <Text
+          style={[
+            styles.creditName,
+            { color: colors.foreground, textAlign: isRTL ? "right" : "left" },
+          ]}
+        >
+          Capt. ABEDALQADER GHUNMAT
+        </Text>
+        <Text
+          style={[
+            styles.creditRole,
+            { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
+          ]}
+        >
+          {t("credits_developer")}
+        </Text>
+        <Pressable
+          onPress={() => Linking.openURL("tel:+9620775008345").catch(() => {})}
+          style={({ pressed }) => [
+            styles.creditRow,
+            {
+              borderColor: colors.border,
+              flexDirection: isRTL ? "row-reverse" : "row",
+              opacity: pressed ? 0.7 : 1,
+            },
+          ]}
+        >
+          <Feather name="phone" size={14} color={colors.primary} />
+          <Text style={[styles.creditValue, { color: colors.foreground }]}>0775008345</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => Linking.openURL("mailto:ghneimatabed1@icloud.com").catch(() => {})}
+          style={({ pressed }) => [
+            styles.creditRow,
+            {
+              borderColor: colors.border,
+              flexDirection: isRTL ? "row-reverse" : "row",
+              opacity: pressed ? 0.7 : 1,
+            },
+          ]}
+        >
+          <Feather name="mail" size={14} color={colors.primary} />
+          <Text style={[styles.creditValue, { color: colors.foreground }]}>ghneimatabed1@icloud.com</Text>
+        </Pressable>
+        <Text
+          style={[
+            styles.creditBlurb,
+            { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
+          ]}
+        >
+          {t("credits_blurb")}
+        </Text>
+      </View>
     </ScrollView>
   );
 }
