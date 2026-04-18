@@ -175,11 +175,10 @@ export default function FlightProgram() {
 
   // Access to the Flight Schedule (both viewing and editing) is restricted
   // to the two roles that actually own the daily sheet: the squadron ops
-  // officer on the squadron PC, and the squadron commander on the HQ
-  // dashboard. Super admin retains access for administrative verification.
+  // officer (pilot officer) on the squadron PC, and the squadron commander
+  // on the HQ dashboard. Nobody else — not even super admin — can open it.
   const canAccess =
     user?.role === "ops" ||
-    user?.role === "super_admin" ||
     (user?.role === "commander" && user?.scope === "squadron");
   // The print button is shown to the same set — creators and signers of
   // the sheet are the only ones who need a hardcopy.

@@ -3,6 +3,7 @@ import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
 import { runArchiveCheck } from "@/lib/archive";
+import { clearDemoSeed } from "@/lib/squadron-data";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { I18nProvider } from "@/lib/i18n";
@@ -151,6 +152,11 @@ function Shell() {
 
 function ArchiveBootstrap() {
   useEffect(() => { runArchiveCheck(); }, []);
+  // Wipe any leftover demo/sample data (demo pilots + demo sorties) so the
+  // squadron starts with an empty dataset for real operations. Demo records
+  // were tagged with importedAt === "DEMO_SEED" specifically so this single
+  // call can strip them without touching anything real.
+  useEffect(() => { clearDemoSeed(); }, []);
   return null;
 }
 

@@ -68,7 +68,10 @@ export default function Layout({ children }: { children: ReactNode }) {
             // other roles don't see it in the sidebar and the page itself
             // blocks direct URL access.
             if (p === "/flight-program") {
-              return user?.role === "ops" || user?.role === "super_admin";
+              // Only the squadron ops officer (pilot officer) owns the sheet
+              // on the squadron PC. No other sidebar role — not even super
+              // admin — gets this entry.
+              return user?.role === "ops";
             }
             return true;
           }).map(({ p, k, I }) => {
