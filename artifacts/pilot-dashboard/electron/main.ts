@@ -14,6 +14,7 @@
  * password protection, code signing, and electron-updater configuration.
  */
 import { app, BrowserWindow, Menu, shell, ipcMain, dialog } from "electron";
+import { autoUpdater } from "electron-updater";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -72,6 +73,18 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
+
+  // Auto-update from the public Releases repo. The repo only contains the
+  // compiled installer + latest.yml — never the source code. Pilots get a
+  // popup when a newer version is published.
+  if (!isDev) {
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.checkForUpdatesAndNotify().catch((err: Error) => {
+      // eslint-disable-next-line no-console
+      console.warn("Update check failed:", err.message);
+    });
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
