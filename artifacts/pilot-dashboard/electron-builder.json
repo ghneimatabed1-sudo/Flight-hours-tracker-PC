@@ -28,5 +28,13 @@
     "createStartMenuShortcut": true,
     "shortcutName": "RJAF Squadron Ops",
     "include": "build/installer.nsh"
-  }
+  },
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "ghneimatabed1-sudo",
+      "repo": "Flight-hours-tracker-Releases",
+      "releaseType": "release"
+    }
+  ]
 }
