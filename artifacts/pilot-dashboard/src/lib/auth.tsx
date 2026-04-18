@@ -405,10 +405,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // (not in lookupHQUser) the check is deferred to the Supabase branch
       // below using the role resolved from the server; for standalone-mode
       // ops officers sign-in happens through the license screen, not here.
+      // EXCEPTION: the super admin can always sign in regardless of the
+      // PC role lock — they're the system owner and need a way back into
+      // any locked PC (for recovery, role changes, etc.). The override is
+      // audit-logged distinctly so its use is visible in the trail.
       const lock = readPcRoleLock();
       if (lock && hqUser && hqUser.role !== lock) {
-        await recordAuditEvent({ type: "login.rolelock.blocked", actor: username, detail: { lock, attemptedRole: hqUser.role } });
-        return { ok: false, error: "role_locked" };
+        if (hqUser.role === "super_admin") {
+          await recordAuditEvent({ type: "login.rolelock.override", actor: username, detail: { lock } });
+        } else {
+          await recordAuditEvent({ type: "login.rolelock.blocked", actor: username, detail: { lock, attemptedRole: hqUser.role } });
+          return { ok: false, error: "role_locked" };
+        }
       }
 
       // Super admin path: password is validated server-side by the edge
