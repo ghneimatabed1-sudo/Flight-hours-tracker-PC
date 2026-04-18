@@ -4,7 +4,7 @@ export type Lang = "en" | "ar";
 
 const dict = {
   en: {
-    nav_flight_program: "Flight Program",
+    nav_flight_program: "Flight Schedule",
     saved: "Saved",
     appName: "RJAF Squadron Ops",
     appTag: "Royal Jordanian Air Force — Squadron Management System",
@@ -67,7 +67,7 @@ const dict = {
     nav_leaves: "Leaves",
     nav_unavail: "Unavailable Pilots",
     nav_duty: "Duty Week",
-    nav_schedule: "Flight Schedule",
+    nav_schedule: "Daily Missions",
     nav_risk: "Risk Assessment",
     nav_coord: "Coordinating Form",
     nav_notams: "NOTAMs",
@@ -654,7 +654,7 @@ const dict = {
     error: "error",
   },
   ar: {
-    nav_flight_program: "برنامج الطيران",
+    nav_flight_program: "جدول الطيران",
     saved: "تم الحفظ",
     appName: "أسراب عمليات سلاح الجو الملكي",
     appTag: "سلاح الجو الملكي الأردني — نظام إدارة الأسراب",
@@ -717,7 +717,7 @@ const dict = {
     nav_leaves: "الإجازات",
     nav_unavail: "الطيارون غير المتاحين",
     nav_duty: "أسبوع الواجب",
-    nav_schedule: "جدول الطيران",
+    nav_schedule: "المهام اليومية",
     nav_risk: "تقييم المخاطر",
     nav_coord: "نموذج التنسيق",
     nav_notams: "إخطارات NOTAM",

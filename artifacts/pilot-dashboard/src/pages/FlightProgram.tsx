@@ -160,17 +160,17 @@ export default function FlightProgram() {
   const PILOTS = pilotsQ.data;
   const { user } = useAuth();
 
-  // Printing is restricted to the roles who actually own or run the daily
-  // Flight Program on paper: the ops officer (and deputy) on the squadron PC,
-  // and the squadron commander. Higher-echelon commanders (flight / wing /
-  // base / HQ) view the program but don't get the print button — the printed
-  // sheet belongs to squadron-level ops. Super admin retains the button for
-  // administrative verification.
-  const canPrint =
+  // Access to the Flight Schedule (both viewing and editing) is restricted
+  // to the two roles that actually own the daily sheet: the squadron ops
+  // officer on the squadron PC, and the squadron commander on the HQ
+  // dashboard. Super admin retains access for administrative verification.
+  const canAccess =
     user?.role === "ops" ||
-    user?.role === "deputy" ||
     user?.role === "super_admin" ||
     (user?.role === "commander" && user?.scope === "squadron");
+  // The print button is shown to the same set — creators and signers of
+  // the sheet are the only ones who need a hardcopy.
+  const canPrint = canAccess;
 
   const todayIso = new Date().toISOString().slice(0, 10);
   const [defaults, setDefaults] = useState<Defaults>(() => loadDefaults());
@@ -242,6 +242,24 @@ export default function FlightProgram() {
   const nightLabel =
     prog.mode === "NVG" || prog.mode === "DAY_AND_NVG" ? "NVG" : "NIGHT";
   const defaultNightDn = nightLabel === "NVG" ? "NVG" : "N";
+
+  // Hard gate: anyone who isn't an ops officer, squadron commander, or
+  // super admin lands here with a read-only "not authorized" notice even
+  // if they navigate to /flight-program directly.
+  if (!canAccess) {
+    return (
+      <div className="p-6" dir={dir}>
+        <div className="rounded-md border border-border bg-card p-6 max-w-xl">
+          <div className="text-sm font-semibold mb-1">{t("nav_flight_program")}</div>
+          <div className="text-xs text-muted-foreground leading-relaxed">
+            {lang === "ar"
+              ? "هذه الصفحة متاحة فقط لضابط عمليات السرب وقائد السرب."
+              : "This page is available only to the squadron ops officer and the squadron commander."}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3" dir={dir}>

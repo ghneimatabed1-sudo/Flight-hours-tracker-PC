@@ -62,7 +62,16 @@ export default function Layout({ children }: { children: ReactNode }) {
           )}
         </div>
         <nav className="flex-1 overflow-y-auto py-2">
-          {ITEMS.map(({ p, k, I }) => {
+          {ITEMS.filter(({ p }) => {
+            // Flight Schedule (creation / editing) is restricted to the ops
+            // officer and super admin on the squadron PC. Deputies and
+            // other roles don't see it in the sidebar and the page itself
+            // blocks direct URL access.
+            if (p === "/flight-program") {
+              return user?.role === "ops" || user?.role === "super_admin";
+            }
+            return true;
+          }).map(({ p, k, I }) => {
             const active = loc === p || (p !== "/" && loc.startsWith(p));
             return (
               <Link key={p} href={p} className={`flex items-center gap-3 px-3 py-2 mx-2 my-0.5 rounded-md text-sm row-hover ${active ? "bg-sidebar-accent text-sidebar-primary font-medium" : "text-sidebar-foreground"}`}>
