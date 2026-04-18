@@ -9,7 +9,7 @@ export default function LoginGate() {
     licensed, configured, activateLicense, configureSquadron, login, fingerprint,
     lockedUntil, user, pendingAdmin, verifyAdminTotp, cancelAdminTotp,
     pendingRecoveryCodes, ackRecoveryCodes, provisionSuperAdmin, pcRoleLock,
-    pcDeviceName, adminProvisioned,
+    pcDeviceName,
   } = useAuth();
   const { t, lang, setLang } = useI18n();
 
@@ -25,13 +25,13 @@ export default function LoginGate() {
   const [p, setP] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
-  // First-run Super Admin password setup. On a brand-new install (no admin
-  // hash, no license, no role lock) we jump STRAIGHT to the Set-Password
-  // form so the very first thing the owner sees is "choose your Super Admin
-  // password". License activation is for OPS pilots' PCs, not the admin's.
-  const [setupMode, setSetupMode] = useState(
-    !adminProvisioned && !licensed && pcRoleLock !== "ops"
-  );
+  // First-run Super Admin password setup. Triggered manually (link from the
+  // login form) or when login() returns { error: "admin_not_provisioned" }.
+  // On a fresh install we DO NOT auto-jump here — every install ships with
+  // the baked-in default admin password hash, so the Super Admin can log in
+  // straight away with the password we agreed on. They rotate it later from
+  // Admin → Security if they want.
+  const [setupMode, setSetupMode] = useState(false);
   const [setupPw1, setSetupPw1] = useState("");
   const [setupPw2, setSetupPw2] = useState("");
   const [setupErr, setSetupErr] = useState<string | null>(null);
