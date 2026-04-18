@@ -344,37 +344,70 @@ export default function FlightProgram() {
         className="bg-white text-black border border-black p-3 space-y-2 text-[11px] print:text-[10px] print:p-2"
         dir="ltr"
       >
-        {/* Header — matches the printed RJAF template exactly:
-            CLASSIFIED banner on top, 5 helicopter silhouettes row,
-            then three stacked title lines with the emblem to the left. */}
+        {/* Header — reproduces the original XLSX drawing pixel-for-pixel.
+            Positions/sizes are exact percentages of the drawing bounding box
+            (extracted from xl/drawings/drawing1.xml of the source template). */}
         <div className="text-center text-[10px] font-bold tracking-[0.4em]">CLASSIFIED</div>
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
-          <div className="flex items-center justify-start gap-2 min-w-0 overflow-hidden">
-            <img src={heloBlackhawk} alt="" className="h-12 max-w-[45%] object-contain shrink" />
-            <img src={heloLittleBird} alt="" className="h-10 max-w-[45%] object-contain shrink" />
-          </div>
-          <div className="flex flex-col items-center relative z-10 bg-white px-2">
-            <img src={emblem} alt="" className="h-20 w-20 object-contain" />
-            <div className="text-center leading-tight mt-1">
-              <input
-                value={prog.airbase}
-                onChange={(e) => update("airbase", e.target.value)}
-                className="text-sm font-bold bg-transparent text-center outline-none hover:bg-yellow-50 focus:bg-yellow-50 w-[26ch]"
-                data-testid="input-airbase"
-              />
-              <input
-                value={prog.squadron}
-                onChange={(e) => update("squadron", e.target.value)}
-                className="text-sm font-bold bg-transparent text-center outline-none hover:bg-yellow-50 focus:bg-yellow-50 w-[18ch] block mx-auto"
-                data-testid="input-squadron"
-              />
-              <div className="text-base font-bold underline tracking-wider mt-0.5">FLIGHT SCHEDULE</div>
-            </div>
-          </div>
-          <div className="flex items-center justify-end gap-2 min-w-0 overflow-hidden">
-            <img src={heloHeavy} alt="" className="h-10 max-w-[45%] object-contain shrink" />
-            <img src={heloCobra} alt="" className="h-10 max-w-[45%] object-contain shrink" />
-          </div>
+        <div className="relative w-full" style={{ aspectRatio: "20363369 / 2438400" }}>
+          {/* Blackhawk — far left */}
+          <img
+            src={heloBlackhawk}
+            alt=""
+            className="absolute object-contain"
+            style={{ left: "0%", top: "28.12%", width: "14.69%", height: "67.41%" }}
+          />
+          {/* Heavy-lift — left of center */}
+          <img
+            src={heloHeavy}
+            alt=""
+            className="absolute object-contain"
+            style={{ left: "20.23%", top: "9.37%", width: "17.10%", height: "90.62%" }}
+          />
+          {/* RJAF emblem — center */}
+          <img
+            src={emblem}
+            alt=""
+            className="absolute object-contain"
+            style={{ left: "42.47%", top: "0%", width: "12.38%", height: "57.03%" }}
+          />
+          {/* Little Bird — right of center */}
+          <img
+            src={heloLittleBird}
+            alt=""
+            className="absolute object-contain"
+            style={{ left: "65.00%", top: "28.68%", width: "12.37%", height: "53.35%" }}
+          />
+          {/* Cobra — far right, rotated ~-4° like the original */}
+          <img
+            src={heloCobra}
+            alt=""
+            className="absolute object-contain"
+            style={{
+              left: "80.72%",
+              top: "17.35%",
+              width: "19.28%",
+              height: "47.25%",
+              transform: "rotate(-4.05deg)",
+              transformOrigin: "center",
+            }}
+          />
+        </div>
+
+        {/* Title text block — sits BELOW the helicopter row, like the original */}
+        <div className="text-center leading-tight">
+          <input
+            value={prog.airbase}
+            onChange={(e) => update("airbase", e.target.value)}
+            className="text-sm font-bold bg-transparent text-center outline-none hover:bg-yellow-50 focus:bg-yellow-50 w-[28ch]"
+            data-testid="input-airbase"
+          />
+          <input
+            value={prog.squadron}
+            onChange={(e) => update("squadron", e.target.value)}
+            className="text-sm font-bold bg-transparent text-center outline-none hover:bg-yellow-50 focus:bg-yellow-50 w-[20ch] block mx-auto"
+            data-testid="input-squadron"
+          />
+          <div className="text-base font-bold underline tracking-wider mt-0.5">FLIGHT SCHEDULE</div>
         </div>
 
         {/* Day + Date row */}
