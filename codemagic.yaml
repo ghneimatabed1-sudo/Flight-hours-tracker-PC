@@ -1,98 +1,49 @@
 workflows:
+  # ──────────────────────────────────────────────────────────────────────
+  # Android APK — RJAF Pilot Logbook (unsigned preview build)
+  #
+  # Produces a debug-signed APK you can hand to pilots on any Android
+  # phone without an Play Store account. Uses `expo prebuild` so the
+  # native android/ folder is generated at build time from app.json.
+  # ──────────────────────────────────────────────────────────────────────
   android-apk:
-    name: Flight Hour Tracker - Android APK (debug)
+    name: RJAF Pilot Logbook — Android APK
     max_build_duration: 60
-    instance_type: mac_mini_m2
+    instance_type: linux_x2
     environment:
       node: 20
       java: 17
+      vars:
+        PACKAGE_NAME: "com.rjaf.pilotlogbook"
     scripts:
-      - name: Ensure pnpm
+      - name: Install pnpm
         script: |
-          rm -f $HOME/package.json
-          npm install -g pnpm@9.12.0 --force
-          pnpm --version
-      - name: Install dependencies (workspace root)
+          npm install -g pnpm@9
+      - name: Install workspace deps
         script: |
-          cd $CM_BUILD_DIR
-          pnpm install --no-frozen-lockfile --ignore-scripts=false
+          pnpm install --frozen-lockfile=false
       - name: Expo prebuild (android)
-        working_directory: artifacts/pilot-mobile
         script: |
-          npx expo prebuild --platform android --no-install --clean
-      - name: Build Android debug APK
-        working_directory: artifacts/pilot-mobile/android
+          cd artifacts/pilot-mobile
+          pnpm dlx expo prebuild --platform android --clean --non-interactive
+      - name: Build debug APK
         script: |
-          chmod +x ./gradlew
-          ./gradlew assembleRelease -x lint
-      - name: Collect artifact
-        script: |
-          cp $CM_BUILD_DIR/artifacts/pilot-mobile/android/app/build/outputs/apk/release/*.apk \
-             $CM_BUILD_DIR/flight-hour-tracker.apk
+          cd artifacts/pilot-mobile/android
+          chmod +x gradlew
+          ./gradlew assembleRelease -x lint -x test
     artifacts:
-      - flight-hour-tracker.apk
-    publishing:
-      email:
-        recipients:
-          - ghneimatabed1@icloud.com
-        notify:
-          success: true
-          failure: true
+      - artifacts/pilot-mobile/android/app/build/outputs/**/*.apk
 
-  ios-ipa-simulator:
-    name: Flight Hour Tracker - iOS IPA (simulator, unsigned)
-    max_build_duration: 90
-    instance_type: mac_mini_m2
-    environment:
-      node: 20
-      xcode: latest
-      cocoapods: default
-    scripts:
-      - name: Ensure pnpm
-        script: |
-          rm -f $HOME/package.json
-          npm install -g pnpm@9.12.0 --force
-          pnpm --version
-      - name: Install dependencies (workspace root)
-        script: |
-          cd $CM_BUILD_DIR
-          pnpm install --no-frozen-lockfile --ignore-scripts=false
-      - name: Expo prebuild (ios)
-        working_directory: artifacts/pilot-mobile
-        script: |
-          npx expo prebuild --platform ios --no-install --clean
-      - name: CocoaPods install
-        working_directory: artifacts/pilot-mobile/ios
-        script: |
-          pod install
-      - name: Build iOS for Simulator
-        working_directory: artifacts/pilot-mobile/ios
-        script: |
-          set -e
-          WORKSPACE=$(ls -d *.xcworkspace | head -1)
-          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
-          xcodebuild -workspace "$WORKSPACE" \
-            -scheme "$SCHEME" \
-            -configuration Release \
-            -sdk iphonesimulator \
-            -derivedDataPath build \
-            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
-          APP_PATH=$(find build/Build/Products -name "*.app" -type d | head -1)
-          mkdir -p Payload
-          cp -R "$APP_PATH" Payload/
-          zip -qr "$CM_BUILD_DIR/flight-hour-tracker-simulator.ipa" Payload
-    artifacts:
-      - flight-hour-tracker-simulator.ipa
-    publishing:
-      email:
-        recipients:
-          - ghneimatabed1@icloud.com
-        notify:
-          success: true
-          failure: true
-
-  ios-ipa-device:
-    name: Flight Hour Tracker - iOS IPA (signed, requires Apple cert)
+  # ──────────────────────────────────────────────────────────────────────
+  # iOS IPA — RJAF Pilot Logbook (unsigned / ad-hoc)
+  #
+  # Builds an .ipa you can side-load via AltStore / Sideloadly on any
+  # iPhone without a paid Apple Developer account. Flip to
+  # `app-store` distribution later by adding an ios_signing block and
+  # code-signing credentials in the Codemagic UI.
+  # ──────────────────────────────────────────────────────────────────────
+  ios-ipa:
+    name: RJAF Pilot Logbook — iOS IPA
     max_build_duration: 90
     instance_type: mac_mini_m2
     integrations:
@@ -101,51 +52,75 @@ workflows:
       node: 20
       xcode: latest
       cocoapods: default
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.rjaf.pilotlogbook
+      vars:
+        BUNDLE_ID: "com.rjaf.pilotlogbook"
     scripts:
-      - name: Ensure pnpm
+      - name: Install pnpm
         script: |
-          rm -f $HOME/package.json
-          npm install -g pnpm@9.12.0 --force
-          pnpm --version
-      - name: Install dependencies (workspace root)
+          npm install -g pnpm@9
+      - name: Install workspace deps
         script: |
-          cd $CM_BUILD_DIR
-          pnpm install --no-frozen-lockfile --ignore-scripts=false
+          pnpm install --frozen-lockfile=false
       - name: Expo prebuild (ios)
-        working_directory: artifacts/pilot-mobile
         script: |
-          npx expo prebuild --platform ios --no-install --clean
-      - name: CocoaPods install
-        working_directory: artifacts/pilot-mobile/ios
+          cd artifacts/pilot-mobile
+          pnpm dlx expo prebuild --platform ios --clean --non-interactive
+      - name: Install pods
         script: |
+          cd artifacts/pilot-mobile/ios
           pod install
-      - name: Set up signing
-        working_directory: artifacts/pilot-mobile/ios
+      - name: Build unsigned IPA (ad-hoc)
         script: |
-          keychain initialize
-          app-store-connect fetch-signing-files "com.rjaf.pilotlogbook" \
-            --type IOS_APP_STORE --create
-          keychain add-certificates
-          xcode-project use-profiles
-      - name: Build signed IPA
-        working_directory: artifacts/pilot-mobile/ios
-        script: |
-          WORKSPACE=$(ls -d *.xcworkspace | head -1)
-          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
-          xcode-project build-ipa \
-            --workspace "$WORKSPACE" \
-            --scheme "$SCHEME" \
-            --archive-flags "-destination 'generic/platform=iOS'"
-          cp build/ios/ipa/*.ipa $CM_BUILD_DIR/flight-hour-tracker.ipa
+          cd artifacts/pilot-mobile/ios
+          SCHEME=$(ls *.xcworkspace | head -1 | sed 's/.xcworkspace//')
+          xcodebuild -workspace "$SCHEME.xcworkspace" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath $CM_BUILD_DIR/build/PilotLogbook.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            archive
+          # Repackage .xcarchive -> .ipa without re-signing
+          mkdir -p $CM_BUILD_DIR/build/Payload
+          cp -R $CM_BUILD_DIR/build/PilotLogbook.xcarchive/Products/Applications/*.app \
+                $CM_BUILD_DIR/build/Payload/
+          cd $CM_BUILD_DIR/build
+          zip -qr PilotLogbook-unsigned.ipa Payload
     artifacts:
-      - flight-hour-tracker.ipa
-    publishing:
-      email:
-        recipients:
-          - ghneimatabed1@icloud.com
-        notify:
-          success: true
-          failure: true
+      - build/*.ipa
+      - build/**/*.xcarchive
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Windows EXE — RJAF Squadron Ops installer (Electron + NSIS)
+  #
+  # Produces the one-click NSIS installer ops officers run on the
+  # squadron PC. INSTALL_PASSWORD can be set per-build in the Codemagic
+  # UI; if omitted, a placeholder is used for sanity testing.
+  # ──────────────────────────────────────────────────────────────────────
+  windows-exe:
+    name: RJAF Squadron Ops — Windows Installer
+    max_build_duration: 60
+    instance_type: windows_x2
+    environment:
+      node: 20
+      vars:
+        INSTALL_PASSWORD: "Encrypted(change-me-in-codemagic-ui)"
+    scripts:
+      - name: Install pnpm
+        script: |
+          npm install -g pnpm@9
+      - name: Install workspace deps
+        script: |
+          pnpm install --frozen-lockfile=false
+      - name: Install Electron toolchain
+        script: |
+          cd artifacts/pilot-dashboard
+          pnpm add -D electron@^32 electron-builder@^25 electron-updater@^6
+      - name: Build Windows installer
+        script: |
+          cd artifacts/pilot-dashboard
+          pnpm run electron:build
+    artifacts:
+      - artifacts/pilot-dashboard/release/*.exe
+      - artifacts/pilot-dashboard/release/latest.yml
