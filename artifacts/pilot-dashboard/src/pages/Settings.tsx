@@ -16,14 +16,20 @@ export default function Settings() {
   const [curWindow, setCurWindow] = useCurrencyWindow();
   const [curDay, setCurDay] = useState<string>(String(curWindow.day));
   const [curNvg, setCurNvg] = useState<string>(String(curWindow.nvg));
+  const [curIrt, setCurIrt] = useState<string>(String(curWindow.instrument));
+  const [curMed, setCurMed] = useState<string>(String(curWindow.medical));
   const [curSaved, setCurSaved] = useState(false);
   const saveCurrencyWindow = (e: React.FormEvent) => {
     e.preventDefault();
     const d = parseInt(curDay, 10);
     const n = parseInt(curNvg, 10);
+    const i = parseInt(curIrt, 10);
+    const m = parseInt(curMed, 10);
     setCurWindow({
       day: Number.isFinite(d) && d > 0 ? d : DEFAULT_CURRENCY_WINDOW.day,
       nvg: Number.isFinite(n) && n > 0 ? n : DEFAULT_CURRENCY_WINDOW.nvg,
+      instrument: Number.isFinite(i) && i > 0 ? i : DEFAULT_CURRENCY_WINDOW.instrument,
+      medical: Number.isFinite(m) && m > 0 ? m : DEFAULT_CURRENCY_WINDOW.medical,
     });
     setCurSaved(true);
     setTimeout(() => setCurSaved(false), 1500);
@@ -31,6 +37,8 @@ export default function Settings() {
   const resetCurrencyWindow = () => {
     setCurDay(String(DEFAULT_CURRENCY_WINDOW.day));
     setCurNvg(String(DEFAULT_CURRENCY_WINDOW.nvg));
+    setCurIrt(String(DEFAULT_CURRENCY_WINDOW.instrument));
+    setCurMed(String(DEFAULT_CURRENCY_WINDOW.medical));
     setCurWindow({ ...DEFAULT_CURRENCY_WINDOW });
     setCurSaved(true);
     setTimeout(() => setCurSaved(false), 1500);
@@ -72,14 +80,14 @@ export default function Settings() {
           <form onSubmit={saveCurrencyWindow} className="space-y-3">
             <div className="text-sm font-semibold">{t("currencyWindowTitle")}</div>
             <p className="text-xs text-muted-foreground">{t("currencyWindowBlurb")}</p>
-            <div className="grid grid-cols-2 gap-3 max-w-md">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-2xl">
               <label className="block">
                 <span className="text-xs text-muted-foreground">{t("dayCurrencyDays")}</span>
                 <div className="flex items-center gap-2 mt-1">
                   <input
                     type="number"
                     min={1}
-                    max={365}
+                    max={1095}
                     value={curDay}
                     onChange={e => setCurDay(e.target.value)}
                     data-testid="input-currency-window-day"
@@ -94,10 +102,40 @@ export default function Settings() {
                   <input
                     type="number"
                     min={1}
-                    max={365}
+                    max={1095}
                     value={curNvg}
                     onChange={e => setCurNvg(e.target.value)}
                     data-testid="input-currency-window-nvg"
+                    className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm font-mono"
+                  />
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">{t("days")}</span>
+                </div>
+              </label>
+              <label className="block">
+                <span className="text-xs text-muted-foreground">{t("instrumentCurrencyDays")}</span>
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={1095}
+                    value={curIrt}
+                    onChange={e => setCurIrt(e.target.value)}
+                    data-testid="input-currency-window-instrument"
+                    className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm font-mono"
+                  />
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">{t("days")}</span>
+                </div>
+              </label>
+              <label className="block">
+                <span className="text-xs text-muted-foreground">{t("medicalCurrencyDays")}</span>
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={1095}
+                    value={curMed}
+                    onChange={e => setCurMed(e.target.value)}
+                    data-testid="input-currency-window-medical"
                     className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm font-mono"
                   />
                   <span className="text-xs text-muted-foreground whitespace-nowrap">{t("days")}</span>
@@ -108,7 +146,13 @@ export default function Settings() {
               <button type="submit" className="px-4 py-2 rounded-md bg-primary text-primary-foreground font-medium text-sm" data-testid="button-save-currency-window">{t("save_changes")}</button>
               <button type="button" onClick={resetCurrencyWindow} className="px-4 py-2 rounded-md bg-secondary border border-border text-sm" data-testid="button-reset-currency-window">{t("resetDefaults")}</button>
               {curSaved && <span className="text-emerald-300 text-sm">✔</span>}
-              <span className="text-[11px] text-muted-foreground ms-auto">{t("currentWindow")}: Day <span className="font-mono">{curWindow.day}d</span> · NVG <span className="font-mono">{curWindow.nvg}d</span></span>
+              <span className="text-[11px] text-muted-foreground ms-auto">
+                {t("currentWindow")}:
+                {" "}Day <span className="font-mono">{curWindow.day}d</span>
+                {" · "}NVG <span className="font-mono">{curWindow.nvg}d</span>
+                {" · "}IRT <span className="font-mono">{curWindow.instrument}d</span>
+                {" · "}Med <span className="font-mono">{curWindow.medical}d</span>
+              </span>
             </div>
           </form>
         </Card>
