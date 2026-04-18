@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { KeyRound, ShieldCheck, ShieldAlert, RefreshCw, Lock, Monitor, LifeBuoy } from "lucide-react";
 import type { PcRoleLock } from "@/lib/auth";
+import { BackupCard } from "@/components/BackupCard";
 
 export default function AdminSecurity() {
   const { t } = useI18n();
@@ -631,6 +632,11 @@ export default function AdminSecurity() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Password-protected export / restore of the full squadron install.
+          Lives at the bottom of the Security page so the super-admin sees
+          it alongside the other recovery tools. */}
+      <BackupCard />
     </div>
   );
 }

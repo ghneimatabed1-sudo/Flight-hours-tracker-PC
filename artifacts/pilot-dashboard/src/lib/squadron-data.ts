@@ -1348,3 +1348,43 @@ export function useReminderOverview(): UseQueryResult<ReminderOverviewRow[]> & {
     data: q.data ?? getMockReminderOverview(),
   } as UseQueryResult<ReminderOverviewRow[]> & { data: ReminderOverviewRow[] };
 }
+
+// ── backup / restore helpers ────────────────────────────────────────────
+//
+// The offline squadron deployment keeps its operational data in the module
+// -level mock arrays above (mockPilotsList, MOCK_SORTIES, mockNotamsList,
+// mockUnavailList, mockUsersList). These helpers let `lib/backup.ts`
+// serialise that state into an encrypted export and slam it back in on a
+// fresh install after an uninstall/reinstall. They are intentionally no-ops
+// when Supabase is configured: the canonical store is the cloud, and the
+// mock arrays are not in the data path on that install.
+
+export interface SquadronMockState {
+  pilots: Pilot[];
+  sorties: Sortie[];
+  notams: NotamRow[];
+  unavail: UnavailEntry[];
+  users: AppUser[];
+}
+
+export function exportSquadronMockState(): SquadronMockState {
+  if (isLive()) {
+    return { pilots: [], sorties: [], notams: [], unavail: [], users: [] };
+  }
+  return {
+    pilots: [...getMockPilots()],
+    sorties: [...MOCK_SORTIES],
+    notams: [...getMockNotams()],
+    unavail: [...mockUnavailList ?? []],
+    users: [...getMockUsers()],
+  };
+}
+
+export function applySquadronMockState(s: SquadronMockState): void {
+  if (isLive()) return;
+  mockPilotsList = [...(s.pilots ?? [])];
+  MOCK_SORTIES.splice(0, MOCK_SORTIES.length, ...(s.sorties ?? []));
+  mockNotamsList = [...(s.notams ?? [])];
+  mockUnavailList = [...(s.unavail ?? [])];
+  mockUsersList = [...(s.users ?? [])];
+}

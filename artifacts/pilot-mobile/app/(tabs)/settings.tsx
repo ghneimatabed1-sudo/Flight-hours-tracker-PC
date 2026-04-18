@@ -7,6 +7,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -65,6 +66,48 @@ export default function SettingsScreen() {
 
   const profile = snapshot.profile;
   const topPad = (Platform.OS === "web" ? 67 : insets.top) + 12;
+
+  // Hand the pilot a copy of their logbook (profile + every cached sortie).
+  // Uses the native Share sheet on phones and a plain download on web —
+  // no new native modules required. The pilot picks where the file goes
+  // (AirDrop, email, Drive, WhatsApp…), and keeps it as a personal backup
+  // independent of the squadron PC. We intentionally do NOT offer a
+  // "restore" on mobile: re-linking the device from the PC is the clean
+  // recovery path and it gets the freshest data every time.
+  const exportLogbook = async () => {
+    if (!snapshot) return;
+    const payload = {
+      kind: "rjaf-pilot-logbook",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      profile: snapshot.profile,
+      sorties: snapshot.sorties,
+      totals: { count: snapshot.sorties.length },
+    };
+    const text = JSON.stringify(payload, null, 2);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const filename = `logbook-${snapshot.profile.militaryNumber || "pilot"}-${stamp}.json`;
+    try {
+      if (Platform.OS === "web") {
+        const blob = new Blob([text], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } else {
+        await Share.share({
+          title: filename,
+          message: text,
+        });
+      }
+    } catch (e) {
+      Alert.alert(t("settings_export_failed"), String((e as Error).message || e));
+    }
+  };
 
   const confirmUnlink = () => {
     if (Platform.OS === "web") {
@@ -374,6 +417,66 @@ export default function SettingsScreen() {
           {t("credits_blurb")}
         </Text>
       </View>
+
+      {/* ── Export logbook ─────────────────────────────
+          Gives the pilot a personal copy of their hours they can keep
+          on iCloud / Drive / email. The PC is still the source of truth. */}
+      <Text
+        style={[
+          styles.section,
+          { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
+        ]}
+      >
+        {t("settings_backup")}
+      </Text>
+      <Pressable
+        onPress={exportLogbook}
+        style={({ pressed }) => [
+          styles.row,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            flexDirection: isRTL ? "row-reverse" : "row",
+            opacity: pressed ? 0.85 : 1,
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.helpIcon,
+            { backgroundColor: colors.muted, borderColor: colors.border },
+          ]}
+        >
+          <Feather name="download" size={16} color={colors.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text
+            style={[
+              styles.rowValue,
+              { color: colors.foreground, textAlign: isRTL ? "right" : "left" },
+            ]}
+          >
+            {t("settings_export_logbook")}
+          </Text>
+          <Text
+            style={[
+              styles.rowLabel,
+              {
+                color: colors.mutedForeground,
+                textAlign: isRTL ? "right" : "left",
+                marginTop: 2,
+              },
+            ]}
+          >
+            {t("settings_export_logbook_hint")}
+          </Text>
+        </View>
+        <Feather
+          name={isRTL ? "chevron-left" : "chevron-right"}
+          size={18}
+          color={colors.mutedForeground}
+        />
+      </Pressable>
 
       <Pressable
         onPress={confirmUnlink}
