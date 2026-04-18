@@ -25,7 +25,7 @@ workflows:
       - name: Expo prebuild (android)
         script: |
           cd artifacts/pilot-mobile
-          CI=true pnpm exec expo prebuild --platform android --clean
+          CI=true EXPO_NO_GIT_STATUS=1 pnpm exec expo prebuild --platform android --clean
       - name: Build debug APK
         script: |
           cd artifacts/pilot-mobile/android
@@ -62,29 +62,51 @@ workflows:
       - name: Expo prebuild (ios)
         script: |
           cd artifacts/pilot-mobile
-          CI=true pnpm exec expo prebuild --platform ios --clean
+          CI=true EXPO_NO_GIT_STATUS=1 pnpm exec expo prebuild --platform ios --clean
       - name: Install pods
         script: |
           cd artifacts/pilot-mobile/ios
           pod install
       - name: Build unsigned IPA (ad-hoc)
         script: |
+          set -euo pipefail
           cd artifacts/pilot-mobile/ios
-          SCHEME=$(ls *.xcworkspace | head -1 | sed 's/.xcworkspace//')
-          xcodebuild -workspace "$SCHEME.xcworkspace" \
+          # `.xcworkspace` is a directory bundle, so `ls *.xcworkspace`
+          # would list its contents. Use `-d` to list the directory itself.
+          WORKSPACE=$(ls -d *.xcworkspace 2>/dev/null | head -1)
+          if [ -z "$WORKSPACE" ]; then
+            echo "ERROR: no .xcworkspace found in $(pwd). Listing:"; ls -la
+            exit 1
+          fi
+          SCHEME="${WORKSPACE%.xcworkspace}"
+          echo "Workspace: $WORKSPACE | Scheme: $SCHEME"
+          xcodebuild -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
-            -archivePath $CM_BUILD_DIR/build/PilotLogbook.xcarchive \
+            -archivePath "$CM_BUILD_DIR/build/PilotLogbook.xcarchive" \
             CODE_SIGNING_ALLOWED=NO \
             archive
+          # Verify the .app was produced before packaging
+          APP_PATH=$(ls -d "$CM_BUILD_DIR/build/PilotLogbook.xcarchive/Products/Applications/"*.app | head -1)
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: archive produced no .app bundle"
+            ls -la "$CM_BUILD_DIR/build/PilotLogbook.xcarchive/Products/Applications/" || true
+            exit 1
+          fi
+          echo "App bundle: $APP_PATH"
           # Repackage .xcarchive -> .ipa without re-signing
-          mkdir -p $CM_BUILD_DIR/build/Payload
-          cp -R $CM_BUILD_DIR/build/PilotLogbook.xcarchive/Products/Applications/*.app \
-                $CM_BUILD_DIR/build/Payload/
-          cd $CM_BUILD_DIR/build
+          mkdir -p "$CM_BUILD_DIR/build/Payload"
+          cp -R "$APP_PATH" "$CM_BUILD_DIR/build/Payload/"
+          cd "$CM_BUILD_DIR/build"
           zip -qr PilotLogbook-unsigned.ipa Payload
+          IPA_SIZE=$(stat -f%z PilotLogbook-unsigned.ipa)
+          echo "IPA size: $IPA_SIZE bytes"
+          if [ "$IPA_SIZE" -lt 1000000 ]; then
+            echo "ERROR: IPA is suspiciously small ($IPA_SIZE bytes) — failing build"
+            exit 1
+          fi
     artifacts:
       - build/*.ipa
       - build/**/*.xcarchive
