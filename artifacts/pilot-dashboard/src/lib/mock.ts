@@ -109,6 +109,18 @@ export interface Sortie {
   remarks?: string;
   imported?: boolean;
   importedAt?: string;
+  // ── New simple-mode fields (added Apr 2026) ────────────────────────────
+  // The simplified Add Sortie page enters a single Time number plus per-seat
+  // metadata; we still derive the legacy day1/day2/night1/night2/dayDual/
+  // nightDual buckets for backward compatibility with monthly reports and
+  // the mobile app's roll-ups.
+  time?: number;
+  dual?: boolean;
+  pilotPosition?: "1st" | "2nd";
+  coPilotPosition?: "1st" | "2nd";
+  pilotIsCaptain?: boolean;
+  coPilotIsCaptain?: boolean;
+  msnDuty?: string;
 }
 
 function daysFromNow(d: number): string {

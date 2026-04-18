@@ -52,7 +52,12 @@ export function computePilotTotals(pilot: Pilot, allSorties: Sortie[]): PilotTot
     if (!isP1 && !isP2) continue;
 
     const c = sortieCategories(s);
-    const cap = isP1 ? c.actual : 0;
+    // Captain credit prefers explicit per-seat flag (set by the new
+    // simple-mode Add Sortie page). Falls back to legacy assumption that
+    // P1 = captain when the flags are absent.
+    const flag = isP1 ? s.pilotIsCaptain : s.coPilotIsCaptain;
+    const captainCredit = typeof flag === "boolean" ? flag : isP1;
+    const cap = captainCredit ? c.actual : 0;
 
     aDay += c.day; aNight += c.night; aNvg += c.nvg; aSim += c.sim; aCap += cap;
 

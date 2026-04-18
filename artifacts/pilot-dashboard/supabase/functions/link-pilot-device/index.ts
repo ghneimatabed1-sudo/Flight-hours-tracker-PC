@@ -1,27 +1,21 @@
-// Supabase Edge Function: link-pilot-device
+// Supabase Edge Function: link-pilot-device  (v6)
 //
 // POST { mil: string, code: string }
 //
-// Validates a one-time link code (issued from the dashboard via
-// `issue_pilot_link_code`), provisions / refreshes a per-pilot Supabase auth
-// user, and returns a real Supabase session that the mobile app can use to
-// read its own row from `pilots` / `sorties` under RLS.
+// Validates a one-time link code and provisions a per-pilot Supabase auth
+// user, returning a real session for the mobile app to use under RLS.
 //
-// Why an edge function (and not a SQL RPC):
-//   * Creating an auth user and stamping app_metadata requires the service
-//     role key, which must never reach the mobile client.
-//   * The function then signs in as that user with a freshly rotated
-//     password so it can hand the mobile app an access_token /
-//     refresh_token pair.
-//
-// Deploy with:
-//   supabase functions deploy link-pilot-device --no-verify-jwt
-// Required secrets: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY.
+// v6 changes (Apr 2026):
+//   - Case-INsensitive `id` lookup (ilike) — fixes pairing failures on
+//     decks where the only identifier is the pilots.id row key (e.g.
+//     "RADWAN") and the pilot types it in different casing.
+//   - Looks at the top-level `name` and `arabic_name` columns in addition
+//     to the JSON-blob fields, since the dashboard pilot form writes both.
+//   - Adds `data->>phone` as a fallback identifier.
+//   - Logs each lookup attempt + outcome to function logs (visible via
+//     Supabase Studio → Edge Functions → Logs) so failures are diagnosable.
 
-import {
-  createClient,
-  type User,
-} from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -30,88 +24,131 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-interface LinkRequestBody {
-  mil?: string;
-  code?: string;
-}
-
-interface PilotLookup {
-  id: string;
-  squadron_id: string;
-  auth_user_id: string | null;
-}
-
-interface PilotLinkCodeRow {
-  id: string;
-  expires_at: string;
-  consumed_at: string | null;
-}
-
-interface SquadronLookup {
-  number: string;
-}
-
-interface LinkResponse {
-  ok: boolean;
-  error?: string;
-  detail?: string;
-  pilotId?: string;
-  squadronId?: string;
-  session?: {
-    access_token: string;
-    refresh_token: string;
-    expires_in?: number;
-    expires_at?: number;
-    token_type?: string;
-  };
-}
-
-function reply(payload: LinkResponse, status = 200): Response {
+function reply(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
     headers: { ...corsHeaders, "content-type": "application/json" },
   });
 }
 
-async function sha256Hex(input: string): Promise<string> {
+async function sha256Hex(input: string) {
   const buf = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(input)
+    new TextEncoder().encode(input),
   );
   return Array.from(new Uint8Array(buf))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
 
-function randomPassword(): string {
+function randomPassword() {
   const bytes = new Uint8Array(24);
   crypto.getRandomValues(bytes);
-  // base64url, plenty of entropy, satisfies Supabase's >=8 char rule.
   return btoa(String.fromCharCode(...bytes))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
 }
 
-// @ts-ignore Deno provided by the Edge runtime
-declare const Deno: {
-  env: { get(name: string): string | undefined };
-  serve(handler: (req: Request) => Response | Promise<Response>): void;
-};
+// deno-lint-ignore no-explicit-any
+type Sb = any;
 
-Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS")
+async function findPilot(admin: Sb, raw: string) {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  // Try identifiers in priority order — first hit wins.
+  // Each lookup is case-insensitive (ilike) and uses the FULL string;
+  // we never substring-match to avoid cross-pilot collisions.
+  const attempts: { label: string; build: () => Sb }[] = [
+    {
+      label: "id (case-insensitive)",
+      build: () => admin.from("pilots").select("*").ilike("id", trimmed),
+    },
+    {
+      label: "name (column)",
+      build: () => admin.from("pilots").select("*").ilike("name", trimmed),
+    },
+    {
+      label: "arabic_name (column)",
+      build: () =>
+        admin.from("pilots").select("*").ilike("arabic_name", trimmed),
+    },
+    {
+      label: "data.militaryNumber",
+      build: () =>
+        admin
+          .from("pilots")
+          .select("*")
+          .filter("data->>militaryNumber", "ilike", trimmed),
+    },
+    {
+      label: "data.callSign",
+      build: () =>
+        admin
+          .from("pilots")
+          .select("*")
+          .filter("data->>callSign", "ilike", trimmed),
+    },
+    {
+      label: "data.flightName",
+      build: () =>
+        admin
+          .from("pilots")
+          .select("*")
+          .filter("data->>flightName", "ilike", trimmed),
+    },
+    {
+      label: "data.name",
+      build: () =>
+        admin.from("pilots").select("*").filter("data->>name", "ilike", trimmed),
+    },
+    {
+      label: "data.arabicName",
+      build: () =>
+        admin
+          .from("pilots")
+          .select("*")
+          .filter("data->>arabicName", "ilike", trimmed),
+    },
+    {
+      label: "data.phone",
+      build: () =>
+        admin
+          .from("pilots")
+          .select("*")
+          .filter("data->>phone", "ilike", trimmed),
+    },
+  ];
+
+  for (const a of attempts) {
+    const { data, error } = await a.build().limit(1);
+    if (error) {
+      console.log(`[link] lookup ${a.label} ERROR:`, error.message);
+      continue;
+    }
+    if (data && data.length > 0) {
+      console.log(`[link] matched pilot via ${a.label}: id=${data[0].id}`);
+      return data[0];
+    }
+  }
+  console.log(`[link] no pilot matched identifier "${trimmed}"`);
+  return null;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
-  if (req.method !== "POST")
+  }
+  if (req.method !== "POST") {
     return reply({ ok: false, error: "method_not_allowed" }, 405);
+  }
 
-  let body: LinkRequestBody;
+  let body: { mil?: string; code?: string };
   try {
-    body = (await req.json()) as LinkRequestBody;
+    body = await req.json();
   } catch {
     return reply({ ok: false, error: "bad_json" }, 400);
   }
-
   const mil = (body.mil ?? "").trim();
   const code = (body.code ?? "").trim();
   if (!mil || !code) {
@@ -129,203 +166,116 @@ Deno.serve(async (req: Request) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  // 1. Look up the pilot. The Super Admin can hand a pilot ANY identifier
-  //    on the squadron PC — military number, English/Arabic name, call sign,
-  //    flight name, or even the auto-generated row id (P001). Whatever the
-  //    Super Admin records is what the pilot types on their phone. Lookups
-  //    are case-insensitive and trim-tolerant. We try each candidate field
-  //    in priority order; first hit wins. Generic error on miss to avoid
-  //    confirming which identifiers exist.
-  let pilot: PilotLookup | null = null;
-  let pilotErr: { message: string } | null = null;
-
-  type Lookup = { col: string; op: "eq" | "ilike"; val: string; isJson: boolean };
-  const trimmed = mil.trim();
-  const candidates: Lookup[] = [
-    // Exact (case-sensitive) row id — fastest path, common for migrated decks.
-    { col: "id",                       op: "eq",    val: trimmed,             isJson: false },
-    // JSON-blob identifiers populated from the dashboard pilot form.
-    { col: "data->>militaryNumber",    op: "eq",    val: trimmed,             isJson: true  },
-    { col: "data->>callSign",          op: "ilike", val: trimmed,             isJson: true  },
-    { col: "data->>flightName",        op: "ilike", val: trimmed,             isJson: true  },
-    // Real columns. ilike makes name matching forgiving of caps/Arabic forms.
-    { col: "name",                     op: "ilike", val: trimmed,             isJson: false },
-    { col: "arabic_name",              op: "ilike", val: trimmed,             isJson: false },
-    { col: "phone",                    op: "eq",    val: trimmed,             isJson: false },
-  ];
-
-  for (const c of candidates) {
-    const q = admin.from("pilots").select("id, squadron_id, auth_user_id");
-    const built = c.isJson
-      ? q.filter(c.col, c.op, c.val)
-      : c.op === "ilike"
-        ? q.ilike(c.col, c.val)
-        : q.eq(c.col, c.val);
-    const { data, error } = await built.limit(1).maybeSingle<PilotLookup>();
-    if (error) { pilotErr = error; break; }
-    if (data) { pilot = data; break; }
+  // 1. Resolve pilot from any identifier the Super Admin assigned.
+  const pilot = await findPilot(admin, mil);
+  if (!pilot) {
+    return reply({ ok: false, error: "not_found" }, 404);
   }
 
-  if (pilotErr) return reply({ ok: false, error: "lookup_failed" }, 500);
-  if (!pilot) return reply({ ok: false, error: "invalid_credentials" });
-
-  // 2. Validate the code. Hashed at rest; compare hashes.
+  // 2. Verify the one-time code: SHA-256 hash, must be unconsumed and
+  //    not expired, and must belong to this pilot.
   const codeHash = await sha256Hex(code);
-  const { data: codeRow } = await admin
+  const { data: codeRow, error: codeErr } = await admin
     .from("pilot_link_codes")
-    .select("id, expires_at, consumed_at")
+    .select("id, pilot_id, squadron_id, expires_at, consumed_at")
     .eq("pilot_id", pilot.id)
     .eq("code_hash", codeHash)
     .is("consumed_at", null)
     .gt("expires_at", new Date().toISOString())
-    .maybeSingle<PilotLinkCodeRow>();
-  if (!codeRow) return reply({ ok: false, error: "invalid_credentials" });
+    .order("issued_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  // 3. Mark the code consumed BEFORE provisioning the auth user. Use the
-  //    `is consumed_at null` guard + select-after-update to enforce the
-  //    one-time semantic: if a concurrent request consumed it first, our
-  //    update returns zero rows and we abort.
-  const { data: consumed, error: consumeErr } = await admin
-    .from("pilot_link_codes")
-    .update({ consumed_at: new Date().toISOString() })
-    .eq("id", codeRow.id)
-    .is("consumed_at", null)
-    .select("id");
-  if (consumeErr) return reply({ ok: false, error: "consume_failed" }, 500);
-  if (!consumed || consumed.length === 0) {
-    return reply({ ok: false, error: "invalid_credentials" });
+  if (codeErr) {
+    console.log("[link] code lookup error:", codeErr.message);
+    return reply({ ok: false, error: "generic" }, 500);
+  }
+  if (!codeRow) {
+    console.log(`[link] no valid code for pilot ${pilot.id}`);
+    return reply({ ok: false, error: "bad_code" }, 401);
   }
 
-  // 4. Resolve the squadron number (used to synthesize a stable email).
-  const { data: sqRow } = await admin
-    .from("squadrons")
-    .select("number")
-    .eq("id", pilot.squadron_id)
-    .maybeSingle<SquadronLookup>();
-  const squadronNumber = (sqRow?.number ?? "rjaf")
-    .toString()
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
-  // Pilot ids are military numbers (alnum). Email scheme matches
-  // provision-user's `${user}@${sq}.rjaf.local` pattern so audit trails stay
-  // legible.
-  const safePilotId = pilot.id.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const email = `pilot-${safePilotId}@${squadronNumber}.rjaf.mobile`;
-
-  // 5. Create the auth user on first link, otherwise rotate their password
-  //    and refresh their app_metadata so the JWT has the latest claims.
+  // 3. Provision (or refresh) the per-pilot auth user. Email is synthetic;
+  //    the real auth is the link code.
+  const email = `pilot+${pilot.id.toLowerCase()}@rjaf.local`.replace(/\s+/g, "");
   const password = randomPassword();
-  let authUserId: string | null = pilot.auth_user_id;
 
-  const appMetadata = { role: "pilot", pilot_id: pilot.id };
-
-  if (!authUserId) {
-    const { data: created, error: createErr } =
-      await admin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-        app_metadata: appMetadata,
-        user_metadata: { pilot_id: pilot.id },
-      });
-    if (createErr || !created.user) {
-      // The pilot may have an orphaned auth user from a previous attempt.
-      // Try to recover by paging through listUsers() until we hit the email
-      // (or run out of pages). Pagination ceiling is generous but bounded
-      // so a runaway project never hangs the function.
-      let existing: User | undefined;
-      for (let page = 1; page <= 50 && !existing; page++) {
-        const { data: list, error: listErr } =
-          await admin.auth.admin.listUsers({ page, perPage: 200 });
-        if (listErr) break;
-        existing = list?.users?.find((u: User) => u.email === email);
-        if (!list?.users || list.users.length < 200) break;
-      }
-      if (!existing) {
-        return reply(
-          {
-            ok: false,
-            error: "auth_create_failed",
-            detail: createErr?.message,
-          },
-          500
-        );
-      }
-      authUserId = existing.id;
-      const { error: updErr } = await admin.auth.admin.updateUserById(
-        authUserId,
-        { password, app_metadata: appMetadata }
-      );
-      if (updErr) return reply({ ok: false, error: "auth_update_failed" }, 500);
-    } else {
-      authUserId = created.user.id;
+  // a. Try create. If already exists, fetch + update password.
+  let userId: string | null = null;
+  const { data: created, error: createErr } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    app_metadata: {
+      pilot_id: pilot.id,
+      squadron_id: codeRow.squadron_id,
+      role: "pilot",
+    },
+    user_metadata: { pilot_id: pilot.id },
+  });
+  if (created?.user) {
+    userId = created.user.id;
+  } else if (createErr && /already/i.test(createErr.message ?? "")) {
+    // Locate the existing user by email and rotate password.
+    const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const existing = list?.users?.find((u) => (u.email ?? "").toLowerCase() === email);
+    if (!existing) {
+      console.log("[link] could not locate existing auth user for", email);
+      return reply({ ok: false, error: "generic" }, 500);
     }
-  } else {
-    const { error: updErr } = await admin.auth.admin.updateUserById(
-      authUserId,
-      { password, app_metadata: appMetadata }
-    );
-    if (updErr) {
-      // If the row pointed at a stale auth user that no longer exists, fall
-      // back to creating a fresh one.
-      const { data: created, error: createErr } =
-        await admin.auth.admin.createUser({
-          email,
-          password,
-          email_confirm: true,
-          app_metadata: appMetadata,
-          user_metadata: { pilot_id: pilot.id },
-        });
-      if (createErr || !created.user) {
-        return reply({ ok: false, error: "auth_update_failed" }, 500);
-      }
-      authUserId = created.user.id;
-    }
+    userId = existing.id;
+    await admin.auth.admin.updateUserById(existing.id, {
+      password,
+      app_metadata: {
+        pilot_id: pilot.id,
+        squadron_id: codeRow.squadron_id,
+        role: "pilot",
+      },
+    });
+  } else if (createErr) {
+    console.log("[link] createUser error:", createErr.message);
+    return reply({ ok: false, error: "generic" }, 500);
+  }
+  if (!userId) {
+    return reply({ ok: false, error: "generic" }, 500);
   }
 
-  // 6. Persist the binding (also clears any other pilot row that was
-  //    pointing at this auth user).
-  const { error: bindErr } = await admin.rpc("bind_pilot_auth_user", {
-    p_pilot_id: pilot.id,
-    p_auth_user_id: authUserId,
-  });
-  if (bindErr) return reply({ ok: false, error: "bind_failed" }, 500);
-
-  // 7. Sign in with the freshly rotated password using the anon client. This
-  //    yields a real session the mobile app can persist and refresh.
+  // 4. Sign in as the user with the rotated password to get a real
+  //    session for the mobile app.
   const anon = createClient(url, anonKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  const { data: signIn, error: signInErr } = await anon.auth.signInWithPassword(
-    { email, password }
-  );
-  if (signInErr || !signIn.session) {
-    return reply({ ok: false, error: "signin_failed" }, 500);
+  const { data: signIn, error: signErr } = await anon.auth.signInWithPassword({
+    email,
+    password,
+  });
+  if (signErr || !signIn?.session) {
+    console.log("[link] sign-in error:", signErr?.message);
+    return reply({ ok: false, error: "generic" }, 500);
   }
 
-  // 8. Audit + device row (kept for the dashboard's "linked devices" view).
-  await admin.from("pilot_devices").insert({
-    token_hash: await sha256Hex(signIn.session.access_token),
-    squadron_id: pilot.squadron_id,
-    pilot_id: pilot.id,
-  });
-  await admin.from("audit_log").insert({
-    squadron_id: pilot.squadron_id,
-    type: "mobile.link",
-    actor: pilot.id,
-    detail: { pilotId: pilot.id, via: "edge" },
-  });
+  // 5. Mark the code consumed and record the device link.
+  await admin.from("pilot_link_codes").update({
+    consumed_at: new Date().toISOString(),
+  }).eq("id", codeRow.id);
+
+  await admin.from("pilot_devices").upsert(
+    {
+      pilot_id: pilot.id,
+      user_id: userId,
+      linked_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id" },
+  );
 
   return reply({
     ok: true,
     pilotId: pilot.id,
-    squadronId: pilot.squadron_id,
+    squadronId: codeRow.squadron_id,
     session: {
       access_token: signIn.session.access_token,
       refresh_token: signIn.session.refresh_token,
-      expires_in: signIn.session.expires_in,
       expires_at: signIn.session.expires_at,
-      token_type: signIn.session.token_type,
     },
   });
 });

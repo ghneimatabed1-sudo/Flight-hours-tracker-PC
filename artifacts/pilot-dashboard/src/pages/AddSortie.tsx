@@ -1,80 +1,290 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { usePilots, useCreateSortie } from "@/lib/squadron-data";
+import {
+  usePilots,
+  useSorties,
+  useCreateSortie,
+  useUpdateSortie,
+  useDeleteSortie,
+  deriveSortieBuckets,
+} from "@/lib/squadron-data";
 import { useToast } from "@/hooks/use-toast";
-import { Plane, UserPlus } from "lucide-react";
+import type { Sortie } from "@/lib/mock";
+import { Plane, Pencil, Trash2, X } from "lucide-react";
+
+// Re-creates the look of the legacy "ADD SORTIES" Access form (image 1):
+// a single compact row of inputs, a list of all entries below, and inline
+// Edit/Delete controls. Per-seat position (1st/2nd PLT) + "Count as
+// Captain" toggles drive the credited bucket via deriveSortieBuckets.
+
+const SORTIE_TYPES = [
+  "MSN DAY", "MSN NIGHT", "MSN NVG",
+  "TRG DAY", "TRG NIGHT", "TRG NVG",
+  "NAV", "NAV DAY", "NAV NIGHT",
+  "FCF", "ACADEMIC", "EMER", "INSTR",
+  "CHECK RIDE", "TRANSPORT", "SAR", "MEDEVAC",
+  "Other…",
+];
+
+type Condition = "Day" | "Night" | "NVG";
+type SeatPos = "1st" | "2nd";
+
+interface FormState {
+  id: string | null;
+  date: string;
+  acType: string;
+  acNumber: string;
+  pilot: string;
+  coPilot: string;
+  pilotPosition: SeatPos;
+  coPilotPosition: SeatPos;
+  pilotIsCaptain: boolean;
+  coPilotIsCaptain: boolean;
+  sortieType: string;
+  sortieTypeOther: string;
+  msnDuty: string;
+  condition: Condition;
+  dual: boolean;
+  time: string; // keep as string for free typing, parse on submit
+  sim: string;
+  actual: string;
+  remarks: string;
+}
+
+const blankForm = (): FormState => ({
+  id: null,
+  date: new Date().toISOString().slice(0, 10),
+  acType: "UH-60M",
+  acNumber: "",
+  pilot: "",
+  coPilot: "",
+  pilotPosition: "1st",
+  coPilotPosition: "2nd",
+  pilotIsCaptain: true,
+  coPilotIsCaptain: false,
+  sortieType: "TRG DAY",
+  sortieTypeOther: "",
+  msnDuty: "",
+  condition: "Day",
+  dual: false,
+  time: "",
+  sim: "",
+  actual: "",
+  remarks: "",
+});
 
 export default function AddSortie() {
   const { t } = useI18n();
   const { toast } = useToast();
   const { data: PILOTS } = usePilots();
+  const { data: SORTIES } = useSorties();
   const create = useCreateSortie();
-  const [pilotExt, setPilotExt] = useState(false);
-  const [coPilotExt, setCoPilotExt] = useState(false);
-  const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
-    acType: "UH-60M", acNumber: "",
-    pilot: PILOTS[0]?.id ?? "", coPilot: PILOTS[1]?.id ?? "",
-    pilotExtName: "", pilotExtSqn: "",
-    coPilotExtName: "", coPilotExtSqn: "",
-    sortieType: "Training", name: "NAV",
-    condition: "Day" as "Day" | "Night" | "NVG",
-    remarks: "",
-    day1: 0, day2: 0, dayDual: 0,
-    night1: 0, night2: 0, nightDual: 0,
-    nvg: 0, sim: 0, actual: 0,
-  });
-  useEffect(() => {
-    if (!form.pilot && PILOTS[0]) setForm(f => ({ ...f, pilot: PILOTS[0].id, coPilot: PILOTS[1]?.id ?? PILOTS[0].id }));
-  }, [PILOTS, form.pilot]);
-  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm(f => ({ ...f, [k]: v }));
+  const update = useUpdateSortie();
+  const del = useDeleteSortie();
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pilotExt && !form.pilotExtName.trim()) { toast({ title: t("externalMissingName"), variant: "destructive" }); return; }
-    if (coPilotExt && !form.coPilotExtName.trim()) { toast({ title: t("externalMissingName"), variant: "destructive" }); return; }
+  const [form, setForm] = useState<FormState>(blankForm);
+  const [confirmDel, setConfirmDel] = useState<Sortie | null>(null);
+
+  // Seed pilot/co-pilot defaults once roster loads.
+  useEffect(() => {
+    if (!form.pilot && PILOTS[0]) {
+      setForm(f => ({
+        ...f,
+        pilot: PILOTS[0].id,
+        coPilot: PILOTS[1]?.id ?? PILOTS[0].id,
+      }));
+    }
+  }, [PILOTS, form.pilot]);
+
+  const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
+    setForm(f => ({ ...f, [k]: v }));
+
+  const pilotOpts = useMemo(
+    () => PILOTS.map(p => ({ value: p.id, label: `${p.rank} ${p.name}` })),
+    [PILOTS],
+  );
+  const pilotById = (id: string) => PILOTS.find(p => p.id === id);
+
+  // Today's sorties (and the row currently being edited) — matches the old
+  // form's scoped table.
+  const todaySorties = useMemo(() => {
+    const list = SORTIES.filter(s => s.date === form.date);
+    return [...list].sort((a, b) => (a.id < b.id ? 1 : -1));
+  }, [SORTIES, form.date]);
+
+  const totals = useMemo(() => {
+    let s = 0, h = 0;
+    for (const r of todaySorties) {
+      s += 1;
+      const t =
+        Number(r.actual) ||
+        Number(r.day1 || 0) + Number(r.day2 || 0) + Number(r.dayDual || 0) +
+        Number(r.night1 || 0) + Number(r.night2 || 0) + Number(r.nightDual || 0);
+      h += Number.isFinite(t) ? t : 0;
+    }
+    return { s, h: +h.toFixed(1) };
+  }, [todaySorties]);
+
+  const resetForm = () => setForm(f => ({ ...blankForm(), date: f.date, acType: f.acType, acNumber: f.acNumber, pilot: f.pilot, coPilot: f.coPilot }));
+
+  const submit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const time = parseFloat(form.time || "0");
+    if (!(time > 0) && !form.sim && !form.actual) {
+      toast({ title: "Time required", description: "Enter Time, Sim, or Actual hours.", variant: "destructive" });
+      return;
+    }
+    if (form.pilot === form.coPilot && form.pilot) {
+      toast({ title: "Pilot and Co-Pilot are the same", variant: "destructive" });
+      return;
+    }
+    const buckets = deriveSortieBuckets({
+      time,
+      condition: form.condition,
+      pilotPosition: form.pilotPosition,
+      dual: form.dual,
+    });
+    const sortieType = form.sortieType === "Other…" ? form.sortieTypeOther.trim() || "OTHER" : form.sortieType;
+    const payload: Omit<Sortie, "id"> = {
+      date: form.date,
+      acType: form.acType,
+      acNumber: form.acNumber.trim(),
+      pilotId: form.pilot,
+      coPilotId: form.coPilot,
+      sortieType,
+      name: form.msnDuty.trim() || sortieType,
+      condition: form.condition,
+      remarks: form.remarks.trim() || undefined,
+      day1: buckets.day1, day2: buckets.day2, dayDual: buckets.dayDual,
+      night1: buckets.night1, night2: buckets.night2, nightDual: buckets.nightDual,
+      nvg: buckets.nvg,
+      sim: parseFloat(form.sim || "0") || 0,
+      actual: parseFloat(form.actual || String(buckets.actual)) || buckets.actual,
+      time,
+      dual: form.dual,
+      pilotPosition: form.pilotPosition,
+      coPilotPosition: form.coPilotPosition,
+      pilotIsCaptain: form.pilotIsCaptain,
+      coPilotIsCaptain: form.coPilotIsCaptain,
+      msnDuty: form.msnDuty.trim() || undefined,
+    };
     try {
-      await create.mutateAsync({
-        date: form.date, acType: form.acType, acNumber: form.acNumber,
-        pilotId: pilotExt ? "" : form.pilot,
-        coPilotId: coPilotExt ? "" : form.coPilot,
-        pilotExternal: pilotExt ? { name: form.pilotExtName.trim(), squadron: form.pilotExtSqn.trim() } : undefined,
-        coPilotExternal: coPilotExt ? { name: form.coPilotExtName.trim(), squadron: form.coPilotExtSqn.trim() } : undefined,
-        sortieType: form.sortieType, name: form.name,
-        condition: form.condition,
-        remarks: form.remarks.trim() || undefined,
-        day1: form.day1, day2: form.day2, dayDual: form.dayDual,
-        night1: form.night1, night2: form.night2, nightDual: form.nightDual,
-        nvg: form.nvg, sim: form.sim, actual: form.actual,
-      });
-      toast({ title: t("savedTitle"), description: t("sortieSavedMsg") });
-      if (pilotExt || coPilotExt) {
-        toast({ title: t("externalLoggedTitle"), description: t("externalLoggedMsg") });
+      if (form.id) {
+        await update.mutateAsync({ sortie: { ...payload, id: form.id } as Sortie });
+        toast({ title: "Sortie updated" });
+      } else {
+        await create.mutateAsync(payload);
+        toast({ title: "Sortie added" });
       }
-    } catch { /* surfaced by the global error toast */ }
+      resetForm();
+    } catch {
+      /* surfaced by global error toast */
+    }
   };
 
-  const pilotOpts = PILOTS.map(p => ({ value: p.id, label: `${p.rank} ${p.name}` }));
-  const pilotById = (id: string) => PILOTS.find(p => p.id === id);
-  const selectedPilot = !pilotExt ? pilotById(form.pilot) : null;
-  const selectedCoPilot = !coPilotExt ? pilotById(form.coPilot) : null;
+  const loadForEdit = (s: Sortie) => {
+    setForm({
+      id: s.id,
+      date: s.date,
+      acType: s.acType || "UH-60M",
+      acNumber: s.acNumber || "",
+      pilot: s.pilotId,
+      coPilot: s.coPilotId,
+      pilotPosition: s.pilotPosition ?? "1st",
+      coPilotPosition: s.coPilotPosition ?? "2nd",
+      pilotIsCaptain: s.pilotIsCaptain ?? true,
+      coPilotIsCaptain: s.coPilotIsCaptain ?? false,
+      sortieType: SORTIE_TYPES.includes(s.sortieType) ? s.sortieType : "Other…",
+      sortieTypeOther: SORTIE_TYPES.includes(s.sortieType) ? "" : s.sortieType,
+      msnDuty: s.msnDuty ?? s.name ?? "",
+      condition: (s.condition as Condition) || "Day",
+      dual: !!s.dual,
+      time: String(s.time ?? s.actual ?? ""),
+      sim: String(s.sim || ""),
+      actual: String(s.actual || ""),
+      remarks: s.remarks || "",
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const doDelete = async () => {
+    if (!confirmDel) return;
+    try {
+      await del.mutateAsync({ id: confirmDel.id });
+      toast({ title: "Sortie deleted" });
+    } finally {
+      setConfirmDel(null);
+    }
+  };
+
+  const seatLabel = (id: string, ext?: { name: string }) => {
+    if (ext?.name) return ext.name;
+    const p = pilotById(id);
+    return p ? `${p.rank} ${p.name}` : id || "—";
+  };
 
   return (
     <div>
       <PageHead title={t("nav_addsortie")} subtitle="New flight entry · auto-syncs to Supabase" />
-      <form onSubmit={submit} className="grid lg:grid-cols-3 gap-4">
-        <Card className="space-y-3 lg:col-span-2">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <Field label={t("date")} type="date" value={form.date} onChange={v => set("date", v)} />
-            <Select label={t("acType")} value={form.acType} onChange={v => set("acType", v)} opts={["UH-60M", "UH-60L", "UH-60AIL", "AS332"]} />
-            <Field label={t("acNumber")} value={form.acNumber} onChange={v => set("acNumber", v)} placeholder="e.g. 832" />
-            <Select label={t("sortieType")} value={form.sortieType} onChange={v => set("sortieType", v)} opts={["Training", "Mission", "Check Ride", "FCF", "Transport"]} />
-            <Field label={t("sortieName")} value={form.name} onChange={v => set("name", v)} className="md:col-span-2" />
+
+      {/* Compact entry form (mirrors the legacy Add Sorties dialog) */}
+      <Card className="mb-4">
+        <form onSubmit={submit} className="space-y-3" data-testid="form-add-sortie">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            <Mini label="Date" type="date" value={form.date} onChange={v => set("date", v)} />
+            <MiniSelect label="A/C Type" value={form.acType} onChange={v => set("acType", v)} opts={["UH-60M", "UH-60L", "UH-60AIL", "AS332"]} />
+            <Mini label="A/C No" value={form.acNumber} onChange={v => set("acNumber", v)} placeholder="e.g. 832" />
+            <MiniSelect
+              label="Sortie Type"
+              value={form.sortieType}
+              onChange={v => set("sortieType", v)}
+              opts={SORTIE_TYPES}
+            />
+            <Mini label="Time" type="number" step="0.1" value={form.time} onChange={v => set("time", v)} placeholder="0.0" />
+            <Mini label="Sim" type="number" step="0.1" value={form.sim} onChange={v => set("sim", v)} placeholder="0.0" />
           </div>
 
-          <div className="border-t border-border pt-3">
-            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{t("condition")}</div>
+          {form.sortieType === "Other…" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <Mini label="Custom sortie type" value={form.sortieTypeOther} onChange={v => set("sortieTypeOther", v)} placeholder="Type your own…" />
+              <Mini label="MSN / Duty" value={form.msnDuty} onChange={v => set("msnDuty", v)} placeholder="Mission name / duty" />
+            </div>
+          )}
+          {form.sortieType !== "Other…" && (
+            <div>
+              <Mini label="MSN / Duty (optional)" value={form.msnDuty} onChange={v => set("msnDuty", v)} placeholder="Mission name / duty" />
+            </div>
+          )}
+
+          {/* Crew row with per-seat position + captain toggle */}
+          <div className="grid lg:grid-cols-2 gap-3">
+            <SeatBlock
+              label="Pilot"
+              pilotId={form.pilot}
+              onPilot={v => set("pilot", v)}
+              position={form.pilotPosition}
+              onPosition={v => set("pilotPosition", v)}
+              captain={form.pilotIsCaptain}
+              onCaptain={v => set("pilotIsCaptain", v)}
+              opts={pilotOpts}
+              testIdPrefix="pilot"
+            />
+            <SeatBlock
+              label="Co-Pilot"
+              pilotId={form.coPilot}
+              onPilot={v => set("coPilot", v)}
+              position={form.coPilotPosition}
+              onPosition={v => set("coPilotPosition", v)}
+              captain={form.coPilotIsCaptain}
+              onCaptain={v => set("coPilotIsCaptain", v)}
+              opts={pilotOpts}
+              testIdPrefix="copilot"
+            />
+          </div>
+
+          {/* Condition + DUAL + Actual + ADD */}
+          <div className="flex flex-wrap items-end gap-3 border-t border-border pt-3">
             <div className="flex items-center gap-2" data-testid="condition-selector">
               {(["Day", "Night", "NVG"] as const).map(opt => (
                 <button
@@ -82,225 +292,239 @@ export default function AddSortie() {
                   key={opt}
                   onClick={() => set("condition", opt)}
                   data-testid={`button-condition-${opt}`}
-                  className={`px-4 py-2 rounded-md text-sm font-medium border transition-colors ${
+                  className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
                     form.condition === opt
                       ? opt === "NVG"
                         ? "bg-rose-500/20 border-rose-400 text-rose-200"
-                        : "bg-primary/20 border-primary text-primary"
+                        : opt === "Night"
+                        ? "bg-indigo-500/20 border-indigo-400 text-indigo-200"
+                        : "bg-amber-400/20 border-amber-400 text-amber-200"
                       : "bg-secondary border-border text-muted-foreground hover:bg-secondary/80"
                   }`}
                 >
-                  {t(opt === "Day" ? "conditionDay" : opt === "Night" ? "conditionNight" : "conditionNVG")}
+                  {opt === "Night" ? "NITE" : opt.toUpperCase()}
                 </button>
               ))}
             </div>
+            <label className="inline-flex items-center gap-1.5 text-xs cursor-pointer select-none" data-testid="toggle-dual">
+              <input type="checkbox" checked={form.dual} onChange={e => set("dual", e.target.checked)} className="h-3.5 w-3.5 accent-primary" />
+              <span className="font-semibold">DUAL</span>
+            </label>
+            <div className="w-32">
+              <Mini label="Actual" type="number" step="0.1" value={form.actual} onChange={v => set("actual", v)} placeholder="auto" />
+            </div>
+            <div className="flex-1" />
+            <div className="flex items-center gap-2">
+              {form.id && (
+                <button
+                  type="button"
+                  onClick={() => setForm(blankForm())}
+                  className="px-3 py-2 rounded-md bg-secondary border border-border text-xs font-medium inline-flex items-center gap-1"
+                  data-testid="button-cancel-edit"
+                >
+                  <X className="h-3.5 w-3.5" /> Cancel
+                </button>
+              )}
+              <button
+                disabled={create.isPending || update.isPending}
+                className="px-4 py-2 rounded-md bg-primary text-primary-foreground font-semibold inline-flex items-center gap-2 disabled:opacity-50"
+                data-testid="button-submit-sortie"
+              >
+                <Plane className="h-4 w-4" />
+                {form.id ? "Save changes" : "ADD"}
+              </button>
+            </div>
           </div>
 
+          {/* Remarks (optional) */}
           <div>
             <label className="block">
-              <span className="text-xs text-muted-foreground">{t("remarks")}</span>
+              <span className="text-[11px] text-muted-foreground">Remarks</span>
               <textarea
                 value={form.remarks}
                 onChange={e => set("remarks", e.target.value)}
-                placeholder={t("remarksPlaceholder")}
+                placeholder="Notes (weather, aborts, maintenance, etc.)"
                 rows={2}
                 data-testid="input-remarks"
-                className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm resize-none"
+                className="w-full mt-1 px-3 py-1.5 rounded-md bg-input border border-border text-xs resize-none"
               />
             </label>
           </div>
+        </form>
+      </Card>
 
-          <div className="border-t border-border pt-3 space-y-3">
-            <SeatRow
-              label={t("pilot")}
-              external={pilotExt}
-              onToggle={setPilotExt}
-              pilotId={form.pilot}
-              onPilotChange={v => set("pilot", v)}
-              extName={form.pilotExtName}
-              onExtName={v => set("pilotExtName", v)}
-              extSqn={form.pilotExtSqn}
-              onExtSqn={v => set("pilotExtSqn", v)}
-              opts={pilotOpts}
-              externalLabel={t("externalPilotToggle")}
-            />
-            {selectedPilot && <PilotAutoFill pilot={selectedPilot} testId="autofill-pilot" />}
-            <SeatRow
-              label={t("coPilot")}
-              external={coPilotExt}
-              onToggle={setCoPilotExt}
-              pilotId={form.coPilot}
-              onPilotChange={v => set("coPilot", v)}
-              extName={form.coPilotExtName}
-              onExtName={v => set("coPilotExtName", v)}
-              extSqn={form.coPilotExtSqn}
-              onExtSqn={v => set("coPilotExtSqn", v)}
-              opts={pilotOpts}
-              externalLabel={t("externalPilotToggle")}
-            />
-            {selectedCoPilot && <PilotAutoFill pilot={selectedCoPilot} testId="autofill-copilot" />}
-          </div>
+      {/* Sortie list table (today's flights) */}
+      <Card>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-sm font-semibold">QREG · {form.date} · {form.acType}</div>
+          <div className="text-[11px] text-muted-foreground">All sorties for this date — click <span className="text-primary">edit</span> to load back into the form.</div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px] font-mono">
+            <thead>
+              <tr className="text-left text-muted-foreground border-b border-border">
+                <th className="py-1.5 pr-2">DATE</th>
+                <th className="pr-2">A/C TYPE</th>
+                <th className="pr-2">A/C NO.</th>
+                <th className="pr-2">PILOT</th>
+                <th className="pr-2">CO-PILOT</th>
+                <th className="pr-2">SORTIE TYPE</th>
+                <th className="pr-2">MSN/DUTY</th>
+                <th className="pr-2">D/N</th>
+                <th className="pr-2">DUAL</th>
+                <th className="pr-2 text-right">TIME</th>
+                <th className="pr-2 text-right">SIM</th>
+                <th className="pr-2 text-right">ACT</th>
+                <th className="pr-2 text-right">…</th>
+              </tr>
+            </thead>
+            <tbody>
+              {todaySorties.length === 0 && (
+                <tr><td colSpan={13} className="py-3 text-center text-muted-foreground italic">No sorties logged on this date yet.</td></tr>
+              )}
+              {todaySorties.map(s => {
+                const time = s.time ?? s.actual ?? (s.day1 + s.day2 + s.dayDual + s.night1 + s.night2 + s.nightDual);
+                const dn = s.condition === "NVG" ? "NVG" : s.condition === "Night" ? "N" : "D";
+                return (
+                  <tr key={s.id} className={`border-b border-border/50 hover:bg-secondary/30 ${form.id === s.id ? "bg-primary/10" : ""}`} data-testid={`sortie-row-${s.id}`}>
+                    <td className="py-1.5 pr-2">{s.date}</td>
+                    <td className="pr-2">{s.acType}</td>
+                    <td className="pr-2">{s.acNumber}</td>
+                    <td className="pr-2">{seatLabel(s.pilotId, s.pilotExternal)}{s.pilotIsCaptain ? <span className="ml-1 text-[9px] text-amber-300">CAPT</span> : null}</td>
+                    <td className="pr-2">{seatLabel(s.coPilotId, s.coPilotExternal)}{s.coPilotIsCaptain ? <span className="ml-1 text-[9px] text-amber-300">CAPT</span> : null}</td>
+                    <td className="pr-2">{s.sortieType}</td>
+                    <td className="pr-2 text-muted-foreground">{s.msnDuty || s.name || "—"}</td>
+                    <td className="pr-2">{dn}</td>
+                    <td className="pr-2">{s.dual ? "✓" : ""}</td>
+                    <td className="pr-2 text-right">{Number(time || 0).toFixed(1)}</td>
+                    <td className="pr-2 text-right">{Number(s.sim || 0).toFixed(1)}</td>
+                    <td className="pr-2 text-right">{Number(s.actual || 0).toFixed(1)}</td>
+                    <td className="pr-2 text-right whitespace-nowrap">
+                      <button onClick={() => loadForEdit(s)} className="px-1.5 py-0.5 rounded border border-border bg-secondary text-[10px] inline-flex items-center gap-0.5 mr-1" data-testid={`button-edit-${s.id}`}>
+                        <Pencil className="h-3 w-3" /> Edit
+                      </button>
+                      <button onClick={() => setConfirmDel(s)} className="px-1.5 py-0.5 rounded border border-rose-400/40 bg-rose-500/10 text-rose-200 text-[10px] inline-flex items-center gap-0.5" data-testid={`button-delete-${s.id}`}>
+                        <Trash2 className="h-3 w-3" /> Del
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            {todaySorties.length > 0 && (
+              <tfoot>
+                <tr className="border-t-2 border-border font-semibold">
+                  <td colSpan={9} className="py-2 text-right">ALL TOTALS</td>
+                  <td className="pr-2 text-right">S {totals.s}</td>
+                  <td className="pr-2 text-right">H {totals.h.toFixed(1)}</td>
+                  <td colSpan={2} />
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </Card>
 
-          <div className="border-t border-border pt-3">
-            <div className="title-line mb-2">Day</div>
-            <div className="grid grid-cols-3 gap-3">
-              <Field label={t("day1")} type="number" value={form.day1} onChange={v => set("day1", +v)} />
-              <Field label={t("day2")} type="number" value={form.day2} onChange={v => set("day2", +v)} />
-              <Field label={t("dayDual")} type="number" value={form.dayDual} onChange={v => set("dayDual", +v)} />
+      {/* Delete confirmation modal */}
+      {confirmDel && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setConfirmDel(null)}>
+          <div className="bg-card border border-border rounded-lg p-4 max-w-md w-full" onClick={e => e.stopPropagation()} data-testid="dialog-confirm-delete">
+            <div className="font-semibold mb-1">Delete this sortie?</div>
+            <div className="text-xs text-muted-foreground mb-3">
+              {confirmDel.date} · {confirmDel.acType} {confirmDel.acNumber} · {confirmDel.sortieType}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setConfirmDel(null)} className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs">Cancel</button>
+              <button onClick={doDelete} className="px-3 py-1.5 rounded-md bg-rose-600 text-white text-xs font-semibold" data-testid="button-confirm-delete">Delete</button>
             </div>
           </div>
-          <div>
-            <div className="title-line mb-2">Night</div>
-            <div className="grid grid-cols-3 gap-3">
-              <Field label={t("night1")} type="number" value={form.night1} onChange={v => set("night1", +v)} />
-              <Field label={t("night2")} type="number" value={form.night2} onChange={v => set("night2", +v)} />
-              <Field label={t("nightDual")} type="number" value={form.nightDual} onChange={v => set("nightDual", +v)} />
-            </div>
-          </div>
-          <div>
-            <div className="title-line mb-2">Other</div>
-            <div className="grid grid-cols-3 gap-3">
-              <Field label={t("nvg")} type="number" value={form.nvg} onChange={v => set("nvg", +v)} className="text-rose-300" />
-              <Field label={t("sim")} type="number" value={form.sim} onChange={v => set("sim", +v)} />
-              <Field label={t("actual")} type="number" value={form.actual} onChange={v => set("actual", +v)} />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 pt-2">
-            <button disabled={create.isPending} className="px-4 py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 inline-flex items-center gap-2 disabled:opacity-50" data-testid="button-submit-sortie">
-              <Plane className="h-4 w-4" /> {create.isPending ? t("saving") : t("submit")}
-            </button>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="text-sm font-semibold mb-2">Summary</div>
-          <Row k="Day total" v={(form.day1 + form.day2 + form.dayDual).toFixed(1)} />
-          <Row k="Night total" v={(form.night1 + form.night2 + form.nightDual).toFixed(1)} />
-          <Row k="NVG" v={form.nvg.toFixed(1)} accent="text-rose-300" />
-          <Row k="Sim" v={form.sim.toFixed(1)} />
-          <Row k="Actual" v={form.actual.toFixed(1)} bold />
-          {(pilotExt || coPilotExt) && (
-            <div className="mt-3 p-2 rounded-md border border-amber-400/40 bg-amber-400/10 text-[11px] text-amber-200">
-              <div className="inline-flex items-center gap-1 font-semibold mb-1"><UserPlus className="h-3 w-3" /> {t("externalPilotNoticeTitle")}</div>
-              <div className="text-amber-100/80">{t("externalPilotNoticeBody")}</div>
-            </div>
-          )}
-          <div className="text-[11px] text-muted-foreground mt-3">{t("bigPlaceholder")}</div>
-        </Card>
-      </form>
-    </div>
-  );
-}
-
-interface AutoFillProps {
-  pilot: { callSign?: string; flightName?: string; militaryNumber?: string; arabicName?: string; qualifications?: string[] };
-  testId: string;
-}
-function PilotAutoFill({ pilot, testId }: AutoFillProps) {
-  const { t } = useI18n();
-  const callSign = pilot.callSign?.trim();
-  const flightName = pilot.flightName?.trim();
-  const milNo = pilot.militaryNumber?.trim();
-  const ar = pilot.arabicName?.trim();
-  const quals = pilot.qualifications?.filter(q => q && q.trim().length > 0) ?? [];
-  if (!callSign && !flightName && !milNo && !ar && quals.length === 0) {
-    return (
-      <div className="-mt-1 text-[11px] text-muted-foreground italic px-1" data-testid={testId}>
-        {t("autoFillEmpty")}
-      </div>
-    );
-  }
-  return (
-    <div className="-mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] px-1" data-testid={testId}>
-      {callSign && <span><span className="text-muted-foreground">{t("callSign")}: </span><span className="font-mono font-semibold text-primary">{callSign}</span></span>}
-      {flightName && <span><span className="text-muted-foreground">{t("flightName")}: </span><span className="font-mono font-semibold">{flightName}</span></span>}
-      {milNo && <span><span className="text-muted-foreground">{t("militaryNumber")}: </span><span className="font-mono">{milNo}</span></span>}
-      {ar && <span dir="auto"><span className="text-muted-foreground">{t("arabicName")}: </span><span className="font-semibold">{ar}</span></span>}
-      {quals.length > 0 && (
-        <span className="inline-flex items-center gap-1">
-          <span className="text-muted-foreground">{t("qualifications")}:</span>
-          {quals.map(q => <span key={q} className="px-1.5 py-0.5 rounded bg-secondary border border-border text-[10px] uppercase tracking-wider">{q}</span>)}
-        </span>
+        </div>
       )}
     </div>
   );
 }
 
-interface SeatOpt { value: string; label: string; }
-interface SeatRowProps {
+// ── Components ──────────────────────────────────────────────────────────
+
+interface SeatProps {
   label: string;
-  external: boolean;
-  onToggle: (v: boolean) => void;
   pilotId: string;
-  onPilotChange: (v: string) => void;
-  extName: string;
-  onExtName: (v: string) => void;
-  extSqn: string;
-  onExtSqn: (v: string) => void;
-  opts: SeatOpt[];
-  externalLabel: string;
+  onPilot: (v: string) => void;
+  position: SeatPos;
+  onPosition: (v: SeatPos) => void;
+  captain: boolean;
+  onCaptain: (v: boolean) => void;
+  opts: { value: string; label: string }[];
+  testIdPrefix: string;
 }
-function SeatRow({ label, external, onToggle, pilotId, onPilotChange, extName, onExtName, extSqn, onExtSqn, opts, externalLabel }: SeatRowProps) {
+function SeatBlock({ label, pilotId, onPilot, position, onPosition, captain, onCaptain, opts, testIdPrefix }: SeatProps) {
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{label}</div>
-        <label className="inline-flex items-center gap-1.5 text-[11px] text-amber-200 cursor-pointer" data-testid={`toggle-external-${label}`}>
-          <input type="checkbox" checked={external} onChange={e => onToggle(e.target.checked)} className="h-3 w-3 accent-amber-400" />
-          {externalLabel}
+    <div className="border border-border rounded-md p-2 bg-secondary/20" data-testid={`seat-${testIdPrefix}`}>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+        <label className="inline-flex items-center gap-1 text-[10px] cursor-pointer select-none">
+          <input type="checkbox" checked={captain} onChange={e => onCaptain(e.target.checked)} className="h-3 w-3 accent-amber-400" data-testid={`toggle-captain-${testIdPrefix}`} />
+          <span className="text-amber-300 font-semibold">Count as Captain</span>
         </label>
       </div>
-      {external ? (
-        <div className="grid grid-cols-2 gap-3 p-3 rounded-md border border-amber-400/40 bg-amber-400/5">
-          <Field label="Name" value={extName} onChange={onExtName} placeholder="Capt. Ahmad Foo" />
-          <Field label="Squadron" value={extSqn} onChange={onExtSqn} placeholder="Sqn 3" />
-        </div>
-      ) : (
-        <Select label="" value={pilotId} onChange={onPilotChange} opts={opts} />
-      )}
+      <div className="grid grid-cols-3 gap-2">
+        <select
+          className="col-span-2 px-2 py-1.5 rounded-md bg-input border border-border text-xs"
+          value={pilotId}
+          onChange={e => onPilot(e.target.value)}
+          data-testid={`select-${testIdPrefix}`}
+        >
+          {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <select
+          className="px-2 py-1.5 rounded-md bg-input border border-border text-xs"
+          value={position}
+          onChange={e => onPosition(e.target.value as SeatPos)}
+          data-testid={`select-position-${testIdPrefix}`}
+        >
+          <option value="1st">1st PLT</option>
+          <option value="2nd">2nd PLT</option>
+        </select>
+      </div>
     </div>
   );
 }
 
-type FieldProps = {
+type MiniProps = {
   label: string;
   value: string | number;
   onChange: (v: string) => void;
   type?: string;
-  className?: string;
   placeholder?: string;
+  step?: string;
 };
-function Field({ label, value, onChange, type = "text", className = "", placeholder }: FieldProps) {
-  return (
-    <label className={`block ${className}`}>
-      {label && <span className="text-xs text-muted-foreground">{label}</span>}
-      <input type={type} value={value} placeholder={placeholder}
-        onChange={e => onChange(e.target.value)}
-        className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm font-mono" />
-    </label>
-  );
-}
-type SelectOpt = string | { value: string; label: string };
-type SelectProps = { label: string; value: string; onChange: (v: string) => void; opts: SelectOpt[] };
-function Select({ label, value, onChange, opts }: SelectProps) {
-  const items = opts.map(o => typeof o === "string" ? { value: o, label: o } : o);
+function Mini({ label, value, onChange, type = "text", placeholder, step }: MiniProps) {
   return (
     <label className="block">
-      {label && <span className="text-xs text-muted-foreground">{label}</span>}
-      <select value={value} onChange={e => onChange(e.target.value)}
-        className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm">
-        {items.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
+      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <input
+        type={type}
+        step={step}
+        value={value}
+        placeholder={placeholder}
+        onChange={e => onChange(e.target.value)}
+        className="w-full mt-0.5 px-2 py-1.5 rounded-md bg-input border border-border text-xs font-mono"
+      />
     </label>
   );
 }
-type RowProps = { k: string; v: string | number; accent?: string; bold?: boolean };
-function Row({ k, v, accent = "", bold }: RowProps) {
+
+function MiniSelect({ label, value, onChange, opts }: { label: string; value: string; onChange: (v: string) => void; opts: string[] }) {
   return (
-    <div className="flex items-center justify-between text-sm py-1.5 border-b border-border last:border-b-0">
-      <span className="text-muted-foreground">{k}</span>
-      <span className={`font-mono ${accent} ${bold ? "font-semibold text-base" : ""}`}>{v}</span>
-    </div>
+    <label className="block">
+      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="w-full mt-0.5 px-2 py-1.5 rounded-md bg-input border border-border text-xs"
+      >
+        {opts.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </label>
   );
 }

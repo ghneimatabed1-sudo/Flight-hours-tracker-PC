@@ -158,7 +158,9 @@ export function buildForm1Rows(
     const mine = monthSorties.filter(s => s.pilotId === p.id || s.coPilotId === p.id);
     let day1=0,day2=0,dayDual=0,night1=0,night2=0,nightDual=0,nvg=0,sim=0,act=0,cap=0,sor=0;
     for (const s of mine) {
-      const isPic = s.pilotId === p.id;
+      const isAsPilot = s.pilotId === p.id;
+      const explicitCap = isAsPilot ? s.pilotIsCaptain : s.coPilotIsCaptain;
+      const isPic = typeof explicitCap === "boolean" ? explicitCap : isAsPilot;
       const isCo  = s.coPilotId === p.id;
       if (isPic) { day1 += s.day1||0; night1 += s.night1||0; cap++; }
       if (isCo)  { day2 += s.day2||0; night2 += s.night2||0; }
