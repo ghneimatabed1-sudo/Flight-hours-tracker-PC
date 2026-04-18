@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { usePilots } from "@/lib/squadron-data";
+import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Printer, Save, Settings, Plus, X } from "lucide-react";
 import emblem from "@assets/rjaf_emblem.png";
@@ -157,6 +158,19 @@ export default function FlightProgram() {
   const { t, lang, dir } = useI18n();
   const pilotsQ = usePilots();
   const PILOTS = pilotsQ.data;
+  const { user } = useAuth();
+
+  // Printing is restricted to the roles who actually own or run the daily
+  // Flight Program on paper: the ops officer (and deputy) on the squadron PC,
+  // and the squadron commander. Higher-echelon commanders (flight / wing /
+  // base / HQ) view the program but don't get the print button — the printed
+  // sheet belongs to squadron-level ops. Super admin retains the button for
+  // administrative verification.
+  const canPrint =
+    user?.role === "ops" ||
+    user?.role === "deputy" ||
+    user?.role === "super_admin" ||
+    (user?.role === "commander" && user?.scope === "squadron");
 
   const todayIso = new Date().toISOString().slice(0, 10);
   const [defaults, setDefaults] = useState<Defaults>(() => loadDefaults());
@@ -260,10 +274,12 @@ export default function FlightProgram() {
           <Save className="h-3.5 w-3.5 me-1" />
           {savedFlash ? t("saved") : t("save")}
         </Button>
-        <Button size="sm" variant="outline" onClick={() => window.print()} data-testid="button-print-program">
-          <Printer className="h-3.5 w-3.5 me-1" />
-          {t("print")}
-        </Button>
+        {canPrint && (
+          <Button size="sm" variant="outline" onClick={() => window.print()} data-testid="button-print-program">
+            <Printer className="h-3.5 w-3.5 me-1" />
+            {t("print")}
+          </Button>
+        )}
         <Button size="sm" variant="outline" onClick={() => setShowDefaults((v) => !v)} data-testid="button-fp-defaults">
           <Settings className="h-3.5 w-3.5 me-1" />
           Defaults
