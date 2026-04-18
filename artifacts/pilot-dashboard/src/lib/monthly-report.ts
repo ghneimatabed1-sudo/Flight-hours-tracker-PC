@@ -252,6 +252,36 @@ export interface Form3Computed {
   achievedHours: number;
 }
 
+/**
+ * Derived percentages on top of Form 3 — these aren't stored, just rendered.
+ * Achievement is achieved/planned (handles divide-by-zero).
+ * Weather % is weather-aborted sorties as a share of attempted sorties.
+ */
+export function deriveForm3Stats(inputs: ReportInputs, computed: Form3Computed) {
+  const planS = inputs.plannedSorties || 0;
+  const planH = inputs.plannedHours  || 0;
+  const totalAbortS = inputs.weatherAbortS + inputs.maintAbortS + inputs.opsAbortS + inputs.airAbortS;
+  const totalAbortH = round1(inputs.weatherAbortH + inputs.maintAbortH + inputs.opsAbortH + inputs.airAbortH);
+  const attempted = computed.achievedSorties + totalAbortS;
+  return {
+    achievementSortiesPct: planS ? round1((computed.achievedSorties / planS) * 100) : 0,
+    achievementHoursPct:   planH ? round1((computed.achievedHours   / planH) * 100) : 0,
+    totalAbortSorties: totalAbortS,
+    totalAbortHours: totalAbortH,
+    weatherAbortPct: attempted ? round1((inputs.weatherAbortS / attempted) * 100) : 0,
+  };
+}
+
+/* Pre-fill helper used by the "Auto-fill" wizard button. Looks at the
+ * previous month's actual achievement and proposes that as next month's
+ * plan — a sensible starting point the officer can tweak in seconds. */
+export function suggestNextMonthPlanFrom(prevAchieved: { sorties: number; hours: number }) {
+  return {
+    plannedSorties: prevAchieved.sorties,
+    plannedHours: prevAchieved.hours,
+  };
+}
+
 export function buildForm3(sorties: Sortie[], period: string): Form3Computed {
   const monthSorties = sorties.filter(s => (s.date || "").startsWith(period));
   const totals = Object.fromEntries(

@@ -31,6 +31,7 @@ export default function Roster() {
       id: nextId,
       name: "",
       arabicName: "",
+      militaryNumber: "",
       rank: "",
       phone: "",
       address: "",
@@ -236,6 +237,7 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
             <Field label={t("flightName")} value={p.flightName || ""} onChange={v => set("flightName", v)} testId="input-flightName" />
             <Field label={t("name")} value={p.name} onChange={v => set("name", v)} testId="input-name" />
             <Field label={t("arabicName")} value={p.arabicName} onChange={v => set("arabicName", v)} testId="input-arabicName" />
+            <Field label={t("militaryNumber")} value={p.militaryNumber || ""} onChange={v => set("militaryNumber", v)} testId="input-militaryNumber" />
             <Field label={t("rank")} value={p.rank} onChange={v => set("rank", v)} testId="input-rank" />
             <Field label={t("phone")} value={p.phone} onChange={v => set("phone", v)} testId="input-phone" />
             <label className="block text-xs col-span-2">
