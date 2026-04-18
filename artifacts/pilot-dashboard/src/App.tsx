@@ -1,25 +1,28 @@
 import { useEffect } from "react";
 import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
+import { useHashLocation } from "wouter/use-hash-location";
 
 /**
- * Normalize Vite's BASE_URL into a value wouter can handle.
+ * Routing strategy:
  *
- * Vite emits BASE_URL based on the `base` option:
- *   - dev (web)        → "/"
- *   - hosted with prefix → "/some-prefix/"
- *   - electron build   → "./"   (because we ship index.html under file://)
+ * In Electron the app loads via `file:///C:/Program Files/.../index.html`.
+ * The `pathname` of that URL is the absolute file path, NOT `/`. wouter's
+ * default browser-location hook compares `window.location.pathname` against
+ * route paths like "/admin/keys", so under file:// EVERY route falls
+ * through to NotFound. (This was the v1.0.7/v1.0.8 "404 Page Not Found"
+ * bug — sidebar rendered, but every link inside an <Switch> 404'd.)
  *
- * Wouter wants base to be either "" or a path beginning with "/" — it
- * compares paths via simple string ops. If we pass "." or "./" the route
- * comparison never matches and EVERY route renders nothing, leaving the
- * Electron window's blue background showing. (This is exactly the v1.0.6
- * "blue screen on launch" bug.) Map the Electron-style relative bases to
- * the empty string so wouter treats every route as relative to the file.
+ * Hash-based routing sidesteps the problem entirely: URLs become
+ * `index.html#/admin/keys` and only the part after `#` is used for matching.
+ * That works identically whether we're served from file://, http://, or a
+ * proxied path-prefix like /pilot-dashboard/.
+ *
+ * Hash routing is safe in dev too — the dev server URL just becomes
+ * http://localhost:5173/#/something, and Vite still serves index.html.
  */
-function resolveRouterBase(raw: string | undefined): string {
-  if (!raw) return "";
-  if (raw === "/" || raw === "./" || raw === ".") return "";
-  return raw.replace(/\/$/, "");
+function isElectron(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.location.protocol === "file:";
 }
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
@@ -191,9 +194,15 @@ function App() {
       <I18nProvider>
         <AuthProvider>
           <TooltipProvider>
-            <WouterRouter base={resolveRouterBase(import.meta.env.BASE_URL)}>
-              <Shell />
-            </WouterRouter>
+            {isElectron() ? (
+              <WouterRouter hook={useHashLocation}>
+                <Shell />
+              </WouterRouter>
+            ) : (
+              <WouterRouter>
+                <Shell />
+              </WouterRouter>
+            )}
             <Toaster />
           </TooltipProvider>
         </AuthProvider>
