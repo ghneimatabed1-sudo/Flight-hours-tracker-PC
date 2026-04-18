@@ -11,7 +11,6 @@ import { pilots, squadrons } from "@/lib/mockData";
 import { pilotWorstStatus, pilotWorstDate, fmtDate } from "@/lib/format";
 import type { CurrencyStatus, Pilot } from "@/lib/types";
 import { Search, ArrowUpDown, ChevronLeft, Download, Printer, FileSpreadsheet } from "lucide-react";
-import * as XLSX from "xlsx";
 
 type SortKey = keyof Pick<Pilot, "callSign" | "fullName" | "monthlyHours" | "grandTotalHours" | "nvgTotalHours">;
 
@@ -122,7 +121,8 @@ export default function PilotsTable() {
     URL.revokeObjectURL(url);
   }
 
-  function exportXlsx() {
+  async function exportXlsx() {
+    const ExcelJS = (await import("exceljs")).default;
     const headers = [
       t("callSign"), t("name"), t("squadron"),
       t("nvgTotal"), t("monthlyHours"), t("grandTotal"),
@@ -145,14 +145,22 @@ export default function PilotsTable() {
         [headers[10]]: statusLabel(pilotWorstStatus(p)),
       };
     });
-    const ws = XLSX.utils.json_to_sheet(rows, { header: headers });
-    // Reasonable default column widths so Arabic names don't get clipped.
-    ws["!cols"] = headers.map(h => ({ wch: Math.max(12, Math.min(28, h.length + 4)) }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Pilots");
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Pilots");
+    ws.columns = headers.map(h => ({ header: h, key: h, width: Math.max(12, Math.min(28, h.length + 4)) }));
+    rows.forEach(row => ws.addRow(row));
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
     const stamp = new Date().toISOString().slice(0, 10);
     const scope = focusedSqn?.code ?? (sqnFilter !== "__all" ? squadrons.find(s => s.id === sqnFilter)?.code : null) ?? "all";
-    XLSX.writeFile(wb, `pilots-${scope}-${stamp}.xlsx`);
+    a.href = url;
+    a.download = `pilots-${scope}-${stamp}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   function printReport() {
