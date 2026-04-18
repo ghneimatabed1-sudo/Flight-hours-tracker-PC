@@ -1,0 +1,649 @@
+import { useEffect, useMemo, useState } from "react";
+import { Printer, Wand2, Save, ChevronDown, ChevronUp, FileText } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
+import { PageHead } from "@/components/Layout";
+import { useAuth } from "@/lib/auth";
+import { usePilots, useSorties } from "@/lib/squadron-data";
+import {
+  buildForm1Rows, buildForm2Rows, buildForm3, buildArabicRoster,
+  defaultInputs, lastCompletedPeriod, loadInputs, saveInputs,
+  periodLabel, MISSION_BUCKETS, MISSION_LABEL, NEXT_PLAN_EXERCISES,
+  type ReportInputs,
+} from "@/lib/monthly-report";
+
+export default function MonthlyReport() {
+  const { t } = useI18n();
+  const { squadron } = useAuth();
+  const { data: pilots = [] } = usePilots();
+  const { data: sorties = [] } = useSorties();
+
+  const [period, setPeriod] = useState<string>(() => lastCompletedPeriod());
+  const [inputs, setInputs] = useState<ReportInputs>(() =>
+    loadInputs(period) ?? defaultInputs(period, []));
+  const [wizardOpen, setWizardOpen] = useState(true);
+  const [saved, setSaved] = useState(false);
+
+  // Reload persisted inputs whenever the period changes; if none exist,
+  // pre-fill from current pilot count.
+  useEffect(() => {
+    const persisted = loadInputs(period);
+    setInputs(persisted ?? defaultInputs(period, pilots));
+  }, [period, pilots.length]);
+
+  const form1 = useMemo(() =>
+    buildForm1Rows(pilots, sorties, period, inputs), [pilots, sorties, period, inputs.perPilotStatus, inputs.perPilotRemarks]);
+  const form2 = useMemo(() =>
+    buildForm2Rows(pilots, sorties, period, form1), [pilots, sorties, period, form1]);
+  const form3 = useMemo(() =>
+    buildForm3(sorties, period), [sorties, period]);
+  const arabicRoster = useMemo(() =>
+    buildArabicRoster(pilots, sorties, period, form1), [pilots, sorties, period, form1]);
+
+  const onSave = () => {
+    saveInputs(period, inputs);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1800);
+  };
+
+  const onAutoFill = () => {
+    setInputs(prev => ({
+      ...prev,
+      squadronStrength: pilots.length,
+      ops: pilots.filter(p => p.unit === "SQDN").length,
+      attached: pilots.filter(p => p.unit === "HQ Attached").length,
+      pilotsAvailableNext: pilots.length,
+    }));
+  };
+
+  const updI = <K extends keyof ReportInputs>(k: K, v: ReportInputs[K]) =>
+    setInputs(p => ({ ...p, [k]: v }));
+
+  const sqdnNumber = squadron?.number || "8";
+  const sqdnName = squadron?.name || "8 SQDN";
+  const monthHeader = periodLabel(period).toUpperCase();
+  const nextMonthHeader = periodLabel(inputs.nextMonthPlanFor).toUpperCase();
+
+  return (
+    <div className="monthly-report">
+      <style>{`
+        @media print {
+          .no-print { display: none !important; }
+          .monthly-report { background: white !important; color: black !important; }
+          body { background: white !important; }
+          .form-page { page-break-after: always; padding: 12mm !important; }
+          .form-page table { color: black !important; }
+          .form-page table, .form-page th, .form-page td { border-color: #000 !important; }
+        }
+        .form-page { background: white; color: #111; padding: 18px; border-radius: 8px; margin-bottom: 16px; }
+        .form-page table { width: 100%; border-collapse: collapse; font-size: 10px; }
+        .form-page th, .form-page td { border: 1px solid #444; padding: 3px 4px; vertical-align: middle; }
+        .form-page th { background: #eee; text-align: center; font-weight: 600; }
+        .form-page td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .form-page td.center { text-align: center; }
+        .form-page .form-title { text-align: center; font-weight: 700; margin-bottom: 4px; font-size: 12px; }
+        .form-page .form-sub { text-align: center; font-style: italic; margin-bottom: 8px; font-size: 11px; }
+        .form-page .form-meta { display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 6px; }
+        .form-page .secret { text-align: center; font-style: italic; font-size: 9px; color: #555; }
+      `}</style>
+
+      <PageHead
+        title={t("monthlyReportTitle")}
+        subtitle={t("monthlyReportSubtitle")}
+        actions={
+          <div className="flex gap-2 no-print">
+            <input type="month" value={period} onChange={e => setPeriod(e.target.value)}
+              className="text-xs px-2 py-1.5 rounded-md border border-border bg-background"
+              data-testid="input-monthly-period" />
+            <button onClick={onAutoFill}
+              className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-secondary inline-flex items-center gap-1"
+              data-testid="button-monthly-autofill">
+              <Wand2 className="h-3.5 w-3.5" /> {t("monthlyAutoFill")}
+            </button>
+            <button onClick={onSave}
+              className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-secondary inline-flex items-center gap-1"
+              data-testid="button-monthly-save">
+              <Save className="h-3.5 w-3.5" /> {saved ? t("opsTeamCopied") : t("save_changes")}
+            </button>
+            <button onClick={() => window.print()}
+              className="text-xs px-3 py-1.5 rounded-md bg-primary text-primary-foreground font-medium inline-flex items-center gap-1"
+              data-testid="button-monthly-print">
+              <Printer className="h-3.5 w-3.5" /> {t("monthlyPrint")}
+            </button>
+          </div>
+        }
+      />
+
+      {/* Wizard */}
+      <section className="bg-card border border-border rounded-lg p-4 mb-4 no-print">
+        <button onClick={() => setWizardOpen(o => !o)}
+          className="w-full flex items-center justify-between text-sm font-semibold mb-2"
+          data-testid="button-monthly-wizard-toggle">
+          <span className="inline-flex items-center gap-2">
+            <FileText className="h-4 w-4 text-primary" /> {t("monthlyWizardTitle")}
+          </span>
+          {wizardOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </button>
+        <p className="text-xs text-muted-foreground mb-3">{t("monthlyWizardBlurb")}</p>
+
+        {wizardOpen && (
+          <div className="space-y-4">
+            {/* Squadron header values */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                ["squadronStrength","SQDN STRENGTH"],
+                ["ops","OPS"],
+                ["attached","ATTACHED"],
+                ["course","COURSE"],
+                ["sickLeave","SICK LEAVE"],
+                ["sickRatePct","SICK RATE %"],
+              ].map(([k,label]) => (
+                <NumField key={k} label={label} value={(inputs as any)[k]} onChange={v => updI(k as any, v as any)} testId={`input-mr-${k}`} />
+              ))}
+              <div>
+                <label className="text-xs text-muted-foreground">DISCIPLINE MORALE</label>
+                <select value={inputs.morale} onChange={e => updI("morale", e.target.value as any)}
+                  className="w-full bg-background border border-border rounded px-2 py-1.5 text-sm"
+                  data-testid="input-mr-morale">
+                  <option>HIGH</option><option>MEDIUM</option><option>LOW</option>
+                </select>
+              </div>
+              <TextField label="INCIDENTS" value={inputs.incidents} onChange={v => updI("incidents", v)} testId="input-mr-incidents" />
+              <TextField label="ACCIDENTS" value={inputs.accidents} onChange={v => updI("accidents", v)} testId="input-mr-accidents" />
+            </div>
+
+            {/* Planned + aborts */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <NumField label="PLANNED SORTIES" value={inputs.plannedSorties} onChange={v => updI("plannedSorties", v)} testId="input-mr-plannedS" />
+              <NumField label="PLANNED HOURS" value={inputs.plannedHours} onChange={v => updI("plannedHours", v)} step={0.1} testId="input-mr-plannedH" />
+              <AbortPair label="WX ABORT" s={inputs.weatherAbortS} h={inputs.weatherAbortH} onS={v=>updI("weatherAbortS",v)} onH={v=>updI("weatherAbortH",v)} testId="wx" />
+              <AbortPair label="MAINT" s={inputs.maintAbortS} h={inputs.maintAbortH} onS={v=>updI("maintAbortS",v)} onH={v=>updI("maintAbortH",v)} testId="maint" />
+              <AbortPair label="OPS ABORT" s={inputs.opsAbortS} h={inputs.opsAbortH} onS={v=>updI("opsAbortS",v)} onH={v=>updI("opsAbortH",v)} testId="ops" />
+              <AbortPair label="AIR ABORT" s={inputs.airAbortS} h={inputs.airAbortH} onS={v=>updI("airAbortS",v)} onH={v=>updI("airAbortH",v)} testId="air" />
+            </div>
+
+            {/* Lectures */}
+            <div>
+              <div className="text-xs font-semibold mb-1">LECTURES</div>
+              <div className="space-y-1">
+                {inputs.lectures.map((lec, i) => (
+                  <div key={i} className="grid grid-cols-12 gap-2 items-center text-xs">
+                    <div className="col-span-4">{lec.name}</div>
+                    <input type="number" step="0.1" placeholder="Hours" value={lec.hours}
+                      onChange={e => {
+                        const next = [...inputs.lectures];
+                        next[i] = { ...lec, hours: parseFloat(e.target.value) || 0 };
+                        updI("lectures", next);
+                      }}
+                      className="col-span-2 bg-background border border-border rounded px-2 py-1"
+                      data-testid={`input-mr-lec-h-${i}`} />
+                    <input type="number" step="1" min="0" max="100" placeholder="Quiz%" value={lec.quizPct}
+                      onChange={e => {
+                        const next = [...inputs.lectures];
+                        next[i] = { ...lec, quizPct: parseFloat(e.target.value) || 0 };
+                        updI("lectures", next);
+                      }}
+                      className="col-span-2 bg-background border border-border rounded px-2 py-1"
+                      data-testid={`input-mr-lec-q-${i}`} />
+                    <input value={lec.remarks}
+                      onChange={e => {
+                        const next = [...inputs.lectures];
+                        next[i] = { ...lec, remarks: e.target.value };
+                        updI("lectures", next);
+                      }}
+                      placeholder="Remarks"
+                      className="col-span-4 bg-background border border-border rounded px-2 py-1" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Form 4 next-month plan */}
+            <div>
+              <div className="text-xs font-semibold mb-1">PLAN FOR {nextMonthHeader}</div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-2">
+                <NumField label="PILOTS AVAILABLE" value={inputs.pilotsAvailableNext} onChange={v => updI("pilotsAvailableNext", v)} testId="input-mr-pilots-next" />
+                <NumField label="OPS" value={inputs.opsNext} onChange={v => updI("opsNext", v)} testId="input-mr-ops-next" />
+              </div>
+              <div className="space-y-1">
+                {inputs.nextPlan.map((row, i) => (
+                  <div key={i} className="grid grid-cols-12 gap-2 items-center text-xs">
+                    <div className="col-span-2">{row.exercise}</div>
+                    <input type="number" placeholder="Pilots" value={row.pilots}
+                      onChange={e => updPlan(inputs, updI, i, { pilots: parseInt(e.target.value)||0 })}
+                      className="col-span-1 bg-background border border-border rounded px-2 py-1"
+                      data-testid={`input-mr-plan-pilots-${i}`} />
+                    <input type="number" step="0.1" placeholder="S/Pilot" value={row.sortiesPerPilot}
+                      onChange={e => updPlan(inputs, updI, i, { sortiesPerPilot: parseFloat(e.target.value)||0 })}
+                      className="col-span-2 bg-background border border-border rounded px-2 py-1"
+                      data-testid={`input-mr-plan-spp-${i}`} />
+                    <input type="number" step="0.1" placeholder="Dur" value={row.durationPerSortie}
+                      onChange={e => updPlan(inputs, updI, i, { durationPerSortie: parseFloat(e.target.value)||0 })}
+                      className="col-span-2 bg-background border border-border rounded px-2 py-1"
+                      data-testid={`input-mr-plan-dur-${i}`} />
+                    <input placeholder="2.75 RKT" value={row.ammo275}
+                      onChange={e => updPlan(inputs, updI, i, { ammo275: e.target.value })}
+                      className="col-span-1 bg-background border border-border rounded px-2 py-1" />
+                    <input placeholder="12.7" value={row.ammo127}
+                      onChange={e => updPlan(inputs, updI, i, { ammo127: e.target.value })}
+                      className="col-span-1 bg-background border border-border rounded px-2 py-1" />
+                    <input placeholder="7.62" value={row.ammo762}
+                      onChange={e => updPlan(inputs, updI, i, { ammo762: e.target.value })}
+                      className="col-span-1 bg-background border border-border rounded px-2 py-1" />
+                    <input placeholder="Remarks" value={row.remarks}
+                      onChange={e => updPlan(inputs, updI, i, { remarks: e.target.value })}
+                      className="col-span-2 bg-background border border-border rounded px-2 py-1" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Per-pilot remarks override */}
+            {pilots.length > 0 && (
+              <details className="border border-border rounded-md p-2">
+                <summary className="text-xs font-semibold cursor-pointer">{t("monthlyPerPilotOverrides")} ({pilots.length})</summary>
+                <div className="space-y-1 mt-2 max-h-64 overflow-y-auto">
+                  {pilots.map(p => (
+                    <div key={p.id} className="grid grid-cols-12 gap-2 items-center text-xs">
+                      <div className="col-span-3 truncate">{p.name}</div>
+                      <input placeholder="Status (e.g. PILOT, FLT.CMDR)"
+                        value={inputs.perPilotStatus[p.id] || ""}
+                        onChange={e => updI("perPilotStatus", { ...inputs.perPilotStatus, [p.id]: e.target.value })}
+                        className="col-span-3 bg-background border border-border rounded px-2 py-1"
+                        data-testid={`input-mr-status-${p.id}`} />
+                      <input placeholder="Remarks (e.g. CYPRUS DUTY, 5 DAYS LEAVE)"
+                        value={inputs.perPilotRemarks[p.id] || ""}
+                        onChange={e => updI("perPilotRemarks", { ...inputs.perPilotRemarks, [p.id]: e.target.value })}
+                        className="col-span-6 bg-background border border-border rounded px-2 py-1"
+                        data-testid={`input-mr-remarks-${p.id}`} />
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* ───────── FORM 1 ───────── */}
+      <section className="form-page" data-testid="form1">
+        <div className="form-meta">
+          <div><b>ORFG RCN FORM 1</b><br/>ORFG HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div className="text-center">
+            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-sub">INDIVIDUAL PILOT ACHIEVEMENTS</div>
+          </div>
+          <div className="text-right"><b>ACHIEVEMENTS FOR : {monthHeader}</b></div>
+        </div>
+        <div className="secret">SECRET ( WHEN FILLED )</div>
+        <table>
+          <thead>
+            <tr>
+              <th rowSpan={2}>#</th>
+              <th colSpan={3}>PERSONAL DETAILS</th>
+              <th rowSpan={2}>TYPE OF AIRCRAFT</th>
+              <th rowSpan={2}>STATUS</th>
+              <th colSpan={3}>DAY</th>
+              <th colSpan={3}>NIGHT</th>
+              <th rowSpan={2}>TOTAL FOR MONTH</th>
+              <th colSpan={2}>TOTAL</th>
+              <th colSpan={2}>IF FOR MONTH</th>
+              <th rowSpan={2}>REMARKS</th>
+            </tr>
+            <tr>
+              <th>SERV NO</th><th>RANK</th><th>NAME</th>
+              <th>1ST PILOT</th><th>2ND PILOT</th><th>DUAL</th>
+              <th>1ST PILOT</th><th>2ND PILOT</th><th>DUAL</th>
+              <th>CAP</th><th>SOR</th>
+              <th>SIM</th><th>ACT</th>
+            </tr>
+          </thead>
+          <tbody>
+            {form1.map((r, i) => (
+              <tr key={r.pilot.id} data-testid={`form1-row-${r.pilot.id}`}>
+                <td className="center">{i+1}</td>
+                <td className="center">{r.pilot.id}</td>
+                <td className="center">{r.pilot.rank}</td>
+                <td>{r.pilot.name}</td>
+                <td className="center">{r.pilot.unit === "HQ Attached" ? "UH-60M" : (r.pilot.unit || "UH-60M")}</td>
+                <td className="center">{r.status}</td>
+                <td className="num">{r.day1.toFixed(1)}</td>
+                <td className="num">{r.day2.toFixed(1)}</td>
+                <td className="num">{r.dayDual.toFixed(1)}</td>
+                <td className="num">{r.night1.toFixed(1)}</td>
+                <td className="num">{r.night2.toFixed(1)}</td>
+                <td className="num">{r.nightDual.toFixed(1)}</td>
+                <td className="num"><b>{r.totalForMonth.toFixed(1)}</b></td>
+                <td className="num">{r.cap}</td>
+                <td className="num">{r.sor}</td>
+                <td className="num">{r.ifSim.toFixed(1)}</td>
+                <td className="num">{r.ifAct.toFixed(1)}</td>
+                <td>{r.remarks}</td>
+              </tr>
+            ))}
+            {form1.length === 0 && (
+              <tr><td colSpan={18} className="center" style={{padding:"12px"}}>{t("monthlyEmpty")}</td></tr>
+            )}
+          </tbody>
+        </table>
+        <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
+      </section>
+
+      {/* ───────── FORM 2 ───────── */}
+      <section className="form-page" data-testid="form2">
+        <div className="form-meta">
+          <div><b>ORFG RCN FORM 2</b><br/>ORFG HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div className="text-center">
+            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-sub">INDIVIDUAL PILOT ACHIEVEMENTS</div>
+          </div>
+          <div className="text-right"><b>ACHIEVEMENTS FOR : {monthHeader}</b></div>
+        </div>
+        <div className="secret">SECRET ( WHEN FILLED )</div>
+        <table>
+          <thead>
+            <tr>
+              <th rowSpan={2}>#</th>
+              <th rowSpan={2}>NAME</th>
+              <th rowSpan={2}>TOTAL FOR MONTH ALL TYPES</th>
+              <th rowSpan={2}>GRAND TOTAL</th>
+              <th colSpan={2}>CURRENCY</th>
+              <th colSpan={2}>IF FOR MONTH ALL TYPES</th>
+              <th colSpan={2}>TOTAL IF</th>
+              <th rowSpan={2}>IF EXPIRY DATE</th>
+              <th rowSpan={2}>REMARKS</th>
+            </tr>
+            <tr>
+              <th>NF</th><th>IF</th>
+              <th>SIM</th><th>ACT</th>
+              <th>SIM</th><th>ACT</th>
+            </tr>
+          </thead>
+          <tbody>
+            {form2.map((r, i) => (
+              <tr key={r.pilot.id} data-testid={`form2-row-${r.pilot.id}`}>
+                <td className="center">{i+1}</td>
+                <td>{r.pilot.name}</td>
+                <td className="num">{r.totalForMonthAllTypes.toFixed(1)}</td>
+                <td className="num"><b>{r.grandTotal.toFixed(1)}</b></td>
+                <td className="center">{r.currencyNF}</td>
+                <td className="center">{r.currencyIF}</td>
+                <td className="num">{r.ifSimMonth.toFixed(1)}</td>
+                <td className="num">{r.ifActMonth.toFixed(1)}</td>
+                <td className="num">{r.ifSimTotal.toFixed(1)}</td>
+                <td className="num">{r.ifActTotal.toFixed(1)}</td>
+                <td className="center">{r.ifExpiryDate || "—"}</td>
+                <td>{r.remarks}</td>
+              </tr>
+            ))}
+            {form2.length === 0 && (
+              <tr><td colSpan={12} className="center" style={{padding:"12px"}}>{t("monthlyEmpty")}</td></tr>
+            )}
+          </tbody>
+        </table>
+        <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
+      </section>
+
+      {/* ───────── FORM 3 ───────── */}
+      <section className="form-page" data-testid="form3">
+        <div className="form-meta">
+          <div><b>ORFG RCN FORM 3</b><br/>ORFG HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div className="text-center">
+            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-sub">MONTHLY PLANNED FLYING TASKS</div>
+          </div>
+          <div className="text-right"><b>ACHIEVEMENTS FOR : {monthHeader}</b></div>
+        </div>
+        <div className="secret">SECRET ( WHEN FILLED )</div>
+        <table>
+          <thead>
+            <tr>
+              <th>SQDN STRENGTH</th><th>OPS</th><th>ATTACHED</th><th>COURSE</th><th>SICK LEAVE</th>
+              <th>SICK RATE</th><th>DISCIPLINE MORALE</th><th>SQDN CMDR REMARKS</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="center">{inputs.squadronStrength}</td>
+              <td className="center">{inputs.ops}</td>
+              <td className="center">{inputs.attached}</td>
+              <td className="center">{inputs.course}</td>
+              <td className="center">{inputs.sickLeave}</td>
+              <td className="center">{inputs.sickRatePct.toFixed(1)}%</td>
+              <td className="center">{inputs.morale}</td>
+              <td></td>
+            </tr>
+            <tr><td><b>INCIDENTS</b></td><td colSpan={7} className="center">{inputs.incidents}</td></tr>
+            <tr><td><b>ACCIDENTS</b></td><td colSpan={7} className="center">{inputs.accidents}</td></tr>
+          </tbody>
+        </table>
+
+        <table style={{marginTop:8}}>
+          <thead>
+            <tr>
+              <th>MISSION</th>
+              {MISSION_BUCKETS.map(b => <th key={b}>{MISSION_LABEL[b]}</th>)}
+              <th>TOTAL</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>SORTIES</b></td>
+              {MISSION_BUCKETS.map(b => <td key={b} className="num">{form3.missionTotals[b].sorties}</td>)}
+              <td className="num"><b>{form3.totalSorties}</b></td>
+            </tr>
+            <tr>
+              <td><b>HOURS</b></td>
+              {MISSION_BUCKETS.map(b => <td key={b} className="num">{form3.missionTotals[b].hours.toFixed(1)}</td>)}
+              <td className="num"><b>{form3.totalHours.toFixed(1)}</b></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:8}}>
+          <table>
+            <thead><tr><th colSpan={3}>PLANNED AND ACHIEVED</th></tr>
+              <tr><th></th><th>SORTIES</th><th>HOURS</th></tr></thead>
+            <tbody>
+              <tr><td>PLANNED</td><td className="num">{inputs.plannedSorties}</td><td className="num">{inputs.plannedHours.toFixed(1)}</td></tr>
+              <tr><td>ACHIEVED</td><td className="num">{form3.achievedSorties}</td><td className="num">{form3.achievedHours.toFixed(1)}</td></tr>
+              <tr><td>WEATHER ABORT</td><td className="num">{inputs.weatherAbortS}</td><td className="num">{inputs.weatherAbortH.toFixed(1)}</td></tr>
+              <tr><td>MAINTENANCE</td><td className="num">{inputs.maintAbortS}</td><td className="num">{inputs.maintAbortH.toFixed(1)}</td></tr>
+              <tr><td>OPS ABORT</td><td className="num">{inputs.opsAbortS}</td><td className="num">{inputs.opsAbortH.toFixed(1)}</td></tr>
+              <tr><td>AIR ABORT</td><td className="num">{inputs.airAbortS}</td><td className="num">{inputs.airAbortH.toFixed(1)}</td></tr>
+            </tbody>
+          </table>
+          <table>
+            <thead><tr><th>LECTURES</th><th>HOURS</th><th>QUIZ</th><th>REMARKS</th></tr></thead>
+            <tbody>
+              {inputs.lectures.map((lec, i) => (
+                <tr key={i}>
+                  <td>{lec.name}</td>
+                  <td className="num">{lec.hours.toFixed(1)}</td>
+                  <td className="num">{lec.quizPct ? `${lec.quizPct}%` : ""}</td>
+                  <td>{lec.remarks}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
+      </section>
+
+      {/* ───────── FORM 4 ───────── */}
+      <section className="form-page" data-testid="form4">
+        <div className="form-meta">
+          <div><b>ORFG RCN FORM 4</b><br/>MONTH : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div className="text-center">
+            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-sub">MONTHLY PLANNED FLYING TASKS</div>
+          </div>
+          <div className="text-right"><b>PLANNED FOR : {nextMonthHeader}</b></div>
+        </div>
+        <div className="secret">SECRET ( WHEN FILLED )</div>
+        <table>
+          <thead>
+            <tr>
+              <th colSpan={3}>MONTH : {monthHeader}</th>
+              <th colSpan={3}>PILOTS AVAILABLE : {inputs.pilotsAvailableNext}</th>
+              <th colSpan={4}>OPS : {inputs.opsNext}</th>
+            </tr>
+            <tr>
+              <th>NO</th><th>TYPE OF EXERCISE</th><th>NO OF PILOTS</th>
+              <th>NO OF SORTIES / PILOT</th><th>TIME (DURATION) / SORTIE</th>
+              <th>TOTAL SORTIES FOR THE SQDN</th><th>TOTAL TIME FOR THE SQDN</th>
+              <th>2.75 RKT</th><th>12.7 MM</th><th>7.62 MM</th><th>REMARKS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {inputs.nextPlan.map((row, i) => {
+              const totalSorties = row.pilots * row.sortiesPerPilot;
+              const totalTime = totalSorties * row.durationPerSortie;
+              return (
+                <tr key={i} data-testid={`form4-row-${i}`}>
+                  <td className="center">{i+1}</td>
+                  <td className="center">{row.exercise}</td>
+                  <td className="num">{row.pilots}</td>
+                  <td className="num">{row.sortiesPerPilot.toFixed(1)}</td>
+                  <td className="num">{row.durationPerSortie.toFixed(1)}</td>
+                  <td className="num">{totalSorties.toFixed(0)}</td>
+                  <td className="num">{totalTime.toFixed(1)}</td>
+                  <td className="center">{row.ammo275}</td>
+                  <td className="center">{row.ammo127}</td>
+                  <td className="center">{row.ammo762}</td>
+                  <td>{row.remarks}</td>
+                </tr>
+              );
+            })}
+            <tr>
+              <td colSpan={5} className="center"><b>TOTAL</b></td>
+              <td className="num"><b>{inputs.nextPlan.reduce((a,r) => a + r.pilots*r.sortiesPerPilot, 0).toFixed(0)}</b></td>
+              <td className="num"><b>{inputs.nextPlan.reduce((a,r) => a + r.pilots*r.sortiesPerPilot*r.durationPerSortie, 0).toFixed(1)}</b></td>
+              <td colSpan={4}></td>
+            </tr>
+            <tr>
+              <td colSpan={7}><b>AMMO. AVAILABLE FROM PREVIOUS MONTH</b></td>
+              <td className="center">{inputs.ammoPrev.rkt275}</td>
+              <td className="center">{inputs.ammoPrev.mm127}</td>
+              <td className="center">{inputs.ammoPrev.mm762}</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td colSpan={7}><b>AMMO. REQUIRED THIS MONTH</b></td>
+              <td className="center">{inputs.ammoReq.rkt275}</td>
+              <td className="center">{inputs.ammoReq.mm127}</td>
+              <td className="center">{inputs.ammoReq.mm762}</td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+        <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
+      </section>
+
+      {/* ───────── ARABIC ROSTER ───────── */}
+      <section className="form-page" data-testid="arabic-roster" dir="rtl">
+        <div className="form-meta" dir="ltr">
+          <div className="text-center" style={{flex:1}}>
+            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+          </div>
+        </div>
+        <div className="secret">SECRET ( WHEN FILLED )</div>
+        <table>
+          <thead>
+            <tr>
+              <th>الرقم</th>
+              <th>الرتبة</th>
+              <th>الاسم</th>
+              <th>الإختصاص الإضافي</th>
+              <th>تاريخ انتهاء الفحص الطبي</th>
+              <th>تاريخ آخر طلعة</th>
+              <th>كامل ساعات طيران UH-60L/M</th>
+              <th>ساعات الشهر الماضي</th>
+              <th>العنوان</th>
+              <th>رقم الهاتف</th>
+            </tr>
+          </thead>
+          <tbody>
+            {arabicRoster.map((r, i) => (
+              <tr key={r.pilot.id} data-testid={`arabic-row-${r.pilot.id}`}>
+                <td className="center">{i+1}</td>
+                <td className="center">{r.pilot.rank}</td>
+                <td>{r.pilot.arabicName || r.pilot.name}</td>
+                <td className="center">{(inputs.perPilotStatus[r.pilot.id] || "PILOT")}</td>
+                <td className="center">{r.medicalExpiry || "—"}</td>
+                <td className="center">{r.lastFlightDate || "—"}</td>
+                <td className="num">{r.cumulativeHoursUH60M.toFixed(1)}</td>
+                <td className="num">{r.monthHours.toFixed(1)}</td>
+                <td>{r.pilot.address}</td>
+                <td className="center" dir="ltr">{r.pilot.phone}</td>
+              </tr>
+            ))}
+            {arabicRoster.length === 0 && (
+              <tr><td colSpan={10} className="center" style={{padding:"12px"}}>{t("monthlyEmpty")}</td></tr>
+            )}
+          </tbody>
+        </table>
+        <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
+      </section>
+    </div>
+  );
+}
+
+function NumField({ label, value, onChange, step = 1, testId }: {
+  label: string; value: number; onChange: (v: number) => void; step?: number; testId?: string;
+}) {
+  return (
+    <div>
+      <label className="text-xs text-muted-foreground">{label}</label>
+      <input type="number" step={step} value={value}
+        onChange={e => onChange(parseFloat(e.target.value) || 0)}
+        className="w-full bg-background border border-border rounded px-2 py-1.5 text-sm"
+        data-testid={testId} />
+    </div>
+  );
+}
+
+function TextField({ label, value, onChange, testId }: {
+  label: string; value: string; onChange: (v: string) => void; testId?: string;
+}) {
+  return (
+    <div>
+      <label className="text-xs text-muted-foreground">{label}</label>
+      <input value={value} onChange={e => onChange(e.target.value)}
+        className="w-full bg-background border border-border rounded px-2 py-1.5 text-sm"
+        data-testid={testId} />
+    </div>
+  );
+}
+
+function AbortPair({ label, s, h, onS, onH, testId }: {
+  label: string; s: number; h: number; onS: (v: number) => void; onH: (v: number) => void; testId: string;
+}) {
+  return (
+    <div>
+      <label className="text-xs text-muted-foreground">{label}</label>
+      <div className="flex gap-1">
+        <input type="number" step="1" min="0" value={s}
+          onChange={e => onS(parseInt(e.target.value)||0)}
+          placeholder="S"
+          className="w-1/2 bg-background border border-border rounded px-2 py-1.5 text-sm"
+          data-testid={`input-mr-abort-s-${testId}`} />
+        <input type="number" step="0.1" min="0" value={h}
+          onChange={e => onH(parseFloat(e.target.value)||0)}
+          placeholder="H"
+          className="w-1/2 bg-background border border-border rounded px-2 py-1.5 text-sm"
+          data-testid={`input-mr-abort-h-${testId}`} />
+      </div>
+    </div>
+  );
+}
+
+function updPlan(
+  inputs: ReportInputs,
+  updI: <K extends keyof ReportInputs>(k: K, v: ReportInputs[K]) => void,
+  i: number,
+  patch: Partial<ReportInputs["nextPlan"][number]>,
+) {
+  const next = [...inputs.nextPlan];
+  next[i] = { ...next[i], ...patch };
+  updI("nextPlan", next);
+}
