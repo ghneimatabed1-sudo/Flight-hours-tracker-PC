@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useI18n } from "@/lib/i18n";
+import { useAuth, type PcRoleLock } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -9,7 +10,7 @@ import type { LicenseKey, LicenseDuration } from "@/lib/types";
 import { addDuration, addDays } from "@/lib/types";
 import { listLicenseKeys, registerLicenseKey, updateLicenseKey, removeLicenseKey } from "@/lib/license-registry";
 import { fmtDate, fmtDateTime } from "@/lib/format";
-import { KeyRound, Copy, Check, User as UserIcon } from "lucide-react";
+import { KeyRound, Copy, Check, User as UserIcon, Wrench } from "lucide-react";
 
 function genKey(code: string): string {
   const rnd = Array.from({ length: 16 }, () => Math.floor(Math.random() * 36).toString(36).toUpperCase()).join("");
@@ -24,7 +25,86 @@ const CUSTOM_DURATION = "__custom__";
 
 export default function LicenseKeys() {
   const { t, lang } = useI18n();
+  const auth = useAuth();
   const [keys, setKeys] = useState<LicenseKey[]>(() => listLicenseKeys());
+
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupRole, setSetupRole] = useState<Exclude<PcRoleLock, null>>("ops");
+  const [setupSqnName, setSetupSqnName] = useState("");
+  const [setupSqnNumber, setSetupSqnNumber] = useState("");
+  const [setupSqnBase, setSetupSqnBase] = useState("");
+  const [setupDeviceName, setSetupDeviceName] = useState("");
+  const [setupOpsUsername, setSetupOpsUsername] = useState("");
+  const [setupBusy, setSetupBusy] = useState(false);
+  const [setupErr, setSetupErr] = useState<string | null>(null);
+  const [setupOk, setSetupOk] = useState<string | null>(null);
+
+  function openSetup() {
+    setSetupOpen(true);
+    setSetupErr(null);
+    setSetupOk(null);
+    setSetupRole("ops");
+    setSetupSqnName(auth.squadron?.name ?? "");
+    setSetupSqnNumber(auth.squadron?.number ?? "");
+    setSetupSqnBase(auth.squadron?.base ?? "");
+    setSetupDeviceName(auth.pcDeviceName ?? "");
+    setSetupOpsUsername("");
+  }
+
+  async function applySetup() {
+    setSetupErr(null);
+    setSetupBusy(true);
+    try {
+      const sqnName = setupSqnName.trim();
+      const sqnNumber = setupSqnNumber.trim();
+      const sqnBase = setupSqnBase.trim();
+      if (!sqnName || !sqnNumber || !sqnBase) {
+        setSetupErr(lang === "ar" ? "أكمل اسم السرب ورقمه والقاعدة." : "Fill squadron name, number, and base.");
+        return;
+      }
+      if (setupRole === "ops" && !setupOpsUsername.trim()) {
+        setSetupErr(lang === "ar" ? "اسم مستخدم الطيار مطلوب لجهاز العمليات." : "Pilot username is required for an Ops PC.");
+        return;
+      }
+
+      auth.configureSquadron({ name: sqnName, number: sqnNumber, base: sqnBase });
+      auth.setPcDeviceName(setupDeviceName.trim());
+      auth.setPcRoleLock(setupRole);
+
+      if (setupRole === "ops") {
+        const sqnCode = sqnNumber.replace(/[^0-9A-Z]/gi, "").toUpperCase().slice(0, 4) || "SQN";
+        const issuedAt = new Date().toISOString().slice(0, 10);
+        const expiresAt = addDuration(issuedAt, "never");
+        const fullKey = genKey(sqnCode);
+        const rec: LicenseKey = {
+          id: "key-" + Math.random().toString(36).slice(2, 8),
+          squadronId: "local-" + sqnCode,
+          keyPreview: `EE-${sqnCode}-••••-${fullKey.slice(-4)}`,
+          status: "active",
+          issuedAt,
+          expiresAt,
+          assignedUsername: setupOpsUsername.trim(),
+          lockedToDevice: null,
+          lastSyncAt: null,
+        };
+        registerLicenseKey({ fullKey, meta: rec });
+        setKeys(() => listLicenseKeys());
+        const res = await auth.activateLicense(fullKey, setupOpsUsername.trim());
+        if (!res.ok) {
+          setSetupErr(res.error ?? "License activation failed.");
+          return;
+        }
+      }
+
+      setSetupOk(
+        lang === "ar"
+          ? "تم إعداد هذا الجهاز. أعد التشغيل لتطبيق الدور الجديد."
+          : "Device set up. Restart the app to apply the new role.",
+      );
+    } finally {
+      setSetupBusy(false);
+    }
+  }
   const [genFor, setGenFor] = useState<string>("");
   const [genUsername, setGenUsername] = useState<string>("");
   const [genDuration, setGenDuration] = useState<LicenseDuration | typeof CUSTOM_DURATION>("1y");
@@ -106,9 +186,15 @@ export default function LicenseKeys() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-xl font-bold flex items-center gap-2"><KeyRound className="h-5 w-5" />{t("licenseKeys")}</h2>
-        <Button onClick={() => { setGenOpen(true); setNewKey(null); setGenFor(""); setGenUsername(""); setGenDuration("1y"); setGenCustomDays("5"); }} data-testid="button-generate">
-          {t("generateKey")}
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" onClick={openSetup} data-testid="button-setup-device">
+            <Wrench className="h-4 w-4 me-1" />
+            {lang === "ar" ? "إعداد هذا الجهاز" : "Set up this device"}
+          </Button>
+          <Button onClick={() => { setGenOpen(true); setNewKey(null); setGenFor(""); setGenUsername(""); setGenDuration("1y"); setGenCustomDays("5"); }} data-testid="button-generate">
+            {t("generateKey")}
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -267,6 +353,128 @@ export default function LicenseKeys() {
               </>
             ) : (
               <Button onClick={() => setGenOpen(false)} data-testid="button-done">{t("done")}</Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={setupOpen} onOpenChange={setSetupOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{lang === "ar" ? "إعداد هذا الجهاز" : "Set up this device"}</DialogTitle>
+            <DialogDescription>
+              {lang === "ar"
+                ? "اضبط دور هذا الجهاز واسم السرب باستخدام نموذج واحد. ينطبق فوراً ويستمر بعد إعادة التشغيل."
+                : "Set this PC's role, squadron, and (for Ops PCs) auto-mint and activate a license — all in one form."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {setupOk ? (
+            <div className="space-y-3">
+              <div className="rounded border border-emerald-300 bg-emerald-50 dark:bg-emerald-950 p-3 text-sm text-emerald-900 dark:text-emerald-100">
+                {setupOk}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{lang === "ar" ? "دور هذا الجهاز" : "Role for this PC"}</label>
+                <Select value={setupRole} onValueChange={(v) => setSetupRole(v as Exclude<PcRoleLock, null>)}>
+                  <SelectTrigger data-testid="select-setup-role"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ops">{lang === "ar" ? "طيار عمليات (Ops)" : "Ops Pilot"}</SelectItem>
+                    <SelectItem value="commander">{lang === "ar" ? "قائد سرب" : "Squadron Commander"}</SelectItem>
+                    <SelectItem value="super_admin">{lang === "ar" ? "مدير عام" : "Super Admin"}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="text-sm font-medium">{lang === "ar" ? "اسم السرب" : "Squadron name"}</label>
+                  <input
+                    value={setupSqnName}
+                    onChange={e => setSetupSqnName(e.target.value)}
+                    placeholder={lang === "ar" ? "مثال: السرب الأول" : "e.g. 1st Squadron"}
+                    className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
+                    data-testid="input-setup-sqn-name"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">{lang === "ar" ? "الرقم" : "Number"}</label>
+                  <input
+                    value={setupSqnNumber}
+                    onChange={e => setSetupSqnNumber(e.target.value)}
+                    placeholder="1"
+                    className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
+                    data-testid="input-setup-sqn-number"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium">{lang === "ar" ? "القاعدة" : "Base"}</label>
+                <input
+                  value={setupSqnBase}
+                  onChange={e => setSetupSqnBase(e.target.value)}
+                  placeholder={lang === "ar" ? "مثال: قاعدة الملك حسين" : "e.g. King Hussein Air Base"}
+                  className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
+                  data-testid="input-setup-sqn-base"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium">{lang === "ar" ? "اسم الجهاز (اختياري)" : "Device name (optional)"}</label>
+                <input
+                  value={setupDeviceName}
+                  onChange={e => setSetupDeviceName(e.target.value)}
+                  placeholder={lang === "ar" ? "مثال: جهاز غرفة العمليات 3" : "e.g. Cockpit-3"}
+                  className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
+                  data-testid="input-setup-device-name"
+                />
+              </div>
+
+              {setupRole === "ops" && (
+                <div className="space-y-1">
+                  <label className="text-sm font-medium flex items-center gap-1.5">
+                    <UserIcon className="h-3.5 w-3.5" /> {lang === "ar" ? "اسم مستخدم الطيار" : "Pilot username"}
+                  </label>
+                  <input
+                    value={setupOpsUsername}
+                    onChange={e => setSetupOpsUsername(e.target.value)}
+                    placeholder={lang === "ar" ? "مثال: pilot.alkhatib" : "e.g. pilot.alkhatib"}
+                    className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
+                    data-testid="input-setup-ops-user"
+                    autoComplete="off"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    {lang === "ar"
+                      ? "سيتم إنشاء مفتاح ترخيص محلي لهذا الطيار وتفعيله تلقائياً على هذا الجهاز."
+                      : "A local license key will be auto-generated for this pilot and activated on this PC."}
+                  </p>
+                </div>
+              )}
+
+              {setupErr && (
+                <div className="rounded border border-red-300 bg-red-50 dark:bg-red-950 p-2 text-xs text-red-900 dark:text-red-100">
+                  {setupErr}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            {setupOk ? (
+              <Button onClick={() => { setSetupOpen(false); setSetupOk(null); }} data-testid="button-setup-done">{t("done")}</Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setSetupOpen(false)} disabled={setupBusy}>{t("cancel")}</Button>
+                <Button onClick={applySetup} disabled={setupBusy} data-testid="button-setup-apply">
+                  {setupBusy
+                    ? (lang === "ar" ? "جارٍ الإعداد…" : "Setting up…")
+                    : (lang === "ar" ? "تطبيق" : "Apply")}
+                </Button>
+              </>
             )}
           </DialogFooter>
         </DialogContent>
