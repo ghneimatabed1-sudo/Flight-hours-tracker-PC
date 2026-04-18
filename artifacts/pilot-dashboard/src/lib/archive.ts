@@ -176,6 +176,16 @@ export function getArchive(period: string): ArchiveEntry | null {
   return readArchive(period);
 }
 
+/** Persist an edited archive snapshot. Recomputes totals before writing. */
+export function saveArchive(period: string, value: ArchiveEntry): void {
+  const next: ArchiveEntry = { ...value, totals: totalsOf(value.sorties) };
+  writeArchive(period, next);
+}
+
+export function deleteArchive(period: string): void {
+  try { localStorage.removeItem(STORAGE_PREFIX + period); } catch { /* noop */ }
+}
+
 export function downloadArchive(period: string): void {
   const data = readArchive(period);
   if (!data) return;
