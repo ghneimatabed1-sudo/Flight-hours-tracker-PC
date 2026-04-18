@@ -38,6 +38,7 @@ import SettingsPage from "@/pages/Settings";
 import Help from "@/pages/Help";
 import Reminders from "@/pages/Reminders";
 import Archives from "@/pages/Archives";
+import OpsTeam from "@/pages/OpsTeam";
 import NotFound from "@/pages/not-found";
 import AdminOverview from "@/pages/admin/Overview";
 import LicenseKeys from "@/pages/admin/LicenseKeys";
@@ -85,6 +86,7 @@ function SquadronOpsRoutes() {
       <Route path="/reminders" component={Reminders} />
       <Route path="/import" component={HistoricalImport} />
       <Route path="/archives" component={Archives} />
+      <Route path="/ops-team" component={OpsTeam} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/help" component={Help} />
       <Route component={NotFound} />
