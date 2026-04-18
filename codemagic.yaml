@@ -18,7 +18,7 @@ workflows:
     scripts:
       - name: Install pnpm
         script: |
-          npm install -g pnpm@9
+          npm install -g pnpm@9 --force
       - name: Install workspace deps
         script: |
           pnpm install --frozen-lockfile=false
@@ -55,7 +55,7 @@ workflows:
     scripts:
       - name: Install pnpm
         script: |
-          npm install -g pnpm@9
+          npm install -g pnpm@9 --force
       - name: Install workspace deps
         script: |
           pnpm install --frozen-lockfile=false
@@ -89,36 +89,6 @@ workflows:
       - build/*.ipa
       - build/**/*.xcarchive
 
-  # ──────────────────────────────────────────────────────────────────────
-  # Windows EXE — RJAF Squadron Ops installer (Electron + NSIS)
-  #
-  # Produces the one-click NSIS installer ops officers run on the
-  # squadron PC. INSTALL_PASSWORD can be set per-build in the Codemagic
-  # UI; if omitted, a placeholder is used for sanity testing.
-  # ──────────────────────────────────────────────────────────────────────
-  windows-exe:
-    name: RJAF Squadron Ops — Windows Installer
-    max_build_duration: 60
-    instance_type: windows_x2
-    environment:
-      node: 20
-      vars:
-        INSTALL_PASSWORD: "rjaf-install-change-me"
-    scripts:
-      - name: Install pnpm
-        script: |
-          npm install -g pnpm@9
-      - name: Install workspace deps
-        script: |
-          pnpm install --frozen-lockfile=false
-      - name: Install Electron toolchain
-        script: |
-          cd artifacts/pilot-dashboard
-          pnpm add -D electron@^32 electron-builder@^25 electron-updater@^6
-      - name: Build Windows installer
-        script: |
-          cd artifacts/pilot-dashboard
-          pnpm run electron:build
-    artifacts:
-      - artifacts/pilot-dashboard/release/*.exe
-      - artifacts/pilot-dashboard/release/latest.yml
+  # NOTE: Windows EXE build runs on GitHub Actions instead of Codemagic
+  # because Codemagic's Windows runners require a paid plan. See
+  # `.github/workflows/dashboard-windows-installer.yml`.
