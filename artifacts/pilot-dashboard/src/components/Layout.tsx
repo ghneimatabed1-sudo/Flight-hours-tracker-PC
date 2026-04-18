@@ -6,7 +6,7 @@ import {
   LayoutDashboard, ListChecks, PlusCircle, Users, BadgeCheck, AlertOctagon,
   Trophy, CalendarRange, PalmtreeIcon, UserX, Calendar, ClipboardList,
   ShieldAlert, FileText, Megaphone, Map, Tags, FileDown, UserCog, Settings,
-  Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle, Archive, Bell, UserPlus, Users2,
+  Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle, Archive, Bell, UserPlus, Users2, FileBarChart,
 } from "lucide-react";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
 
@@ -38,6 +38,7 @@ const ITEMS: readonly Item[] = [
   { p: "/import", k: "nav_import", I: Upload },
   { p: "/archives", k: "nav_archives", I: Archive },
   { p: "/ops-team", k: "nav_opsteam", I: Users2 },
+  { p: "/monthly-report", k: "nav_monthly_report", I: FileBarChart },
   { p: "/help", k: "nav_help", I: HelpCircle },
   { p: "/settings", k: "nav_settings", I: Settings },
 ] as const;
@@ -76,6 +77,11 @@ export default function Layout({ children }: { children: ReactNode }) {
             }
             if (p === "/ops-team") {
               // Only the lead ops pilot manages the assigned ops sub-accounts.
+              return user?.role === "ops";
+            }
+            if (p === "/monthly-report") {
+              // Monthly Report (ORFG RCN Forms 1-4 + Arabic roster) is owned
+              // by the squadron ops officer.
               return user?.role === "ops";
             }
             return true;
