@@ -172,7 +172,10 @@ export function buildForm1Rows(
     const totalForMonth = round1(day1+day2+dayDual+night1+night2+nightDual);
     return {
       pilot: p,
-      status: inputs.perPilotStatus[p.id] || defaultPilotStatus(p),
+      // Per the v1.0.6 directive: leave the status BLANK when the officer
+      // hasn't filled it in. Previously we auto-guessed from rank/quals which
+      // could mislead. The wizard's per-pilot override row is the only source.
+      status: inputs.perPilotStatus[p.id] || "",
       day1: round1(day1), day2: round1(day2), dayDual: round1(dayDual),
       night1: round1(night1), night2: round1(night2), nightDual: round1(nightDual),
       nvg: round1(nvg),
