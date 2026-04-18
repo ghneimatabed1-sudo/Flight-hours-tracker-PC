@@ -59,7 +59,7 @@ export default function SettingsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { t, isRTL, lang, setLang } = useI18n();
-  const { snapshot, unlink } = useAppData();
+  const { snapshot, unlink, signOut } = useAppData();
   const router = useRouter();
 
   if (!snapshot) return null;
@@ -112,14 +112,38 @@ export default function SettingsScreen() {
   const confirmUnlink = () => {
     if (Platform.OS === "web") {
       // eslint-disable-next-line no-alert
-      if (typeof window !== "undefined" && window.confirm(t("settings_logout_confirm"))) {
+      if (typeof window !== "undefined" && window.confirm(t("settings_unlink_confirm"))) {
         void unlink();
       }
       return;
     }
-    Alert.alert(t("settings_logout"), t("settings_logout_confirm"), [
+    Alert.alert(t("settings_unlink"), t("settings_unlink_confirm"), [
       { text: t("cancel"), style: "cancel" },
       { text: t("confirm"), style: "destructive", onPress: () => void unlink() },
+    ]);
+  };
+
+  // Sign-out locks the app but keeps the pilot-device pairing intact. On
+  // re-entry the pilot types their password — no new pairing code required.
+  const confirmSignOut = () => {
+    const proceed = () => {
+      signOut();
+      try {
+        router.replace("/lock" as never);
+      } catch {
+        // best-effort
+      }
+    };
+    if (Platform.OS === "web") {
+      // eslint-disable-next-line no-alert
+      if (typeof window !== "undefined" && window.confirm(t("settings_signout_confirm"))) {
+        proceed();
+      }
+      return;
+    }
+    Alert.alert(t("settings_signout"), t("settings_signout_confirm"), [
+      { text: t("cancel"), style: "cancel" },
+      { text: t("confirm"), onPress: proceed },
     ]);
   };
 
@@ -478,6 +502,115 @@ export default function SettingsScreen() {
         />
       </Pressable>
 
+      {/* ── Security ─────────────────────────────
+          Local device password: sign out locks the app but keeps the pilot
+          paired, "change password" is for rotating the PIN, and "unlink"
+          wipes the pairing entirely (a new pairing code will be needed). */}
+      <Text
+        style={[
+          styles.section,
+          { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
+        ]}
+      >
+        {t("settings_security")}
+      </Text>
+      <Pressable
+        onPress={confirmSignOut}
+        style={({ pressed }) => [
+          styles.row,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            flexDirection: isRTL ? "row-reverse" : "row",
+            opacity: pressed ? 0.85 : 1,
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.helpIcon,
+            { backgroundColor: colors.muted, borderColor: colors.border },
+          ]}
+        >
+          <Feather name="lock" size={16} color={colors.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text
+            style={[
+              styles.rowValue,
+              { color: colors.foreground, textAlign: isRTL ? "right" : "left" },
+            ]}
+          >
+            {t("settings_signout")}
+          </Text>
+          <Text
+            style={[
+              styles.rowLabel,
+              {
+                color: colors.mutedForeground,
+                textAlign: isRTL ? "right" : "left",
+                marginTop: 2,
+              },
+            ]}
+          >
+            {t("settings_signout_hint")}
+          </Text>
+        </View>
+        <Feather
+          name={isRTL ? "chevron-left" : "chevron-right"}
+          size={18}
+          color={colors.mutedForeground}
+        />
+      </Pressable>
+      <Pressable
+        onPress={() => router.push("/setup-lock?mode=change" as never)}
+        style={({ pressed }) => [
+          styles.row,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            flexDirection: isRTL ? "row-reverse" : "row",
+            opacity: pressed ? 0.85 : 1,
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.helpIcon,
+            { backgroundColor: colors.muted, borderColor: colors.border },
+          ]}
+        >
+          <Feather name="key" size={16} color={colors.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text
+            style={[
+              styles.rowValue,
+              { color: colors.foreground, textAlign: isRTL ? "right" : "left" },
+            ]}
+          >
+            {t("settings_change_password")}
+          </Text>
+          <Text
+            style={[
+              styles.rowLabel,
+              {
+                color: colors.mutedForeground,
+                textAlign: isRTL ? "right" : "left",
+                marginTop: 2,
+              },
+            ]}
+          >
+            {t("settings_change_password_hint")}
+          </Text>
+        </View>
+        <Feather
+          name={isRTL ? "chevron-left" : "chevron-right"}
+          size={18}
+          color={colors.mutedForeground}
+        />
+      </Pressable>
+
       <Pressable
         onPress={confirmUnlink}
         style={({ pressed }) => [
@@ -491,7 +624,7 @@ export default function SettingsScreen() {
       >
         <Feather name="log-out" size={16} color={colors.destructive} />
         <Text style={[styles.logoutText, { color: colors.destructive }]}>
-          {t("settings_logout")}
+          {t("settings_unlink")}
         </Text>
       </Pressable>
     </ScrollView>

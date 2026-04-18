@@ -51,11 +51,12 @@ export default function LinkScreen() {
           Haptics.NotificationFeedbackType.Success
         ).catch(() => {});
       }
-      // Send the freshly-linked pilot to the reminders screen so they can
-      // opt in to push notifications and pick their per-currency thresholds
-      // before landing on the home tab. They can skip with the back button.
+      // After linking we first make the pilot create a local device
+      // password — the app is then locked on every cold launch. The
+      // setup-lock screen forwards to /reminders once the password is
+      // confirmed.
       try {
-        router.replace("/reminders" as never);
+        router.replace("/setup-lock" as never);
       } catch {
         // Navigation is best-effort; if it fails the user still lands in tabs.
       }

@@ -88,6 +88,8 @@ function RootLayoutNav() {
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="link" options={{ presentation: "modal" }} />
       <Stack.Screen name="reminders" options={{ presentation: "modal" }} />
+      <Stack.Screen name="lock" options={{ gestureEnabled: false }} />
+      <Stack.Screen name="setup-lock" />
     </Stack>
   );
 }

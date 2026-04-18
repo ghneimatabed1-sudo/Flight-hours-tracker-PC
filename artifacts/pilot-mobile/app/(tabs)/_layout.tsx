@@ -10,11 +10,16 @@ import { useI18n } from "@/lib/i18n";
 export default function TabLayout() {
   const colors = useColors();
   const { t } = useI18n();
-  const { ready, link } = useAppData();
+  const { ready, link, hasPassword, unlocked } = useAppData();
   const isWeb = Platform.OS === "web";
 
   if (!ready) return null;
   if (!link) return <Redirect href="/link" />;
+  // Local device-lock gate. A pilot who has never created a password is
+  // sent to /setup-lock; a pilot who has one but has not unlocked this
+  // session is sent to /lock.
+  if (!hasPassword) return <Redirect href={"/setup-lock" as never} />;
+  if (!unlocked) return <Redirect href={"/lock" as never} />;
 
   return (
     <Tabs

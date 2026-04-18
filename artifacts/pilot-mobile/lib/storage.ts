@@ -7,6 +7,7 @@ import type { PilotSnapshot } from "./types";
 const LINK_KEY = "rjaf.link.v1";
 const SNAPSHOT_KEY = "rjaf.snapshot.v1";
 const PREFS_KEY = "rjaf.prefs.v1";
+const LOCK_KEY = "rjaf.lock.v1";
 
 export interface LinkRecord {
   militaryNumber: string;
@@ -77,6 +78,30 @@ export async function loadSnapshot(): Promise<PilotSnapshot | null> {
 
 export async function saveSnapshot(snap: PilotSnapshot): Promise<void> {
   await secureSet(SNAPSHOT_KEY, JSON.stringify(snap));
+}
+
+// Local device-lock password. Stored as { salt, hash } — we never keep
+// the plaintext. Absent when the pilot has not created a password yet.
+export interface LockRecord {
+  salt: string;
+  hash: string;
+}
+
+export async function loadLock(): Promise<LockRecord | null> {
+  try {
+    const raw = await secureGet(LOCK_KEY);
+    return raw ? (JSON.parse(raw) as LockRecord) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveLock(rec: LockRecord): Promise<void> {
+  await secureSet(LOCK_KEY, JSON.stringify(rec));
+}
+
+export async function clearLock(): Promise<void> {
+  await secureDelete(LOCK_KEY);
 }
 
 export async function loadPrefs(): Promise<UserPrefs> {
