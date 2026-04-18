@@ -162,6 +162,10 @@ interface AuthCtx extends AuthState {
   cancelAdminTotp: () => void;
   pendingAdmin: { mode: "enroll" | "verify"; secret: string; otpauth: string } | null;
   adminTotpEnrolled: boolean;
+  // True once the Super Admin has chosen a password on this PC. Drives
+  // the "first-launch" UX: when false, the login screen jumps straight
+  // to the Set-Password form instead of asking for a license key.
+  adminProvisioned: boolean;
   // Number of unused recovery codes the super admin has left, or null if
   // unknown (e.g. before sign-in or when the server didn't report it). The
   // dashboard uses this to warn the admin when the count is at or below
@@ -297,6 +301,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // only consulted as a hint for the demo (no-Supabase) path.
   const [adminTotpEnrolled, setAdminTotpEnrolled] = useState<boolean>(
     () => supabaseConfigured ? false : !!localStorage.getItem(ADMIN_TOTP_SECRET_KEY),
+  );
+  const [adminProvisioned, setAdminProvisioned] = useState<boolean>(
+    () => !!localStorage.getItem(ADMIN_PASSWORD_HASH_KEY),
   );
   const [pcRoleLock, setPcRoleLockState] = useState<PcRoleLock>(() => readPcRoleLock());
   const applyPcRoleLock = (v: PcRoleLock) => {
@@ -555,6 +562,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ? { mode: pending.mode, secret: pending.secret, otpauth: pending.otpauth }
       : null,
     adminTotpEnrolled,
+    adminProvisioned,
     verifyAdminTotp: async (code) => {
       if (!pending) return { ok: false, error: "no_pending" };
       const now = Date.now();
@@ -732,6 +740,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       const newHash = await sha256Hex(np);
       localStorage.setItem(ADMIN_PASSWORD_HASH_KEY, newHash);
+      setAdminProvisioned(true);
       await recordAuditEvent({ type: "admin.password.provisioned", actor: "admin", detail: {} });
       return { ok: true };
     },
