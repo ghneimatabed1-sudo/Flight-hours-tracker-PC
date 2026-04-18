@@ -25,7 +25,7 @@ workflows:
       - name: Expo prebuild (android)
         script: |
           cd artifacts/pilot-mobile
-          CI=1 pnpm dlx expo prebuild --platform android --clean
+          CI=true pnpm exec expo prebuild --platform android --clean
       - name: Build debug APK
         script: |
           cd artifacts/pilot-mobile/android
@@ -62,7 +62,7 @@ workflows:
       - name: Expo prebuild (ios)
         script: |
           cd artifacts/pilot-mobile
-          CI=1 pnpm dlx expo prebuild --platform ios --clean
+          CI=true pnpm exec expo prebuild --platform ios --clean
       - name: Install pods
         script: |
           cd artifacts/pilot-mobile/ios
