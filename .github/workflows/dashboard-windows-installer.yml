@@ -8,6 +8,12 @@ name: Build Windows Installer (RJAF Squadron Ops)
 # Triggers:
 #   - manual (workflow_dispatch) — build + publish a release on demand
 #   - push of a v* tag          — cut a release
+#
+# IMPORTANT: every step that runs multiple commands MUST use `shell: bash`.
+# The default Windows shell is PowerShell, which does NOT abort on a non-
+# zero exit code from an intermediate command. That bug previously hid a
+# failed `vite build` and shipped an installer with an empty dist/public/
+# directory — the app then crashed at startup with "missing-index".
 on:
   workflow_dispatch:
   push:
@@ -20,6 +26,7 @@ jobs:
     defaults:
       run:
         working-directory: artifacts/pilot-dashboard
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,18 +51,40 @@ jobs:
         # asar — otherwise the installed app crashes with "Cannot find
         # module 'electron-updater'" at startup.
         run: |
+          set -euo pipefail
           pnpm add -D electron@^32 electron-builder@^25
           pnpm add electron-updater@^6
 
       - name: Inject INSTALL_PASSWORD define into installer.nsh
         env:
           INSTALL_PASSWORD: ${{ secrets.INSTALL_PASSWORD || 'rjaf-install-change-me' }}
-        shell: pwsh
         run: |
-          $nsh = "build/installer.nsh"
-          $original = Get-Content $nsh -Raw
-          $define = "!define INSTALL_PASSWORD `"$env:INSTALL_PASSWORD`"`r`n"
-          Set-Content -Path $nsh -Value ($define + $original) -NoNewline
+          set -euo pipefail
+          NSH=build/installer.nsh
+          ORIGINAL=$(cat "$NSH")
+          printf '!define INSTALL_PASSWORD "%s"\r\n%s' "$INSTALL_PASSWORD" "$ORIGINAL" > "$NSH"
+
+      - name: Vite build (renderer)
+        # Split out so a failed vite build aborts the workflow immediately
+        # instead of being swallowed by a chained run-step.
+        env:
+          PORT: "5173"
+          BASE_PATH: "./"
+        run: pnpm run build
+
+      - name: Verify renderer output exists
+        # Belt-and-suspenders: if vite build silently produced no
+        # index.html, fail before electron-builder packs an empty asar.
+        run: |
+          set -euo pipefail
+          if [ ! -f dist/public/index.html ]; then
+            echo "::error::dist/public/index.html missing — vite build did not produce a renderer bundle"
+            exit 1
+          fi
+          echo "renderer ok: $(ls -la dist/public/index.html)"
+
+      - name: Compile Electron main + preload
+        run: pnpm run electron:compile
 
       - name: Build & publish Windows installer
         env:
@@ -65,12 +94,7 @@ jobs:
           # GITHUB_TOKEN only grants access to THIS repo, so we use a PAT
           # stored as RELEASES_PAT secret.
           GH_TOKEN: ${{ secrets.RELEASES_PAT }}
-          PORT: "5173"
-          BASE_PATH: "./"
-        run: |
-          pnpm run build
-          pnpm run electron:compile
-          pnpm exec electron-builder --win nsis --config electron-builder.json --publish always
+        run: pnpm exec electron-builder --win nsis --config electron-builder.json --publish always
 
       - name: Upload installer (workflow artifact backup)
         uses: actions/upload-artifact@v4
