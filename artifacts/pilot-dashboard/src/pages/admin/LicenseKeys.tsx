@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useI18n } from "@/lib/i18n";
 import { useAuth, type PcRoleLock } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -67,8 +67,23 @@ export default function LicenseKeys() {
   // trap, and when it closes the Delete button has already been unmounted,
   // leaving the dialog inert — user reported all inputs became unclickable.
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  // Ref to the username input — after deleting/resetting an account we
+  // explicitly move keyboard focus here so the dialog can never end up in
+  // a state where every input feels "frozen". (Native <details> + Radix
+  // Dialog focus traps + button unmounts conspired to break focus
+  // recovery in earlier versions.)
+  const usernameInputRef = useRef<HTMLInputElement | null>(null);
   function refreshLocalAccounts(): void {
     try { setLocalAccounts(listCommanders()); } catch { setLocalAccounts([]); }
+  }
+  function returnFocusToUsername(): void {
+    // Wait for React to commit the DOM change before focusing — otherwise
+    // we'd be focusing the OLD button that's about to unmount.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        usernameInputRef.current?.focus();
+      });
+    });
   }
   useEffect(() => {
     if (setupOpen) {
@@ -85,17 +100,17 @@ export default function LicenseKeys() {
       setPendingDeleteId(rec.id);
       return;
     }
-    // Move focus off the about-to-be-unmounted button BEFORE we mutate
-    // state, so the dialog's focus trap doesn't end up pointing at a
-    // detached node — the same class of bug as the native-confirm freeze.
-    if (document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
-    }
+    // Hand focus to the username input BEFORE we mutate state, so the
+    // dialog's focus trap can never end up pointing at the about-to-be-
+    // unmounted Delete button. Then re-focus after the DOM commits, in
+    // case React decides to bounce focus during reconciliation.
+    usernameInputRef.current?.focus();
     deleteCommander(rec.id);
     try { clearSupabaseCreds(rec.username); } catch { /* swallow */ }
     setPendingDeleteId(null);
     setResetCreds(null);
     refreshLocalAccounts();
+    returnFocusToUsername();
   }
   async function handleResetLocalAccount(rec: CommanderRecord) {
     const newPw = await resetCommanderPassword(rec.id);
@@ -103,6 +118,7 @@ export default function LicenseKeys() {
     setResetCreds({ username: rec.username, password: newPw });
     setPendingDeleteId(null);
     refreshLocalAccounts();
+    returnFocusToUsername();
   }
 
   // Squadron data is only meaningful for roles that operate at squadron
@@ -151,7 +167,10 @@ export default function LicenseKeys() {
     setSetupOk(null);
     setSetupCredentials(null);
     setCredCopied(false);
-    setSetupRole("ops");
+    // If the active license carried a Super-Admin-assigned role, force the
+    // setup dialog to that role; the operator can't widen their own tier.
+    const assigned = localStorage.getItem("rjaf.assignedRole") as SetupRoleUI | null;
+    setSetupRole(assigned && ["ops","flight_commander","squadron_commander","hq_commander","super_admin"].includes(assigned) ? assigned : "ops");
     setSetupSqnName(auth.squadron?.name ?? "");
     setSetupSqnNumber(auth.squadron?.number ?? "");
     setSetupSqnBase(auth.squadron?.base ?? "");
@@ -160,6 +179,9 @@ export default function LicenseKeys() {
     setSetupOpsUsername("");
     setSetupAccountPassword("");
   }
+  // True when the current license-key record assigned a role from the admin
+  // page. We use this to disable the role selector inside the Setup dialog.
+  const roleLockedByLicense = typeof window !== "undefined" && !!localStorage.getItem("rjaf.assignedRole");
 
   async function applySetup() {
     setSetupErr(null);
@@ -374,9 +396,23 @@ export default function LicenseKeys() {
   const [genUsername, setGenUsername] = useState<string>("");
   const [genDuration, setGenDuration] = useState<LicenseDuration | typeof CUSTOM_DURATION>("1y");
   const [genCustomDays, setGenCustomDays] = useState<string>("5");
+  // Pre-assigned role tier for the PC this key will activate. Only the
+  // Super Admin chooses this here; the field operator can't override it
+  // during Setup. Defaults to "ops" (the most common case — squadron
+  // operations PC).
+  const [genRole, setGenRole] = useState<"ops" | "flight_commander" | "squadron_commander" | "hq_commander">("ops");
+  // Authorized squadrons for commander tiers. Empty for ops (the PC's own
+  // squadron is implicit) and HQ (sees all). For Flight/Squadron Commander
+  // PCs, the Super Admin ticks exactly which squadrons that commander is
+  // allowed to monitor — and only those.
+  const [genAuthSqns, setGenAuthSqns] = useState<string[]>([]);
   const [genOpen, setGenOpen] = useState(false);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  function toggleGenAuthSqn(id: string) {
+    setGenAuthSqns(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  }
 
   // Resolve the picked duration (preset or custom) into an ISO expiry date.
   // Returns null for "never expires" or invalid custom input.
@@ -399,6 +435,13 @@ export default function LicenseKeys() {
     if (!valid) return;
     const full = genKey(sqn.code);
     setNewKey(full);
+    // For commander tiers (squadron / flight) the Super Admin must tick at
+    // least one authorized squadron; the home squadron (`sqn`) is auto-added
+    // so the commander can always see the squadron the PC belongs to.
+    const isCommanderTier = genRole === "squadron_commander" || genRole === "flight_commander";
+    const authSqns = isCommanderTier
+      ? Array.from(new Set([sqn.id, ...genAuthSqns]))
+      : undefined;
     const newRecord: LicenseKey = {
       id: "key-" + Math.random().toString(36).slice(2, 8),
       squadronId: sqn.id,
@@ -409,6 +452,8 @@ export default function LicenseKeys() {
       assignedUsername: username,
       lockedToDevice: null,
       lastSyncAt: null,
+      assignedRole: genRole,
+      authorizedSquadronIds: authSqns,
     };
     registerLicenseKey({ fullKey: full, meta: newRecord });
     setKeys(() => listLicenseKeys());
@@ -465,6 +510,46 @@ export default function LicenseKeys() {
     setKeys(() => listLicenseKeys());
   }
 
+  // Per-PC authorized-squadron editor. Reads + writes the same localStorage
+  // key that the License-Key flow seeds (`rjaf.authorizedSquadronIds`) and
+  // mirrors the change into the registry record so the PC's history stays
+  // consistent. Only visible when this PC is licensed as a commander tier.
+  const assignedRoleHere = (typeof window !== "undefined" ? localStorage.getItem("rjaf.assignedRole") : null) as
+    | "ops" | "flight_commander" | "squadron_commander" | "hq_commander" | "super_admin" | null;
+  const showLiveAuthEditor =
+    assignedRoleHere === "squadron_commander" ||
+    assignedRoleHere === "flight_commander" ||
+    assignedRoleHere === "hq_commander";
+  const [liveAuth, setLiveAuth] = useState<string[]>(() => {
+    try { const raw = localStorage.getItem("rjaf.authorizedSquadronIds"); return raw ? JSON.parse(raw) : []; }
+    catch { return []; }
+  });
+  const [liveAuthSavedFlash, setLiveAuthSavedFlash] = useState(false);
+  function toggleLiveAuth(id: string) {
+    setLiveAuth(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  }
+  function saveLiveAuth() {
+    const homeSqnNumber = auth.squadron?.number ?? "";
+    const homeSqnId = squadrons.find(s => s.code === homeSqnNumber || s.id === `local-${homeSqnNumber}`)?.id;
+    // Always keep the home squadron in the list so the commander can never
+    // accidentally lose visibility on the squadron their PC physically lives at.
+    const final = homeSqnId
+      ? Array.from(new Set([homeSqnId, ...liveAuth]))
+      : Array.from(new Set(liveAuth));
+    localStorage.setItem("rjaf.authorizedSquadronIds", JSON.stringify(final));
+    // Mirror the new list back onto the registered LicenseKey for this PC so
+    // re-activating won't snap back to the original list issued months ago.
+    const activeKey = localStorage.getItem("rjaf.licenseKey");
+    if (activeKey) {
+      const matching = keys.find(k => (k as unknown as { _fullKey?: string })._fullKey?.toUpperCase() === activeKey.toUpperCase());
+      if (matching) updateLicenseKey(matching.id, { authorizedSquadronIds: final });
+      setKeys(() => listLicenseKeys());
+    }
+    setLiveAuth(final);
+    setLiveAuthSavedFlash(true);
+    setTimeout(() => setLiveAuthSavedFlash(false), 1800);
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -474,11 +559,55 @@ export default function LicenseKeys() {
             <Wrench className="h-4 w-4 me-1" />
             {lang === "ar" ? "إعداد هذا الجهاز" : "Set up this device"}
           </Button>
-          <Button onClick={() => { setGenOpen(true); setNewKey(null); setGenFor(""); setGenUsername(""); setGenDuration("1y"); setGenCustomDays("5"); }} data-testid="button-generate">
+          <Button onClick={() => { setGenOpen(true); setNewKey(null); setGenFor(""); setGenUsername(""); setGenDuration("1y"); setGenCustomDays("5"); setGenRole("ops"); setGenAuthSqns([]); }} data-testid="button-generate">
             {t("generateKey")}
           </Button>
         </div>
       </div>
+
+      {showLiveAuthEditor && (
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div>
+                <h3 className="text-sm font-bold">
+                  {lang === "ar" ? "الأسراب التي يراقبها هذا الجهاز" : "Squadrons this PC monitors"}
+                </h3>
+                <p className="text-[11px] text-muted-foreground">
+                  {lang === "ar"
+                    ? "أضف أو احذف أسراب هذا الجهاز هنا. يحفظ التغيير محليًا فورًا — لا حاجة لإعادة إصدار المفتاح."
+                    : "Add or remove squadrons for this PC here. Saved locally on this device — no key reissue needed."}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {liveAuthSavedFlash && <span className="text-xs text-emerald-600 font-medium">{lang === "ar" ? "تم الحفظ ✓" : "Saved ✓"}</span>}
+                <Button size="sm" onClick={saveLiveAuth} data-testid="button-save-live-auth">
+                  {lang === "ar" ? "حفظ" : "Save"}
+                </Button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5 max-h-56 overflow-y-auto border border-border rounded p-2">
+              {squadrons.map(s => {
+                const homeNumber = auth.squadron?.number ?? "";
+                const isHome = s.code === homeNumber || s.id === `local-${homeNumber}`;
+                const checked = isHome || liveAuth.includes(s.id);
+                return (
+                  <label key={s.id} className={`flex items-center gap-2 text-xs cursor-pointer ${isHome ? "opacity-70" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={isHome}
+                      onChange={() => toggleLiveAuth(s.id)}
+                      data-testid={`check-liveauth-${s.id}`}
+                    />
+                    <span>{lang === "ar" ? s.nameAr : s.name}{isHome ? (lang === "ar" ? " (أم)" : " (home)") : ""}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardContent className="p-0">
@@ -544,7 +673,7 @@ export default function LicenseKeys() {
           {!newKey ? (
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium">{t("squadron")}</label>
+                <label className="text-sm font-medium">{lang === "ar" ? "السرب الأم لهذا الجهاز" : "Home squadron of this PC"}</label>
                 <Select value={genFor} onValueChange={setGenFor}>
                   <SelectTrigger data-testid="select-squadron"><SelectValue placeholder={t("selectSquadron")} /></SelectTrigger>
                   <SelectContent>
@@ -554,6 +683,62 @@ export default function LicenseKeys() {
                   </SelectContent>
                 </Select>
               </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{lang === "ar" ? "دور هذا الجهاز" : "Role for this PC"}</label>
+                <Select value={genRole} onValueChange={(v) => { setGenRole(v as typeof genRole); setGenAuthSqns([]); }}>
+                  <SelectTrigger data-testid="select-gen-role"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ops">{lang === "ar" ? "طيار عمليات" : "Ops Pilot"}</SelectItem>
+                    <SelectItem value="flight_commander">{lang === "ar" ? "قائد طيران" : "Flight Commander"}</SelectItem>
+                    <SelectItem value="squadron_commander">{lang === "ar" ? "قائد سرب" : "Squadron Commander"}</SelectItem>
+                    <SelectItem value="hq_commander">{lang === "ar" ? "قائد القيادة" : "Head Quarter Commander"}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  {lang === "ar"
+                    ? "هذا الدور يُقفل على الجهاز عند التفعيل ولا يمكن للمشغّل تغييره."
+                    : "This role is locked on the PC at activation; the operator cannot change it."}
+                </p>
+              </div>
+
+              {(genRole === "squadron_commander" || genRole === "flight_commander") && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    {lang === "ar" ? "الأسراب المخوّل بمراقبتها" : "Authorized squadrons (which this commander can monitor)"}
+                  </label>
+                  <p className="text-[11px] text-muted-foreground">
+                    {lang === "ar"
+                      ? "اختر الأسراب التي يستطيع هذا الجهاز عرض بياناتها فقط. يُضاف السرب الأم تلقائيًا."
+                      : "Pick exactly the squadrons this PC may view. The home squadron is added automatically."}
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto border border-border rounded p-2">
+                    {squadrons.map(s => {
+                      const isHome = s.id === genFor;
+                      const checked = isHome || genAuthSqns.includes(s.id);
+                      return (
+                        <label key={s.id} className={`flex items-center gap-2 text-xs cursor-pointer ${isHome ? "opacity-70" : ""}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={isHome}
+                            onChange={() => toggleGenAuthSqn(s.id)}
+                            data-testid={`check-genauth-${s.id}`}
+                          />
+                          <span>{lang === "ar" ? s.nameAr : s.name}{isHome ? (lang === "ar" ? " (أم)" : " (home)") : ""}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {genRole === "hq_commander" && (
+                <p className="text-[11px] text-muted-foreground border border-border rounded p-2">
+                  {lang === "ar"
+                    ? "قائد القيادة يرى كل الأسراب تلقائيًا — لا حاجة لاختيار."
+                    : "HQ Commander sees every squadron automatically — no selection needed."}
+                </p>
+              )}
               <div className="space-y-2">
                 <label className="text-sm font-medium flex items-center gap-1.5">
                   <UserIcon className="h-3.5 w-3.5" /> {t("operatorUsername")}
@@ -665,13 +850,13 @@ export default function LicenseKeys() {
                   "username already exists" trap), or reset a forgotten
                   password — without leaving the Setup dialog. */}
               {localAccounts.length > 0 && (
-                <details className="rounded border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 p-2">
-                  <summary className="cursor-pointer text-sm font-medium text-amber-900 dark:text-amber-100">
+                <div className="rounded border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 p-2">
+                  <div className="text-sm font-medium text-amber-900 dark:text-amber-100 mb-2">
                     {lang === "ar"
                       ? `الحسابات المحلية الموجودة (${localAccounts.length})`
                       : `Existing local accounts on this PC (${localAccounts.length})`}
-                  </summary>
-                  <div className="mt-2 space-y-1.5">
+                  </div>
+                  <div className="space-y-1.5">
                     {localAccounts.map((rec) => (
                       <div key={rec.id} className="flex items-center justify-between gap-2 rounded bg-white dark:bg-black/30 p-1.5 text-xs">
                         <div className="min-w-0 flex-1">
@@ -700,8 +885,9 @@ export default function LicenseKeys() {
                         </Button>
                       </div>
                     ))}
-                    {resetCreds && (
-                      <div className="rounded border border-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 p-2 text-[11px] text-emerald-900 dark:text-emerald-100">
+                  {/* (close inner spacer) */}</div>
+                  {resetCreds && (
+                      <div className="mt-2 rounded border border-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 p-2 text-[11px] text-emerald-900 dark:text-emerald-100">
                         <div className="font-bold mb-1">
                           {lang === "ar" ? "كلمة المرور الجديدة (تظهر مرة واحدة):" : "New password (shown once):"}
                         </div>
@@ -721,13 +907,12 @@ export default function LicenseKeys() {
                         </Button>
                       </div>
                     )}
-                  </div>
-                </details>
+                </div>
               )}
 
               <div className="space-y-2">
                 <label className="text-sm font-medium">{lang === "ar" ? "دور هذا الجهاز" : "Role for this PC"}</label>
-                <Select value={setupRole} onValueChange={(v) => setSetupRole(v as SetupRoleUI)}>
+                <Select value={setupRole} onValueChange={(v) => setSetupRole(v as SetupRoleUI)} disabled={roleLockedByLicense}>
                   <SelectTrigger data-testid="select-setup-role"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="ops">{lang === "ar" ? "طيار عمليات (Ops)" : "Ops Pilot"}</SelectItem>
@@ -737,6 +922,13 @@ export default function LicenseKeys() {
                     <SelectItem value="super_admin">{lang === "ar" ? "مدير عام" : "Super Admin"}</SelectItem>
                   </SelectContent>
                 </Select>
+                {roleLockedByLicense && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                    {lang === "ar"
+                      ? "تم قفل الدور من قبل المدير العام عند إصدار المفتاح."
+                      : "Role was locked by the Super Admin when this key was issued."}
+                  </p>
+                )}
                 <p className="text-[11px] text-muted-foreground">
                   {!roleNeedsSquadron(setupRole)
                     ? (lang === "ar"
@@ -829,6 +1021,7 @@ export default function LicenseKeys() {
                       <span className="text-red-500">*</span>
                     </label>
                     <input
+                      ref={usernameInputRef}
                       value={setupOpsUsername}
                       onChange={e => setSetupOpsUsername(e.target.value)}
                       placeholder={usernamePlaceholder(setupRole)}

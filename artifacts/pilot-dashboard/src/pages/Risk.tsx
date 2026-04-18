@@ -367,7 +367,7 @@ export default function Risk() {
   }
 
   return (
-    <div className="space-y-4 print:space-y-2">
+    <div className="space-y-4 print:space-y-1 print-area print:text-[10px]">
       <PageHead
         title={t("nav_risk")}
         subtitle="Rotary-Wing Risk Assessment Matrix"
@@ -429,7 +429,7 @@ export default function Risk() {
       </Card>
 
       {/* DAY/NIGHT SECTIONS 1-11 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 lg:grid-cols-2 print:grid-cols-2 gap-3 print:gap-1">
         <Card>
           <h3 className="text-sm font-semibold mb-2">1. Supervision <span className="text-xs text-muted-foreground">(CMD/Control)</span></h3>
           <PickMatrix rows={SUPERVISION.rows} cols={SUPERVISION.cols} values={SUPERVISION.values}

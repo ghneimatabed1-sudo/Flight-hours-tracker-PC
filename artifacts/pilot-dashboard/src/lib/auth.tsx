@@ -372,6 +372,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem("rjaf.licenseKey", k);
         localStorage.setItem("rjaf.licenseUser", u);
         localStorage.setItem("rjaf.licenseBoundFp", state.fingerprint);
+        // Carry the Super Admin's PC-tier and squadron-monitoring decisions
+        // forward into Setup. The role is locked at activation; the
+        // authorized squadron list scopes commander pages so a Squadron
+        // Commander can't widen visibility past what was issued.
+        if (lookup.record?.assignedRole) {
+          localStorage.setItem("rjaf.assignedRole", lookup.record.assignedRole);
+        }
+        if (lookup.record?.authorizedSquadronIds && lookup.record.authorizedSquadronIds.length > 0) {
+          localStorage.setItem("rjaf.authorizedSquadronIds", JSON.stringify(lookup.record.authorizedSquadronIds));
+        }
         setState(s => ({ ...s, licensed: true }));
         return { ok: true };
       }
