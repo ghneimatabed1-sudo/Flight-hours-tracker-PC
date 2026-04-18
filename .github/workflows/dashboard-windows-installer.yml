@@ -8,12 +8,6 @@ name: Build Windows Installer (RJAF Squadron Ops)
 # Triggers:
 #   - manual (workflow_dispatch) — build + publish a release on demand
 #   - push of a v* tag          — cut a release
-#
-# IMPORTANT: every step that runs multiple commands MUST use `shell: bash`.
-# The default Windows shell is PowerShell, which does NOT abort on a non-
-# zero exit code from an intermediate command. That bug previously hid a
-# failed `vite build` and shipped an installer with an empty dist/public/
-# directory — the app then crashed at startup with "missing-index".
 on:
   workflow_dispatch:
   push:
@@ -41,6 +35,21 @@ jobs:
         with:
           version: 9
 
+      # Cache electron-builder's binary downloads (nsis, winCodeSign,
+      # nsis-resources, electron zips, etc). Without this cache, every
+      # run re-downloads ~120MB from GitHub release CDN; a transient 504
+      # on any one of those downloads (as happened in run 24608487600)
+      # fails the entire build. Cached entries skip the network entirely.
+      - name: Cache electron-builder downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/AppData/Local/electron-builder/Cache
+            ~/AppData/Local/electron/Cache
+          key: electron-builder-${{ runner.os }}-v32-nsis
+          restore-keys: |
+            electron-builder-${{ runner.os }}-
+
       - name: Install workspace deps
         run: pnpm install --frozen-lockfile=false
         working-directory: .
@@ -65,22 +74,14 @@ jobs:
           printf '!define INSTALL_PASSWORD "%s"\r\n%s' "$INSTALL_PASSWORD" "$ORIGINAL" > "$NSH"
 
       - name: Vite build (renderer)
-        # Split out so a failed vite build aborts the workflow immediately
-        # instead of being swallowed by a chained run-step.
         env:
           PORT: "5173"
           BASE_PATH: "./"
-          # Bake Supabase project credentials into the renderer bundle so
-          # every PC talks to the SAME backend. With these set, the Super
-          # Admin TOTP secret is shared across all PCs (server-side) instead
-          # of being trapped in per-PC localStorage.
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: pnpm run build
 
       - name: Verify renderer output exists
-        # Belt-and-suspenders: if vite build silently produced no
-        # index.html, fail before electron-builder packs an empty asar.
         run: |
           set -euo pipefail
           if [ ! -f dist/public/index.html ]; then
@@ -92,15 +93,30 @@ jobs:
       - name: Compile Electron main + preload
         run: pnpm run electron:compile
 
-      - name: Build & publish Windows installer
+      - name: Build & publish Windows installer (with retry)
         env:
           INSTALL_PASSWORD: ${{ secrets.INSTALL_PASSWORD || 'rjaf-install-change-me' }}
-          # GH_TOKEN must be a Personal Access Token with `repo` scope on
-          # the PUBLIC Flight-hours-tracker-Releases repo. The default
-          # GITHUB_TOKEN only grants access to THIS repo, so we use a PAT
-          # stored as RELEASES_PAT secret.
           GH_TOKEN: ${{ secrets.RELEASES_PAT }}
-        run: pnpm exec electron-builder --win nsis --config electron-builder.json --publish always
+        # Retry up to 3 times. electron-builder downloads several binaries
+        # from the GitHub release CDN at build time; transient 5xx errors
+        # there should not fail the whole pipeline. After the first
+        # successful download, the cache step above keeps the file warm
+        # for subsequent runs.
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            echo "::group::electron-builder attempt $attempt"
+            if pnpm exec electron-builder --win nsis --config electron-builder.json --publish always; then
+              echo "::endgroup::"
+              echo "build succeeded on attempt $attempt"
+              exit 0
+            fi
+            echo "::endgroup::"
+            echo "::warning::electron-builder attempt $attempt failed; retrying in 20s"
+            sleep 20
+          done
+          echo "::error::electron-builder failed after 3 attempts"
+          exit 1
 
       - name: Upload installer (workflow artifact backup)
         uses: actions/upload-artifact@v4
