@@ -255,7 +255,48 @@ function rowToSortie(r: Record<string, unknown>): Sortie {
     actual: Number(data.actual ?? 0),
     condition: data.condition,
     remarks: data.remarks,
+    time: data.time != null ? Number(data.time) : undefined,
+    dual: data.dual,
+    pilotPosition: data.pilotPosition,
+    coPilotPosition: data.coPilotPosition,
+    pilotIsCaptain: data.pilotIsCaptain,
+    coPilotIsCaptain: data.coPilotIsCaptain,
+    msnDuty: data.msnDuty,
   };
+}
+
+// Derive the legacy day1/day2/night1/night2/dayDual/nightDual/nvg buckets
+// from the new simple-mode inputs (single Time + condition + per-seat
+// position + dual flag). Keeping the legacy fields populated means existing
+// monthly reports, archives, and the mobile app totals work unchanged.
+export function deriveSortieBuckets(input: {
+  time: number;
+  condition: "Day" | "Night" | "NVG";
+  pilotPosition: "1st" | "2nd";
+  dual: boolean;
+}): {
+  day1: number; day2: number; dayDual: number;
+  night1: number; night2: number; nightDual: number;
+  nvg: number; actual: number;
+} {
+  const t = Number.isFinite(input.time) ? Math.max(0, input.time) : 0;
+  const out = { day1: 0, day2: 0, dayDual: 0, night1: 0, night2: 0, nightDual: 0, nvg: 0, actual: t };
+  if (t <= 0) return out;
+  if (input.condition === "Day") {
+    if (input.dual) out.dayDual = t;
+    else if (input.pilotPosition === "1st") out.day1 = t;
+    else out.day2 = t;
+  } else if (input.condition === "Night") {
+    if (input.dual) out.nightDual = t;
+    else if (input.pilotPosition === "1st") out.night1 = t;
+    else out.night2 = t;
+  } else {
+    out.nvg = t;
+    if (input.pilotPosition === "1st") out.night1 = t;
+    else out.night2 = t;
+    if (input.dual) out.nightDual = t;
+  }
+  return out;
 }
 
 export function useSorties(): UseQueryResult<Sortie[]> & { data: Sortie[] } {
@@ -389,6 +430,12 @@ export function useCreateSortie() {
           remarks: s.remarks,
           pilotExternal: s.pilotExternal,
           coPilotExternal: s.coPilotExternal,
+          time: s.time, dual: s.dual,
+          pilotPosition: s.pilotPosition,
+          coPilotPosition: s.coPilotPosition,
+          pilotIsCaptain: s.pilotIsCaptain,
+          coPilotIsCaptain: s.coPilotIsCaptain,
+          msnDuty: s.msnDuty,
         },
       }).select().single();
       if (error) throw error;
@@ -435,6 +482,12 @@ export function useUpdateSortie() {
           remarks: s.remarks,
           pilotExternal: s.pilotExternal,
           coPilotExternal: s.coPilotExternal,
+          time: s.time, dual: s.dual,
+          pilotPosition: s.pilotPosition,
+          coPilotPosition: s.coPilotPosition,
+          pilotIsCaptain: s.pilotIsCaptain,
+          coPilotIsCaptain: s.coPilotIsCaptain,
+          msnDuty: s.msnDuty,
         },
       }).eq("id", s.id);
       if (error) throw error;

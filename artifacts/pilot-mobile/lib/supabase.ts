@@ -119,8 +119,24 @@ function rowsToSnapshot(
     const sd = s.data ?? {};
     const day = num(sd.day1) + num(sd.day2) + num(sd.dayDual);
     const night = num(sd.night1) + num(sd.night2) + num(sd.nightDual);
-    const cap =
-      sd.captain === pilot.id || sd.captainPilotId === pilot.id;
+    // Captain credit, per-seat: prefer the explicit pilotIsCaptain /
+    // coPilotIsCaptain flag set by the new simple-mode Add Sortie page on
+    // the dashboard. Fall back to the legacy assumption (P1 = captain) so
+    // historical sorties still credit captain hours correctly.
+    const isAsPilot = s.pilot_id === pilot.id;
+    const isAsCoPilot = s.co_pilot_id === pilot.id;
+    let cap = false;
+    if (typeof sd.pilotIsCaptain === "boolean" || typeof sd.coPilotIsCaptain === "boolean") {
+      cap = isAsPilot
+        ? sd.pilotIsCaptain === true
+        : isAsCoPilot
+        ? sd.coPilotIsCaptain === true
+        : false;
+    } else {
+      cap = isAsPilot ||
+        sd.captain === pilot.id ||
+        sd.captainPilotId === pilot.id;
+    }
     const total = num(sd.actual) || day + night + num(sd.nvg) + num(sd.sim);
     return {
       id: s.id,
