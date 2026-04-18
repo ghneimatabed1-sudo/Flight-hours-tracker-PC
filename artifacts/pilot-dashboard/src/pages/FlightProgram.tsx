@@ -5,7 +5,41 @@ import { Button } from "@/components/ui/button";
 import { Printer, Save } from "lucide-react";
 import emblem from "@assets/rjaf_emblem.png";
 
-type Mode = "DAY_AND_NVG" | "DAY" | "NVG";
+type Mode = "DAY" | "NIGHT" | "NVG" | "DAY_AND_NVG" | "DAY_AND_NIGHT";
+
+const MODES: { id: Mode; label: string }[] = [
+  { id: "DAY", label: "DAY" },
+  { id: "NIGHT", label: "NIGHT" },
+  { id: "NVG", label: "NVG" },
+  { id: "DAY_AND_NVG", label: "DAY & NVG" },
+  { id: "DAY_AND_NIGHT", label: "DAY & NIGHT" },
+];
+
+// Simple side-profile Black Hawk silhouette used 5× across the header,
+// matching the printed RJAF schedule template.
+function Helo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 200 60" className={className} fill="currentColor" aria-hidden>
+      {/* main rotor bar */}
+      <rect x="20" y="4" width="160" height="2" rx="1" />
+      <rect x="98" y="6" width="4" height="8" />
+      {/* fuselage */}
+      <path d="M30 30 Q40 18 95 18 L140 18 Q158 18 165 26 L178 28 L178 34 L165 36 Q158 42 140 42 L60 42 Q40 42 30 36 Z" />
+      {/* tail boom */}
+      <rect x="165" y="29" width="25" height="4" />
+      {/* tail fin */}
+      <path d="M185 20 L195 30 L185 34 Z" />
+      {/* tail rotor */}
+      <rect x="192" y="22" width="1.5" height="16" />
+      {/* landing gear / stub wings */}
+      <rect x="70" y="42" width="3" height="8" />
+      <rect x="120" y="42" width="3" height="8" />
+      <rect x="55" y="50" width="80" height="2" />
+      {/* cockpit window */}
+      <path d="M42 28 Q48 22 62 22 L70 22 L70 30 L44 30 Z" fill="white" opacity="0.25" />
+    </svg>
+  );
+}
 
 interface Row {
   dn: string;
@@ -150,8 +184,20 @@ export default function FlightProgram() {
     setTimeout(() => setSavedFlash(false), 1400);
   };
 
-  const showDay = prog.mode === "DAY" || prog.mode === "DAY_AND_NVG";
-  const showNight = prog.mode === "NVG" || prog.mode === "DAY_AND_NVG";
+  const showDay =
+    prog.mode === "DAY" ||
+    prog.mode === "DAY_AND_NVG" ||
+    prog.mode === "DAY_AND_NIGHT";
+  const showNight =
+    prog.mode === "NIGHT" ||
+    prog.mode === "NVG" ||
+    prog.mode === "DAY_AND_NVG" ||
+    prog.mode === "DAY_AND_NIGHT";
+  // NIGHT section label tracks the mode: "NVG" when the night block is
+  // NVG-only, "NIGHT" otherwise (matches the two Excel tabs: DAY&NVG / DAY).
+  const nightLabel =
+    prog.mode === "NVG" || prog.mode === "DAY_AND_NVG" ? "NVG" : "NIGHT";
+  const defaultNightDn = nightLabel === "NVG" ? "NVG" : "N";
 
   return (
     <div className="space-y-3" dir={dir}>
@@ -165,18 +211,18 @@ export default function FlightProgram() {
           data-testid="input-fp-date"
         />
         <div className="inline-flex rounded-md border border-border overflow-hidden">
-          {(["DAY_AND_NVG", "DAY", "NVG"] as const).map((m) => (
+          {MODES.map((m) => (
             <button
-              key={m}
-              onClick={() => update("mode", m)}
+              key={m.id}
+              onClick={() => update("mode", m.id)}
               className={`px-3 py-1.5 text-xs font-medium ${
-                prog.mode === m
+                prog.mode === m.id
                   ? "bg-primary text-primary-foreground"
                   : "bg-secondary/40 hover:bg-secondary"
               }`}
-              data-testid={`button-mode-${m}`}
+              data-testid={`button-mode-${m.id}`}
             >
-              {m === "DAY_AND_NVG" ? "DAY & NVG" : m}
+              {m.label}
             </button>
           ))}
         </div>
@@ -197,17 +243,24 @@ export default function FlightProgram() {
         className="bg-white text-black border border-black p-3 space-y-2 text-[11px] print:text-[10px] print:p-2"
         dir="ltr"
       >
-        {/* Header */}
-        <div className="text-center">
-          <div className="text-[9px] tracking-[0.3em] font-semibold">CLASSIFIED</div>
-          <div className="flex items-center justify-center gap-4 mt-1">
+        {/* Header — matches the printed RJAF template: 5 helicopter
+            silhouettes across the top, emblem + squadron name centered
+            below, "CLASSIFIED" caption underneath. */}
+        <div className="relative">
+          <div className="flex items-center justify-between text-black px-1">
+            <Helo className="h-6 w-20" />
+            <Helo className="h-6 w-20" />
+            <Helo className="h-6 w-20" />
+            <Helo className="h-6 w-20" />
+            <Helo className="h-6 w-20" />
+          </div>
+          <div className="flex items-center justify-center gap-3 mt-1">
             <img src={emblem} alt="" className="h-14 w-14 object-contain" />
             <div className="text-center leading-tight">
-              <div className="text-sm font-bold">KING ABDULLAH II AIRBASE</div>
-              <div className="text-sm font-bold">NO.8 SQDN</div>
-              <div className="text-sm font-bold underline tracking-wider mt-0.5">FLIGHT SCHEDULE</div>
+              <div className="text-sm font-bold">KING ABDULLAH II AIRBASE - NO.8 SQDN</div>
+              <div className="text-base font-bold underline tracking-wider mt-0.5">FLIGHT SCHEDULE</div>
+              <div className="text-[9px] tracking-[0.3em] font-semibold mt-0.5">CLASSIFIED</div>
             </div>
-            <img src={emblem} alt="" className="h-14 w-14 object-contain opacity-0" />
           </div>
         </div>
 
@@ -270,14 +323,14 @@ export default function FlightProgram() {
               <>
                 <tr>
                   <td colSpan={14} className="border border-black bg-gray-100 text-center font-bold py-0.5">
-                    NIGHT
+                    {nightLabel}
                   </td>
                 </tr>
                 {prog.nightRows.map((r, i) => (
                   <RowInputs
                     key={`n${i}`}
                     index={i + 1}
-                    row={r}
+                    row={{ ...r, dn: r.dn || defaultNightDn }}
                     pilotOptions={pilotOptions}
                     onChange={(patch) => updateRow("nightRows", i, patch)}
                   />
