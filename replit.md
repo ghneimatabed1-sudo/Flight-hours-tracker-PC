@@ -78,3 +78,13 @@ The system is built as a pnpm workspace monorepo.
 # v1.0.5 — Monthly Report
 
 Ops-only `/monthly-report` page renders ORFG RCN Forms 1, 2, 3, 4 and the Arabic roster sheet. Engine in `src/lib/monthly-report.ts` computes per-pilot day/night/dual hours, IF totals, currency state (C/R/N/C/U/R), and mission-bucket sortie/hour breakdown directly from `usePilots` + `useSorties`. A small wizard collects only the values that vary month-to-month (squadron strength, OPS/attached/course/sick, morale, planned vs achieved, four abort categories, five lectures, next-month plan with ammo, optional per-pilot status/remarks overrides). User inputs persist to `localStorage` under `rjaf.monthlyReport.YYYY-MM`. Forms render as printable HTML with `@media print` page breaks; the toolbar's Print / Save PDF button uses `window.print()`. Sidebar entry gated to `user.role === "ops"`. EN+AR strings under `monthlyReport*` and `nav_monthly_report`. Build: dashboard-windows-installer.yml triggered on main after wiping the previous run + artifact.
+
+# v1.0.6 — Polish, Help, Auto-fill
+
+- **Monthly Report polish:** Form 1/2/3 now show TOTAL rows; Form 3 also derives ACHIEVEMENT %, TOTAL ABORTS and WEATHER % via `deriveForm3Stats`. Wizard auto-fill seeds next-month plan from prior achievement (`suggestNextMonthPlanFrom`).
+- **Bilingual inputs:** Lecture rows, exercise rows, ammo, per-pilot status/remarks all carry `dir="auto"` so officers can type Arabic and English in the same field — direction flips automatically.
+- **Add/remove rows:** Plus/Trash2 buttons added for lectures and next-month exercises in the wizard.
+- **Pilot model:** New optional `militaryNumber` on `Pilot` (mock + roundtripped through `squadron-data.ts` JSON `data` blob). Roster edit form exposes the field next to Arabic name.
+- **Add Sortie auto-fill:** When the ops officer picks a pilot or co-pilot, a read-only `PilotAutoFill` line appears under the dropdown showing the pilot's call sign, flight name, military number, Arabic name and qualification badges from the roster — so the officer can confirm they picked the right person without leaving the form.
+- **Help page:** Now covers every major area — Sortie Logging, Roster/Pilots/Rankings, Currency & Expirations, Schedule/Duty/Risk, NOTAMs/Routes/Units, PDF Exports & Archives, Monthly Report, Users/Audit/Ops Team, Settings/License/Updates and the existing Pilot Mobile App + Support sections. EN + AR strings.
+- **Build:** dashboard-windows-installer.yml triggered on main commit `57be433` after wiping prior runs + artifacts.

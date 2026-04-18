@@ -56,6 +56,9 @@ export default function AddSortie() {
   };
 
   const pilotOpts = PILOTS.map(p => ({ value: p.id, label: `${p.rank} ${p.name}` }));
+  const pilotById = (id: string) => PILOTS.find(p => p.id === id);
+  const selectedPilot = !pilotExt ? pilotById(form.pilot) : null;
+  const selectedCoPilot = !coPilotExt ? pilotById(form.coPilot) : null;
 
   return (
     <div>
@@ -121,6 +124,7 @@ export default function AddSortie() {
               opts={pilotOpts}
               externalLabel={t("externalPilotToggle")}
             />
+            {selectedPilot && <PilotAutoFill pilot={selectedPilot} testId="autofill-pilot" />}
             <SeatRow
               label={t("coPilot")}
               external={coPilotExt}
@@ -134,6 +138,7 @@ export default function AddSortie() {
               opts={pilotOpts}
               externalLabel={t("externalPilotToggle")}
             />
+            {selectedCoPilot && <PilotAutoFill pilot={selectedCoPilot} testId="autofill-copilot" />}
           </div>
 
           <div className="border-t border-border pt-3">
@@ -184,6 +189,40 @@ export default function AddSortie() {
           <div className="text-[11px] text-muted-foreground mt-3">{t("bigPlaceholder")}</div>
         </Card>
       </form>
+    </div>
+  );
+}
+
+interface AutoFillProps {
+  pilot: { callSign?: string; flightName?: string; militaryNumber?: string; arabicName?: string; qualifications?: string[] };
+  testId: string;
+}
+function PilotAutoFill({ pilot, testId }: AutoFillProps) {
+  const { t } = useI18n();
+  const callSign = pilot.callSign?.trim();
+  const flightName = pilot.flightName?.trim();
+  const milNo = pilot.militaryNumber?.trim();
+  const ar = pilot.arabicName?.trim();
+  const quals = pilot.qualifications?.filter(q => q && q.trim().length > 0) ?? [];
+  if (!callSign && !flightName && !milNo && !ar && quals.length === 0) {
+    return (
+      <div className="-mt-1 text-[11px] text-muted-foreground italic px-1" data-testid={testId}>
+        {t("autoFillEmpty")}
+      </div>
+    );
+  }
+  return (
+    <div className="-mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] px-1" data-testid={testId}>
+      {callSign && <span><span className="text-muted-foreground">{t("callSign")}: </span><span className="font-mono font-semibold text-primary">{callSign}</span></span>}
+      {flightName && <span><span className="text-muted-foreground">{t("flightName")}: </span><span className="font-mono font-semibold">{flightName}</span></span>}
+      {milNo && <span><span className="text-muted-foreground">{t("militaryNumber")}: </span><span className="font-mono">{milNo}</span></span>}
+      {ar && <span dir="auto"><span className="text-muted-foreground">{t("arabicName")}: </span><span className="font-semibold">{ar}</span></span>}
+      {quals.length > 0 && (
+        <span className="inline-flex items-center gap-1">
+          <span className="text-muted-foreground">{t("qualifications")}:</span>
+          {quals.map(q => <span key={q} className="px-1.5 py-0.5 rounded bg-secondary border border-border text-[10px] uppercase tracking-wider">{q}</span>)}
+        </span>
+      )}
     </div>
   );
 }

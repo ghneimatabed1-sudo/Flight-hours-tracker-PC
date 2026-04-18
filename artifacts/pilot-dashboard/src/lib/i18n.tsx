@@ -313,6 +313,8 @@ const dict = {
 
     name: "Name",
     arabicName: "Arabic Name",
+    militaryNumber: "Military Number",
+    autoFillEmpty: "No call sign or military number on file — open Roster to add one.",
     rank: "Rank",
     phone: "Phone",
     address: "Address",
@@ -1075,6 +1077,8 @@ const dict = {
 
     name: "الاسم",
     arabicName: "الاسم بالعربية",
+    militaryNumber: "الرقم العسكري",
+    autoFillEmpty: "لا يوجد نداء أو رقم عسكري مسجّل — افتح القائمة الاسمية لإضافتهما.",
     rank: "الرتبة",
     phone: "الهاتف",
     address: "العنوان",

@@ -15,6 +15,11 @@ export interface Pilot {
   flightName?: string;
   name: string;
   arabicName: string;
+  // Optional military service number (e.g. "20-1234"). Free text so units that
+  // use letters/dashes can store them as-is. Shown on the roster, the pilot
+  // detail page, and auto-displayed when the ops officer picks this pilot in
+  // the Add Sortie form so they can confirm they chose the right person.
+  militaryNumber?: string;
   rank: string;
   phone: string;
   address: string;
