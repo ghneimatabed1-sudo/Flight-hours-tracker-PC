@@ -9,7 +9,7 @@ workflows:
   android-apk:
     name: RJAF Pilot Logbook — Android APK
     max_build_duration: 60
-    instance_type: linux_x2
+    instance_type: mac_mini_m2
     environment:
       node: 20
       java: 17
@@ -46,8 +46,6 @@ workflows:
     name: RJAF Pilot Logbook — iOS IPA
     max_build_duration: 90
     instance_type: mac_mini_m2
-    integrations:
-      app_store_connect: codemagic
     environment:
       node: 20
       xcode: latest
@@ -105,7 +103,7 @@ workflows:
     environment:
       node: 20
       vars:
-        INSTALL_PASSWORD: "Encrypted(change-me-in-codemagic-ui)"
+        INSTALL_PASSWORD: "rjaf-install-change-me"
     scripts:
       - name: Install pnpm
         script: |
