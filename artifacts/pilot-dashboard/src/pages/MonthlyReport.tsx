@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Printer, Wand2, Save, ChevronDown, ChevronUp, FileText } from "lucide-react";
+import { Printer, Wand2, Save, ChevronDown, ChevronUp, FileText, Plus, Trash2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { PageHead } from "@/components/Layout";
 import { useAuth } from "@/lib/auth";
@@ -7,9 +7,12 @@ import { usePilots, useSorties } from "@/lib/squadron-data";
 import {
   buildForm1Rows, buildForm2Rows, buildForm3, buildArabicRoster,
   defaultInputs, lastCompletedPeriod, loadInputs, saveInputs,
-  periodLabel, MISSION_BUCKETS, MISSION_LABEL, NEXT_PLAN_EXERCISES,
+  periodLabel, MISSION_BUCKETS, MISSION_LABEL,
+  deriveForm3Stats, suggestNextMonthPlanFrom,
   type ReportInputs,
 } from "@/lib/monthly-report";
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
 
 export default function MonthlyReport() {
   const { t } = useI18n();
@@ -36,8 +39,36 @@ export default function MonthlyReport() {
     buildForm2Rows(pilots, sorties, period, form1), [pilots, sorties, period, form1]);
   const form3 = useMemo(() =>
     buildForm3(sorties, period), [sorties, period]);
+  const form3Stats = useMemo(() =>
+    deriveForm3Stats(inputs, form3), [inputs, form3]);
   const arabicRoster = useMemo(() =>
     buildArabicRoster(pilots, sorties, period, form1), [pilots, sorties, period, form1]);
+
+  // Form 1 totals row — sum of all per-pilot columns. Officer can compare
+  // this against squadron-wide reports without manually adding numbers.
+  const form1Totals = useMemo(() => form1.reduce((a, r) => ({
+    day1:      round1(a.day1 + r.day1),
+    day2:      round1(a.day2 + r.day2),
+    dayDual:   round1(a.dayDual + r.dayDual),
+    night1:    round1(a.night1 + r.night1),
+    night2:    round1(a.night2 + r.night2),
+    nightDual: round1(a.nightDual + r.nightDual),
+    nvg:       round1(a.nvg + r.nvg),
+    totalForMonth: round1(a.totalForMonth + r.totalForMonth),
+    cap:       a.cap + r.cap,
+    sor:       a.sor + r.sor,
+    ifSim:     round1(a.ifSim + r.ifSim),
+    ifAct:     round1(a.ifAct + r.ifAct),
+  }), { day1:0,day2:0,dayDual:0,night1:0,night2:0,nightDual:0,nvg:0,totalForMonth:0,cap:0,sor:0,ifSim:0,ifAct:0 }), [form1]);
+
+  const form2Totals = useMemo(() => form2.reduce((a, r) => ({
+    totalForMonthAllTypes: round1(a.totalForMonthAllTypes + r.totalForMonthAllTypes),
+    grandTotal:            round1(a.grandTotal + r.grandTotal),
+    ifSimMonth:            round1(a.ifSimMonth + r.ifSimMonth),
+    ifActMonth:            round1(a.ifActMonth + r.ifActMonth),
+    ifSimTotal:            round1(a.ifSimTotal + r.ifSimTotal),
+    ifActTotal:            round1(a.ifActTotal + r.ifActTotal),
+  }), { totalForMonthAllTypes:0, grandTotal:0, ifSimMonth:0, ifActMonth:0, ifSimTotal:0, ifActTotal:0 }), [form2]);
 
   const onSave = () => {
     saveInputs(period, inputs);
@@ -46,12 +77,24 @@ export default function MonthlyReport() {
   };
 
   const onAutoFill = () => {
-    setInputs(prev => ({
-      ...prev,
+    // Use last month's actual achievement as a starting estimate for both
+    // "planned" (this month's plan was made before the month started) and
+    // the next-month plan. Officer can tweak in seconds.
+    const prevPeriod = (() => {
+      const [y,m] = period.split("-").map(Number);
+      const d = new Date(y, m - 2, 1);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+    })();
+    const prevStats = buildForm3(sorties, prevPeriod);
+    const suggestion = suggestNextMonthPlanFrom({ sorties: prevStats.achievedSorties, hours: prevStats.achievedHours });
+    setInputs(curr => ({
+      ...curr,
       squadronStrength: pilots.length,
       ops: pilots.filter(p => p.unit === "SQDN").length,
       attached: pilots.filter(p => p.unit === "HQ Attached").length,
       pilotsAvailableNext: pilots.length,
+      plannedSorties: curr.plannedSorties || suggestion.plannedSorties,
+      plannedHours:   curr.plannedHours   || suggestion.plannedHours,
     }));
   };
 
@@ -163,11 +206,26 @@ export default function MonthlyReport() {
 
             {/* Lectures */}
             <div>
-              <div className="text-xs font-semibold mb-1">LECTURES</div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-xs font-semibold">LECTURES</div>
+                <button onClick={() => updI("lectures", [...inputs.lectures, { name: "", hours: 0, quizPct: 0, remarks: "" }])}
+                  className="text-[10px] px-2 py-0.5 rounded border border-border hover:bg-secondary inline-flex items-center gap-1"
+                  data-testid="button-mr-add-lecture">
+                  <Plus className="h-3 w-3" /> Add lecture
+                </button>
+              </div>
               <div className="space-y-1">
                 {inputs.lectures.map((lec, i) => (
                   <div key={i} className="grid grid-cols-12 gap-2 items-center text-xs">
-                    <div className="col-span-4">{lec.name}</div>
+                    <input value={lec.name}
+                      placeholder="Lecture name"
+                      onChange={e => {
+                        const next = [...inputs.lectures];
+                        next[i] = { ...lec, name: e.target.value };
+                        updI("lectures", next);
+                      }}
+                      className="col-span-3 bg-background border border-border rounded px-2 py-1"
+                      data-testid={`input-mr-lec-n-${i}`} />
                     <input type="number" step="0.1" placeholder="Hours" value={lec.hours}
                       onChange={e => {
                         const next = [...inputs.lectures];
@@ -192,6 +250,14 @@ export default function MonthlyReport() {
                       }}
                       placeholder="Remarks"
                       className="col-span-4 bg-background border border-border rounded px-2 py-1" />
+                    <button onClick={() => {
+                        if (!confirm("Remove this lecture row?")) return;
+                        updI("lectures", inputs.lectures.filter((_, idx) => idx !== i));
+                      }}
+                      className="col-span-1 text-destructive hover:bg-secondary rounded p-1 inline-flex items-center justify-center"
+                      data-testid={`button-mr-del-lecture-${i}`} title="Remove">
+                      <Trash2 className="h-3 w-3" />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -199,7 +265,14 @@ export default function MonthlyReport() {
 
             {/* Form 4 next-month plan */}
             <div>
-              <div className="text-xs font-semibold mb-1">PLAN FOR {nextMonthHeader}</div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-xs font-semibold">PLAN FOR {nextMonthHeader}</div>
+                <button onClick={() => updI("nextPlan", [...inputs.nextPlan, { exercise: "", pilots: 0, sortiesPerPilot: 0, durationPerSortie: 0, ammo275: "-", ammo127: "-", ammo762: "-", remarks: "" }])}
+                  className="text-[10px] px-2 py-0.5 rounded border border-border hover:bg-secondary inline-flex items-center gap-1"
+                  data-testid="button-mr-add-plan">
+                  <Plus className="h-3 w-3" /> Add exercise
+                </button>
+              </div>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-2">
                 <NumField label="PILOTS AVAILABLE" value={inputs.pilotsAvailableNext} onChange={v => updI("pilotsAvailableNext", v)} testId="input-mr-pilots-next" />
                 <NumField label="OPS" value={inputs.opsNext} onChange={v => updI("opsNext", v)} testId="input-mr-ops-next" />
@@ -207,7 +280,10 @@ export default function MonthlyReport() {
               <div className="space-y-1">
                 {inputs.nextPlan.map((row, i) => (
                   <div key={i} className="grid grid-cols-12 gap-2 items-center text-xs">
-                    <div className="col-span-2">{row.exercise}</div>
+                    <input value={row.exercise} placeholder="Exercise"
+                      onChange={e => updPlan(inputs, updI, i, { exercise: e.target.value })}
+                      className="col-span-2 bg-background border border-border rounded px-2 py-1"
+                      data-testid={`input-mr-plan-ex-${i}`} />
                     <input type="number" placeholder="Pilots" value={row.pilots}
                       onChange={e => updPlan(inputs, updI, i, { pilots: parseInt(e.target.value)||0 })}
                       className="col-span-1 bg-background border border-border rounded px-2 py-1"
@@ -231,7 +307,15 @@ export default function MonthlyReport() {
                       className="col-span-1 bg-background border border-border rounded px-2 py-1" />
                     <input placeholder="Remarks" value={row.remarks}
                       onChange={e => updPlan(inputs, updI, i, { remarks: e.target.value })}
-                      className="col-span-2 bg-background border border-border rounded px-2 py-1" />
+                      className="col-span-1 bg-background border border-border rounded px-2 py-1" />
+                    <button onClick={() => {
+                        if (!confirm("Remove this exercise row?")) return;
+                        updI("nextPlan", inputs.nextPlan.filter((_, idx) => idx !== i));
+                      }}
+                      className="col-span-1 text-destructive hover:bg-secondary rounded p-1 inline-flex items-center justify-center"
+                      data-testid={`button-mr-del-plan-${i}`} title="Remove">
+                      <Trash2 className="h-3 w-3" />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -323,6 +407,23 @@ export default function MonthlyReport() {
             {form1.length === 0 && (
               <tr><td colSpan={18} className="center" style={{padding:"12px"}}>{t("monthlyEmpty")}</td></tr>
             )}
+            {form1.length > 0 && (
+              <tr data-testid="form1-totals" style={{background:"#f3f4f6", fontWeight:700}}>
+                <td colSpan={6} className="center">TOTAL</td>
+                <td className="num">{form1Totals.day1.toFixed(1)}</td>
+                <td className="num">{form1Totals.day2.toFixed(1)}</td>
+                <td className="num">{form1Totals.dayDual.toFixed(1)}</td>
+                <td className="num">{form1Totals.night1.toFixed(1)}</td>
+                <td className="num">{form1Totals.night2.toFixed(1)}</td>
+                <td className="num">{form1Totals.nightDual.toFixed(1)}</td>
+                <td className="num">{form1Totals.totalForMonth.toFixed(1)}</td>
+                <td className="num">{form1Totals.cap}</td>
+                <td className="num">{form1Totals.sor}</td>
+                <td className="num">{form1Totals.ifSim.toFixed(1)}</td>
+                <td className="num">{form1Totals.ifAct.toFixed(1)}</td>
+                <td></td>
+              </tr>
+            )}
           </tbody>
         </table>
         <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
@@ -377,6 +478,19 @@ export default function MonthlyReport() {
             ))}
             {form2.length === 0 && (
               <tr><td colSpan={12} className="center" style={{padding:"12px"}}>{t("monthlyEmpty")}</td></tr>
+            )}
+            {form2.length > 0 && (
+              <tr data-testid="form2-totals" style={{background:"#f3f4f6", fontWeight:700}}>
+                <td colSpan={2} className="center">TOTAL</td>
+                <td className="num">{form2Totals.totalForMonthAllTypes.toFixed(1)}</td>
+                <td className="num">{form2Totals.grandTotal.toFixed(1)}</td>
+                <td colSpan={2}></td>
+                <td className="num">{form2Totals.ifSimMonth.toFixed(1)}</td>
+                <td className="num">{form2Totals.ifActMonth.toFixed(1)}</td>
+                <td className="num">{form2Totals.ifSimTotal.toFixed(1)}</td>
+                <td className="num">{form2Totals.ifActTotal.toFixed(1)}</td>
+                <td colSpan={2}></td>
+              </tr>
             )}
           </tbody>
         </table>
@@ -446,10 +560,24 @@ export default function MonthlyReport() {
             <tbody>
               <tr><td>PLANNED</td><td className="num">{inputs.plannedSorties}</td><td className="num">{inputs.plannedHours.toFixed(1)}</td></tr>
               <tr><td>ACHIEVED</td><td className="num">{form3.achievedSorties}</td><td className="num">{form3.achievedHours.toFixed(1)}</td></tr>
+              <tr style={{background:"#f8fafc"}}>
+                <td><b>ACHIEVEMENT %</b></td>
+                <td className="num"><b>{form3Stats.achievementSortiesPct.toFixed(1)}%</b></td>
+                <td className="num"><b>{form3Stats.achievementHoursPct.toFixed(1)}%</b></td>
+              </tr>
               <tr><td>WEATHER ABORT</td><td className="num">{inputs.weatherAbortS}</td><td className="num">{inputs.weatherAbortH.toFixed(1)}</td></tr>
               <tr><td>MAINTENANCE</td><td className="num">{inputs.maintAbortS}</td><td className="num">{inputs.maintAbortH.toFixed(1)}</td></tr>
               <tr><td>OPS ABORT</td><td className="num">{inputs.opsAbortS}</td><td className="num">{inputs.opsAbortH.toFixed(1)}</td></tr>
               <tr><td>AIR ABORT</td><td className="num">{inputs.airAbortS}</td><td className="num">{inputs.airAbortH.toFixed(1)}</td></tr>
+              <tr style={{background:"#f8fafc"}}>
+                <td><b>TOTAL ABORTS</b></td>
+                <td className="num"><b>{form3Stats.totalAbortSorties}</b></td>
+                <td className="num"><b>{form3Stats.totalAbortHours.toFixed(1)}</b></td>
+              </tr>
+              <tr>
+                <td>WEATHER %</td>
+                <td className="num" colSpan={2}>{form3Stats.weatherAbortPct.toFixed(1)}% of attempted sorties</td>
+              </tr>
             </tbody>
           </table>
           <table>

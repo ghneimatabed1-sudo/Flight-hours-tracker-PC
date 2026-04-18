@@ -14,6 +14,10 @@ import {
   Eye,
   ShieldOff,
   LifeBuoy,
+  FileBarChart,
+  Wand2,
+  Printer,
+  Save,
 } from "lucide-react";
 
 type Step = { titleKey: TKey; bodyKey: TKey; Icon: typeof KeyRound };
@@ -37,6 +41,14 @@ const PILOTS: Step[] = [
   { titleKey: "help_pilots_1_t", bodyKey: "help_pilots_1_b", Icon: Smartphone },
   { titleKey: "help_pilots_2_t", bodyKey: "help_pilots_2_b", Icon: Eye },
   { titleKey: "help_pilots_3_t", bodyKey: "help_pilots_3_b", Icon: ShieldOff },
+];
+
+const MONTHLY: Step[] = [
+  { titleKey: "help_mr_1_t", bodyKey: "help_mr_1_b", Icon: FileBarChart },
+  { titleKey: "help_mr_2_t", bodyKey: "help_mr_2_b", Icon: Wand2 },
+  { titleKey: "help_mr_3_t", bodyKey: "help_mr_3_b", Icon: BadgeCheck },
+  { titleKey: "help_mr_4_t", bodyKey: "help_mr_4_b", Icon: Save },
+  { titleKey: "help_mr_5_t", bodyKey: "help_mr_5_b", Icon: Printer },
 ];
 
 function Section({ title, steps }: { title: string; steps: Step[] }) {
@@ -76,6 +88,7 @@ export default function Help() {
         <Section title={t("help_section_first")} steps={FIRST_TIME} />
         <Section title={t("help_section_daily")} steps={DAILY} />
         <Section title={t("help_section_pilots")} steps={PILOTS} />
+        <Section title={t("help_section_monthly")} steps={MONTHLY} />
         <Card className="space-y-3">
           <div className="text-sm font-semibold gold-grad uppercase tracking-wider">{t("help_section_support")}</div>
           <div className="flex gap-3 items-start">
