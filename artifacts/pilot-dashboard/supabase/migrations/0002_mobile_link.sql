@@ -69,9 +69,17 @@ revoke all on pilot_devices from anon;
 
 -- Helpers --------------------------------------------------------------------
 
+-- pgcrypto lives in the `extensions` schema on Supabase, so callers with
+-- `set search_path = public` cannot see `digest()` unqualified — that was
+-- the "function digest(text, unknown) does not exist" (42883) error users
+-- hit when generating a mobile pairing code. Fully-qualify the call so
+-- the function works regardless of the caller's search_path.
+create extension if not exists pgcrypto with schema extensions;
+
 create or replace function public._hash_secret(p_secret text)
-returns text language sql immutable as $$
-  select encode(digest(p_secret, 'sha256'), 'hex');
+returns text language sql immutable
+set search_path = public, extensions as $$
+  select encode(extensions.digest(p_secret, 'sha256'), 'hex');
 $$;
 
 -- Issue a fresh link code for a pilot. Called from the ops dashboard.

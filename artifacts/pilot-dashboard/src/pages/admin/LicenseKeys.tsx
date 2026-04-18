@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useI18n } from "@/lib/i18n";
 import { useAuth, type PcRoleLock } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -67,8 +67,23 @@ export default function LicenseKeys() {
   // trap, and when it closes the Delete button has already been unmounted,
   // leaving the dialog inert — user reported all inputs became unclickable.
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  // Ref to the username input — after deleting/resetting an account we
+  // explicitly move keyboard focus here so the dialog can never end up in
+  // a state where every input feels "frozen". (Native <details> + Radix
+  // Dialog focus traps + button unmounts conspired to break focus
+  // recovery in earlier versions.)
+  const usernameInputRef = useRef<HTMLInputElement | null>(null);
   function refreshLocalAccounts(): void {
     try { setLocalAccounts(listCommanders()); } catch { setLocalAccounts([]); }
+  }
+  function returnFocusToUsername(): void {
+    // Wait for React to commit the DOM change before focusing — otherwise
+    // we'd be focusing the OLD button that's about to unmount.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        usernameInputRef.current?.focus();
+      });
+    });
   }
   useEffect(() => {
     if (setupOpen) {
@@ -85,17 +100,17 @@ export default function LicenseKeys() {
       setPendingDeleteId(rec.id);
       return;
     }
-    // Move focus off the about-to-be-unmounted button BEFORE we mutate
-    // state, so the dialog's focus trap doesn't end up pointing at a
-    // detached node — the same class of bug as the native-confirm freeze.
-    if (document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
-    }
+    // Hand focus to the username input BEFORE we mutate state, so the
+    // dialog's focus trap can never end up pointing at the about-to-be-
+    // unmounted Delete button. Then re-focus after the DOM commits, in
+    // case React decides to bounce focus during reconciliation.
+    usernameInputRef.current?.focus();
     deleteCommander(rec.id);
     try { clearSupabaseCreds(rec.username); } catch { /* swallow */ }
     setPendingDeleteId(null);
     setResetCreds(null);
     refreshLocalAccounts();
+    returnFocusToUsername();
   }
   async function handleResetLocalAccount(rec: CommanderRecord) {
     const newPw = await resetCommanderPassword(rec.id);
@@ -103,6 +118,7 @@ export default function LicenseKeys() {
     setResetCreds({ username: rec.username, password: newPw });
     setPendingDeleteId(null);
     refreshLocalAccounts();
+    returnFocusToUsername();
   }
 
   // Squadron data is only meaningful for roles that operate at squadron
@@ -665,13 +681,13 @@ export default function LicenseKeys() {
                   "username already exists" trap), or reset a forgotten
                   password — without leaving the Setup dialog. */}
               {localAccounts.length > 0 && (
-                <details className="rounded border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 p-2">
-                  <summary className="cursor-pointer text-sm font-medium text-amber-900 dark:text-amber-100">
+                <div className="rounded border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 p-2">
+                  <div className="text-sm font-medium text-amber-900 dark:text-amber-100 mb-2">
                     {lang === "ar"
                       ? `الحسابات المحلية الموجودة (${localAccounts.length})`
                       : `Existing local accounts on this PC (${localAccounts.length})`}
-                  </summary>
-                  <div className="mt-2 space-y-1.5">
+                  </div>
+                  <div className="space-y-1.5">
                     {localAccounts.map((rec) => (
                       <div key={rec.id} className="flex items-center justify-between gap-2 rounded bg-white dark:bg-black/30 p-1.5 text-xs">
                         <div className="min-w-0 flex-1">
@@ -700,8 +716,9 @@ export default function LicenseKeys() {
                         </Button>
                       </div>
                     ))}
-                    {resetCreds && (
-                      <div className="rounded border border-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 p-2 text-[11px] text-emerald-900 dark:text-emerald-100">
+                  {/* (close inner spacer) */}</div>
+                  {resetCreds && (
+                      <div className="mt-2 rounded border border-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 p-2 text-[11px] text-emerald-900 dark:text-emerald-100">
                         <div className="font-bold mb-1">
                           {lang === "ar" ? "كلمة المرور الجديدة (تظهر مرة واحدة):" : "New password (shown once):"}
                         </div>
@@ -721,8 +738,7 @@ export default function LicenseKeys() {
                         </Button>
                       </div>
                     )}
-                  </div>
-                </details>
+                </div>
               )}
 
               <div className="space-y-2">
@@ -829,6 +845,7 @@ export default function LicenseKeys() {
                       <span className="text-red-500">*</span>
                     </label>
                     <input
+                      ref={usernameInputRef}
                       value={setupOpsUsername}
                       onChange={e => setSetupOpsUsername(e.target.value)}
                       placeholder={usernamePlaceholder(setupRole)}
