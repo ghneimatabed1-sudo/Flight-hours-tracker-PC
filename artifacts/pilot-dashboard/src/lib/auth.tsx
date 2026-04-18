@@ -252,6 +252,31 @@ function lookupHQUser(username: string): User | null {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // Launch-time enforcement of the per-PC setup duration written by
+  // LicenseKeys.tsx (`rjaf.localExpiresAt`, ISO yyyy-mm-dd). Ops PC expiry
+  // is enforced by the server-side validate-license call elsewhere; this
+  // gate handles every other tier (Flight / Squadron / HQ commander). When
+  // the date has passed we wipe the licence binding so the operator is
+  // forced back to the activation screen and a Super Admin must re-issue
+  // or re-run setup. Cloud data is untouched.
+  if (typeof window !== "undefined") {
+    try {
+      const exp = localStorage.getItem("rjaf.localExpiresAt");
+      if (exp && exp.length >= 10) {
+        const today = new Date().toISOString().slice(0, 10);
+        if (today > exp) {
+          localStorage.removeItem("rjaf.licensed");
+          localStorage.removeItem("rjaf.licenseKey");
+          localStorage.removeItem("rjaf.assignedRole");
+          localStorage.removeItem("rjaf.authorizedSquadronIds");
+          localStorage.removeItem("rjaf.pcRoleLock");
+          localStorage.removeItem("rjaf.commanderTier");
+          localStorage.removeItem("rjaf.commanderName");
+          localStorage.removeItem("rjaf.localExpiresAt");
+        }
+      }
+    } catch { /* localStorage unavailable — fail open, server checks still apply */ }
+  }
   const [state, setState] = useState<AuthState>(() => ({
     licensed: localStorage.getItem("rjaf.licensed") === "1",
     configured: !!localStorage.getItem("rjaf.squadron"),
