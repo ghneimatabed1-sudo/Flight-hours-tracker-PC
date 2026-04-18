@@ -218,7 +218,8 @@ export default function MonthlyReport() {
                 {inputs.lectures.map((lec, i) => (
                   <div key={i} className="grid grid-cols-12 gap-2 items-center text-xs">
                     <input value={lec.name}
-                      placeholder="Lecture name"
+                      placeholder="Lecture name (EN/AR)"
+                      dir="auto"
                       onChange={e => {
                         const next = [...inputs.lectures];
                         next[i] = { ...lec, name: e.target.value };
@@ -248,7 +249,8 @@ export default function MonthlyReport() {
                         next[i] = { ...lec, remarks: e.target.value };
                         updI("lectures", next);
                       }}
-                      placeholder="Remarks"
+                      placeholder="Remarks (EN/AR)"
+                      dir="auto"
                       className="col-span-4 bg-background border border-border rounded px-2 py-1" />
                     <button onClick={() => {
                         if (!confirm("Remove this lecture row?")) return;
@@ -280,7 +282,8 @@ export default function MonthlyReport() {
               <div className="space-y-1">
                 {inputs.nextPlan.map((row, i) => (
                   <div key={i} className="grid grid-cols-12 gap-2 items-center text-xs">
-                    <input value={row.exercise} placeholder="Exercise"
+                    <input value={row.exercise} placeholder="Exercise (EN/AR)"
+                      dir="auto"
                       onChange={e => updPlan(inputs, updI, i, { exercise: e.target.value })}
                       className="col-span-2 bg-background border border-border rounded px-2 py-1"
                       data-testid={`input-mr-plan-ex-${i}`} />
@@ -296,16 +299,16 @@ export default function MonthlyReport() {
                       onChange={e => updPlan(inputs, updI, i, { durationPerSortie: parseFloat(e.target.value)||0 })}
                       className="col-span-2 bg-background border border-border rounded px-2 py-1"
                       data-testid={`input-mr-plan-dur-${i}`} />
-                    <input placeholder="2.75 RKT" value={row.ammo275}
+                    <input placeholder="2.75 RKT" value={row.ammo275} dir="auto"
                       onChange={e => updPlan(inputs, updI, i, { ammo275: e.target.value })}
                       className="col-span-1 bg-background border border-border rounded px-2 py-1" />
-                    <input placeholder="12.7" value={row.ammo127}
+                    <input placeholder="12.7" value={row.ammo127} dir="auto"
                       onChange={e => updPlan(inputs, updI, i, { ammo127: e.target.value })}
                       className="col-span-1 bg-background border border-border rounded px-2 py-1" />
-                    <input placeholder="7.62" value={row.ammo762}
+                    <input placeholder="7.62" value={row.ammo762} dir="auto"
                       onChange={e => updPlan(inputs, updI, i, { ammo762: e.target.value })}
                       className="col-span-1 bg-background border border-border rounded px-2 py-1" />
-                    <input placeholder="Remarks" value={row.remarks}
+                    <input placeholder="Remarks (EN/AR)" value={row.remarks} dir="auto"
                       onChange={e => updPlan(inputs, updI, i, { remarks: e.target.value })}
                       className="col-span-1 bg-background border border-border rounded px-2 py-1" />
                     <button onClick={() => {
@@ -329,12 +332,12 @@ export default function MonthlyReport() {
                   {pilots.map(p => (
                     <div key={p.id} className="grid grid-cols-12 gap-2 items-center text-xs">
                       <div className="col-span-3 truncate">{p.name}</div>
-                      <input placeholder="Status (e.g. PILOT, FLT.CMDR)"
+                      <input placeholder="Status (EN/AR)" dir="auto"
                         value={inputs.perPilotStatus[p.id] || ""}
                         onChange={e => updI("perPilotStatus", { ...inputs.perPilotStatus, [p.id]: e.target.value })}
                         className="col-span-3 bg-background border border-border rounded px-2 py-1"
                         data-testid={`input-mr-status-${p.id}`} />
-                      <input placeholder="Remarks (e.g. CYPRUS DUTY, 5 DAYS LEAVE)"
+                      <input placeholder="Remarks (EN/AR)" dir="auto"
                         value={inputs.perPilotRemarks[p.id] || ""}
                         onChange={e => updI("perPilotRemarks", { ...inputs.perPilotRemarks, [p.id]: e.target.value })}
                         className="col-span-6 bg-background border border-border rounded px-2 py-1"
