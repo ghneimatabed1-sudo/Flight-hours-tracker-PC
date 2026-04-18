@@ -2,95 +2,107 @@
 
 This repo produces three artefacts for operational use:
 
-| Target              | Platform | How it's built                 | Output |
-|---------------------|----------|--------------------------------|--------|
-| Squadron Ops PC app | Windows  | electron-builder (NSIS)        | `RJAF-SquadronOps-Setup-<ver>.exe` |
-| Pilot Logbook iOS   | iPhone   | EAS Build (preview/production) | `.ipa` |
-| Pilot Logbook Android| Any     | EAS Build (preview APK)        | `.apk` |
+| Target                 | Platform | Builder                        | Output |
+|------------------------|----------|--------------------------------|--------|
+| Squadron Ops PC app    | Windows  | electron-builder (NSIS)        | `RJAF-SquadronOps-Setup-<ver>.exe` |
+| Pilot Logbook iOS      | iPhone   | Xcode + expo prebuild          | `.ipa` |
+| Pilot Logbook Android  | Android  | Gradle + expo prebuild         | `.apk` |
 
-All three are fully wired. Replit Linux cannot itself produce a Windows
-installer or a real IPA/APK — those require Windows and macOS build hosts
-respectively. Instead, this repo ships two GitHub Actions workflows that
-do the heavy lifting for you.
+All three are pre-configured for **Codemagic** (`codemagic.yaml` at the
+repo root) and GitHub Actions (`.github/workflows/`). Pick whichever you
+prefer — Codemagic is recommended because it's one-click and it handles
+macOS, Linux, and Windows build agents in a single dashboard.
 
 ---
 
-## 1) PC app — Windows `.exe` installer
+## Codemagic (recommended — one dashboard for all 3)
 
-### Build via GitHub Actions (recommended)
-1. Push this repo to GitHub.
-2. In the Actions tab, run **Build Windows Installer (RJAF Squadron Ops)**.
-3. When it finishes, download the `RJAF-SquadronOps-Installer` artefact —
-   it contains the `.exe` you hand to ops officers.
+### One-time setup
+1. Go to https://codemagic.io, sign in with GitHub/GitLab.
+2. Add this repository as a project.
+3. Codemagic auto-detects `codemagic.yaml` — you'll see three workflows:
+   - **RJAF Pilot Logbook — Android APK**
+   - **RJAF Pilot Logbook — iOS IPA**
+   - **RJAF Squadron Ops — Windows Installer**
 
-Optional repo secrets:
-- `INSTALL_PASSWORD` — master password the NSIS installer will prompt for
-  before any files are written. Defaults to `rjaf-install-change-me`.
+### Optional secrets (set in Codemagic UI → Environment variables)
+- `INSTALL_PASSWORD` — master password the NSIS installer prompts for
+  before any files are written. Encrypt it via the Codemagic UI.
+- **iOS signing** (only if you want a signed production IPA for the App
+  Store / TestFlight): add an App Store Connect integration. For ad-hoc
+  side-loading via AltStore / Sideloadly the current unsigned build is
+  fine.
 
-### Build manually on a Windows PC
-See `artifacts/pilot-dashboard/ELECTRON_BUILD.md` for the full checklist.
-Short version:
+### Run a build
+Click **Start new build** on any of the three workflows. When it
+finishes, the `.exe`, `.ipa`, and `.apk` appear under the **Artefacts**
+tab of that build.
+
+### Triggers you can add
+`codemagic.yaml` supports auto-triggering on tag pushes; drop a
+`triggering:` block under any workflow if you want every `v*` tag to
+produce installers automatically.
+
+---
+
+## GitHub Actions (alternative)
+
+The repo also ships two GitHub Actions workflows:
+- `.github/workflows/dashboard-windows-installer.yml` — Windows `.exe`
+- `.github/workflows/mobile-eas-build.yml` — IPA + APK via EAS
+
+If you prefer Actions: push to GitHub, open the Actions tab, run the
+workflow, download the artifact. Mobile requires an `EXPO_TOKEN` repo
+secret.
+
+---
+
+## Manual builds (if you ever need them)
+
+### Windows `.exe` on a Windows PC
+See `artifacts/pilot-dashboard/ELECTRON_BUILD.md`. Short version:
 ```powershell
 cd artifacts/pilot-dashboard
 pnpm install
 pnpm add -D electron@^32 electron-builder@^25 electron-updater@^6
 $env:INSTALL_PASSWORD="YourMasterPasswordHere"
 pnpm run electron:build
-# installer: artifacts/pilot-dashboard/release/RJAF-SquadronOps-Setup-<ver>.exe
+# → artifacts/pilot-dashboard/release/RJAF-SquadronOps-Setup-<ver>.exe
 ```
 
-### Publish the web copy (PWA)
-Click **Publish** in Replit to deploy the dashboard as a PWA — same UI,
-no install. Pair that URL with the `.exe` for ops officers who want a
-desktop shortcut + offline cache.
-
----
-
-## 2) Mobile app — IPA + APK
-
-### Prerequisite (one-time)
-1. Create a free Expo account at https://expo.dev/signup.
-2. Generate an access token at
-   https://expo.dev/accounts/[you]/settings/access-tokens.
-3. Add it to this GitHub repo as a secret named **EXPO_TOKEN**.
-
-### Build via GitHub Actions
-1. Actions tab → **Build Mobile (IPA + APK)**.
-2. Pick a profile:
-   - **preview** — unsigned APK and iOS-simulator IPA. Good for internal
-     testing without an Apple Developer account.
-   - **production** — signed release APK and a real iPhone IPA. Requires
-     an Apple Developer account (EAS will prompt the first time).
-3. Build progress is visible at https://expo.dev/accounts/[you]/projects.
-4. When the build finishes, EAS provides direct download links for the
-   `.ipa` and `.apk`.
-
-### Build locally (faster iteration)
+### IPA on macOS
 ```bash
 cd artifacts/pilot-mobile
 pnpm install
-pnpm dlx eas-cli login
-pnpm dlx eas-cli build --platform all --profile preview
+pnpm dlx expo prebuild --platform ios --clean
+cd ios && pod install && cd ..
+# Open ios/*.xcworkspace in Xcode and Archive
 ```
 
-### Common "build failed" causes we already handle
-- **Android adaptive icon missing** → configured in `app.json`.
-- **iOS bundle identifier missing** → `com.rjaf.pilotlogbook`.
-- **Android package missing** → `com.rjaf.pilotlogbook`.
-- **New architecture flag** → `newArchEnabled: true`.
+### APK on any OS with JDK 17
+```bash
+cd artifacts/pilot-mobile
+pnpm install
+pnpm dlx expo prebuild --platform android --clean
+cd android
+./gradlew assembleRelease
+# → android/app/build/outputs/apk/release/app-release.apk
+```
 
-If EAS still fails, the logs at https://expo.dev will tell you exactly
-which step broke — usually a credentials prompt on first run that the
-`--non-interactive` CI run can't answer. Run it once locally
-(`eas build --platform ios --profile production`) to generate the
-credentials, then re-run CI.
+---
+
+## PWA (the web version of the PC app)
+The published dashboard URL is already a PWA — users can "Install app"
+from Chrome/Edge to get a desktop shortcut with offline caching, without
+needing the Windows `.exe`. Use whichever distribution the squadron
+prefers.
 
 ---
 
 ## Version bumps
-- PC app: bump `version` in `artifacts/pilot-dashboard/package.json`.
-- Mobile: bump `expo.version`, `ios.buildNumber`, `android.versionCode`
-  in `artifacts/pilot-mobile/app.json`.
+- **PC app**: bump `version` in `artifacts/pilot-dashboard/package.json`.
+- **Mobile**: bump `expo.version`, `ios.buildNumber`, and
+  `android.versionCode` in `artifacts/pilot-mobile/app.json`.
 
-Tag a release (`git tag v1.0.1 && git push --tags`) to kick off both
-CI builds at once.
+Tag a release (`git tag v1.0.1 && git push --tags`) to trigger all three
+builds at once.
