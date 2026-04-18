@@ -48,6 +48,13 @@ export function HQLayout({ children }: { children: ReactNode }) {
               { path: "/dashboard/simulator", labelKey: "simulator" as Key, icon: <Gauge className="h-4 w-4" /> },
             ]
           : []),
+        // Flight commanders also need the Flight Program page so they can
+        // create and sign the day's schedule on their own PC.
+        ...(user.scope === "flight"
+          ? [
+              { path: "/dashboard/flight-program", labelKey: "nav_flight_program" as Key, icon: <ClipboardList className="h-4 w-4" /> },
+            ]
+          : []),
       ];
 
   return (
