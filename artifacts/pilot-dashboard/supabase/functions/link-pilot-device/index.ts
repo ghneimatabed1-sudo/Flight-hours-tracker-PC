@@ -140,7 +140,7 @@ Deno.serve(async (req: Request) => {
     const byMil = await admin
       .from("pilots")
       .select("id, squadron_id, auth_user_id")
-      .eq("data->>militaryNumber", mil)
+      .filter("data->>militaryNumber", "eq", mil)
       .limit(1)
       .maybeSingle<PilotLookup>();
     if (byMil.error) pilotErr = byMil.error;

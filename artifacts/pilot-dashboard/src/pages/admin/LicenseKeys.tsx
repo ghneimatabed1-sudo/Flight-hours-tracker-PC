@@ -87,6 +87,8 @@ export default function LicenseKeys() {
       localStorage.removeItem("rjaf.squadron");
       localStorage.removeItem("rjaf.squadronId");
       localStorage.removeItem("rjaf.pcDeviceName");
+      localStorage.removeItem("rjaf.commanderTier");
+      localStorage.removeItem("rjaf.commanderName");
       // Local user accounts on this PC
       localStorage.removeItem("rjaf.commanders");
       localStorage.removeItem("rjaf.commanderPwHashes");

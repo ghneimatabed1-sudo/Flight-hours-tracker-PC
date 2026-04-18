@@ -91,7 +91,10 @@ function rowsToSnapshot(
   const expiry = (d.expiry as Record<string, string> | undefined) ?? {};
   const profile: PilotProfile = {
     id: pilot.id,
-    militaryNumber: pilot.id,
+    // Real military number lives inside the JSON `data` blob (the dashboard
+    // stores `pilots.id` as an auto-incremented row key like P001). Fall back
+    // to the row id only if the field was never filled in on the squadron PC.
+    militaryNumber: (typeof d.militaryNumber === "string" && d.militaryNumber.trim()) || pilot.id,
     name: pilot.name,
     arabicName: pilot.arabic_name ?? "",
     rank: pilot.rank,
