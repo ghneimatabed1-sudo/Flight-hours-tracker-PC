@@ -516,7 +516,10 @@ export default function LicenseKeys() {
   // consistent. Only visible when this PC is licensed as a commander tier.
   const assignedRoleHere = (typeof window !== "undefined" ? localStorage.getItem("rjaf.assignedRole") : null) as
     | "ops" | "flight_commander" | "squadron_commander" | "hq_commander" | "super_admin" | null;
-  const showLiveAuthEditor = assignedRoleHere === "squadron_commander" || assignedRoleHere === "flight_commander";
+  const showLiveAuthEditor =
+    assignedRoleHere === "squadron_commander" ||
+    assignedRoleHere === "flight_commander" ||
+    assignedRoleHere === "hq_commander";
   const [liveAuth, setLiveAuth] = useState<string[]>(() => {
     try { const raw = localStorage.getItem("rjaf.authorizedSquadronIds"); return raw ? JSON.parse(raw) : []; }
     catch { return []; }
