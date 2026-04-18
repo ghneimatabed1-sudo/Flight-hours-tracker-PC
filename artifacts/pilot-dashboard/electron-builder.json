@@ -28,12 +28,5 @@
     "createStartMenuShortcut": true,
     "shortcutName": "RJAF Squadron Ops",
     "include": "build/installer.nsh"
-  },
-  "publish": [
-    {
-      "provider": "generic",
-      "url": "https://updates.rjaf.local/squadron-ops/",
-      "channel": "latest"
-    }
-  ]
+  }
 }
