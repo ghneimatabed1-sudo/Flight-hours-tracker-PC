@@ -196,79 +196,106 @@ export default function FlightRecords() {
         />
       </div>
 
-      {/* Per-sortie detail table. Read-only — no edit/delete buttons: the
-          commander reviews what was entered, they don't modify it. */}
+      {/* Per-sortie cards. The four primary details (AC#, Pilot, Co-Pilot,
+          Mission) are front and centre so the commander can scan the day
+          at a glance. The full hour breakdown, condition tag and remarks
+          live as a quieter footer beneath each card — still visible, but
+          not fighting for attention. Read-only; no edit/delete. */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
             {t("flightsOnDay").replace("{date}", fmtDate(date, lang))}
           </CardTitle>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="p-3 space-y-2">
           {rowsForDay.length === 0 ? (
             <p
-              className="p-4 text-sm text-muted-foreground"
+              className="p-4 text-sm text-muted-foreground text-center"
               data-testid="empty-flights"
             >
               {t("noFlightsDay")}
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-secondary/40 text-xs uppercase tracking-wider text-muted-foreground">
-                  <tr>
-                    <Th>{t("acType")}</Th>
-                    <Th>{t("acNumber")}</Th>
-                    <Th>{t("pilot")}</Th>
-                    <Th>{t("coPilot")}</Th>
-                    <Th>{t("sortieType")}</Th>
-                    <Th>{t("sortieName")}</Th>
-                    <Th>{t("condition")}</Th>
-                    <Th right>D1</Th>
-                    <Th right>D2</Th>
-                    <Th right>DD</Th>
-                    <Th right>N1</Th>
-                    <Th right>N2</Th>
-                    <Th right>ND</Th>
-                    <Th right cls="text-rose-300">NVG</Th>
-                    <Th right>Sim</Th>
-                    <Th right>{t("actual")}</Th>
-                    <Th>{t("remarks")}</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rowsForDay.map((s) => (
-                    <tr
-                      key={s.id}
-                      className="border-t border-border row-hover"
-                      data-testid={`row-flight-${s.id}`}
+            rowsForDay.map((s, idx) => (
+              <div
+                key={s.id}
+                className="rounded-lg border border-border bg-secondary/20 p-3 space-y-2"
+                data-testid={`row-flight-${s.id}`}
+              >
+                {/* Primary row: the four things the commander wants to see. */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <Field
+                    label={`#${idx + 1} · ${t("acNumber")}`}
+                    value={s.acNumber || "—"}
+                    mono
+                    accent
+                  />
+                  <Field
+                    label={t("pilot")}
+                    value={seatName(s.pilotId, s.pilotExternal)}
+                  />
+                  <Field
+                    label={t("coPilot")}
+                    value={seatName(s.coPilotId, s.coPilotExternal)}
+                  />
+                  <Field
+                    label={t("sortieName")}
+                    value={s.name || "—"}
+                  />
+                </div>
+
+                {/* Secondary meta: AC type, sortie type, primary condition. */}
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                  {s.acType && (
+                    <span className="px-1.5 py-0.5 rounded bg-secondary/60 border border-border">
+                      {s.acType}
+                    </span>
+                  )}
+                  {s.sortieType && (
+                    <span className="px-1.5 py-0.5 rounded bg-secondary/60 border border-border">
+                      {s.sortieType}
+                    </span>
+                  )}
+                  {s.condition && (
+                    <span
+                      className={`px-1.5 py-0.5 rounded border ${
+                        s.condition === "NVG"
+                          ? "bg-rose-500/10 border-rose-500/40 text-rose-200"
+                          : s.condition === "Night"
+                          ? "bg-indigo-500/10 border-indigo-500/40 text-indigo-200"
+                          : "bg-amber-500/10 border-amber-500/40 text-amber-200"
+                      }`}
                     >
-                      <Td>{s.acType}</Td>
-                      <Td mono>{s.acNumber}</Td>
-                      <Td>{seatName(s.pilotId, s.pilotExternal)}</Td>
-                      <Td>{seatName(s.coPilotId, s.coPilotExternal)}</Td>
-                      <Td>{s.sortieType}</Td>
-                      <Td>{s.name}</Td>
-                      <Td>{s.condition ?? "—"}</Td>
-                      <Td mono right>{s.day1 || "—"}</Td>
-                      <Td mono right>{s.day2 || "—"}</Td>
-                      <Td mono right>{s.dayDual || "—"}</Td>
-                      <Td mono right>{s.night1 || "—"}</Td>
-                      <Td mono right>{s.night2 || "—"}</Td>
-                      <Td mono right>{s.nightDual || "—"}</Td>
-                      <Td mono right cls={s.nvg ? "text-rose-300" : ""}>
-                        {s.nvg || "—"}
-                      </Td>
-                      <Td mono right>{s.sim || "—"}</Td>
-                      <Td mono right>{s.actual}</Td>
-                      <Td cls="max-w-[240px] truncate" title={s.remarks || ""}>
-                        {s.remarks || "—"}
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                      {s.condition}
+                    </span>
+                  )}
+                  <span className="ms-auto font-mono tabular-nums text-muted-foreground">
+                    {t("actual")}: <span className="text-foreground font-semibold">{s.actual}h</span>
+                  </span>
+                </div>
+
+                {/* Detailed hour breakdown — quieter, single line. */}
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground font-mono tabular-nums border-t border-border/60 pt-2">
+                  <HourChip label="D1" v={s.day1} />
+                  <HourChip label="D2" v={s.day2} />
+                  <HourChip label="DD" v={s.dayDual} />
+                  <HourChip label="N1" v={s.night1} />
+                  <HourChip label="N2" v={s.night2} />
+                  <HourChip label="ND" v={s.nightDual} />
+                  <HourChip label="NVG" v={s.nvg} rose />
+                  <HourChip label="Sim" v={s.sim} />
+                </div>
+
+                {s.remarks && (
+                  <div className="text-xs text-muted-foreground italic border-t border-border/60 pt-2">
+                    <span className="not-italic font-medium text-foreground/80">
+                      {t("remarks")}:{" "}
+                    </span>
+                    {s.remarks}
+                  </div>
+                )}
+              </div>
+            ))
           )}
         </CardContent>
       </Card>
@@ -302,43 +329,47 @@ function Stat({
   );
 }
 
-function Th({
-  children,
-  right,
-  cls = "",
+function Field({
+  label,
+  value,
+  mono,
+  accent,
 }: {
-  children: React.ReactNode;
-  right?: boolean;
-  cls?: string;
+  label: string;
+  value: string;
+  mono?: boolean;
+  accent?: boolean;
 }) {
   return (
-    <th
-      className={`px-3 py-2 ${right ? "text-right" : "text-left"} font-medium ${cls}`}
-    >
-      {children}
-    </th>
+    <div className="min-w-0">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">
+        {label}
+      </div>
+      <div
+        className={`text-sm font-semibold truncate ${
+          mono ? "font-mono" : ""
+        } ${accent ? "text-amber-200" : "text-foreground"}`}
+        title={value}
+      >
+        {value}
+      </div>
+    </div>
   );
 }
 
-function Td({
-  children,
-  mono,
-  right,
-  cls = "",
-  title,
+function HourChip({
+  label,
+  v,
+  rose,
 }: {
-  children: React.ReactNode;
-  mono?: boolean;
-  right?: boolean;
-  cls?: string;
-  title?: string;
+  label: string;
+  v: number;
+  rose?: boolean;
 }) {
+  const hasValue = !!v;
   return (
-    <td
-      className={`px-3 py-2 ${mono ? "font-mono" : ""} ${right ? "text-right" : ""} ${cls}`}
-      title={title}
-    >
-      {children}
-    </td>
+    <span className={hasValue ? (rose ? "text-rose-300" : "text-foreground") : "opacity-50"}>
+      {label} <span className="font-semibold">{v || "—"}</span>
+    </span>
   );
 }
