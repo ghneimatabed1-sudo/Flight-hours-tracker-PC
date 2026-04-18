@@ -4,6 +4,7 @@ import { Redirect, Stack, useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   Pressable,
   StyleSheet,
@@ -25,7 +26,7 @@ export default function LockScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, isRTL } = useI18n();
-  const { verifyPassword, hasPassword } = useAppData();
+  const { verifyPassword, hasPassword, forgotPassword } = useAppData();
 
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -59,6 +60,38 @@ export default function LockScreen() {
         ).catch(() => {});
       }
     }
+  };
+
+  // Forgot-password: wipe the local lock and send the pilot back through
+  // the pairing flow. The ops officer issues a fresh 6-digit code (same
+  // as first install); linking with it lands on /setup-lock for a new
+  // password.
+  const handleForgot = () => {
+    const proceed = async () => {
+      await forgotPassword();
+      try {
+        router.replace("/link" as never);
+      } catch {
+        // best-effort
+      }
+    };
+    if (Platform.OS === "web") {
+      if (
+        typeof window !== "undefined" &&
+        window.confirm(t("lock_forgot_confirm_body"))
+      ) {
+        void proceed();
+      }
+      return;
+    }
+    Alert.alert(
+      t("lock_forgot_confirm_title"),
+      t("lock_forgot_confirm_body"),
+      [
+        { text: t("cancel"), style: "cancel" },
+        { text: t("lock_forgot_confirm_ok"), onPress: () => void proceed() },
+      ],
+    );
   };
 
   // Safety: if somehow no password is set, bounce the user out to setup.
@@ -167,6 +200,19 @@ export default function LockScreen() {
             </Text>
           )}
         </Pressable>
+
+        <Pressable
+          onPress={handleForgot}
+          hitSlop={10}
+          style={({ pressed }) => [
+            styles.forgotBtn,
+            { opacity: pressed ? 0.6 : 1 },
+          ]}
+        >
+          <Text style={[styles.forgotText, { color: colors.primary }]}>
+            {t("lock_forgot_cta")}
+          </Text>
+        </Pressable>
       </KeyboardAwareScrollView>
     </View>
   );
@@ -216,5 +262,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: "Inter_700Bold",
     letterSpacing: 0.4,
+  },
+  forgotBtn: {
+    alignSelf: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    marginTop: 4,
+  },
+  forgotText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.2,
   },
 });

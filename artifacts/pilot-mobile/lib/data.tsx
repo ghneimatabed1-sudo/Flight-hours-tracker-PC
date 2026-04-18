@@ -66,6 +66,11 @@ interface AppDataValue {
     newPw: string
   ) => Promise<{ ok: boolean; error?: "wrong_current" }>;
   signOut: () => Promise<void>;
+  // Forgot-password recovery. Clears the local password so the pilot can
+  // re-pair with a fresh 6-digit code issued by their ops officer (same
+  // flow as first install). The cached snapshot is kept as a read-only
+  // fallback until the new pairing succeeds and overwrites it.
+  forgotPassword: () => Promise<void>;
 }
 
 const Ctx = createContext<AppDataValue | null>(null);
@@ -317,6 +322,17 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     [lock]
   );
 
+  // Forgot-password path: ops officer issues a new 6-digit code, pilot
+  // re-runs the link flow. Wipe the local lock (password) so the /link
+  // → /setup-lock chain will prompt for a fresh password once the new
+  // code is consumed. We intentionally keep the LinkRecord and cached
+  // snapshot in place so the app doesn't feel "empty" in transit.
+  const forgotPassword = useCallback(async () => {
+    await clearLock();
+    setLock(null);
+    setUnlocked(false);
+  }, []);
+
   // Sign out locks the app but keeps the pilot-device pairing intact. We
   // also persist `trusted: false` on the lock record so subsequent cold
   // launches surface the lock screen again — without this, the persisted
@@ -347,6 +363,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       verifyPassword,
       changePassword,
       signOut,
+      forgotPassword,
     }),
     [
       ready,
@@ -363,6 +380,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       verifyPassword,
       changePassword,
       signOut,
+      forgotPassword,
     ]
   );
 
