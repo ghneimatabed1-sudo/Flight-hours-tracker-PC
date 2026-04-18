@@ -340,6 +340,23 @@ export default function LoginGate() {
                 ? <div className="text-xs text-amber-400">{t("lockedOut")} ({lockedRemaining}s)</div>
                 : err && <div className="text-xs text-destructive">{err}</div>}
               <button data-testid="button-signin" disabled={lockedRemaining > 0} className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 disabled:opacity-50">{t("signIn")}</button>
+              {u.trim().toLowerCase() !== "admin" && (
+                <button
+                  type="button"
+                  data-testid="button-admin-access"
+                  onClick={() => {
+                    setHqMode(true);
+                    setU("admin");
+                    setP("");
+                    setErr(null);
+                  }}
+                  className="w-full text-[11px] text-amber-400 hover:text-amber-300 underline pt-0.5"
+                >
+                  {pcRoleLock !== null || (licensed && configured)
+                    ? t("adminAccess")
+                    : t("superAdminAccess")}
+                </button>
+              )}
               <div className="text-[11px] text-muted-foreground text-center pt-1">
                 {t("loginHelp")}
               </div>
