@@ -129,32 +129,43 @@ Deno.serve(async (req: Request) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  // 1. Look up the pilot. The dashboard stores the actual military number
-  //    inside the JSON `data->>militaryNumber` blob — `pilots.id` is just
-  //    the auto-generated row key (e.g. "P001"). Match either, so a pilot
-  //    can type whichever one the squadron records as their military number.
-  //    Generic error on miss to avoid confirming which numbers exist.
+  // 1. Look up the pilot. The Super Admin can hand a pilot ANY identifier
+  //    on the squadron PC — military number, English/Arabic name, call sign,
+  //    flight name, or even the auto-generated row id (P001). Whatever the
+  //    Super Admin records is what the pilot types on their phone. Lookups
+  //    are case-insensitive and trim-tolerant. We try each candidate field
+  //    in priority order; first hit wins. Generic error on miss to avoid
+  //    confirming which identifiers exist.
   let pilot: PilotLookup | null = null;
   let pilotErr: { message: string } | null = null;
-  {
-    const byMil = await admin
-      .from("pilots")
-      .select("id, squadron_id, auth_user_id")
-      .filter("data->>militaryNumber", "eq", mil)
-      .limit(1)
-      .maybeSingle<PilotLookup>();
-    if (byMil.error) pilotErr = byMil.error;
-    pilot = byMil.data ?? null;
+
+  type Lookup = { col: string; op: "eq" | "ilike"; val: string; isJson: boolean };
+  const trimmed = mil.trim();
+  const candidates: Lookup[] = [
+    // Exact (case-sensitive) row id — fastest path, common for migrated decks.
+    { col: "id",                       op: "eq",    val: trimmed,             isJson: false },
+    // JSON-blob identifiers populated from the dashboard pilot form.
+    { col: "data->>militaryNumber",    op: "eq",    val: trimmed,             isJson: true  },
+    { col: "data->>callSign",          op: "ilike", val: trimmed,             isJson: true  },
+    { col: "data->>flightName",        op: "ilike", val: trimmed,             isJson: true  },
+    // Real columns. ilike makes name matching forgiving of caps/Arabic forms.
+    { col: "name",                     op: "ilike", val: trimmed,             isJson: false },
+    { col: "arabic_name",              op: "ilike", val: trimmed,             isJson: false },
+    { col: "phone",                    op: "eq",    val: trimmed,             isJson: false },
+  ];
+
+  for (const c of candidates) {
+    const q = admin.from("pilots").select("id, squadron_id, auth_user_id");
+    const built = c.isJson
+      ? q.filter(c.col, c.op, c.val)
+      : c.op === "ilike"
+        ? q.ilike(c.col, c.val)
+        : q.eq(c.col, c.val);
+    const { data, error } = await built.limit(1).maybeSingle<PilotLookup>();
+    if (error) { pilotErr = error; break; }
+    if (data) { pilot = data; break; }
   }
-  if (!pilot && !pilotErr) {
-    const byId = await admin
-      .from("pilots")
-      .select("id, squadron_id, auth_user_id")
-      .eq("id", mil)
-      .maybeSingle<PilotLookup>();
-    if (byId.error) pilotErr = byId.error;
-    pilot = byId.data ?? null;
-  }
+
   if (pilotErr) return reply({ ok: false, error: "lookup_failed" }, 500);
   if (!pilot) return reply({ ok: false, error: "invalid_credentials" });
 
