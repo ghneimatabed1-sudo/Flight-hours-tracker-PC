@@ -4,55 +4,58 @@
 ;  v1: nsDialogs in customInit (.onInit) — silently aborted because the
 ;      installer's main window doesn't exist that early.
 ;  v2: moved to a custom Page via customPageAfterChangeDir, but referenced
-;      MUI_HEADER_TEXT which isn't defined when this file is first parsed
-;      (electron-builder !includes us BEFORE MUI2.nsh).
-;  v3: include nsDialogs.nsh + LogicLib.nsh at the top so those macros are
-;      available when the Function bodies are parsed; skip MUI_HEADER_TEXT
-;      and use a plain label inside the dialog instead.
-
-!include "nsDialogs.nsh"
-!include "LogicLib.nsh"
+;      MUI_HEADER_TEXT which isn't defined when this file is first parsed.
+;  v3: include nsDialogs.nsh + LogicLib.nsh at top, drop MUI_HEADER_TEXT.
+;  v4: wrap everything in !ifndef BUILD_UNINSTALLER. NSIS compiles the
+;      uninstaller in a second pass with BUILD_UNINSTALLER defined; in that
+;      pass customPageAfterChangeDir is skipped, so the Functions appear
+;      unreferenced and "warning treated as error" kills the build.
 
 !ifndef INSTALL_PASSWORD
-  !error "INSTALL_PASSWORD is required. Set the environment variable INSTALL_PASSWORD before running electron-builder."
+  !error "INSTALL_PASSWORD env var is required."
 !endif
 !if "${INSTALL_PASSWORD}" == ""
-  !error "INSTALL_PASSWORD must not be an empty string."
+  !error "INSTALL_PASSWORD must not be empty."
 !endif
 
-Var RjafPwdInput
-Var RjafPwdEntered
+!ifndef BUILD_UNINSTALLER
 
-; electron-builder injects this macro between MUI_PAGE_DIRECTORY and
-; MUI_PAGE_INSTFILES. Window already exists by then, so nsDialogs works.
-!macro customPageAfterChangeDir
-  Page custom RjafPwdPageShow RjafPwdPageLeave
-!macroend
+  !include "nsDialogs.nsh"
+  !include "LogicLib.nsh"
 
-Function RjafPwdPageShow
-  nsDialogs::Create 1018
-  Pop $0
-  ${If} $0 == error
-    Abort
-  ${EndIf}
+  Var RjafPwdInput
+  Var RjafPwdEntered
 
-  ${NSD_CreateLabel} 0 0 100% 16u "RJAF Squadron Ops — Installation Password"
-  Pop $1
+  !macro customPageAfterChangeDir
+    Page custom RjafPwdPageShow RjafPwdPageLeave
+  !macroend
 
-  ${NSD_CreateLabel} 0 22u 100% 30u "Enter the master installation password issued by the RJAF Super Admin to continue."
-  Pop $2
+  Function RjafPwdPageShow
+    nsDialogs::Create 1018
+    Pop $0
+    ${If} $0 == error
+      Abort
+    ${EndIf}
 
-  ${NSD_CreatePassword} 0 60u 100% 14u ""
-  Pop $RjafPwdInput
-  ${NSD_SetFocus} $RjafPwdInput
+    ${NSD_CreateLabel} 0 0 100% 16u "RJAF Squadron Ops — Installation Password"
+    Pop $1
 
-  nsDialogs::Show
-FunctionEnd
+    ${NSD_CreateLabel} 0 22u 100% 30u "Enter the master installation password issued by the RJAF Super Admin to continue."
+    Pop $2
 
-Function RjafPwdPageLeave
-  ${NSD_GetText} $RjafPwdInput $RjafPwdEntered
-  ${If} $RjafPwdEntered != "${INSTALL_PASSWORD}"
-    MessageBox MB_ICONSTOP|MB_OK "Incorrect installation password. Please try again, or close the installer to cancel."
-    Abort  ; keeps the user on this page so they can retry
-  ${EndIf}
-FunctionEnd
+    ${NSD_CreatePassword} 0 60u 100% 14u ""
+    Pop $RjafPwdInput
+    ${NSD_SetFocus} $RjafPwdInput
+
+    nsDialogs::Show
+  FunctionEnd
+
+  Function RjafPwdPageLeave
+    ${NSD_GetText} $RjafPwdInput $RjafPwdEntered
+    ${If} $RjafPwdEntered != "${INSTALL_PASSWORD}"
+      MessageBox MB_ICONSTOP|MB_OK "Incorrect installation password. Please try again, or close the installer to cancel."
+      Abort
+    ${EndIf}
+  FunctionEnd
+
+!endif
