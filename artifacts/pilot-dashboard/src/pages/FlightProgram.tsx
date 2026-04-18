@@ -4,6 +4,10 @@ import { usePilots } from "@/lib/squadron-data";
 import { Button } from "@/components/ui/button";
 import { Printer, Save } from "lucide-react";
 import emblem from "@assets/rjaf_emblem.png";
+import heloCobra from "@assets/fp_media/image1.jpg";
+import heloBlackhawk from "@assets/fp_media/image2.jpg";
+import heloLittleBird from "@assets/fp_media/image3.jpg";
+import heloHeavy from "@assets/fp_media/image4.jpg";
 
 type Mode = "DAY" | "NIGHT" | "NVG" | "DAY_AND_NVG" | "DAY_AND_NIGHT";
 
@@ -15,31 +19,8 @@ const MODES: { id: Mode; label: string }[] = [
   { id: "DAY_AND_NIGHT", label: "DAY & NIGHT" },
 ];
 
-// Simple side-profile Black Hawk silhouette used 5× across the header,
-// matching the printed RJAF schedule template.
-function Helo({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 200 60" className={className} fill="currentColor" aria-hidden>
-      {/* main rotor bar */}
-      <rect x="20" y="4" width="160" height="2" rx="1" />
-      <rect x="98" y="6" width="4" height="8" />
-      {/* fuselage */}
-      <path d="M30 30 Q40 18 95 18 L140 18 Q158 18 165 26 L178 28 L178 34 L165 36 Q158 42 140 42 L60 42 Q40 42 30 36 Z" />
-      {/* tail boom */}
-      <rect x="165" y="29" width="25" height="4" />
-      {/* tail fin */}
-      <path d="M185 20 L195 30 L185 34 Z" />
-      {/* tail rotor */}
-      <rect x="192" y="22" width="1.5" height="16" />
-      {/* landing gear / stub wings */}
-      <rect x="70" y="42" width="3" height="8" />
-      <rect x="120" y="42" width="3" height="8" />
-      <rect x="55" y="50" width="80" height="2" />
-      {/* cockpit window */}
-      <path d="M42 28 Q48 22 62 22 L70 22 L70 30 L44 30 Z" fill="white" opacity="0.25" />
-    </svg>
-  );
-}
+// The helicopter silhouettes are the exact images embedded in the
+// original RJAF flight schedule workbook (image1..4.jpg from the xlsx).
 
 interface Row {
   dn: string;
@@ -247,19 +228,22 @@ export default function FlightProgram() {
             CLASSIFIED banner on top, 5 helicopter silhouettes row,
             then three stacked title lines with the emblem to the left. */}
         <div className="text-center text-[10px] font-bold tracking-[0.4em]">CLASSIFIED</div>
-        <div className="flex items-center justify-between text-black px-2 -my-1">
-          <Helo className="h-5 w-16" />
-          <Helo className="h-5 w-16" />
-          <Helo className="h-5 w-16" />
-          <Helo className="h-5 w-16" />
-          <Helo className="h-5 w-16" />
-        </div>
-        <div className="flex items-center justify-center gap-4">
-          <img src={emblem} alt="" className="h-16 w-16 object-contain" />
-          <div className="text-center leading-tight">
-            <div className="text-sm font-bold">KING ABDULLAH II AIRBASE</div>
-            <div className="text-sm font-bold">NO.8 SQDN</div>
-            <div className="text-base font-bold underline tracking-wider mt-0.5">FLIGHT SCHEDULE</div>
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+          <div className="flex items-center justify-start gap-3">
+            <img src={heloBlackhawk} alt="" className="h-16 object-contain" />
+            <img src={heloLittleBird} alt="" className="h-14 object-contain" />
+          </div>
+          <div className="flex flex-col items-center">
+            <img src={emblem} alt="" className="h-20 w-20 object-contain" />
+            <div className="text-center leading-tight mt-1">
+              <div className="text-sm font-bold">KING ABDULLAH II AIRBASE</div>
+              <div className="text-sm font-bold">NO.8 SQDN</div>
+              <div className="text-base font-bold underline tracking-wider mt-0.5">FLIGHT SCHEDULE</div>
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-3">
+            <img src={heloHeavy} alt="" className="h-14 object-contain" />
+            <img src={heloCobra} alt="" className="h-12 object-contain" />
           </div>
         </div>
 
