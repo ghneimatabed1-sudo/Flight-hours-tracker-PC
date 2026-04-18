@@ -125,26 +125,74 @@ export default function FlightRecords() {
 
   const visibleRows = searching ? searchResults : rowsForDay;
 
+  // Aggregate the visible sorties into five headline numbers plus two
+  // per-entity breakdowns:
+  //   pilotCounts   — one entry per unique pilot, with the number of sorties
+  //                   they appeared in (pilot or co-pilot counts as one each).
+  //   aircraftCounts — one entry per unique tail number, with how many
+  //                    sorties used that airframe.
+  // The headline `pilots` and `aircraft` numbers are still the unique counts
+  // (set sizes). The breakdowns give the commander a quick "who flew what,
+  // and how many times" readout under each tile.
   const stats = useMemo(() => {
     let hours = 0;
     let nvg = 0;
     const pilotsSet = new Set<string>();
-    const acSet = new Set<string>();
+    const acCounts = new Map<string, number>();
+    const pilotCountMap = new Map<string, number>();
     for (const s of visibleRows) {
       hours += Number(s.actual) || 0;
       nvg += Number(s.nvg) || 0;
-      if (s.pilotId) pilotsSet.add(s.pilotId);
-      if (s.coPilotId) pilotsSet.add(s.coPilotId);
-      if (s.acNumber) acSet.add(s.acNumber);
+      // Unique-pilot set + per-pilot sortie tally. A single crew member
+      // appearing in both the pilot and co-pilot seat on the same sortie
+      // is still just one sortie for them — we de-dupe per record.
+      const ids = new Set<string>();
+      if (s.pilotId) ids.add(s.pilotId);
+      if (s.coPilotId) ids.add(s.coPilotId);
+      for (const id of ids) {
+        pilotsSet.add(id);
+        pilotCountMap.set(id, (pilotCountMap.get(id) ?? 0) + 1);
+      }
+      // Also include external (guest) pilots in the sortie tally, keyed by
+      // their display string so guests from other squadrons still show up
+      // in the breakdown.
+      const extKeys = new Set<string>();
+      if (s.pilotExternal) extKeys.add(`ext:${s.pilotExternal.name}|${s.pilotExternal.squadron}`);
+      if (s.coPilotExternal) extKeys.add(`ext:${s.coPilotExternal.name}|${s.coPilotExternal.squadron}`);
+      for (const k of extKeys) {
+        pilotsSet.add(k);
+        pilotCountMap.set(k, (pilotCountMap.get(k) ?? 0) + 1);
+      }
+      if (s.acNumber) {
+        acCounts.set(s.acNumber, (acCounts.get(s.acNumber) ?? 0) + 1);
+      }
     }
+    // Sort breakdowns: most-used first, then alphabetical for stable order.
+    const pilotCounts = Array.from(pilotCountMap.entries())
+      .map(([id, count]) => {
+        const label = id.startsWith("ext:")
+          ? (() => {
+              const rest = id.slice(4);
+              const [name, sqn] = rest.split("|");
+              return sqn ? `${name} (${sqn})` : name;
+            })()
+          : pilotMap[id] ?? id;
+        return { id, label, count };
+      })
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    const aircraftCounts = Array.from(acCounts.entries())
+      .map(([ac, count]) => ({ ac, count }))
+      .sort((a, b) => b.count - a.count || a.ac.localeCompare(b.ac));
     return {
       count: visibleRows.length,
       hours,
       nvg,
       pilots: pilotsSet.size,
-      aircraft: acSet.size,
+      aircraft: acCounts.size,
+      pilotCounts,
+      aircraftCounts,
     };
-  }, [visibleRows]);
+  }, [visibleRows, pilotMap]);
 
   const shift = (days: number) => {
     const d = new Date(date + "T00:00:00");
@@ -390,6 +438,39 @@ export default function FlightRecords() {
         />
       </div>
 
+      {/* Breakdown chips. Unique pilots and unique aircraft are counted
+          once in the tiles above; these rows spell out who/what and how
+          many sorties each appeared in. Hidden when nothing is flying. */}
+      {(stats.pilotCounts.length > 0 || stats.aircraftCounts.length > 0) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          {stats.pilotCounts.length > 0 && (
+            <BreakdownChips
+              icon={<Users className="h-4 w-4 text-sky-400" />}
+              label={t("pilotsBreakdown")}
+              entries={stats.pilotCounts.map((p) => ({
+                key: p.id,
+                label: p.label,
+                count: p.count,
+              }))}
+              testIdPrefix="chip-pilot-count"
+            />
+          )}
+          {stats.aircraftCounts.length > 0 && (
+            <BreakdownChips
+              icon={<Plane className="h-4 w-4 text-amber-500" />}
+              label={t("aircraftBreakdown")}
+              entries={stats.aircraftCounts.map((a) => ({
+                key: a.ac,
+                label: a.ac,
+                count: a.count,
+                mono: true,
+              }))}
+              testIdPrefix="chip-ac-count"
+            />
+          )}
+        </div>
+      )}
+
       {/* Sortie list. Search mode groups results by date with a header row
           (newest first); day mode keeps the original single-day layout. */}
       {searching ? (
@@ -486,6 +567,58 @@ function Stat({
             {label}
           </div>
           <div className="text-lg font-semibold tabular-nums">{value}</div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Compact chip list used under the summary tiles to spell out the pilots
+// or aircraft that contributed to the headline count. Each chip shows the
+// name (or tail number) with a small "×N" badge when it appeared in more
+// than one sortie. The headline tile count stays as the unique total.
+function BreakdownChips({
+  icon,
+  label,
+  entries,
+  testIdPrefix,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  entries: { key: string; label: string; count: number; mono?: boolean }[];
+  testIdPrefix: string;
+}) {
+  return (
+    <Card>
+      <CardContent className="p-3 space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="h-7 w-7 rounded-md bg-secondary/40 border border-border flex items-center justify-center">
+            {icon}
+          </div>
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            {label}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {entries.map((e) => (
+            <span
+              key={e.key}
+              data-testid={`${testIdPrefix}-${e.key}`}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-secondary/40 border border-border text-xs"
+              title={`${e.label} · ${e.count}`}
+            >
+              <span className={`truncate max-w-[14rem] ${e.mono ? "font-mono" : ""}`}>
+                {e.label}
+              </span>
+              <span
+                className={`tabular-nums font-semibold ${
+                  e.count > 1 ? "text-amber-300" : "text-muted-foreground"
+                }`}
+              >
+                ×{e.count}
+              </span>
+            </span>
+          ))}
         </div>
       </CardContent>
     </Card>
