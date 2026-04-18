@@ -333,18 +333,18 @@ export default function FlightProgram() {
             CLASSIFIED banner on top, 5 helicopter silhouettes row,
             then three stacked title lines with the emblem to the left. */}
         <div className="text-center text-[10px] font-bold tracking-[0.4em]">CLASSIFIED</div>
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-          <div className="flex items-center justify-start gap-3">
-            <img src={heloBlackhawk} alt="" className="h-16 object-contain" />
-            <img src={heloLittleBird} alt="" className="h-14 object-contain" />
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
+          <div className="flex items-center justify-start gap-2 min-w-0 overflow-hidden">
+            <img src={heloBlackhawk} alt="" className="h-12 max-w-[45%] object-contain shrink" />
+            <img src={heloLittleBird} alt="" className="h-10 max-w-[45%] object-contain shrink" />
           </div>
-          <div className="flex flex-col items-center">
+          <div className="flex flex-col items-center relative z-10 bg-white px-2">
             <img src={emblem} alt="" className="h-20 w-20 object-contain" />
             <div className="text-center leading-tight mt-1">
               <input
                 value={prog.airbase}
                 onChange={(e) => update("airbase", e.target.value)}
-                className="text-sm font-bold bg-transparent text-center outline-none hover:bg-yellow-50 focus:bg-yellow-50 w-[24ch]"
+                className="text-sm font-bold bg-transparent text-center outline-none hover:bg-yellow-50 focus:bg-yellow-50 w-[26ch]"
                 data-testid="input-airbase"
               />
               <input
@@ -356,9 +356,9 @@ export default function FlightProgram() {
               <div className="text-base font-bold underline tracking-wider mt-0.5">FLIGHT SCHEDULE</div>
             </div>
           </div>
-          <div className="flex items-center justify-end gap-3">
-            <img src={heloHeavy} alt="" className="h-14 object-contain" />
-            <img src={heloCobra} alt="" className="h-12 object-contain" />
+          <div className="flex items-center justify-end gap-2 min-w-0 overflow-hidden">
+            <img src={heloHeavy} alt="" className="h-10 max-w-[45%] object-contain shrink" />
+            <img src={heloCobra} alt="" className="h-10 max-w-[45%] object-contain shrink" />
           </div>
         </div>
 
