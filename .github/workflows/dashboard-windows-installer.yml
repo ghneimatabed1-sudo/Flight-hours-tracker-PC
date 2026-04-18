@@ -1,12 +1,12 @@
 name: Build Windows Installer (RJAF Squadron Ops)
 
-# Produces the signed NSIS .exe for the PC app. Runs on windows-latest
-# because electron-builder cannot cross-compile Windows installers from
-# Linux without Wine. The resulting installer is uploaded as a workflow
-# artifact you can download from the Actions tab.
+# Produces the NSIS .exe for the PC app and publishes it as a GitHub
+# Release in the PUBLIC Flight-hours-tracker-Releases repo. The installed
+# app polls that public repo for updates via electron-updater. Source code
+# stays in this private repo; only compiled binaries are exposed.
 #
 # Triggers:
-#   - manual (workflow_dispatch) — build on demand
+#   - manual (workflow_dispatch) — build + publish a release on demand
 #   - push of a v* tag          — cut a release
 on:
   workflow_dispatch:
@@ -39,11 +39,15 @@ jobs:
         working-directory: .
 
       - name: Install Electron toolchain
-        run: pnpm add -D electron@^32 electron-builder@^25 electron-updater@^6
+        # electron + electron-builder are dev tooling. electron-updater MUST
+        # be a regular dependency so electron-builder bundles it into the
+        # asar — otherwise the installed app crashes with "Cannot find
+        # module 'electron-updater'" at startup.
+        run: |
+          pnpm add -D electron@^32 electron-builder@^25
+          pnpm add electron-updater@^6
 
       - name: Inject INSTALL_PASSWORD define into installer.nsh
-        # NSIS does not read OS environment variables — !ifndef checks only
-        # NSIS defines. Prepend a !define so the .nsh script sees the value.
         env:
           INSTALL_PASSWORD: ${{ secrets.INSTALL_PASSWORD || 'rjaf-install-change-me' }}
         shell: pwsh
@@ -53,18 +57,22 @@ jobs:
           $define = "!define INSTALL_PASSWORD `"$env:INSTALL_PASSWORD`"`r`n"
           Set-Content -Path $nsh -Value ($define + $original) -NoNewline
 
-      - name: Build Windows installer
+      - name: Build & publish Windows installer
         env:
           INSTALL_PASSWORD: ${{ secrets.INSTALL_PASSWORD || 'rjaf-install-change-me' }}
-          # vite.config.ts requires PORT (dev server) and BASE_PATH (asset
-          # base href) at build time. PORT is unused for production builds
-          # but must parse as a number; BASE_PATH must be "./" so the bundled
-          # index.html loads its assets via file:// inside Electron.
+          # GH_TOKEN must be a Personal Access Token with `repo` scope on
+          # the PUBLIC Flight-hours-tracker-Releases repo. The default
+          # GITHUB_TOKEN only grants access to THIS repo, so we use a PAT
+          # stored as RELEASES_PAT secret.
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
           PORT: "5173"
           BASE_PATH: "./"
-        run: pnpm run electron:build
+        run: |
+          pnpm run build
+          pnpm run electron:compile
+          pnpm exec electron-builder --win nsis --config electron-builder.json --publish always
 
-      - name: Upload installer
+      - name: Upload installer (workflow artifact backup)
         uses: actions/upload-artifact@v4
         with:
           name: RJAF-SquadronOps-Installer
