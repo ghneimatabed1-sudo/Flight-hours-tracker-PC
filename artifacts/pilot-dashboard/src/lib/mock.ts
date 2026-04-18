@@ -121,6 +121,15 @@ export interface Sortie {
   pilotIsCaptain?: boolean;
   coPilotIsCaptain?: boolean;
   msnDuty?: string;
+  // ── Instrument Flight (added Apr 2026, mirrors old mobile app) ─────────
+  // Flag + breakdown fields. When `instrumentFlight` is true the sortie's
+  // flight time also rolls up into the pilot's IF total. SIM and ACT are
+  // tracked independently so reports can show "8.0 IF (SIM 5.0 / ACT 3.0)".
+  instrumentFlight?: boolean;
+  ifSim?: number;
+  ifAct?: number;
+  ils?: number;
+  vor?: number;
 }
 
 function daysFromNow(d: number): string {
