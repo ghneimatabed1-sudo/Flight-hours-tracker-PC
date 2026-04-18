@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { useI18n, type Key } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays } from "lucide-react";
+import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList } from "lucide-react";
 import emblem from "@assets/rjaf_emblem.png";
 import { RecoveryCodesLowBanner } from "@/components/RecoveryCodesLowBanner";
 
@@ -44,6 +44,7 @@ export function HQLayout({ children }: { children: ReactNode }) {
         ...(user.scope === "squadron"
           ? [
               { path: "/dashboard/flights", labelKey: "flightRecords" as Key, icon: <CalendarDays className="h-4 w-4" /> },
+              { path: "/dashboard/flight-program", labelKey: "nav_flight_program" as Key, icon: <ClipboardList className="h-4 w-4" /> },
               { path: "/dashboard/simulator", labelKey: "simulator" as Key, icon: <Gauge className="h-4 w-4" /> },
             ]
           : []),

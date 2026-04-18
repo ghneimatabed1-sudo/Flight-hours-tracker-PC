@@ -4,6 +4,8 @@ export type Lang = "en" | "ar";
 
 const dict = {
   en: {
+    nav_flight_program: "Flight Program",
+    saved: "Saved",
     appName: "RJAF Squadron Ops",
     appTag: "Royal Jordanian Air Force — Squadron Management System",
     licenseTitle: "License Activation",
@@ -639,6 +641,8 @@ const dict = {
     error: "error",
   },
   ar: {
+    nav_flight_program: "برنامج الطيران",
+    saved: "تم الحفظ",
     appName: "أسراب عمليات سلاح الجو الملكي",
     appTag: "سلاح الجو الملكي الأردني — نظام إدارة الأسراب",
     licenseTitle: "تفعيل الترخيص",

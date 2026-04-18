@@ -53,6 +53,7 @@ import Alerts from "@/pages/dashboard/Alerts";
 import Currencies from "@/pages/dashboard/Currencies";
 import Simulator from "@/pages/dashboard/Simulator";
 import FlightRecords from "@/pages/dashboard/FlightRecords";
+import FlightProgram from "@/pages/FlightProgram";
 
 function SquadronOpsRoutes() {
   return (
@@ -71,6 +72,7 @@ function SquadronOpsRoutes() {
       <Route path="/unavailable" component={Unavailable} />
       <Route path="/duty" component={DutyWeek} />
       <Route path="/schedule" component={Schedule} />
+      <Route path="/flight-program" component={FlightProgram} />
       <Route path="/risk" component={Risk} />
       <Route path="/coordinating" component={Coordinating} />
       <Route path="/notams" component={NotamsPage} />
@@ -118,6 +120,7 @@ function CommanderRoutes() {
       <Route path="/dashboard/currencies" component={Currencies} />
       <Route path="/dashboard/simulator" component={Simulator} />
       <Route path="/dashboard/flights" component={FlightRecords} />
+      <Route path="/dashboard/flight-program" component={FlightProgram} />
       <Route component={NotFound} />
     </Switch>
   );

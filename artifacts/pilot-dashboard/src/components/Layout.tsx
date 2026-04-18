@@ -25,6 +25,7 @@ const ITEMS: readonly Item[] = [
   { p: "/unavailable", k: "nav_unavail", I: UserX },
   { p: "/duty", k: "nav_duty", I: Calendar },
   { p: "/schedule", k: "nav_schedule", I: ClipboardList },
+  { p: "/flight-program", k: "nav_flight_program", I: ClipboardList },
   { p: "/risk", k: "nav_risk", I: ShieldAlert },
   { p: "/coordinating", k: "nav_coord", I: FileText },
   { p: "/notams", k: "nav_notams", I: Megaphone },
