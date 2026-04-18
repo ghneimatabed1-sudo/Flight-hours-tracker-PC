@@ -129,13 +129,32 @@ Deno.serve(async (req: Request) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  // 1. Look up the pilot. Generic error on miss to avoid confirming which
-  //    military numbers exist.
-  const { data: pilot, error: pilotErr } = await admin
-    .from("pilots")
-    .select("id, squadron_id, auth_user_id")
-    .eq("id", mil)
-    .maybeSingle<PilotLookup>();
+  // 1. Look up the pilot. The dashboard stores the actual military number
+  //    inside the JSON `data->>militaryNumber` blob — `pilots.id` is just
+  //    the auto-generated row key (e.g. "P001"). Match either, so a pilot
+  //    can type whichever one the squadron records as their military number.
+  //    Generic error on miss to avoid confirming which numbers exist.
+  let pilot: PilotLookup | null = null;
+  let pilotErr: { message: string } | null = null;
+  {
+    const byMil = await admin
+      .from("pilots")
+      .select("id, squadron_id, auth_user_id")
+      .eq("data->>militaryNumber", mil)
+      .limit(1)
+      .maybeSingle<PilotLookup>();
+    if (byMil.error) pilotErr = byMil.error;
+    pilot = byMil.data ?? null;
+  }
+  if (!pilot && !pilotErr) {
+    const byId = await admin
+      .from("pilots")
+      .select("id, squadron_id, auth_user_id")
+      .eq("id", mil)
+      .maybeSingle<PilotLookup>();
+    if (byId.error) pilotErr = byId.error;
+    pilot = byId.data ?? null;
+  }
   if (pilotErr) return reply({ ok: false, error: "lookup_failed" }, 500);
   if (!pilot) return reply({ ok: false, error: "invalid_credentials" });
 
