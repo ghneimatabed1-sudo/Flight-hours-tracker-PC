@@ -52,12 +52,12 @@ alter table pilot_devices    enable row level security;
 -- mutate codes / devices through PostgREST. The mobile RPCs run SECURITY
 -- DEFINER and therefore bypass these row policies for their own narrow needs.
 create policy link_codes_ops_rw on pilot_link_codes
-  for all using (squadron_id = auth.squadron_id())
-  with check (squadron_id = auth.squadron_id());
+  for all using (squadron_id = public.squadron_id())
+  with check (squadron_id = public.squadron_id());
 
 create policy devices_ops_rw on pilot_devices
-  for all using (squadron_id = auth.squadron_id())
-  with check (squadron_id = auth.squadron_id());
+  for all using (squadron_id = public.squadron_id())
+  with check (squadron_id = public.squadron_id());
 
 -- Belt-and-braces: explicitly remove any lingering anon SELECT rights on the
 -- pilot-facing tables. The pilots_rw / sorties_rw policies in 0001 already
@@ -88,7 +88,7 @@ begin
   if v_squadron is null then
     raise exception 'pilot_not_found';
   end if;
-  if auth.squadron_id() is distinct from v_squadron then
+  if public.squadron_id() is distinct from v_squadron then
     raise exception 'forbidden';
   end if;
 

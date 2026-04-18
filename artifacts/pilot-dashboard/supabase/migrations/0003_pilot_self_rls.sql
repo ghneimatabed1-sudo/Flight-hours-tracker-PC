@@ -32,7 +32,7 @@ create unique index if not exists pilots_auth_user_idx
 
 -- JWT helper: the pilot_id claim that the edge function stamps onto the
 -- mobile auth user's app_metadata. Returns null for ops/admin sessions.
-create or replace function auth.pilot_id() returns text
+create or replace function public.pilot_id() returns text
 language sql stable as $$
   select nullif(coalesce(
     current_setting('request.jwt.claims', true)::jsonb #>> '{app_metadata,pilot_id}',
@@ -53,8 +53,8 @@ $$;
 drop policy if exists pilots_self_select on pilots;
 create policy pilots_self_select on pilots
   for select using (
-    auth.pilot_id() is not null
-    and id = auth.pilot_id()
+    public.pilot_id() is not null
+    and id = public.pilot_id()
     and auth_user_id is not null
     and auth_user_id = auth.uid()
   );
@@ -65,11 +65,11 @@ create policy pilots_self_select on pilots
 drop policy if exists sorties_self_select on sorties;
 create policy sorties_self_select on sorties
   for select using (
-    auth.pilot_id() is not null
-    and (pilot_id = auth.pilot_id() or co_pilot_id = auth.pilot_id())
+    public.pilot_id() is not null
+    and (pilot_id = public.pilot_id() or co_pilot_id = public.pilot_id())
     and exists (
       select 1 from pilots p
-       where p.id = auth.pilot_id()
+       where p.id = public.pilot_id()
          and p.auth_user_id = auth.uid()
     )
   );
@@ -79,10 +79,10 @@ create policy sorties_self_select on sorties
 drop policy if exists sq_self_select on squadrons;
 create policy sq_self_select on squadrons
   for select using (
-    auth.pilot_id() is not null
+    public.pilot_id() is not null
     and id = (
       select squadron_id from pilots
-       where id = auth.pilot_id()
+       where id = public.pilot_id()
          and auth_user_id = auth.uid()
     )
   );

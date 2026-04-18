@@ -48,25 +48,25 @@ alter table pilot_currency_notifications   enable row level security;
 -- Ops staff (squadron JWT) can inspect their squadron's prefs / log via the
 -- dashboard if needed. The pilot writes/reads their own row through the
 -- SECURITY DEFINER RPCs below — no direct policy needed for that path since
--- the RPCs scope by auth.pilot_id().
+-- the RPCs scope by public.pilot_id().
 create policy reminder_prefs_ops_rw on pilot_reminder_prefs
-  for all using (squadron_id = auth.squadron_id())
-  with check (squadron_id = auth.squadron_id());
+  for all using (squadron_id = public.squadron_id())
+  with check (squadron_id = public.squadron_id());
 
 create policy currency_notifications_ops_read on pilot_currency_notifications
   for select using (
     exists (
       select 1 from pilots p
        where p.id = pilot_currency_notifications.pilot_id
-         and p.squadron_id = auth.squadron_id()
+         and p.squadron_id = public.squadron_id()
     )
   );
 
 -- Pilot reads their own prefs via JWT pilot_id claim.
 create policy reminder_prefs_self_select on pilot_reminder_prefs
   for select using (
-    auth.pilot_id() is not null
-    and pilot_id = auth.pilot_id()
+    public.pilot_id() is not null
+    and pilot_id = public.pilot_id()
   );
 
 revoke all on pilot_reminder_prefs        from anon;
@@ -87,7 +87,7 @@ create or replace function public.save_pilot_reminder_prefs(
 ) returns void
 language plpgsql security definer set search_path = public, auth as $$
 declare
-  v_pilot_id text := auth.pilot_id();
+  v_pilot_id text := public.pilot_id();
   v_squadron uuid;
   v_key text;
   v_arr jsonb;
@@ -144,7 +144,7 @@ create or replace function public.get_pilot_reminder_prefs()
 returns jsonb
 language plpgsql security definer set search_path = public, auth as $$
 declare
-  v_pilot_id text := auth.pilot_id();
+  v_pilot_id text := public.pilot_id();
   v_row pilot_reminder_prefs%rowtype;
 begin
   if v_pilot_id is null then

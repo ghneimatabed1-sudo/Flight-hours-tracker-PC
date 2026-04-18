@@ -70,6 +70,12 @@ jobs:
         env:
           PORT: "5173"
           BASE_PATH: "./"
+          # Bake Supabase project credentials into the renderer bundle so
+          # every PC talks to the SAME backend. With these set, the Super
+          # Admin TOTP secret is shared across all PCs (server-side) instead
+          # of being trapped in per-PC localStorage.
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: pnpm run build
 
       - name: Verify renderer output exists
