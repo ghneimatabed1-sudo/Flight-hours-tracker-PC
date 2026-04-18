@@ -728,7 +728,18 @@ export default function LicenseKeys() {
 
           <DialogFooter>
             {setupOk ? (
-              <Button onClick={() => { setSetupOpen(false); setSetupOk(null); }} data-testid="button-setup-done">{t("done")}</Button>
+              <Button
+                onClick={() => {
+                  // Hard-reload so the new role lock and account take effect.
+                  // In Electron this restarts the renderer with the new auth
+                  // context; in the browser it bypasses any stale React state.
+                  window.location.reload();
+                }}
+                data-testid="button-setup-reopen"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+              >
+                {lang === "ar" ? "إعادة تشغيل التطبيق الآن" : "Reopen App Now"}
+              </Button>
             ) : (
               <>
                 <Button variant="outline" onClick={() => setSetupOpen(false)} disabled={setupBusy}>{t("cancel")}</Button>
@@ -742,6 +753,54 @@ export default function LicenseKeys() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Forced-reload overlay. After a successful setup the new role lock,
+          account, and squadron config only take effect once the auth context
+          re-initializes. We block every other interaction with a full-screen
+          modal whose only action is "Reopen App Now" — this prevents the
+          super admin from continuing to navigate in stale state and reaching
+          a confusing half-applied view. The overlay sits OUTSIDE the Dialog
+          so closing the dialog can't dismiss it. */}
+      {setupOk && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85 backdrop-blur-sm"
+          data-testid="overlay-force-reopen"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.preventDefault()}
+        >
+          <div className="max-w-md w-[92%] rounded-xl border-2 border-emerald-500 bg-card shadow-2xl p-6 space-y-4 text-center">
+            <div className="mx-auto w-14 h-14 rounded-full bg-emerald-500/20 border-2 border-emerald-500 flex items-center justify-center">
+              <Check className="h-7 w-7 text-emerald-500" />
+            </div>
+            <div className="text-lg font-bold gold-grad">
+              {lang === "ar" ? "تم إعداد الجهاز" : "Device Configured"}
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {lang === "ar"
+                ? "تم تطبيق إعدادات الدور الجديد. لا يمكن متابعة استخدام التطبيق بدون إعادة التشغيل لتفعيل الدور الجديد وتسجيل الدخول."
+                : "The new role configuration has been saved. You cannot continue until you reopen the app — this loads the new role lock and lets the assigned user sign in."}
+            </div>
+            {setupCredentials && (
+              <div className="text-xs bg-secondary border border-border rounded p-2 text-left font-mono">
+                <div><span className="text-muted-foreground">User:</span> <span className="font-bold">{setupCredentials.username}</span></div>
+                <div><span className="text-muted-foreground">Pass:</span> <span className="font-bold tracking-wider">{setupCredentials.password}</span></div>
+              </div>
+            )}
+            <Button
+              onClick={() => window.location.reload()}
+              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-6 text-base"
+              data-testid="button-overlay-reopen"
+            >
+              {lang === "ar" ? "إعادة تشغيل التطبيق الآن" : "Reopen App Now"}
+            </Button>
+            <div className="text-[10px] text-muted-foreground">
+              {lang === "ar"
+                ? "لن يعمل أي زر آخر حتى تضغط هنا."
+                : "No other action will work until you click above."}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
