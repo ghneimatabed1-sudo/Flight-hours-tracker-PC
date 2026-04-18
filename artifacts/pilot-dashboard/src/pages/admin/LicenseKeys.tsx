@@ -510,6 +510,43 @@ export default function LicenseKeys() {
     setKeys(() => listLicenseKeys());
   }
 
+  // Per-PC authorized-squadron editor. Reads + writes the same localStorage
+  // key that the License-Key flow seeds (`rjaf.authorizedSquadronIds`) and
+  // mirrors the change into the registry record so the PC's history stays
+  // consistent. Only visible when this PC is licensed as a commander tier.
+  const assignedRoleHere = (typeof window !== "undefined" ? localStorage.getItem("rjaf.assignedRole") : null) as
+    | "ops" | "flight_commander" | "squadron_commander" | "hq_commander" | "super_admin" | null;
+  const showLiveAuthEditor = assignedRoleHere === "squadron_commander" || assignedRoleHere === "flight_commander";
+  const [liveAuth, setLiveAuth] = useState<string[]>(() => {
+    try { const raw = localStorage.getItem("rjaf.authorizedSquadronIds"); return raw ? JSON.parse(raw) : []; }
+    catch { return []; }
+  });
+  const [liveAuthSavedFlash, setLiveAuthSavedFlash] = useState(false);
+  function toggleLiveAuth(id: string) {
+    setLiveAuth(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  }
+  function saveLiveAuth() {
+    const homeSqnNumber = auth.squadron?.number ?? "";
+    const homeSqnId = squadrons.find(s => s.code === homeSqnNumber || s.id === `local-${homeSqnNumber}`)?.id;
+    // Always keep the home squadron in the list so the commander can never
+    // accidentally lose visibility on the squadron their PC physically lives at.
+    const final = homeSqnId
+      ? Array.from(new Set([homeSqnId, ...liveAuth]))
+      : Array.from(new Set(liveAuth));
+    localStorage.setItem("rjaf.authorizedSquadronIds", JSON.stringify(final));
+    // Mirror the new list back onto the registered LicenseKey for this PC so
+    // re-activating won't snap back to the original list issued months ago.
+    const activeKey = localStorage.getItem("rjaf.licenseKey");
+    if (activeKey) {
+      const matching = keys.find(k => (k as unknown as { _fullKey?: string })._fullKey?.toUpperCase() === activeKey.toUpperCase());
+      if (matching) updateLicenseKey(matching.id, { authorizedSquadronIds: final });
+      setKeys(() => listLicenseKeys());
+    }
+    setLiveAuth(final);
+    setLiveAuthSavedFlash(true);
+    setTimeout(() => setLiveAuthSavedFlash(false), 1800);
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -524,6 +561,50 @@ export default function LicenseKeys() {
           </Button>
         </div>
       </div>
+
+      {showLiveAuthEditor && (
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div>
+                <h3 className="text-sm font-bold">
+                  {lang === "ar" ? "الأسراب التي يراقبها هذا الجهاز" : "Squadrons this PC monitors"}
+                </h3>
+                <p className="text-[11px] text-muted-foreground">
+                  {lang === "ar"
+                    ? "أضف أو احذف أسراب هذا الجهاز هنا. يحفظ التغيير محليًا فورًا — لا حاجة لإعادة إصدار المفتاح."
+                    : "Add or remove squadrons for this PC here. Saved locally on this device — no key reissue needed."}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {liveAuthSavedFlash && <span className="text-xs text-emerald-600 font-medium">{lang === "ar" ? "تم الحفظ ✓" : "Saved ✓"}</span>}
+                <Button size="sm" onClick={saveLiveAuth} data-testid="button-save-live-auth">
+                  {lang === "ar" ? "حفظ" : "Save"}
+                </Button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5 max-h-56 overflow-y-auto border border-border rounded p-2">
+              {squadrons.map(s => {
+                const homeNumber = auth.squadron?.number ?? "";
+                const isHome = s.code === homeNumber || s.id === `local-${homeNumber}`;
+                const checked = isHome || liveAuth.includes(s.id);
+                return (
+                  <label key={s.id} className={`flex items-center gap-2 text-xs cursor-pointer ${isHome ? "opacity-70" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={isHome}
+                      onChange={() => toggleLiveAuth(s.id)}
+                      data-testid={`check-liveauth-${s.id}`}
+                    />
+                    <span>{lang === "ar" ? s.nameAr : s.name}{isHome ? (lang === "ar" ? " (أم)" : " (home)") : ""}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardContent className="p-0">
