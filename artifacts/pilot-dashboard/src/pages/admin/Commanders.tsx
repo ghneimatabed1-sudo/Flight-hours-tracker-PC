@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { squadrons } from "@/lib/mockData";
 import {
@@ -46,7 +45,6 @@ export default function Commanders() {
   // A single selector whose options mirror the scope names plus "Ops Officer".
   // Translates to (role, scope) internally when creating the account.
   const [tier, setTier] = useState<Tier>("squadron");
-  const [selSqns, setSelSqns] = useState<string[]>([]);
   const [createError, setCreateError] = useState<string | null>(null);
 
   // One-time plaintext password shown right after create or reset. Kept in
@@ -62,23 +60,17 @@ export default function Commanders() {
     setList(listCommanders());
   }
 
-  function toggleSqn(id: string) {
-    setSelSqns(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
-  }
-
   async function create() {
     setCreateError(null);
     if (!username.trim()) { setCreateError(t("missingUsername")); return; }
     if (!name.trim()) { setCreateError(t("missingName")); return; }
     const { role, scope } = tierToRoleScope(tier);
-    // Squadron-visibility rules only apply to non-HQ commanders. HQ auto-gets
-    // every squadron; ops officers implicitly operate this PC's squadron.
-    if (role === "commander" && scope !== "hq" && selSqns.length === 0) {
-      setCreateError(t("pickAtLeastOneSquadron"));
-      return;
-    }
-    const sqnIds = role === "commander"
-      ? (scope === "hq" ? squadrons.map(s => s.id) : selSqns)
+    // Per Super Admin policy, squadron-monitoring scope is NEVER set here —
+    // it is controlled exclusively by the license key issued from the PC
+    // Management page. HQ commanders implicitly see every squadron; everyone
+    // else inherits visibility from the license key when their PC activates.
+    const sqnIds: string[] = role === "commander" && scope === "hq"
+      ? squadrons.map(s => s.id)
       : [];
     const res = await createCommander({
       username: username.trim(),
@@ -98,7 +90,7 @@ export default function Commanders() {
     }
     refresh();
     setCreateOpen(false);
-    setName(""); setUsername(""); setTier("squadron"); setSelSqns([]);
+    setName(""); setUsername(""); setTier("squadron");
     setCredsShow({ username: res.record.username, password: res.initialPassword });
   }
 
@@ -142,14 +134,13 @@ export default function Commanders() {
                   <th className="text-start py-2 px-3">{t("username")}</th>
                   <th className="text-start py-2 px-3">{t("accountRole")}</th>
                   <th className="text-start py-2 px-3">{t("scope")}</th>
-                  <th className="text-start py-2 px-3">{t("authorizedSquadrons")}</th>
                   <th className="text-end py-2 px-3"></th>
                 </tr>
               </thead>
               <tbody>
                 {list.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-8 text-center text-muted-foreground">
+                    <td colSpan={5} className="py-8 text-center text-muted-foreground">
                       {t("noAccountsYet")}
                     </td>
                   </tr>
@@ -163,19 +154,6 @@ export default function Commanders() {
                       </span>
                     </td>
                     <td className="py-2 px-3">{u.scope ? t(scopeKeys[u.scope]) : "—"}</td>
-                    <td className="py-2 px-3 text-xs">
-                      {u.role === "ops" ? (
-                        <span className="text-muted-foreground italic">{t("roleOps")}</span>
-                      ) : (
-                        <>
-                          {(u.squadronIds ?? []).map(id => {
-                            const s = squadrons.find(x => x.id === id);
-                            return s ? <span key={id} className="inline-block me-1 mb-1 rounded bg-secondary px-2 py-0.5">{s.code}</span> : null;
-                          })}
-                          {(u.squadronIds ?? []).length === 0 && <span className="text-muted-foreground">—</span>}
-                        </>
-                      )}
-                    </td>
                     <td className="py-2 px-3 text-end space-x-2 rtl:space-x-reverse whitespace-nowrap">
                       <Button size="sm" variant="outline" onClick={() => reset(u.id)} data-testid={`button-reset-${u.id}`}>
                         <KeyRound className="h-3 w-3 me-1" />{t("resetPassword")}
@@ -225,23 +203,10 @@ export default function Commanders() {
               )}
             </div>
             {tier !== "hq" && tier !== "ops" && (
-              <div>
-                <Label>{t("authorizedSquadrons")}</Label>
-                <p className="text-xs text-muted-foreground mb-1">{t("authorizedSquadronsHint")}</p>
-                {squadrons.length === 0 ? (
-                  <div className="text-xs text-muted-foreground border rounded p-3">
-                    {t("noSquadronsYet")}
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2 mt-1 max-h-48 overflow-y-auto border rounded p-2">
-                    {squadrons.map(s => (
-                      <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                        <Checkbox checked={selSqns.includes(s.id)} onCheckedChange={() => toggleSqn(s.id)} data-testid={`check-sqn-${s.id}`} />
-                        <span>{lang === "ar" ? s.nameAr : s.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
+              <div className="text-xs text-amber-600 dark:text-amber-300 border border-amber-500/40 bg-amber-500/10 rounded p-2.5 leading-relaxed">
+                {lang === "ar"
+                  ? "ملاحظة: الأسراب التي يستطيع هذا القائد مراقبتها تُحدَّد فقط من \"إدارة الأجهزة\" عند إصدار مفتاح الترخيص للجهاز. لا يمكن إضافتها أو إزالتها من هنا."
+                  : "Note: Which squadrons this commander can monitor is set only from PC Management when issuing the license key for that PC. It cannot be added or removed here."}
               </div>
             )}
             {createError && (
