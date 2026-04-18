@@ -97,6 +97,14 @@ export function HQLayout({ children }: { children: ReactNode }) {
             <LogOut className="h-4 w-4 me-1" />{t("signOut")}
           </Button>
         </div>
+        <div className="px-4 sm:px-6 pb-2 -mt-1 flex items-center justify-end">
+          <span
+            className="text-[10px] uppercase tracking-[0.18em] font-medium bg-gradient-to-r from-amber-300 via-amber-100 to-amber-300 bg-clip-text text-transparent select-none"
+            data-testid="text-credit"
+          >
+            Developed by Capt. ABEDALQADER GHUNMAT
+          </span>
+        </div>
       </header>
 
       <div className="flex-1 flex flex-col md:flex-row">
