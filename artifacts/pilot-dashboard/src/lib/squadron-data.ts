@@ -262,6 +262,11 @@ function rowToSortie(r: Record<string, unknown>): Sortie {
     pilotIsCaptain: data.pilotIsCaptain,
     coPilotIsCaptain: data.coPilotIsCaptain,
     msnDuty: data.msnDuty,
+    instrumentFlight: data.instrumentFlight,
+    ifSim: data.ifSim != null ? Number(data.ifSim) : undefined,
+    ifAct: data.ifAct != null ? Number(data.ifAct) : undefined,
+    ils: data.ils != null ? Number(data.ils) : undefined,
+    vor: data.vor != null ? Number(data.vor) : undefined,
   };
 }
 
@@ -291,10 +296,10 @@ export function deriveSortieBuckets(input: {
     else if (input.pilotPosition === "1st") out.night1 = t;
     else out.night2 = t;
   } else {
+    // NVG goes ONLY to the NVG bucket — NEVER also to night1/night2/nightDual.
+    // This mirrors the old mobile rule and prevents NVG hours being
+    // double-counted in pilot Night totals.
     out.nvg = t;
-    if (input.pilotPosition === "1st") out.night1 = t;
-    else out.night2 = t;
-    if (input.dual) out.nightDual = t;
   }
   return out;
 }
@@ -436,6 +441,8 @@ export function useCreateSortie() {
           pilotIsCaptain: s.pilotIsCaptain,
           coPilotIsCaptain: s.coPilotIsCaptain,
           msnDuty: s.msnDuty,
+          instrumentFlight: s.instrumentFlight,
+          ifSim: s.ifSim, ifAct: s.ifAct, ils: s.ils, vor: s.vor,
         },
       }).select().single();
       if (error) throw error;
@@ -488,6 +495,8 @@ export function useUpdateSortie() {
           pilotIsCaptain: s.pilotIsCaptain,
           coPilotIsCaptain: s.coPilotIsCaptain,
           msnDuty: s.msnDuty,
+          instrumentFlight: s.instrumentFlight,
+          ifSim: s.ifSim, ifAct: s.ifAct, ils: s.ils, vor: s.vor,
         },
       }).eq("id", s.id);
       if (error) throw error;
