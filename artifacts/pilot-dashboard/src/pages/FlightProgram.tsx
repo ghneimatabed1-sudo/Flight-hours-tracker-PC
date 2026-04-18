@@ -368,7 +368,7 @@ export default function FlightProgram() {
             src={emblem}
             alt=""
             className="absolute object-contain"
-            style={{ left: "39.50%", top: "0%", width: "18.50%", height: "85.00%" }}
+            style={{ left: "38.25%", top: "0%", width: "21.00%", height: "96.00%" }}
           />
           {/* Little Bird — right of center */}
           <img
