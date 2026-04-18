@@ -52,6 +52,7 @@ import DashboardPilotDetail from "@/pages/dashboard/PilotDetail";
 import Alerts from "@/pages/dashboard/Alerts";
 import Currencies from "@/pages/dashboard/Currencies";
 import Simulator from "@/pages/dashboard/Simulator";
+import FlightRecords from "@/pages/dashboard/FlightRecords";
 
 function SquadronOpsRoutes() {
   return (
@@ -116,6 +117,7 @@ function CommanderRoutes() {
       <Route path="/dashboard/alerts" component={Alerts} />
       <Route path="/dashboard/currencies" component={Currencies} />
       <Route path="/dashboard/simulator" component={Simulator} />
+      <Route path="/dashboard/flights" component={FlightRecords} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { useI18n, type Key } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock } from "lucide-react";
+import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays } from "lucide-react";
 import emblem from "@assets/rjaf_emblem.png";
 import { RecoveryCodesLowBanner } from "@/components/RecoveryCodesLowBanner";
 
@@ -38,8 +38,14 @@ export function HQLayout({ children }: { children: ReactNode }) {
         { path: "/dashboard/pilots", labelKey: "pilots", icon: <Users className="h-4 w-4" /> },
         { path: "/dashboard/alerts", labelKey: "alerts", icon: <AlertTriangle className="h-4 w-4" /> },
         { path: "/dashboard/currencies", labelKey: "currencies", icon: <Gauge className="h-4 w-4" /> },
+        // Squadron-scope commanders can browse the sorties the ops officer
+        // has entered, filterable by day. Intentionally hidden for HQ / base
+        // / wing scope (they don't own a single squadron's local data store).
         ...(user.scope === "squadron"
-          ? [{ path: "/dashboard/simulator", labelKey: "simulator" as Key, icon: <Gauge className="h-4 w-4" /> }]
+          ? [
+              { path: "/dashboard/flights", labelKey: "flightRecords" as Key, icon: <CalendarDays className="h-4 w-4" /> },
+              { path: "/dashboard/simulator", labelKey: "simulator" as Key, icon: <Gauge className="h-4 w-4" /> },
+            ]
           : []),
       ];
 
