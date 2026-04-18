@@ -9,7 +9,7 @@ import { squadrons } from "@/lib/mockData";
 import type { LicenseKey, LicenseDuration } from "@/lib/types";
 import { addDuration, addDays } from "@/lib/types";
 import { listLicenseKeys, registerLicenseKey, updateLicenseKey, removeLicenseKey } from "@/lib/license-registry";
-import { registerLicenseRemote, supabaseConfigured } from "@/lib/supabase";
+import { registerLicenseRemote, provisionCommanderRemote, storeSupabaseCreds, supabaseConfigured } from "@/lib/supabase";
 import { createCommander, generateInitialPassword, type AccountRole } from "@/lib/commander-store";
 import type { CommanderScope } from "@/lib/types";
 import { fmtDate, fmtDateTime } from "@/lib/format";
@@ -200,6 +200,37 @@ export default function LicenseKeys() {
           localStorage.setItem("rjaf.commanderPwHashes", JSON.stringify(hashes));
         }
         createdPassword = initialPassword;
+
+        // For commander roles, also provision a Supabase auth user so the
+        // commander can read squadron data on every PC they sign into. Ops
+        // accounts are handled later in the ops-only branch (via
+        // register-license, which provisions the auth user atomically).
+        // Failing this step does NOT abort setup — local sign-in still
+        // works; only cross-PC data sync is degraded.
+        if (supabaseConfigured && setupRole !== "ops" && roleAccountKind(setupRole) === "commander") {
+          const tierForSb: "hq" | "squadron" | "flight" =
+            setupRole === "hq_commander" ? "hq"
+            : setupRole === "flight_commander" ? "flight"
+            : "squadron";
+          try {
+            const prov = await provisionCommanderRemote({
+              username: accountUsername,
+              displayName: commanderName || accountUsername,
+              role: "commander",
+              tier: tierForSb,
+              squadronNumber: tierForSb === "hq" ? "" : sqnNumber,
+              squadronName: tierForSb === "hq" ? "" : sqnName,
+              squadronBase: tierForSb === "hq" ? "" : sqnBase,
+            });
+            if (prov.ok && prov.supabaseEmail && prov.supabasePassword) {
+              storeSupabaseCreds(accountUsername, prov.supabaseEmail, prov.supabasePassword);
+            } else {
+              console.warn("[provision-commander]", prov.error ?? "unknown");
+            }
+          } catch (err) {
+            console.warn("[provision-commander] threw", err);
+          }
+        }
       }
 
       if (setupRole === "ops") {
@@ -227,6 +258,7 @@ export default function LicenseKeys() {
           const reg = await registerLicenseRemote({
             key: fullKey,
             username: accountUsername,
+            displayName: commanderName || accountUsername,
             squadronNumber: sqnNumber,
             squadronName: sqnName,
             squadronBase: sqnBase,
@@ -239,6 +271,13 @@ export default function LicenseKeys() {
                 : `Could not register license with server: ${reg.error ?? ""}`,
             );
             return;
+          }
+          // Persist Supabase creds for THIS local username so subsequent
+          // sign-ins can also sign into Supabase and obtain a JWT carrying
+          // squadron_id + role. Without this every operational-table read
+          // is filtered out by RLS — i.e. zero data sync between PCs.
+          if (reg.supabaseEmail && reg.supabasePassword) {
+            storeSupabaseCreds(accountUsername, reg.supabaseEmail, reg.supabasePassword);
           }
         }
         const res = await auth.activateLicense(fullKey, accountUsername);
@@ -327,14 +366,20 @@ export default function LicenseKeys() {
     // Mirror the new key into Supabase so any other PC that activates it
     // can be validated by the central server.
     if (supabaseConfigured) {
-      void registerLicenseRemote({
-        key: full,
-        username,
-        squadronNumber: sqn.code,
-        squadronName: sqn.name,
-        squadronBase: sqn.base,
-        expiresAt,
-      });
+      void (async () => {
+        const r = await registerLicenseRemote({
+          key: full,
+          username,
+          displayName: username,
+          squadronNumber: sqn.code,
+          squadronName: sqn.name,
+          squadronBase: sqn.base,
+          expiresAt,
+        });
+        if (r.ok && r.supabaseEmail && r.supabasePassword) {
+          storeSupabaseCreds(username, r.supabaseEmail, r.supabasePassword);
+        }
+      })();
     }
   }
 

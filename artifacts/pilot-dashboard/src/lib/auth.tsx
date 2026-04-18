@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
-import { supabase, supabaseConfigured, validateLicenseRemote, recordAuditEvent } from "./supabase";
+import { supabase, supabaseConfigured, validateLicenseRemote, recordAuditEvent, getSupabaseCreds } from "./supabase";
 import { lookupLicenseKey } from "./license-registry";
 import { SUPER_ADMIN } from "./mockData";
 import { findCommanderByUsername, verifyCommanderPassword } from "./commander-store";
@@ -514,6 +514,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (hqUser && (hqUser.role === "commander" || hqUser.role === "ops")) {
         const verified = await verifyCommanderPassword(u, password);
         if (!verified) return await recordFail("bad_credentials");
+
+        // Also sign into Supabase so the browser obtains a JWT carrying
+        // app_metadata.squadron_id + role. Without this every operational-
+        // table read/write is silently filtered out by RLS — i.e. zero data
+        // sync between PCs. The Supabase password is random and stored
+        // locally at provision time; it is NOT the user-typed password.
+        if (supabaseConfigured && supabase) {
+          const creds = getSupabaseCreds(u);
+          if (creds) {
+            try {
+              const { error: sbErr } = await supabase.auth.signInWithPassword({
+                email: creds.email,
+                password: creds.password,
+              });
+              if (sbErr) {
+                console.warn("[supabase-signin]", sbErr.message);
+              }
+            } catch (err) {
+              console.warn("[supabase-signin] threw", err);
+            }
+          } else {
+            console.warn("[supabase-signin] no cached creds for", u);
+          }
+        }
 
         localStorage.setItem("rjaf.user", JSON.stringify(verified));
         localStorage.removeItem("rjaf.fails");
