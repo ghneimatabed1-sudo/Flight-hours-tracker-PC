@@ -255,9 +255,9 @@ export default function FlightProgram() {
     prog.mode === "NVG" || prog.mode === "DAY_AND_NVG" ? "NVG" : "NIGHT";
   const defaultNightDn = nightLabel === "NVG" ? "NVG" : "N";
 
-  // Hard gate: anyone who isn't an ops officer, squadron commander, or
-  // super admin lands here with a read-only "not authorized" notice even
-  // if they navigate to /flight-program directly.
+  // Hard gate: anyone who isn't the squadron ops officer (pilot officer)
+  // or the squadron commander lands here with a "not authorized" notice
+  // even if they navigate to /flight-program directly.
   if (!canAccess) {
     return (
       <div className="p-6" dir={dir}>
