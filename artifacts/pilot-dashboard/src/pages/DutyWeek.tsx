@@ -71,6 +71,55 @@ export default function DutyWeek() {
   const [rows, setRows] = useState<DutyRow[]>(() => Array.from({ length: 7 }, () => ({ ...EMPTY_ROW })));
   const [commanderName, setCommanderName] = useState<string>(() => localStorage.getItem("rjaf.dutyRoster.commanderName") ?? "");
   const [commanderRank, setCommanderRank] = useState<string>(() => localStorage.getItem("rjaf.dutyRoster.commanderRank") ?? "المقدم الركن الطيار");
+  // Every text label on the printed sheet is editable so each squadron can
+  // tailor the roster to its own conventions (e.g. rename "وظيفة الطائر (١)"
+  // to "المداوم الأول" / "احتياط" / etc.). Stored per-squadron so two
+  // squadrons sharing the dashboard never overwrite each other.
+  const labelKey = `rjaf.dutyRoster.labels.${sqnNumber}`;
+  type Labels = {
+    bismillah: string;
+    title: string;        // مناوبات السرب الثامن
+    periodPrefix: string; // خلال الفترة
+    periodLink: string;   // ولغاية
+    pos1Header: string;   // وظيفة الطائر (١)
+    pos2Header: string;   // وظيفة الطائر (٢)
+    rankCol: string;      // الرتبة
+    nameCol: string;      // الاسم
+    phoneCol: string;     // رقم الهاتف
+    dateCol: string;      // اليوم والتاريخ
+    cmdrCaption: string;  // قائد سرب طيران قوة الفعل السريع/السرب الثامن
+  };
+  const defaultLabels = (): Labels => ({
+    bismillah: "بسم الله الرحمن الرحيم",
+    title: `مناوبات ${sqnNameAr}`,
+    periodPrefix: "خلال الفترة",
+    periodLink: "ولغاية",
+    pos1Header: "وظيفة الطائر (١)",
+    pos2Header: "وظيفة الطائر (٢)",
+    rankCol: "الرتبة",
+    nameCol: "الاسم",
+    phoneCol: "رقم الهاتف",
+    dateCol: "اليوم والتاريخ",
+    cmdrCaption: `قائد سرب طيران قوة الفعل السريع/${sqnNameAr}`,
+  });
+  const [labels, setLabels] = useState<Labels>(defaultLabels);
+  useEffect(() => {
+    const raw = localStorage.getItem(labelKey);
+    if (raw) {
+      try { setLabels({ ...defaultLabels(), ...JSON.parse(raw) }); return; } catch { /* fall through */ }
+    }
+    setLabels(defaultLabels());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [labelKey, sqnNameAr]);
+  function setLabel<K extends keyof Labels>(k: K, v: Labels[K]) {
+    setLabels(prev => ({ ...prev, [k]: v }));
+  }
+  function resetLabels() {
+    if (!confirm("استعادة كل التسميات الافتراضية؟")) return;
+    const d = defaultLabels();
+    setLabels(d);
+    localStorage.setItem(labelKey, JSON.stringify(d));
+  }
   const [savedFlash, setSavedFlash] = useState(false);
 
   // Reload the roster whenever the user switches the start date or moves to
@@ -107,6 +156,7 @@ export default function DutyWeek() {
     localStorage.setItem(storageKey, JSON.stringify(rows));
     localStorage.setItem("rjaf.dutyRoster.commanderName", commanderName);
     localStorage.setItem("rjaf.dutyRoster.commanderRank", commanderRank);
+    localStorage.setItem(labelKey, JSON.stringify(labels));
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1500);
   }
@@ -140,32 +190,70 @@ export default function DutyWeek() {
         <Button size="sm" variant="outline" onClick={clearAll} data-testid="button-duty-clear">
           <RotateCcw className="h-3.5 w-3.5 me-1" /> تفريغ
         </Button>
+        <Button size="sm" variant="ghost" onClick={resetLabels} data-testid="button-duty-reset-labels" title="استعادة كل التسميات الافتراضية">
+          استعادة التسميات
+        </Button>
         {savedFlash && <span className="text-xs text-emerald-600 font-medium">تم الحفظ ✓</span>}
       </div>
 
       <Card className="!p-6 print:!p-2 print:shadow-none print:border-none" >
         <div dir="rtl" className="font-arabic">
-          <div className="text-center text-xs text-muted-foreground mb-1 print:text-black">بسم الله الرحمن الرحيم</div>
-          <div className="text-center text-xl font-bold mb-2 print:text-black">مناوبات {sqnNameAr}</div>
+          <input
+            value={labels.bismillah}
+            onChange={e => setLabel("bismillah", e.target.value)}
+            className="block mx-auto text-center text-xs text-muted-foreground mb-1 bg-transparent w-full max-w-md border-0 outline-none focus:bg-secondary/30 rounded px-1 print:text-black"
+            data-testid="input-label-bismillah"
+          />
+          <input
+            value={labels.title}
+            onChange={e => setLabel("title", e.target.value)}
+            className="block mx-auto text-center text-xl font-bold mb-2 bg-transparent w-full max-w-xl border-0 outline-none focus:bg-secondary/30 rounded px-1 print:text-black"
+            data-testid="input-label-title"
+          />
 
-          <div className="mx-auto mb-3 inline-flex items-center justify-center px-4 py-1 border border-foreground text-sm print:text-black w-full text-center">
-            <span>خلال الفترة {fmtDate(startDate)} ولغاية {fmtDate(endDate)}</span>
+          <div className="mx-auto mb-3 inline-flex items-center justify-center gap-1 px-4 py-1 border border-foreground text-sm print:text-black w-full text-center">
+            <input
+              value={labels.periodPrefix}
+              onChange={e => setLabel("periodPrefix", e.target.value)}
+              className="bg-transparent border-0 outline-none focus:bg-secondary/30 rounded px-1 text-center w-[110px]"
+              data-testid="input-label-periodPrefix"
+            />
+            <span>{fmtDate(startDate)}</span>
+            <input
+              value={labels.periodLink}
+              onChange={e => setLabel("periodLink", e.target.value)}
+              className="bg-transparent border-0 outline-none focus:bg-secondary/30 rounded px-1 text-center w-[70px]"
+              data-testid="input-label-periodLink"
+            />
+            <span>{fmtDate(endDate)}</span>
           </div>
 
           <table className="w-full border-collapse text-sm print:text-[12px] print:text-black">
             <thead>
               <tr className="bg-secondary/40 print:bg-transparent">
-                <th rowSpan={2} className="border border-foreground px-2 py-1 align-middle w-[14%]">اليوم والتاريخ</th>
-                <th colSpan={3} className="border border-foreground px-2 py-1">وظيفة الطائر (١)</th>
-                <th colSpan={3} className="border border-foreground px-2 py-1">وظيفة الطائر (٢)</th>
+                <th rowSpan={2} className="border border-foreground px-2 py-1 align-middle w-[14%]">
+                  <input value={labels.dateCol} onChange={e => setLabel("dateCol", e.target.value)}
+                    className="w-full bg-transparent border-0 outline-none focus:bg-secondary/30 rounded px-1 text-center font-bold print:text-black"
+                    data-testid="input-label-dateCol" />
+                </th>
+                <th colSpan={3} className="border border-foreground px-2 py-1">
+                  <input value={labels.pos1Header} onChange={e => setLabel("pos1Header", e.target.value)}
+                    className="w-full bg-transparent border-0 outline-none focus:bg-secondary/30 rounded px-1 text-center font-bold print:text-black"
+                    data-testid="input-label-pos1Header" />
+                </th>
+                <th colSpan={3} className="border border-foreground px-2 py-1">
+                  <input value={labels.pos2Header} onChange={e => setLabel("pos2Header", e.target.value)}
+                    className="w-full bg-transparent border-0 outline-none focus:bg-secondary/30 rounded px-1 text-center font-bold print:text-black"
+                    data-testid="input-label-pos2Header" />
+                </th>
               </tr>
               <tr className="bg-secondary/30 print:bg-transparent">
-                <th className="border border-foreground px-2 py-1">الرتبة</th>
-                <th className="border border-foreground px-2 py-1">الاسم</th>
-                <th className="border border-foreground px-2 py-1">رقم الهاتف</th>
-                <th className="border border-foreground px-2 py-1">الرتبة</th>
-                <th className="border border-foreground px-2 py-1">الاسم</th>
-                <th className="border border-foreground px-2 py-1">رقم الهاتف</th>
+                <th className="border border-foreground px-2 py-1"><input value={labels.rankCol} onChange={e => setLabel("rankCol", e.target.value)} className="w-full bg-transparent border-0 outline-none focus:bg-secondary/30 rounded px-1 text-center font-bold print:text-black" data-testid="input-label-rankCol-1" /></th>
+                <th className="border border-foreground px-2 py-1"><input value={labels.nameCol} onChange={e => setLabel("nameCol", e.target.value)} className="w-full bg-transparent border-0 outline-none focus:bg-secondary/30 rounded px-1 text-center font-bold print:text-black" data-testid="input-label-nameCol-1" /></th>
+                <th className="border border-foreground px-2 py-1"><input value={labels.phoneCol} onChange={e => setLabel("phoneCol", e.target.value)} className="w-full bg-transparent border-0 outline-none focus:bg-secondary/30 rounded px-1 text-center font-bold print:text-black" data-testid="input-label-phoneCol-1" /></th>
+                <th className="border border-foreground px-2 py-1 text-center font-bold">{labels.rankCol}</th>
+                <th className="border border-foreground px-2 py-1 text-center font-bold">{labels.nameCol}</th>
+                <th className="border border-foreground px-2 py-1 text-center font-bold">{labels.phoneCol}</th>
               </tr>
             </thead>
             <tbody>
@@ -226,7 +314,12 @@ export default function DutyWeek() {
                 className="bg-transparent border-b border-dotted border-foreground/40 text-sm font-semibold w-[260px] print:border-none"
                 data-testid="input-cmdr-rank"
               />
-              <div className="text-xs text-muted-foreground print:text-black mt-1">قائد سرب طيران قوة الفعل السريع/{sqnNameAr}</div>
+              <input
+                value={labels.cmdrCaption}
+                onChange={e => setLabel("cmdrCaption", e.target.value)}
+                className="bg-transparent border-0 outline-none focus:bg-secondary/30 rounded px-1 text-xs text-muted-foreground print:text-black mt-1 w-[420px] print:border-none"
+                data-testid="input-label-cmdrCaption"
+              />
               <input
                 value={commanderName}
                 onChange={e => setCommanderName(e.target.value)}
