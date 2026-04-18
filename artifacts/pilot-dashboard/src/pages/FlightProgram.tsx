@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { usePilots } from "@/lib/squadron-data";
 import { Button } from "@/components/ui/button";
-import { Printer, Save, Settings } from "lucide-react";
+import { Printer, Save, Settings, Plus, X } from "lucide-react";
 import emblem from "@assets/rjaf_emblem.png";
 import heloCobra from "@assets/fp_media/image1.jpg";
 import heloBlackhawk from "@assets/fp_media/image2.jpg";
@@ -116,8 +116,8 @@ const emptyProgram = (date: string, defaults: Defaults): Program => ({
   mode: "DAY_AND_NVG",
   airbase: defaults.airbase,
   squadron: defaults.squadron,
-  dayRows: Array.from({ length: 6 }, () => emptyRow("D")),
-  nightRows: Array.from({ length: 6 }, () => emptyRow("NVG")),
+  dayRows: [emptyRow("D")],
+  nightRows: [emptyRow("NVG")],
   mainBriefer: "",
   briefTime: "0815",
   dayOps: "",
@@ -186,6 +186,21 @@ export default function FlightProgram() {
       const rows = pr[section].slice();
       rows[idx] = { ...rows[idx], ...patch };
       return { ...pr, [section]: rows };
+    });
+  };
+
+  const addRow = (section: "dayRows" | "nightRows") => {
+    setProg((pr) => ({
+      ...pr,
+      [section]: [...pr[section], emptyRow(section === "dayRows" ? "D" : defaultNightDn)],
+    }));
+  };
+
+  const removeRow = (section: "dayRows" | "nightRows", idx: number) => {
+    setProg((pr) => {
+      const rows = pr[section].slice();
+      rows.splice(idx, 1);
+      return { ...pr, [section]: rows.length ? rows : [emptyRow(section === "dayRows" ? "D" : defaultNightDn)] };
     });
   };
 
@@ -412,8 +427,21 @@ export default function FlightProgram() {
                     row={r}
                     pilotOptions={pilotOptions}
                     onChange={(patch) => updateRow("dayRows", i, patch)}
+                    onRemove={prog.dayRows.length > 1 ? () => removeRow("dayRows", i) : undefined}
                   />
                 ))}
+                <tr className="no-print">
+                  <td colSpan={14} className="border border-black bg-white text-left p-1">
+                    <button
+                      type="button"
+                      onClick={() => addRow("dayRows")}
+                      className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-700 hover:underline"
+                      data-testid="button-add-day-row"
+                    >
+                      <Plus className="h-3 w-3" /> Add day row
+                    </button>
+                  </td>
+                </tr>
               </>
             )}
 
@@ -431,8 +459,21 @@ export default function FlightProgram() {
                     row={{ ...r, dn: r.dn || defaultNightDn }}
                     pilotOptions={pilotOptions}
                     onChange={(patch) => updateRow("nightRows", i, patch)}
+                    onRemove={prog.nightRows.length > 1 ? () => removeRow("nightRows", i) : undefined}
                   />
                 ))}
+                <tr className="no-print">
+                  <td colSpan={14} className="border border-black bg-white text-left p-1">
+                    <button
+                      type="button"
+                      onClick={() => addRow("nightRows")}
+                      className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-700 hover:underline"
+                      data-testid="button-add-night-row"
+                    >
+                      <Plus className="h-3 w-3" /> Add {nightLabel.toLowerCase()} row
+                    </button>
+                  </td>
+                </tr>
               </>
             )}
           </tbody>
@@ -583,15 +624,30 @@ function RowInputs({
   row,
   pilotOptions,
   onChange,
+  onRemove,
 }: {
   index: number;
   row: Row;
   pilotOptions: Array<{ value: string; label: string }>;
   onChange: (patch: Partial<Row>) => void;
+  onRemove?: () => void;
 }) {
   return (
-    <tr>
-      <td className="border border-black text-center font-semibold bg-gray-50">{index}</td>
+    <tr className="group">
+      <td className="border border-black text-center font-semibold bg-gray-50 relative">
+        {index}
+        {onRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            title="Delete row"
+            className="no-print absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center"
+            data-testid={`button-remove-row-${index}`}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </td>
       <CellInput value={row.dn} onChange={(v) => onChange({ dn: v })} mono />
       <CellInput value={row.acType} onChange={(v) => onChange({ acType: v })} />
       <CellInput value={row.toTime} onChange={(v) => onChange({ toTime: v })} mono />
