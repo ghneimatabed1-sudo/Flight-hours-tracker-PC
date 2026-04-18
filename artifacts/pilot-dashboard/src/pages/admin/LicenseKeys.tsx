@@ -167,7 +167,10 @@ export default function LicenseKeys() {
     setSetupOk(null);
     setSetupCredentials(null);
     setCredCopied(false);
-    setSetupRole("ops");
+    // If the active license carried a Super-Admin-assigned role, force the
+    // setup dialog to that role; the operator can't widen their own tier.
+    const assigned = localStorage.getItem("rjaf.assignedRole") as SetupRoleUI | null;
+    setSetupRole(assigned && ["ops","flight_commander","squadron_commander","hq_commander","super_admin"].includes(assigned) ? assigned : "ops");
     setSetupSqnName(auth.squadron?.name ?? "");
     setSetupSqnNumber(auth.squadron?.number ?? "");
     setSetupSqnBase(auth.squadron?.base ?? "");
@@ -176,6 +179,9 @@ export default function LicenseKeys() {
     setSetupOpsUsername("");
     setSetupAccountPassword("");
   }
+  // True when the current license-key record assigned a role from the admin
+  // page. We use this to disable the role selector inside the Setup dialog.
+  const roleLockedByLicense = typeof window !== "undefined" && !!localStorage.getItem("rjaf.assignedRole");
 
   async function applySetup() {
     setSetupErr(null);
@@ -390,9 +396,23 @@ export default function LicenseKeys() {
   const [genUsername, setGenUsername] = useState<string>("");
   const [genDuration, setGenDuration] = useState<LicenseDuration | typeof CUSTOM_DURATION>("1y");
   const [genCustomDays, setGenCustomDays] = useState<string>("5");
+  // Pre-assigned role tier for the PC this key will activate. Only the
+  // Super Admin chooses this here; the field operator can't override it
+  // during Setup. Defaults to "ops" (the most common case — squadron
+  // operations PC).
+  const [genRole, setGenRole] = useState<"ops" | "flight_commander" | "squadron_commander" | "hq_commander">("ops");
+  // Authorized squadrons for commander tiers. Empty for ops (the PC's own
+  // squadron is implicit) and HQ (sees all). For Flight/Squadron Commander
+  // PCs, the Super Admin ticks exactly which squadrons that commander is
+  // allowed to monitor — and only those.
+  const [genAuthSqns, setGenAuthSqns] = useState<string[]>([]);
   const [genOpen, setGenOpen] = useState(false);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  function toggleGenAuthSqn(id: string) {
+    setGenAuthSqns(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  }
 
   // Resolve the picked duration (preset or custom) into an ISO expiry date.
   // Returns null for "never expires" or invalid custom input.
@@ -415,6 +435,13 @@ export default function LicenseKeys() {
     if (!valid) return;
     const full = genKey(sqn.code);
     setNewKey(full);
+    // For commander tiers (squadron / flight) the Super Admin must tick at
+    // least one authorized squadron; the home squadron (`sqn`) is auto-added
+    // so the commander can always see the squadron the PC belongs to.
+    const isCommanderTier = genRole === "squadron_commander" || genRole === "flight_commander";
+    const authSqns = isCommanderTier
+      ? Array.from(new Set([sqn.id, ...genAuthSqns]))
+      : undefined;
     const newRecord: LicenseKey = {
       id: "key-" + Math.random().toString(36).slice(2, 8),
       squadronId: sqn.id,
@@ -425,6 +452,8 @@ export default function LicenseKeys() {
       assignedUsername: username,
       lockedToDevice: null,
       lastSyncAt: null,
+      assignedRole: genRole,
+      authorizedSquadronIds: authSqns,
     };
     registerLicenseKey({ fullKey: full, meta: newRecord });
     setKeys(() => listLicenseKeys());
@@ -490,7 +519,7 @@ export default function LicenseKeys() {
             <Wrench className="h-4 w-4 me-1" />
             {lang === "ar" ? "إعداد هذا الجهاز" : "Set up this device"}
           </Button>
-          <Button onClick={() => { setGenOpen(true); setNewKey(null); setGenFor(""); setGenUsername(""); setGenDuration("1y"); setGenCustomDays("5"); }} data-testid="button-generate">
+          <Button onClick={() => { setGenOpen(true); setNewKey(null); setGenFor(""); setGenUsername(""); setGenDuration("1y"); setGenCustomDays("5"); setGenRole("ops"); setGenAuthSqns([]); }} data-testid="button-generate">
             {t("generateKey")}
           </Button>
         </div>
@@ -560,7 +589,7 @@ export default function LicenseKeys() {
           {!newKey ? (
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium">{t("squadron")}</label>
+                <label className="text-sm font-medium">{lang === "ar" ? "السرب الأم لهذا الجهاز" : "Home squadron of this PC"}</label>
                 <Select value={genFor} onValueChange={setGenFor}>
                   <SelectTrigger data-testid="select-squadron"><SelectValue placeholder={t("selectSquadron")} /></SelectTrigger>
                   <SelectContent>
@@ -570,6 +599,62 @@ export default function LicenseKeys() {
                   </SelectContent>
                 </Select>
               </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{lang === "ar" ? "دور هذا الجهاز" : "Role for this PC"}</label>
+                <Select value={genRole} onValueChange={(v) => { setGenRole(v as typeof genRole); setGenAuthSqns([]); }}>
+                  <SelectTrigger data-testid="select-gen-role"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ops">{lang === "ar" ? "طيار عمليات" : "Ops Pilot"}</SelectItem>
+                    <SelectItem value="flight_commander">{lang === "ar" ? "قائد طيران" : "Flight Commander"}</SelectItem>
+                    <SelectItem value="squadron_commander">{lang === "ar" ? "قائد سرب" : "Squadron Commander"}</SelectItem>
+                    <SelectItem value="hq_commander">{lang === "ar" ? "قائد القيادة" : "Head Quarter Commander"}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  {lang === "ar"
+                    ? "هذا الدور يُقفل على الجهاز عند التفعيل ولا يمكن للمشغّل تغييره."
+                    : "This role is locked on the PC at activation; the operator cannot change it."}
+                </p>
+              </div>
+
+              {(genRole === "squadron_commander" || genRole === "flight_commander") && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    {lang === "ar" ? "الأسراب المخوّل بمراقبتها" : "Authorized squadrons (which this commander can monitor)"}
+                  </label>
+                  <p className="text-[11px] text-muted-foreground">
+                    {lang === "ar"
+                      ? "اختر الأسراب التي يستطيع هذا الجهاز عرض بياناتها فقط. يُضاف السرب الأم تلقائيًا."
+                      : "Pick exactly the squadrons this PC may view. The home squadron is added automatically."}
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto border border-border rounded p-2">
+                    {squadrons.map(s => {
+                      const isHome = s.id === genFor;
+                      const checked = isHome || genAuthSqns.includes(s.id);
+                      return (
+                        <label key={s.id} className={`flex items-center gap-2 text-xs cursor-pointer ${isHome ? "opacity-70" : ""}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={isHome}
+                            onChange={() => toggleGenAuthSqn(s.id)}
+                            data-testid={`check-genauth-${s.id}`}
+                          />
+                          <span>{lang === "ar" ? s.nameAr : s.name}{isHome ? (lang === "ar" ? " (أم)" : " (home)") : ""}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {genRole === "hq_commander" && (
+                <p className="text-[11px] text-muted-foreground border border-border rounded p-2">
+                  {lang === "ar"
+                    ? "قائد القيادة يرى كل الأسراب تلقائيًا — لا حاجة لاختيار."
+                    : "HQ Commander sees every squadron automatically — no selection needed."}
+                </p>
+              )}
               <div className="space-y-2">
                 <label className="text-sm font-medium flex items-center gap-1.5">
                   <UserIcon className="h-3.5 w-3.5" /> {t("operatorUsername")}
@@ -743,7 +828,7 @@ export default function LicenseKeys() {
 
               <div className="space-y-2">
                 <label className="text-sm font-medium">{lang === "ar" ? "دور هذا الجهاز" : "Role for this PC"}</label>
-                <Select value={setupRole} onValueChange={(v) => setSetupRole(v as SetupRoleUI)}>
+                <Select value={setupRole} onValueChange={(v) => setSetupRole(v as SetupRoleUI)} disabled={roleLockedByLicense}>
                   <SelectTrigger data-testid="select-setup-role"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="ops">{lang === "ar" ? "طيار عمليات (Ops)" : "Ops Pilot"}</SelectItem>
@@ -753,6 +838,13 @@ export default function LicenseKeys() {
                     <SelectItem value="super_admin">{lang === "ar" ? "مدير عام" : "Super Admin"}</SelectItem>
                   </SelectContent>
                 </Select>
+                {roleLockedByLicense && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                    {lang === "ar"
+                      ? "تم قفل الدور من قبل المدير العام عند إصدار المفتاح."
+                      : "Role was locked by the Super Admin when this key was issued."}
+                  </p>
+                )}
                 <p className="text-[11px] text-muted-foreground">
                   {!roleNeedsSquadron(setupRole)
                     ? (lang === "ar"

@@ -73,6 +73,17 @@ export interface LicenseKey {
   assignedUsername: string;
   lockedToDevice: string | null;
   lastSyncAt: string | null;
+  // Optional: role tier the Super Admin pre-assigned this key to. When
+  // present, the activating PC is locked to this role (the operator can't
+  // pick a different one in the Setup dialog). Values mirror SetupRoleUI in
+  // LicenseKeys.tsx.
+  assignedRole?: "ops" | "flight_commander" | "squadron_commander" | "hq_commander" | "super_admin";
+  // Optional: squadron IDs this commander PC is allowed to monitor. Only
+  // meaningful for commander tiers (flight/squadron). HQ commanders implicitly
+  // see every squadron; ops PCs only ever see their own. The Super Admin sets
+  // this at key-generation time so the field commander can't widen their own
+  // visibility.
+  authorizedSquadronIds?: string[];
 }
 
 // License-key validity durations the super admin can pick when issuing a key.
