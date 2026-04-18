@@ -1,5 +1,26 @@
 import { useEffect } from "react";
 import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
+
+/**
+ * Normalize Vite's BASE_URL into a value wouter can handle.
+ *
+ * Vite emits BASE_URL based on the `base` option:
+ *   - dev (web)        → "/"
+ *   - hosted with prefix → "/some-prefix/"
+ *   - electron build   → "./"   (because we ship index.html under file://)
+ *
+ * Wouter wants base to be either "" or a path beginning with "/" — it
+ * compares paths via simple string ops. If we pass "." or "./" the route
+ * comparison never matches and EVERY route renders nothing, leaving the
+ * Electron window's blue background showing. (This is exactly the v1.0.6
+ * "blue screen on launch" bug.) Map the Electron-style relative bases to
+ * the empty string so wouter treats every route as relative to the file.
+ */
+function resolveRouterBase(raw: string | undefined): string {
+  if (!raw) return "";
+  if (raw === "/" || raw === "./" || raw === ".") return "";
+  return raw.replace(/\/$/, "");
+}
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
 import { runArchiveCheck } from "@/lib/archive";
@@ -170,7 +191,7 @@ function App() {
       <I18nProvider>
         <AuthProvider>
           <TooltipProvider>
-            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <WouterRouter base={resolveRouterBase(import.meta.env.BASE_URL)}>
               <Shell />
             </WouterRouter>
             <Toaster />
