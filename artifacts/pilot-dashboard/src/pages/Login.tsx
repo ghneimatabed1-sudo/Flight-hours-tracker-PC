@@ -9,7 +9,7 @@ export default function LoginGate() {
     licensed, configured, activateLicense, configureSquadron, login, fingerprint,
     lockedUntil, user, pendingAdmin, verifyAdminTotp, cancelAdminTotp,
     pendingRecoveryCodes, ackRecoveryCodes, provisionSuperAdmin, pcRoleLock,
-    pcDeviceName,
+    pcDeviceName, adminProvisioned,
   } = useAuth();
   const { t, lang, setLang } = useI18n();
 
@@ -25,10 +25,13 @@ export default function LoginGate() {
   const [p, setP] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
-  // First-run Super Admin password setup. Triggered when login() returns
-  // { error: "admin_not_provisioned" }, meaning this PC has no admin hash
-  // yet. The user picks a password here and it is hashed + stored locally.
-  const [setupMode, setSetupMode] = useState(false);
+  // First-run Super Admin password setup. On a brand-new install (no admin
+  // hash, no license, no role lock) we jump STRAIGHT to the Set-Password
+  // form so the very first thing the owner sees is "choose your Super Admin
+  // password". License activation is for OPS pilots' PCs, not the admin's.
+  const [setupMode, setSetupMode] = useState(
+    !adminProvisioned && !licensed && pcRoleLock !== "ops"
+  );
   const [setupPw1, setSetupPw1] = useState("");
   const [setupPw2, setSetupPw2] = useState("");
   const [setupErr, setSetupErr] = useState<string | null>(null);
@@ -340,6 +343,23 @@ export default function LoginGate() {
                 ? <div className="text-xs text-amber-400">{t("lockedOut")} ({lockedRemaining}s)</div>
                 : err && <div className="text-xs text-destructive">{err}</div>}
               <button data-testid="button-signin" disabled={lockedRemaining > 0} className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 disabled:opacity-50">{t("signIn")}</button>
+              {u.trim().toLowerCase() !== "admin" && (
+                <button
+                  type="button"
+                  data-testid="button-admin-access"
+                  onClick={() => {
+                    setHqMode(true);
+                    setU("admin");
+                    setP("");
+                    setErr(null);
+                  }}
+                  className="w-full text-[11px] text-amber-400 hover:text-amber-300 underline pt-0.5"
+                >
+                  {pcRoleLock !== null || (licensed && configured)
+                    ? t("adminAccess")
+                    : t("superAdminAccess")}
+                </button>
+              )}
               <div className="text-[11px] text-muted-foreground text-center pt-1">
                 {t("loginHelp")}
               </div>
