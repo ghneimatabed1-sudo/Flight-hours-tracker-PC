@@ -43,13 +43,17 @@ export default function LoginGate() {
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [recoveryCopied, setRecoveryCopied] = useState(false);
 
-  // HQ users (super admin / commanders) bypass license + squadron setup.
-  // When this PC is locked to an HQ role, enter HQ mode automatically so the
-  // user never sees the license-key / squadron-setup screens at all.
-  const [hqMode, setHqMode] = useState(pcRoleLock === "super_admin" || pcRoleLock === "commander");
+  // First-screen policy:
+  //   - Fresh install (no PC role lock yet) → Super Admin login. The very
+  //     first action on any new PC is the Super Admin signing in to assign
+  //     the role for this machine.
+  //   - PC locked to "ops" → license-key / squadron-setup flow.
+  //   - PC locked to "super_admin" or "commander" → HQ login.
+  // The user can always switch from the admin login back to the license
+  // form via the "← License" link below the sign-in button when needed.
+  const [hqMode, setHqMode] = useState(pcRoleLock !== "ops");
   useEffect(() => {
-    if (pcRoleLock === "super_admin" || pcRoleLock === "commander") setHqMode(true);
-    if (pcRoleLock === "ops") setHqMode(false);
+    setHqMode(pcRoleLock !== "ops");
   }, [pcRoleLock]);
 
   const lockedRemaining = lockedUntil ? Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000)) : 0;
