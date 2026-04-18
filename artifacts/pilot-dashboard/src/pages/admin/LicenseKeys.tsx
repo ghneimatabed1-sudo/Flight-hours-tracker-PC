@@ -9,8 +9,10 @@ import { squadrons } from "@/lib/mockData";
 import type { LicenseKey, LicenseDuration } from "@/lib/types";
 import { addDuration, addDays } from "@/lib/types";
 import { listLicenseKeys, registerLicenseKey, updateLicenseKey, removeLicenseKey } from "@/lib/license-registry";
+import { createCommander, generateInitialPassword, type AccountRole } from "@/lib/commander-store";
+import type { CommanderScope } from "@/lib/types";
 import { fmtDate, fmtDateTime } from "@/lib/format";
-import { KeyRound, Copy, Check, User as UserIcon, Wrench } from "lucide-react";
+import { KeyRound, Copy, Check, User as UserIcon, Wrench, Lock, Shuffle } from "lucide-react";
 
 function genKey(code: string): string {
   const rnd = Array.from({ length: 16 }, () => Math.floor(Math.random() * 36).toString(36).toUpperCase()).join("");
@@ -46,9 +48,12 @@ export default function LicenseKeys() {
   const [setupCommanderName, setSetupCommanderName] = useState("");
   const [setupDeviceName, setSetupDeviceName] = useState("");
   const [setupOpsUsername, setSetupOpsUsername] = useState("");
+  const [setupAccountPassword, setSetupAccountPassword] = useState("");
   const [setupBusy, setSetupBusy] = useState(false);
   const [setupErr, setSetupErr] = useState<string | null>(null);
   const [setupOk, setSetupOk] = useState<string | null>(null);
+  const [setupCredentials, setSetupCredentials] = useState<{ username: string; password: string; roleLabel: string } | null>(null);
+  const [credCopied, setCredCopied] = useState(false);
 
   // Squadron data is only meaningful for roles that operate at squadron
   // scope. HQ Commander and Super Admin sit above squadrons, so the form
@@ -61,11 +66,41 @@ export default function LicenseKeys() {
     if (r === "super_admin") return "super_admin";
     return "commander";
   }
+  // Every role except super_admin needs an actual local user account so the
+  // pilot/commander can sign in on this PC after restart. Super admin reuses
+  // the baked-in admin credentials.
+  function roleNeedsAccount(r: SetupRoleUI): boolean {
+    return r !== "super_admin";
+  }
+  function roleAccountKind(r: SetupRoleUI): AccountRole {
+    return r === "ops" ? "ops" : "commander";
+  }
+  function roleScope(r: SetupRoleUI): CommanderScope | undefined {
+    if (r === "flight_commander") return "flight";
+    if (r === "squadron_commander") return "squadron";
+    if (r === "hq_commander") return "hq";
+    return undefined;
+  }
+  function roleLabel(r: SetupRoleUI): string {
+    if (r === "ops") return lang === "ar" ? "طيار عمليات" : "Ops Pilot";
+    if (r === "flight_commander") return lang === "ar" ? "قائد طيران" : "Flight Commander";
+    if (r === "squadron_commander") return lang === "ar" ? "قائد سرب" : "Squadron Commander";
+    if (r === "hq_commander") return lang === "ar" ? "قائد القيادة" : "HQ Commander";
+    return lang === "ar" ? "مدير عام" : "Super Admin";
+  }
+  function usernamePlaceholder(r: SetupRoleUI): string {
+    if (r === "ops") return lang === "ar" ? "مثال: pilot.alkhatib" : "e.g. pilot.alkhatib";
+    if (r === "flight_commander") return lang === "ar" ? "مثال: flt.alali" : "e.g. flt.alali";
+    if (r === "squadron_commander") return lang === "ar" ? "مثال: sqn.alali" : "e.g. sqn.alali";
+    return lang === "ar" ? "مثال: hq.alali" : "e.g. hq.alali";
+  }
 
   function openSetup() {
     setSetupOpen(true);
     setSetupErr(null);
     setSetupOk(null);
+    setSetupCredentials(null);
+    setCredCopied(false);
     setSetupRole("ops");
     setSetupSqnName(auth.squadron?.name ?? "");
     setSetupSqnNumber(auth.squadron?.number ?? "");
@@ -73,6 +108,7 @@ export default function LicenseKeys() {
     setSetupCommanderName("");
     setSetupDeviceName(auth.pcDeviceName ?? "");
     setSetupOpsUsername("");
+    setSetupAccountPassword("");
   }
 
   async function applySetup() {
@@ -88,8 +124,17 @@ export default function LicenseKeys() {
         setSetupErr(lang === "ar" ? "أكمل اسم السرب ورقمه والقاعدة." : "Fill squadron name, number, and base.");
         return;
       }
-      if (setupRole === "ops" && !setupOpsUsername.trim()) {
-        setSetupErr(lang === "ar" ? "اسم مستخدم الطيار مطلوب لجهاز العمليات." : "Pilot username is required for an Ops PC.");
+      const accountUsername = setupOpsUsername.trim().toLowerCase();
+      if (roleNeedsAccount(setupRole) && !accountUsername) {
+        setSetupErr(lang === "ar" ? "اسم المستخدم مطلوب." : "Username is required for this role.");
+        return;
+      }
+      if (accountUsername === "admin") {
+        setSetupErr(lang === "ar" ? "الاسم \"admin\" محجوز للمدير العام." : "Username 'admin' is reserved for the Super Admin.");
+        return;
+      }
+      if (roleNeedsAccount(setupRole) && setupAccountPassword && setupAccountPassword.length < 4) {
+        setSetupErr(lang === "ar" ? "كلمة المرور يجب أن تكون 4 أحرف على الأقل." : "Password must be at least 4 characters.");
         return;
       }
       if ((setupRole === "squadron_commander" || setupRole === "flight_commander") && !commanderName) {
@@ -108,11 +153,52 @@ export default function LicenseKeys() {
         return;
       }
 
-      // For Ops PCs, mint + activate the license FIRST. Only if activation
-      // succeeds do we commit the role lock / squadron / device name. This
-      // prevents a partial-commit state where the PC is locked to "ops"
-      // but has no working license — which would lock the admin out with
-      // no way back in short of Master Recovery.
+      // CRITICAL ORDER OF OPERATIONS for setup:
+      //   1. Create the local user account (so the pilot/commander can sign in
+      //      after restart). Without this step the PC ends up role-locked but
+      //      with no usable account — the user's biggest fear.
+      //   2. For Ops PCs only: mint + activate the local license.
+      //   3. Persist squadron / device / role lock.
+      // Each step short-circuits on failure to avoid half-applied state.
+      let createdPassword: string | null = null;
+      if (roleNeedsAccount(setupRole)) {
+        // Use the explicitly-typed password if provided; otherwise generate a
+        // strong one and surface it to the super admin to hand off.
+        const chosen = setupAccountPassword.trim();
+        const initialPassword = chosen || generateInitialPassword();
+
+        const create = await createCommander({
+          username: accountUsername,
+          displayName: commanderName || accountUsername,
+          role: roleAccountKind(setupRole),
+          scope: roleScope(setupRole),
+          squadronIds: [],
+        });
+        if (!create.ok || !create.record) {
+          if (create.error === "duplicate_username") {
+            setSetupErr(lang === "ar" ? "اسم المستخدم موجود مسبقاً على هذا الجهاز." : "That username already exists on this PC.");
+          } else if (create.error === "reserved_username") {
+            setSetupErr(lang === "ar" ? "الاسم \"admin\" محجوز." : "Username 'admin' is reserved.");
+          } else {
+            setSetupErr(create.error ?? "Failed to create account.");
+          }
+          return;
+        }
+        // Replace the auto-generated password with the chosen one (or keep the
+        // generated one if the admin left the field blank).
+        if (chosen) {
+          // Re-hash with the chosen password so we control what the admin
+          // hands to the user. createCommander already wrote a generated
+          // hash; overwrite it with the chosen-password hash.
+          const hashes = JSON.parse(localStorage.getItem("rjaf.commanderPwHashes") || "{}");
+          const enc = new TextEncoder().encode(chosen);
+          const buf = await crypto.subtle.digest("SHA-256", enc);
+          hashes[create.record.id] = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+          localStorage.setItem("rjaf.commanderPwHashes", JSON.stringify(hashes));
+        }
+        createdPassword = initialPassword;
+      }
+
       if (setupRole === "ops") {
         const sqnCode = sqnNumber.replace(/[^0-9A-Z]/gi, "").toUpperCase().slice(0, 4) || "SQN";
         const issuedAt = new Date().toISOString().slice(0, 10);
@@ -125,13 +211,13 @@ export default function LicenseKeys() {
           status: "active",
           issuedAt,
           expiresAt,
-          assignedUsername: setupOpsUsername.trim(),
+          assignedUsername: accountUsername,
           lockedToDevice: null,
           lastSyncAt: null,
         };
         registerLicenseKey({ fullKey, meta: rec });
         setKeys(() => listLicenseKeys());
-        const res = await auth.activateLicense(fullKey, setupOpsUsername.trim());
+        const res = await auth.activateLicense(fullKey, accountUsername);
         if (!res.ok) {
           setSetupErr(res.error ?? "License activation failed. Role lock NOT applied.");
           return;
@@ -156,6 +242,13 @@ export default function LicenseKeys() {
       auth.setPcDeviceName(setupDeviceName.trim());
       auth.setPcRoleLock(roleToLock(setupRole));
 
+      if (createdPassword && roleNeedsAccount(setupRole)) {
+        setSetupCredentials({
+          username: accountUsername,
+          password: createdPassword,
+          roleLabel: roleLabel(setupRole),
+        });
+      }
       setSetupOk(
         lang === "ar"
           ? "تم إعداد هذا الجهاز. أعد التشغيل لتطبيق الدور الجديد."
@@ -527,24 +620,101 @@ export default function LicenseKeys() {
                 />
               </div>
 
-              {setupRole === "ops" && (
-                <div className="space-y-1">
-                  <label className="text-sm font-medium flex items-center gap-1.5">
-                    <UserIcon className="h-3.5 w-3.5" /> {lang === "ar" ? "اسم مستخدم الطيار" : "Pilot username"}
-                  </label>
-                  <input
-                    value={setupOpsUsername}
-                    onChange={e => setSetupOpsUsername(e.target.value)}
-                    placeholder={lang === "ar" ? "مثال: pilot.alkhatib" : "e.g. pilot.alkhatib"}
-                    className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
-                    data-testid="input-setup-ops-user"
-                    autoComplete="off"
-                  />
-                  <p className="text-[11px] text-muted-foreground">
+              {roleNeedsAccount(setupRole) && (
+                <div className="space-y-3 rounded-md border border-amber-300/40 bg-amber-50/60 dark:bg-amber-950/30 p-3">
+                  <div className="text-[12px] font-semibold text-amber-900 dark:text-amber-200">
                     {lang === "ar"
-                      ? "سيتم إنشاء مفتاح ترخيص محلي لهذا الطيار وتفعيله تلقائياً على هذا الجهاز."
-                      : "A local license key will be auto-generated for this pilot and activated on this PC."}
-                  </p>
+                      ? `حساب الدخول لـ${roleLabel(setupRole)}`
+                      : `Sign-in account for ${roleLabel(setupRole)}`}
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium flex items-center gap-1.5">
+                      <UserIcon className="h-3.5 w-3.5" />
+                      {lang === "ar" ? "اسم المستخدم" : "Username"}
+                      <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      value={setupOpsUsername}
+                      onChange={e => setSetupOpsUsername(e.target.value)}
+                      placeholder={usernamePlaceholder(setupRole)}
+                      className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
+                      data-testid="input-setup-ops-user"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium flex items-center gap-1.5">
+                      <Lock className="h-3.5 w-3.5" />
+                      {lang === "ar" ? "كلمة المرور (اختياري)" : "Password (optional)"}
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={setupAccountPassword}
+                        onChange={e => setSetupAccountPassword(e.target.value)}
+                        placeholder={lang === "ar" ? "اتركها فارغة لإنشاء كلمة مرور تلقائياً" : "Leave empty to auto-generate"}
+                        className="flex-1 px-3 py-2 rounded-md bg-input border border-border text-sm font-mono"
+                        data-testid="input-setup-account-pass"
+                        autoComplete="off"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSetupAccountPassword(generateInitialPassword())}
+                        data-testid="button-setup-pass-gen"
+                        title={lang === "ar" ? "إنشاء كلمة مرور" : "Generate password"}
+                      >
+                        <Shuffle className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      {lang === "ar"
+                        ? "اختر كلمة مرور أو دعها فارغة وسيتم إنشاء واحدة وعرضها بعد الإعداد."
+                        : "Pick a password or leave it blank — one will be generated and shown after setup."}
+                    </p>
+                  </div>
+                  {setupRole === "ops" && (
+                    <p className="text-[11px] text-amber-900/80 dark:text-amber-200/80">
+                      {lang === "ar"
+                        ? "سيتم أيضاً إنشاء مفتاح ترخيص محلي وتفعيله تلقائياً لهذا المستخدم."
+                        : "A local license key will also be auto-generated and activated for this user."}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {setupOk && setupCredentials && (
+                <div className="space-y-2 rounded-md border-2 border-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 p-3" data-testid="panel-setup-credentials">
+                  <div className="text-sm font-bold text-emerald-900 dark:text-emerald-100 flex items-center gap-1.5">
+                    <KeyRound className="h-4 w-4" />
+                    {lang === "ar" ? "احفظ هذه البيانات الآن" : "Save these credentials NOW"}
+                  </div>
+                  <div className="text-[11px] text-emerald-900/80 dark:text-emerald-100/80">
+                    {lang === "ar"
+                      ? "لن يتم عرض كلمة المرور مرة أخرى. سلّمها لـ" + setupCredentials.roleLabel + "."
+                      : `Password will not be shown again. Hand it to the ${setupCredentials.roleLabel}.`}
+                  </div>
+                  <div className="grid grid-cols-[80px_1fr] gap-1 text-sm font-mono bg-white dark:bg-black/40 rounded p-2">
+                    <div className="text-muted-foreground">User:</div>
+                    <div className="font-bold" data-testid="text-cred-user">{setupCredentials.username}</div>
+                    <div className="text-muted-foreground">Pass:</div>
+                    <div className="font-bold tracking-wider" data-testid="text-cred-pass">{setupCredentials.password}</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${setupCredentials.username} / ${setupCredentials.password}`);
+                      setCredCopied(true);
+                      setTimeout(() => setCredCopied(false), 2000);
+                    }}
+                    data-testid="button-copy-creds"
+                  >
+                    {credCopied
+                      ? <><Check className="h-3.5 w-3.5 me-1" />{lang === "ar" ? "تم النسخ" : "Copied"}</>
+                      : <><Copy className="h-3.5 w-3.5 me-1" />{lang === "ar" ? "نسخ" : "Copy"}</>}
+                  </Button>
                 </div>
               )}
 
