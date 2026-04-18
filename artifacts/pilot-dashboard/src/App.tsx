@@ -115,7 +115,13 @@ function SquadronOpsRoutes() {
       <Route path="/monthly-report" component={MonthlyReport} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/help" component={Help} />
-      <Route component={NotFound} />
+      {/* Catch-all: silently redirect to Dashboard instead of showing 404.
+          This handles role transitions where the previous user (e.g.
+          super_admin browsing /admin/keys) signs out and a different role
+          (e.g. ops) signs in — the hash from the prior session is no
+          longer valid in this route table, but landing on a 404 is a
+          worse experience than landing on the home page. */}
+      <Route><Redirect to="/" /></Route>
     </Switch>
   );
 }
@@ -132,7 +138,8 @@ function AdminRoutes() {
       <Route path="/admin/security" component={AdminSecurity} />
       <Route path="/admin/reminders" component={RemindersSchedule} />
       <Route path="/admin/reminders/log" component={ReminderLog} />
-      <Route component={NotFound} />
+      {/* See SquadronOpsRoutes catch-all: redirect home rather than 404. */}
+      <Route><Redirect to="/admin" /></Route>
     </Switch>
   );
 }
@@ -150,7 +157,8 @@ function CommanderRoutes() {
       <Route path="/dashboard/simulator" component={Simulator} />
       <Route path="/dashboard/flights" component={FlightRecords} />
       <Route path="/dashboard/flight-program" component={FlightProgram} />
-      <Route component={NotFound} />
+      {/* See SquadronOpsRoutes catch-all: redirect home rather than 404. */}
+      <Route><Redirect to="/dashboard" /></Route>
     </Switch>
   );
 }
