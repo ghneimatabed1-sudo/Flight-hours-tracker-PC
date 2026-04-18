@@ -243,24 +243,23 @@ export default function FlightProgram() {
         className="bg-white text-black border border-black p-3 space-y-2 text-[11px] print:text-[10px] print:p-2"
         dir="ltr"
       >
-        {/* Header — matches the printed RJAF template: 5 helicopter
-            silhouettes across the top, emblem + squadron name centered
-            below, "CLASSIFIED" caption underneath. */}
-        <div className="relative">
-          <div className="flex items-center justify-between text-black px-1">
-            <Helo className="h-6 w-20" />
-            <Helo className="h-6 w-20" />
-            <Helo className="h-6 w-20" />
-            <Helo className="h-6 w-20" />
-            <Helo className="h-6 w-20" />
-          </div>
-          <div className="flex items-center justify-center gap-3 mt-1">
-            <img src={emblem} alt="" className="h-14 w-14 object-contain" />
-            <div className="text-center leading-tight">
-              <div className="text-sm font-bold">KING ABDULLAH II AIRBASE - NO.8 SQDN</div>
-              <div className="text-base font-bold underline tracking-wider mt-0.5">FLIGHT SCHEDULE</div>
-              <div className="text-[9px] tracking-[0.3em] font-semibold mt-0.5">CLASSIFIED</div>
-            </div>
+        {/* Header — matches the printed RJAF template exactly:
+            CLASSIFIED banner on top, 5 helicopter silhouettes row,
+            then three stacked title lines with the emblem to the left. */}
+        <div className="text-center text-[10px] font-bold tracking-[0.4em]">CLASSIFIED</div>
+        <div className="flex items-center justify-between text-black px-2 -my-1">
+          <Helo className="h-5 w-16" />
+          <Helo className="h-5 w-16" />
+          <Helo className="h-5 w-16" />
+          <Helo className="h-5 w-16" />
+          <Helo className="h-5 w-16" />
+        </div>
+        <div className="flex items-center justify-center gap-4">
+          <img src={emblem} alt="" className="h-16 w-16 object-contain" />
+          <div className="text-center leading-tight">
+            <div className="text-sm font-bold">KING ABDULLAH II AIRBASE</div>
+            <div className="text-sm font-bold">NO.8 SQDN</div>
+            <div className="text-base font-bold underline tracking-wider mt-0.5">FLIGHT SCHEDULE</div>
           </div>
         </div>
 
@@ -368,9 +367,11 @@ export default function FlightProgram() {
           </tbody>
         </table>
 
-        {/* A/C needed + Commander names, arranged side-by-side like the original. */}
-        <div className="grid grid-cols-12 gap-2">
-          <table className="col-span-5 border-collapse border border-black text-[10px]">
+        {/* Bottom strip — A/C NEEDED table on the left, FLT.CMDR and
+            SQDN.CMDR inline to its right, matching rows 31-34 of the
+            original worksheet. */}
+        <div className="grid grid-cols-12 gap-3 items-end">
+          <table className="col-span-4 border-collapse border border-black text-[10px]">
             <thead className="bg-gray-200">
               <tr>
                 <Th rowSpan={2}>A/C NEEDED</Th>
@@ -395,29 +396,29 @@ export default function FlightProgram() {
             </tbody>
           </table>
 
-          <div className="col-span-7 flex flex-col justify-end gap-3 pb-1 ps-4 text-[11px]">
-            <div className="flex items-baseline gap-2">
-              <span className="font-semibold w-24">FLT.CMDR :</span>
-              <input
-                value={prog.fltCmdr}
-                onChange={(e) => update("fltCmdr", e.target.value)}
-                placeholder="LTC AUDEH"
-                className="flex-1 bg-transparent border-b border-black outline-none px-1"
-                data-testid="input-flt-cmdr"
-              />
-            </div>
-            <div className="flex items-baseline gap-2">
-              <span className="font-semibold w-24">SQDN.CMDR :</span>
-              <input
-                value={prog.sqdnCmdr}
-                onChange={(e) => update("sqdnCmdr", e.target.value)}
-                placeholder="LTC BILAL"
-                className="flex-1 bg-transparent border-b border-black outline-none px-1"
-                data-testid="input-sqdn-cmdr"
-              />
-            </div>
+          <div className="col-span-4 pb-1">
+            <div className="font-semibold text-[11px] mb-1">FLT.CMDR</div>
+            <input
+              value={prog.fltCmdr}
+              onChange={(e) => update("fltCmdr", e.target.value)}
+              placeholder="LTC AUDEH …………."
+              className="w-full bg-transparent border-b border-black outline-none px-1 text-[11px]"
+              data-testid="input-flt-cmdr"
+            />
+          </div>
+          <div className="col-span-4 pb-1">
+            <div className="font-semibold text-[11px] mb-1">SQDN.CMDR</div>
+            <input
+              value={prog.sqdnCmdr}
+              onChange={(e) => update("sqdnCmdr", e.target.value)}
+              placeholder="LTC. BILAL ………………"
+              className="w-full bg-transparent border-b border-black outline-none px-1 text-[11px]"
+              data-testid="input-sqdn-cmdr"
+            />
           </div>
         </div>
+
+        <div className="text-center text-[10px] font-bold tracking-[0.4em] pt-1">CLASSIFIED</div>
       </div>
 
       {/* Print styles: hide everything outside the sheet, expand to page. */}
