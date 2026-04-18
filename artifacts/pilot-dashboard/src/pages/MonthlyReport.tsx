@@ -699,7 +699,7 @@ export default function MonthlyReport() {
                 <td className="center">{i+1}</td>
                 <td className="center">{r.pilot.rank}</td>
                 <td>{r.pilot.arabicName || r.pilot.name}</td>
-                <td className="center">{(inputs.perPilotStatus[r.pilot.id] || "PILOT")}</td>
+                <td className="center">{inputs.perPilotStatus[r.pilot.id] || ""}</td>
                 <td className="center">{r.medicalExpiry || "—"}</td>
                 <td className="center">{r.lastFlightDate || "—"}</td>
                 <td className="num">{r.cumulativeHoursUH60M.toFixed(1)}</td>
