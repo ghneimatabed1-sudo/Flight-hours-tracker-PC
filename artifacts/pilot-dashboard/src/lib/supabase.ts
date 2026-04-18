@@ -39,6 +39,32 @@ export async function validateLicenseRemote(
   };
 }
 
+export interface RegisterLicenseArgs {
+  key: string;
+  username: string;
+  squadronNumber: string;
+  squadronName?: string;
+  squadronBase?: string;
+  expiresAt?: string | null;
+}
+
+// Registers a freshly-minted license key with the central server so that the
+// subsequent validate-license call can find it. MUST be called BEFORE the
+// client tries to activate the key — otherwise validate-license returns
+// "unknown_key" and the user is locked out of their own brand-new install.
+export async function registerLicenseRemote(
+  args: RegisterLicenseArgs
+): Promise<{ ok: boolean; error?: string; squadronId?: string }> {
+  if (!supabase) return { ok: false, error: "supabase_not_configured" };
+  const { data, error } = await supabase.functions.invoke("register-license", {
+    body: args,
+  });
+  if (error) return { ok: false, error: error.message };
+  const payload = data as { ok?: boolean; error?: string; squadronId?: string } | null;
+  if (!payload?.ok) return { ok: false, error: payload?.error ?? "register_failed" };
+  return { ok: true, squadronId: payload.squadronId };
+}
+
 export async function recordAuditEvent(event: {
   type: string;
   actor?: string;

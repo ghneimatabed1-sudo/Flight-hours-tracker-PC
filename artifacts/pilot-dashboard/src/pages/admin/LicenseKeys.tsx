@@ -9,6 +9,7 @@ import { squadrons } from "@/lib/mockData";
 import type { LicenseKey, LicenseDuration } from "@/lib/types";
 import { addDuration, addDays } from "@/lib/types";
 import { listLicenseKeys, registerLicenseKey, updateLicenseKey, removeLicenseKey } from "@/lib/license-registry";
+import { registerLicenseRemote, supabaseConfigured } from "@/lib/supabase";
 import { createCommander, generateInitialPassword, type AccountRole } from "@/lib/commander-store";
 import type { CommanderScope } from "@/lib/types";
 import { fmtDate, fmtDateTime } from "@/lib/format";
@@ -184,14 +185,16 @@ export default function LicenseKeys() {
           }
           return;
         }
-        // Replace the auto-generated password with the chosen one (or keep the
-        // generated one if the admin left the field blank).
-        if (chosen) {
-          // Re-hash with the chosen password so we control what the admin
-          // hands to the user. createCommander already wrote a generated
-          // hash; overwrite it with the chosen-password hash.
+        // Replace the auto-generated password with whichever one we'll display
+        // to the admin. createCommander always writes a hash for its OWN
+        // internally-generated password, which is NOT the same string as
+        // `initialPassword` here — so without this overwrite, the credentials
+        // popup would show a password that doesn't actually unlock the account.
+        // We overwrite unconditionally (whether the admin typed a password or
+        // we auto-generated one) to guarantee popup-shown == stored-hash.
+        {
           const hashes = JSON.parse(localStorage.getItem("rjaf.commanderPwHashes") || "{}");
-          const enc = new TextEncoder().encode(chosen);
+          const enc = new TextEncoder().encode(initialPassword);
           const buf = await crypto.subtle.digest("SHA-256", enc);
           hashes[create.record.id] = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
           localStorage.setItem("rjaf.commanderPwHashes", JSON.stringify(hashes));
@@ -217,6 +220,27 @@ export default function LicenseKeys() {
         };
         registerLicenseKey({ fullKey, meta: rec });
         setKeys(() => listLicenseKeys());
+        // In Supabase mode the key MUST exist server-side before
+        // activateLicense (which calls validate-license) is invoked, otherwise
+        // the server returns "unknown_key" and the brand-new install is bricked.
+        if (supabaseConfigured) {
+          const reg = await registerLicenseRemote({
+            key: fullKey,
+            username: accountUsername,
+            squadronNumber: sqnNumber,
+            squadronName: sqnName,
+            squadronBase: sqnBase,
+            expiresAt: expiresAt ?? null,
+          });
+          if (!reg.ok) {
+            setSetupErr(
+              lang === "ar"
+                ? `تعذر تسجيل المفتاح في الخادم: ${reg.error ?? ""}`
+                : `Could not register license with server: ${reg.error ?? ""}`,
+            );
+            return;
+          }
+        }
         const res = await auth.activateLicense(fullKey, accountUsername);
         if (!res.ok) {
           setSetupErr(res.error ?? "License activation failed. Role lock NOT applied.");
@@ -300,6 +324,18 @@ export default function LicenseKeys() {
     };
     registerLicenseKey({ fullKey: full, meta: newRecord });
     setKeys(() => listLicenseKeys());
+    // Mirror the new key into Supabase so any other PC that activates it
+    // can be validated by the central server.
+    if (supabaseConfigured) {
+      void registerLicenseRemote({
+        key: full,
+        username,
+        squadronNumber: sqn.code,
+        squadronName: sqn.name,
+        squadronBase: sqn.base,
+        expiresAt,
+      });
+    }
   }
 
   function isExpired(k: LicenseKey): boolean {
