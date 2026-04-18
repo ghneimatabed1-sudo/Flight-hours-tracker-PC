@@ -28,16 +28,39 @@ export default function LicenseKeys() {
   const auth = useAuth();
   const [keys, setKeys] = useState<LicenseKey[]>(() => listLicenseKeys());
 
+  // Setup-dialog roles. We keep five UI choices but collapse the three
+  // commander tiers into the same underlying PcRoleLock value ("commander"),
+  // recording the tier separately in localStorage so the dashboard can render
+  // tier-aware copy without churning the auth type.
+  type SetupRoleUI =
+    | "ops"
+    | "flight_commander"
+    | "squadron_commander"
+    | "hq_commander"
+    | "super_admin";
   const [setupOpen, setSetupOpen] = useState(false);
-  const [setupRole, setSetupRole] = useState<Exclude<PcRoleLock, null>>("ops");
+  const [setupRole, setSetupRole] = useState<SetupRoleUI>("ops");
   const [setupSqnName, setSetupSqnName] = useState("");
   const [setupSqnNumber, setSetupSqnNumber] = useState("");
   const [setupSqnBase, setSetupSqnBase] = useState("");
+  const [setupCommanderName, setSetupCommanderName] = useState("");
   const [setupDeviceName, setSetupDeviceName] = useState("");
   const [setupOpsUsername, setSetupOpsUsername] = useState("");
   const [setupBusy, setSetupBusy] = useState(false);
   const [setupErr, setSetupErr] = useState<string | null>(null);
   const [setupOk, setSetupOk] = useState<string | null>(null);
+
+  // Squadron data is only meaningful for roles that operate at squadron
+  // scope. HQ Commander and Super Admin sit above squadrons, so the form
+  // hides those fields for them.
+  function roleNeedsSquadron(r: SetupRoleUI): boolean {
+    return r === "ops" || r === "flight_commander" || r === "squadron_commander";
+  }
+  function roleToLock(r: SetupRoleUI): Exclude<PcRoleLock, null> {
+    if (r === "ops") return "ops";
+    if (r === "super_admin") return "super_admin";
+    return "commander";
+  }
 
   function openSetup() {
     setSetupOpen(true);
@@ -47,6 +70,7 @@ export default function LicenseKeys() {
     setSetupSqnName(auth.squadron?.name ?? "");
     setSetupSqnNumber(auth.squadron?.number ?? "");
     setSetupSqnBase(auth.squadron?.base ?? "");
+    setSetupCommanderName("");
     setSetupDeviceName(auth.pcDeviceName ?? "");
     setSetupOpsUsername("");
   }
@@ -58,12 +82,18 @@ export default function LicenseKeys() {
       const sqnName = setupSqnName.trim();
       const sqnNumber = setupSqnNumber.trim();
       const sqnBase = setupSqnBase.trim();
-      if (!sqnName || !sqnNumber || !sqnBase) {
+      const commanderName = setupCommanderName.trim();
+      const needsSqn = roleNeedsSquadron(setupRole);
+      if (needsSqn && (!sqnName || !sqnNumber || !sqnBase)) {
         setSetupErr(lang === "ar" ? "أكمل اسم السرب ورقمه والقاعدة." : "Fill squadron name, number, and base.");
         return;
       }
       if (setupRole === "ops" && !setupOpsUsername.trim()) {
         setSetupErr(lang === "ar" ? "اسم مستخدم الطيار مطلوب لجهاز العمليات." : "Pilot username is required for an Ops PC.");
+        return;
+      }
+      if ((setupRole === "squadron_commander" || setupRole === "flight_commander") && !commanderName) {
+        setSetupErr(lang === "ar" ? "أدخل اسم القائد." : "Enter the commander's name.");
         return;
       }
 
@@ -108,9 +138,23 @@ export default function LicenseKeys() {
         }
       }
 
-      auth.configureSquadron({ name: sqnName, number: sqnNumber, base: sqnBase });
+      // Squadron is only persisted when the role actually operates within
+      // a squadron. HQ Commander / Super Admin keep whatever was already set.
+      if (needsSqn) {
+        auth.configureSquadron({ name: sqnName, number: sqnNumber, base: sqnBase });
+      }
+      // Persist commander tier separately so the dashboard can show the right
+      // label ("Squadron Commander" vs "Flight Commander" vs "HQ Commander")
+      // without expanding the PcRoleLock enum.
+      const tier =
+        setupRole === "hq_commander" ? "hq" :
+        setupRole === "squadron_commander" ? "squadron" :
+        setupRole === "flight_commander" ? "flight" : "";
+      if (tier) localStorage.setItem("rjaf.commanderTier", tier);
+      else localStorage.removeItem("rjaf.commanderTier");
+      if (commanderName) localStorage.setItem("rjaf.commanderName", commanderName);
       auth.setPcDeviceName(setupDeviceName.trim());
-      auth.setPcRoleLock(setupRole);
+      auth.setPcRoleLock(roleToLock(setupRole));
 
       setSetupOk(
         lang === "ar"
@@ -395,49 +439,82 @@ export default function LicenseKeys() {
             <div className="space-y-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium">{lang === "ar" ? "دور هذا الجهاز" : "Role for this PC"}</label>
-                <Select value={setupRole} onValueChange={(v) => setSetupRole(v as Exclude<PcRoleLock, null>)}>
+                <Select value={setupRole} onValueChange={(v) => setSetupRole(v as SetupRoleUI)}>
                   <SelectTrigger data-testid="select-setup-role"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="ops">{lang === "ar" ? "طيار عمليات (Ops)" : "Ops Pilot"}</SelectItem>
-                    <SelectItem value="commander">{lang === "ar" ? "قائد سرب" : "Squadron Commander"}</SelectItem>
+                    <SelectItem value="flight_commander">{lang === "ar" ? "قائد طيران" : "Flight Commander"}</SelectItem>
+                    <SelectItem value="squadron_commander">{lang === "ar" ? "قائد سرب" : "Squadron Commander"}</SelectItem>
+                    <SelectItem value="hq_commander">{lang === "ar" ? "قائد القيادة" : "Head Quarter Commander"}</SelectItem>
                     <SelectItem value="super_admin">{lang === "ar" ? "مدير عام" : "Super Admin"}</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  {!roleNeedsSquadron(setupRole)
+                    ? (lang === "ar"
+                        ? "هذا الدور يعمل فوق مستوى السرب — معلومات السرب اختيارية."
+                        : "This role sits above squadron level — squadron info is optional.")
+                    : (lang === "ar"
+                        ? "املأ تفاصيل السرب أدناه."
+                        : "Fill in the squadron details below.")}
+                </p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="space-y-1 sm:col-span-2">
-                  <label className="text-sm font-medium">{lang === "ar" ? "اسم السرب" : "Squadron name"}</label>
-                  <input
-                    value={setupSqnName}
-                    onChange={e => setSetupSqnName(e.target.value)}
-                    placeholder={lang === "ar" ? "مثال: السرب الأول" : "e.g. 1st Squadron"}
-                    className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
-                    data-testid="input-setup-sqn-name"
-                  />
-                </div>
+              {(setupRole === "squadron_commander" || setupRole === "flight_commander" || setupRole === "hq_commander") && (
                 <div className="space-y-1">
-                  <label className="text-sm font-medium">{lang === "ar" ? "الرقم" : "Number"}</label>
+                  <label className="text-sm font-medium">
+                    {lang === "ar" ? "اسم القائد" : "Commander name"}
+                    {(setupRole === "squadron_commander" || setupRole === "flight_commander") && (
+                      <span className="text-red-500 ms-1">*</span>
+                    )}
+                  </label>
                   <input
-                    value={setupSqnNumber}
-                    onChange={e => setSetupSqnNumber(e.target.value)}
-                    placeholder="1"
+                    value={setupCommanderName}
+                    onChange={e => setSetupCommanderName(e.target.value)}
+                    placeholder={lang === "ar" ? "مثال: المقدم محمد العلي" : "e.g. Lt.Col. Mohammed Al-Ali"}
                     className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
-                    data-testid="input-setup-sqn-number"
+                    data-testid="input-setup-commander-name"
                   />
                 </div>
-              </div>
+              )}
 
-              <div className="space-y-1">
-                <label className="text-sm font-medium">{lang === "ar" ? "القاعدة" : "Base"}</label>
-                <input
-                  value={setupSqnBase}
-                  onChange={e => setSetupSqnBase(e.target.value)}
-                  placeholder={lang === "ar" ? "مثال: قاعدة الملك حسين" : "e.g. King Hussein Air Base"}
-                  className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
-                  data-testid="input-setup-sqn-base"
-                />
-              </div>
+              {roleNeedsSquadron(setupRole) && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-sm font-medium">{lang === "ar" ? "اسم السرب" : "Squadron name"}</label>
+                      <input
+                        value={setupSqnName}
+                        onChange={e => setSetupSqnName(e.target.value)}
+                        placeholder={lang === "ar" ? "مثال: السرب الأول" : "e.g. 1st Squadron"}
+                        className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
+                        data-testid="input-setup-sqn-name"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">{lang === "ar" ? "الرقم" : "Number"}</label>
+                      <input
+                        value={setupSqnNumber}
+                        onChange={e => setSetupSqnNumber(e.target.value)}
+                        placeholder="1"
+                        className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
+                        data-testid="input-setup-sqn-number"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium">{lang === "ar" ? "القاعدة" : "Base"}</label>
+                    <input
+                      value={setupSqnBase}
+                      onChange={e => setSetupSqnBase(e.target.value)}
+                      placeholder={lang === "ar" ? "مثال: قاعدة الملك حسين" : "e.g. King Hussein Air Base"}
+                      className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
+                      data-testid="input-setup-sqn-base"
+                    />
+                  </div>
+                </>
+              )}
 
               <div className="space-y-1">
                 <label className="text-sm font-medium">{lang === "ar" ? "اسم الجهاز (اختياري)" : "Device name (optional)"}</label>
