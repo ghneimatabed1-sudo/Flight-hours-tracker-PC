@@ -935,13 +935,12 @@ export function useMarkMessageRead() {
 }
 
 // Role helper: which roles are allowed to use the messages UI at all.
-// Sqn / Wing / Base only — Flight Cmdr and Ops Pilot are excluded
-// entirely. The squadron-ops `ops` role is treated as "Sqn" for messaging
-// because the squadron PC speaks for the squadron when no commander tier
-// is signed in locally.
+// Commanders only — Squadron / Wing / Base. The squadron Ops Pilot
+// (role="ops"), Ops Pilot deputies (role="deputy") and Flight Cmdrs
+// are explicitly excluded: messages are a commander-tier channel, not
+// an ops-floor tool.
 export function canUseMessages(role: string | undefined, scope: string | undefined): boolean {
   if (role === "super_admin") return true;
-  if (role === "ops") return true; // squadron PC
   if (role === "commander") {
     return scope === "squadron" || scope === "wing" || scope === "base";
   }
