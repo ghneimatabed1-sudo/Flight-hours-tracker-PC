@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { useI18n, type Key } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2 } from "lucide-react";
+import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2, Bell } from "lucide-react";
 import { canUseMessages, canUseScheduleChain, registerLocalPC, purgeExpiredMessages, getLocalPcId, type PcTier } from "@/lib/cross-pc";
 import emblem from "@assets/rjaf_emblem.png";
 import { RecoveryCodesLowBanner } from "@/components/RecoveryCodesLowBanner";
@@ -116,6 +116,12 @@ export function HQLayout({ children }: { children: ReactNode }) {
         // operational availability from this surface.
         ...(user.scope === "squadron" || user.scope === "flight"
           ? [{ path: "/dashboard/unavailable", labelKey: "nav_unavail" as Key, icon: <UserX className="h-4 w-4" /> }]
+          : []),
+        // Pilot Alerts — squadron + flight commanders push short messages
+        // straight to pilots' phones. Other commander scopes don't have a
+        // direct line to pilot mobiles, so they don't see this entry.
+        ...(user.scope === "squadron" || user.scope === "flight"
+          ? [{ path: "/dashboard/pilot-alerts", labelKey: "nav_pilot_alerts" as Key, icon: <Bell className="h-4 w-4" /> }]
           : []),
         // Sticky notes calendar is a per-PC scratchpad for every commander.
         { path: "/dashboard/sticky", labelKey: "nav_sticky" as Key, icon: <StickyNote className="h-4 w-4" /> },

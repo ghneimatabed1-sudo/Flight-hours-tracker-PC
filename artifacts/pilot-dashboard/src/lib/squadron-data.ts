@@ -37,6 +37,7 @@ import {
 export type { Pilot, Sortie } from "./mock";
 
 export interface NotamRow { id: string; date: string; text: string; pk?: string; }
+export interface AlertRow { id: string; postedAt: string; text: string; author: string; }
 export interface DutyDay  { day: string; mainDuty: string; standby: string; rcm: string; }
 export interface UnavailEntry { id: string; pilotId: string; from: string; to: string; reason: string; }
 export interface ScheduleEntry { id: string; ac: string; config: string; crew: string[]; mission: string; takeoff: string; land: string; fuel: string; }
@@ -930,6 +931,120 @@ function getMockNotams(): NotamRow[] {
   }
   return mockNotamsList;
 }
+// ── alerts ──────────────────────────────────────────────────────────────
+// Alerts are short, time-sensitive messages pushed by squadron / flight
+// commanders to pilots' phones. Same broadcast model as NOTAMs (writer
+// publishes, all readers see it), but the mobile client also applies a
+// per-device TTL filter so stale alerts disappear from the phone — the
+// row stays on the server so the issuing commander and other pilots keep
+// seeing it.
+const MOCK_ALERTS_KEY = "rjaf.mock.alerts";
+let mockAlertsList: AlertRow[] | null = null;
+function loadMockAlertsFromStorage(): AlertRow[] | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(MOCK_ALERTS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed as AlertRow[];
+  } catch { return null; }
+}
+function saveMockAlerts(): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(MOCK_ALERTS_KEY, JSON.stringify(mockAlertsList ?? []));
+  } catch { /* quota / private mode */ }
+}
+function getMockAlerts(): AlertRow[] {
+  if (!mockAlertsList) {
+    mockAlertsList = loadMockAlertsFromStorage() ?? [];
+    saveMockAlerts();
+  }
+  return mockAlertsList;
+}
+export function useAlerts(): UseQueryResult<AlertRow[]> & { data: AlertRow[] } {
+  const q = useQuery<AlertRow[]>({
+    queryKey: ["alerts"],
+    queryFn: async () => {
+      if (!isLive()) return [...getMockAlerts()];
+      const { data, error } = await supabase!
+        .from("alerts").select("id, posted_at, body, author")
+        .order("posted_at", { ascending: false }).limit(200);
+      if (error) throw error;
+      return (data ?? []).map(r => ({
+        id: String(r.id),
+        postedAt: r.posted_at as string,
+        text: r.body as string,
+        author: (r.author as string) ?? "",
+      }));
+    },
+    initialData: isLive() ? undefined : () => [...getMockAlerts()],
+    retry: isLive() ? 1 : false,
+  });
+  const fallback: AlertRow[] = isLive() ? [] : getMockAlerts();
+  return { ...q, data: q.data ?? fallback } as UseQueryResult<AlertRow[]> & { data: AlertRow[] };
+}
+
+export function useCreateAlert() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { text: string; author: string }) => {
+      const postedAt = new Date().toISOString();
+      if (!isLive()) {
+        const row: AlertRow = { id: "A" + Date.now(), postedAt, text: input.text, author: input.author };
+        getMockAlerts().unshift(row);
+        saveMockAlerts();
+        return row;
+      }
+      const { data, error } = await supabase!.from("alerts").insert({
+        posted_at: postedAt, body: input.text, author: input.author,
+      }).select("id").single();
+      if (error) throw error;
+      return { id: String(data?.id ?? ""), postedAt, text: input.text, author: input.author };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
+  });
+}
+
+export function useUpdateAlert() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (a: AlertRow) => {
+      if (!isLive()) {
+        const arr = getMockAlerts();
+        const idx = arr.findIndex(x => x.id === a.id);
+        if (idx >= 0) arr[idx] = a;
+        saveMockAlerts();
+        return a;
+      }
+      const { error } = await supabase!.from("alerts").update({ body: a.text }).eq("id", a.id);
+      if (error) throw error;
+      return a;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
+  });
+}
+
+export function useDeleteAlert() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (a: AlertRow) => {
+      if (!isLive()) {
+        const arr = getMockAlerts();
+        const idx = arr.findIndex(x => x.id === a.id);
+        if (idx >= 0) arr.splice(idx, 1);
+        saveMockAlerts();
+        return a;
+      }
+      const { error } = await supabase!.from("alerts").delete().eq("id", a.id);
+      if (error) throw error;
+      return a;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
+  });
+}
+
 export function useNotams(): UseQueryResult<NotamRow[]> & { data: NotamRow[] } {
   const q = useQuery<NotamRow[]>({
     queryKey: ["notams"],

@@ -7,7 +7,7 @@ import * as SecureStore from "expo-secure-store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 
-import type { NotamRecord, PilotProfile, PilotSnapshot, SortieRecord } from "./types";
+import type { AlertRecord, NotamRecord, PilotProfile, PilotSnapshot, SortieRecord } from "./types";
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -80,6 +80,13 @@ interface NotamRow {
   body: string;
 }
 
+interface AlertRow {
+  id: string;
+  posted_at: string;
+  body: string;
+  author: string | null;
+}
+
 function num(v: unknown): number {
   const n = typeof v === "number" ? v : Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
@@ -93,7 +100,8 @@ function rowsToSnapshot(
   pilot: PilotRow,
   squadron: SquadronRow | null,
   sorties: SortieRow[],
-  notams: NotamRow[] = []
+  notams: NotamRow[] = [],
+  alerts: AlertRow[] = []
 ): PilotSnapshot {
   const d = pilot.data ?? {};
   const expiry = (d.expiry as Record<string, string> | undefined) ?? {};
@@ -196,10 +204,18 @@ function rowsToSnapshot(
     text: n.body,
   }));
 
+  const alertRecords: AlertRecord[] = alerts.map((a) => ({
+    id: a.id,
+    postedAt: a.posted_at,
+    text: a.body,
+    author: a.author ?? undefined,
+  }));
+
   return {
     profile,
     sorties: records,
     notams: notamRecords,
+    alerts: alertRecords,
     fetchedAt: new Date().toISOString(),
   };
 }
@@ -323,6 +339,7 @@ export async function fetchPilotSnapshotRemote(
     { data: squadronRow },
     { data: sortieRows, error: sortiesErr },
     { data: notamRows },
+    { data: alertRows },
   ] = await Promise.all([
     supabase
       .from("squadrons")
@@ -343,6 +360,13 @@ export async function fetchPilotSnapshotRemote(
       .select("id, notam_no, posted_on, body")
       .order("posted_on", { ascending: false })
       .limit(100),
+    // Alerts: same shape as NOTAMs but issued by squadron / flight
+    // commanders. Same RLS caveat — the per-pilot role needs SELECT.
+    supabase
+      .from("alerts")
+      .select("id, posted_at, body, author")
+      .order("posted_at", { ascending: false })
+      .limit(100),
   ]);
 
   if (sortiesErr) return { ok: false, error: classifyError(sortiesErr.message) };
@@ -353,7 +377,8 @@ export async function fetchPilotSnapshotRemote(
       pilotRow as PilotRow,
       (squadronRow as SquadronRow | null) ?? null,
       (sortieRows as SortieRow[] | null) ?? [],
-      (notamRows as NotamRow[] | null) ?? []
+      (notamRows as NotamRow[] | null) ?? [],
+      (alertRows as AlertRow[] | null) ?? []
     ),
   };
 }

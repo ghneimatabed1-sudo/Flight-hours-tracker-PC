@@ -163,5 +163,19 @@ export const demoSnapshot: PilotSnapshot = {
       text: "تنبيه: تدريبات إطلاق ليلية في منطقة التدريب (شرق) من الساعة 20:00 حتى 23:00. يُمنع الطيران تحت ارتفاع 3000 قدم.",
     },
   ],
+  alerts: [
+    {
+      id: "A-2026-009",
+      postedAt: new Date().toISOString(),
+      text: "Weather brief moved to 0530Z. All crews report to ops 30 minutes earlier.",
+      author: "Squadron Cmdr",
+    },
+    {
+      id: "A-2026-008",
+      postedAt: new Date(Date.now() - 3600000 * 6).toISOString(),
+      text: "تنبيه: اجتماع طارئ لجميع طياري السرب الساعة الثانية بعد الظهر. الحضور إلزامي.",
+      author: "Flight Cmdr",
+    },
+  ],
   fetchedAt: new Date().toISOString(),
 };

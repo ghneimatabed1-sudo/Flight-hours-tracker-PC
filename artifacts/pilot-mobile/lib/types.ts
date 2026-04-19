@@ -55,9 +55,23 @@ export interface NotamRecord {
   text: string;
 }
 
+export interface AlertRecord {
+  id: string;
+  // ISO timestamp (date+time) — alerts are time-sensitive so we keep the
+  // full timestamp instead of just a date, both for display and for the
+  // phone-side TTL filter.
+  postedAt: string;
+  text: string;
+  // Free-text label of who issued the alert (e.g. "Squadron Cmdr",
+  // "Flight Cmdr A"). Stored as text so we don't have to schema-couple
+  // the role enum into the mobile client.
+  author?: string;
+}
+
 export interface PilotSnapshot {
   profile: PilotProfile;
   sorties: SortieRecord[];
   notams?: NotamRecord[];
+  alerts?: AlertRecord[];
   fetchedAt: string;
 }

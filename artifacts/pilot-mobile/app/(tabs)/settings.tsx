@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useAppData } from "@/lib/data";
 import { useI18n, type Lang } from "@/lib/i18n";
+import { loadPrefs, savePrefs, type AlertsTtlDays } from "@/lib/storage";
 
 interface RowProps {
   label: string;
@@ -152,6 +153,29 @@ export default function SettingsScreen() {
     { key: "ar", label: "العربية" },
   ];
 
+  const [alertsTtl, setAlertsTtl] = React.useState<AlertsTtlDays>(7);
+  React.useEffect(() => {
+    let cancelled = false;
+    void loadPrefs().then((p) => {
+      if (!cancelled) setAlertsTtl(p.alertsTtlDays ?? 7);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const updateAlertsTtl = async (next: AlertsTtlDays) => {
+    setAlertsTtl(next);
+    const current = await loadPrefs();
+    await savePrefs({ ...current, alertsTtlDays: next });
+  };
+  const ttlOptions: { key: AlertsTtlDays; labelKey: "alerts_ttl_off" | "alerts_ttl_1d" | "alerts_ttl_3d" | "alerts_ttl_7d" | "alerts_ttl_30d" }[] = [
+    { key: 0, labelKey: "alerts_ttl_off" },
+    { key: 1, labelKey: "alerts_ttl_1d" },
+    { key: 3, labelKey: "alerts_ttl_3d" },
+    { key: 7, labelKey: "alerts_ttl_7d" },
+    { key: 30, labelKey: "alerts_ttl_30d" },
+  ];
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
@@ -235,6 +259,58 @@ export default function SettingsScreen() {
           );
         })}
       </View>
+
+      <Text
+        style={[
+          styles.section,
+          { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
+        ]}
+      >
+        {t("alerts_autodelete_title")}
+      </Text>
+      <View
+        style={[
+          styles.ttlGrid,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}
+      >
+        {ttlOptions.map((opt) => {
+          const active = alertsTtl === opt.key;
+          return (
+            <Pressable
+              key={opt.key}
+              onPress={() => void updateAlertsTtl(opt.key)}
+              style={({ pressed }) => [
+                styles.ttlBtn,
+                {
+                  backgroundColor: active ? colors.primary : "transparent",
+                  borderColor: active ? colors.primary : colors.border,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.ttlBtnText,
+                  {
+                    color: active ? colors.primaryForeground : colors.foreground,
+                  },
+                ]}
+              >
+                {t(opt.labelKey)}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text
+        style={[
+          styles.ttlHint,
+          { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
+        ]}
+      >
+        {t("alerts_autodelete_hint")}
+      </Text>
 
       <Text
         style={[
@@ -692,6 +768,33 @@ const styles = StyleSheet.create({
   langText: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
+  },
+  ttlGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    padding: 4,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 4,
+  },
+  ttlBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexGrow: 1,
+    minWidth: 90,
+    alignItems: "center",
+  },
+  ttlBtnText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+  },
+  ttlHint: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 17,
+    marginTop: 6,
   },
   about: {
     fontSize: 13,

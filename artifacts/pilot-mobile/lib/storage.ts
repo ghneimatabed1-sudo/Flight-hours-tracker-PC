@@ -22,8 +22,15 @@ export interface LinkRecord {
   token?: string;
 }
 
+// 0 means "keep forever" (no auto-delete). Any positive integer is a
+// number of days — alerts older than that on the phone are filtered out
+// of the Alerts tab. The server copy is untouched, so other pilots and
+// the issuing commander keep seeing it.
+export type AlertsTtlDays = 0 | 1 | 3 | 7 | 30;
+
 export interface UserPrefs {
   language: "en" | "ar";
+  alertsTtlDays?: AlertsTtlDays;
 }
 
 // SecureStore is unavailable on web; fall back to AsyncStorage so the demo
@@ -117,10 +124,14 @@ export async function clearLock(): Promise<void> {
 export async function loadPrefs(): Promise<UserPrefs> {
   try {
     const raw = await AsyncStorage.getItem(PREFS_KEY);
-    if (!raw) return { language: "en" };
-    return { language: "en", ...(JSON.parse(raw) as Partial<UserPrefs>) };
+    if (!raw) return { language: "en", alertsTtlDays: 7 };
+    return {
+      language: "en",
+      alertsTtlDays: 7,
+      ...(JSON.parse(raw) as Partial<UserPrefs>),
+    };
   } catch {
-    return { language: "en" };
+    return { language: "en", alertsTtlDays: 7 };
   }
 }
 
