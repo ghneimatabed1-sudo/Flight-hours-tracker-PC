@@ -145,7 +145,15 @@ export default function LoginGate() {
   const showLogin = hqMode || (licensed && configured && !user);
 
   return (
-    <div className="min-h-screen brand-bg flex items-center justify-center p-6">
+    // Scrollable shell: outer pins to viewport height and owns the scrollbar,
+    // inner `min-h-full` flex grows to content so short forms stay centered
+    // but tall ones (license activation, 2FA enroll with QR + recovery codes,
+    // squadron setup) push the body and scroll naturally. Without this the
+    // login screen got vertically clipped inside small windows / iframes
+    // because `items-center` on a `min-h-screen` flex parent overflows
+    // symmetrically with no scroll path.
+    <div className="h-screen overflow-y-auto brand-bg">
+    <div className="min-h-full flex items-center justify-center p-6">
       <div className="absolute top-4 right-4 rtl:left-4 rtl:right-auto">
         <button onClick={() => setLang(lang === "en" ? "ar" : "en")} className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-secondary inline-flex items-center gap-1.5">
           <Languages className="h-3.5 w-3.5" />
@@ -518,6 +526,7 @@ export default function LoginGate() {
           </span>
         </div>
       </div>
+    </div>
     </div>
   );
 }
