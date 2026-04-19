@@ -18,6 +18,10 @@ export interface PilotProfile {
   expiry: {
     day: string;
     night: string;
+    // NVG currency is fully independent of Night per RJAF SOP — flying a
+    // Night sortie never refreshes NVG and vice versa. Each is tracked on
+    // its own date and surfaced as a separate currency tile.
+    nvg: string;
     irt: string;
     medical: string;
     sim: string;

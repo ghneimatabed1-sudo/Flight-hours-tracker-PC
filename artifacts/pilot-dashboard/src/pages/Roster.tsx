@@ -50,7 +50,7 @@ export default function Roster() {
       totalNvg: 0,
       totalSim: 0,
       totalCaptain: 0,
-      expiry: { day: "", night: "", irt: "", medical: "", sim: "" },
+      expiry: { day: "", night: "", nvg: "", irt: "", medical: "", sim: "" },
       available: true,
       qualifications: [],
       lastSimDate: "",
@@ -131,7 +131,7 @@ export default function Roster() {
           <table className="w-full text-sm">
             <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 text-left">ID</th>
+                <th className="px-3 py-2 text-left">{t("militaryNumber")}</th>
                 <th className="px-3 py-2 text-left">{t("rank")}</th>
                 <th className="px-3 py-2 text-left">{t("name")}</th>
                 <th className="px-3 py-2 text-left">{t("arabicName")}</th>
@@ -154,7 +154,7 @@ export default function Roster() {
               )}
               {list.map((p: Pilot) => (
                 <tr key={p.id} className="border-t border-border row-hover">
-                  <td className="px-3 py-2 font-mono">{p.id}</td>
+                  <td className="px-3 py-2 font-mono">{p.militaryNumber || p.id}</td>
                   <td className="px-3 py-2">{p.rank}</td>
                   <td className="px-3 py-2"><Link href={`/pilot/${p.id}`} className="hover:text-primary">{p.name}</Link></td>
                   <td className="px-3 py-2 text-right rtl:text-left">{p.arabicName}</td>
@@ -289,6 +289,7 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
             <div className="col-span-3 text-xs text-muted-foreground font-semibold uppercase tracking-wider">Currency Expiries</div>
             <Field label="Day" value={p.expiry.day} onChange={v => set("expiry", { ...p.expiry, day: v })} type="date" testId="input-expDay" />
             <Field label="Night" value={p.expiry.night} onChange={v => set("expiry", { ...p.expiry, night: v })} type="date" testId="input-expNight" />
+            <Field label="NVG" value={p.expiry.nvg} onChange={v => set("expiry", { ...p.expiry, nvg: v })} type="date" testId="input-expNvg" />
             <Field label="IRT" value={p.expiry.irt} onChange={v => set("expiry", { ...p.expiry, irt: v })} type="date" testId="input-expIrt" />
             <Field label="Medical" value={p.expiry.medical} onChange={v => set("expiry", { ...p.expiry, medical: v })} type="date" testId="input-expMedical" />
             <Field label="Sim" value={p.expiry.sim} onChange={v => set("expiry", { ...p.expiry, sim: v })} type="date" testId="input-expSim" />

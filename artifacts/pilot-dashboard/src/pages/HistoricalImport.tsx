@@ -104,6 +104,7 @@ function parsePilots(text: string): Parsed<Pilot> {
       expiry: {
         day: r.expiryDay ?? "",
         night: r.expiryNight ?? "",
+        nvg: r.expiryNvg ?? "",
         irt: r.expiryIrt ?? "",
         medical: r.expiryMedical ?? "",
         sim: r.expirySim ?? "",

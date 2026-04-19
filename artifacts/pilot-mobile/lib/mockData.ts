@@ -26,6 +26,7 @@ const demoProfile: PilotProfile = {
   expiry: {
     day: daysFromNow(45),
     night: daysFromNow(12),
+    nvg: daysFromNow(7),
     irt: daysFromNow(-3),
     medical: daysFromNow(120),
     sim: daysFromNow(28),

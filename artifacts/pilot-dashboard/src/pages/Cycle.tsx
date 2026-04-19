@@ -1,7 +1,9 @@
+import { useMemo } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { SIX_MONTH_TASKS } from "@/lib/mock";
-import { usePilots, useCurrencies } from "@/lib/squadron-data";
+import { usePilots, useSorties, useCurrencies } from "@/lib/squadron-data";
+import { computeAllTotals, formatHours } from "@/lib/calculations";
 import { supabaseConfigured } from "@/lib/supabase";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 
@@ -10,13 +12,12 @@ function rng(seed: number) { let s = seed; return () => (s = (s * 9301 + 49297) 
 export default function Cycle() {
   const { t } = useI18n();
   const pilotsQ = usePilots();
+  const sortiesQ = useSorties();
   const currQ = useCurrencies();
   const { data: PILOTS } = pilotsQ;
+  const { data: SORTIES } = sortiesQ;
   const { data: CURR } = currQ;
   const lookup = new Map(CURR.map(c => [`${c.pilotId}|${c.task}`, c.status]));
-  // In live mode, missing rows mean the pilot has not yet completed the task —
-  // never invent a status. The pseudo-random demo statuses are only used when
-  // Supabase is not configured so the offline preview looks populated.
   const demo = rng(7);
   const statusOf = (pid: string, task: string): "done" | "partial" | "missing" => {
     const live = lookup.get(`${pid}|${task}`);
@@ -25,11 +26,81 @@ export default function Cycle() {
     const v = demo();
     return v > 0.4 ? "done" : v > 0.2 ? "partial" : "missing";
   };
+
+  const totals = useMemo(() => computeAllTotals(PILOTS, SORTIES), [PILOTS, SORTIES]);
+  const yearLabel = new Date().getFullYear();
+
   return (
     <div>
-      <PageHead title={t("nav_cycle")} subtitle="Training task tracker — 6-month cycle" />
-      <DataUnavailableBanner queries={[pilotsQ, currQ]} testId="banner-cycle-unavailable" />
+      <PageHead title={t("nav_cycle")} subtitle={`Six-month cycle · ${yearLabel}`} />
+      <DataUnavailableBanner queries={[pilotsQ, sortiesQ, currQ]} testId="banner-cycle-unavailable" />
+
+      <Card className="mb-4 !p-0 overflow-hidden">
+        <div className="px-4 py-2 border-b border-border flex items-center justify-between">
+          <div className="text-sm font-semibold">H1 / H2 Hours · {yearLabel}</div>
+          <div className="text-[11px] text-muted-foreground">H1 = Jan–Jun · H2 = Jul–Dec · NVG kept separate from Night</div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-secondary/50 uppercase tracking-wider text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 text-left">Pilot</th>
+                <th className="px-2 py-2 text-right">H1 Day</th>
+                <th className="px-2 py-2 text-right">H1 Night</th>
+                <th className="px-2 py-2 text-right text-rose-300">H1 NVG</th>
+                <th className="px-2 py-2 text-right">H1 Sim</th>
+                <th className="px-2 py-2 text-right">H1 Capt</th>
+                <th className="px-2 py-2 text-right">H1 #</th>
+                <th className="px-2 py-2 text-right">H1 Total</th>
+                <th className="px-2 py-2 text-right">H2 Day</th>
+                <th className="px-2 py-2 text-right">H2 Night</th>
+                <th className="px-2 py-2 text-right text-rose-300">H2 NVG</th>
+                <th className="px-2 py-2 text-right">H2 Sim</th>
+                <th className="px-2 py-2 text-right">H2 Capt</th>
+                <th className="px-2 py-2 text-right">H2 #</th>
+                <th className="px-2 py-2 text-right">H2 Total</th>
+                <th className="px-2 py-2 text-right text-primary">Year (H1+H2)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {PILOTS.length === 0 && (
+                <tr>
+                  <td colSpan={16} className="px-3 py-6 text-center text-muted-foreground" data-testid="empty-cycle-hours">
+                    {pilotsQ.isError || sortiesQ.isError ? "—" : t("no_records")}
+                  </td>
+                </tr>
+              )}
+              {PILOTS.map(p => {
+                const tot = totals[p.id];
+                if (!tot) return null;
+                return (
+                  <tr key={p.id} className="border-t border-border row-hover">
+                    <td className="px-3 py-2">{p.rank} {p.name}</td>
+                    <td className="px-2 py-2 text-right font-mono">{formatHours(tot.h1.day)}</td>
+                    <td className="px-2 py-2 text-right font-mono">{formatHours(tot.h1.night)}</td>
+                    <td className="px-2 py-2 text-right font-mono text-rose-300">{formatHours(tot.h1.nvg)}</td>
+                    <td className="px-2 py-2 text-right font-mono">{formatHours(tot.h1.sim)}</td>
+                    <td className="px-2 py-2 text-right font-mono">{formatHours(tot.h1.captain)}</td>
+                    <td className="px-2 py-2 text-right font-mono">{tot.h1.sorties}</td>
+                    <td className="px-2 py-2 text-right font-mono">{formatHours(tot.h1.total)}</td>
+                    <td className="px-2 py-2 text-right font-mono">{formatHours(tot.h2.day)}</td>
+                    <td className="px-2 py-2 text-right font-mono">{formatHours(tot.h2.night)}</td>
+                    <td className="px-2 py-2 text-right font-mono text-rose-300">{formatHours(tot.h2.nvg)}</td>
+                    <td className="px-2 py-2 text-right font-mono">{formatHours(tot.h2.sim)}</td>
+                    <td className="px-2 py-2 text-right font-mono">{formatHours(tot.h2.captain)}</td>
+                    <td className="px-2 py-2 text-right font-mono">{tot.h2.sorties}</td>
+                    <td className="px-2 py-2 text-right font-mono">{formatHours(tot.h2.total)}</td>
+                    <td className="px-2 py-2 text-right font-mono font-semibold text-primary">{formatHours(tot.h1.total + tot.h2.total)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
       <Card className="!p-0 overflow-x-auto">
+        <div className="px-4 py-2 border-b border-border text-sm font-semibold">Training task tracker</div>
         <table className="w-full text-xs">
           <thead className="bg-secondary/50 uppercase tracking-wider text-muted-foreground">
             <tr>

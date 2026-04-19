@@ -33,22 +33,32 @@ const SORTIE_TYPES = [
 ];
 
 type Condition = "Day" | "Night";
-type FirstSeat = "pilot" | "coPilot";
+// Each seat carries its own status — Pilot can be 1st PLT while Co-Pilot is
+// in Dual instruction, etc. Captain flag is also per-seat: a Pilot logged as
+// 2nd PLT can still claim CAP hours if he holds the captain qualification on
+// the airframe. This matches the April 2026 ops rebuild where the old
+// "single firstSeat toggle + single captain checkbox" was found to mis-credit
+// hours whenever the two seats had different statuses (e.g. dual eval).
+type SeatStatus = "1st" | "2nd" | "Dual";
+
+interface SeatState {
+  id: string;
+  status: SeatStatus;
+  captain: boolean;
+}
 
 interface FormState {
   id: string | null;
   date: string;
   acType: string;
   acNumber: string;
-  pilot: string;
-  coPilot: string;
-  firstSeat: FirstSeat;        // who is in 1st PLT
-  countsAsCaptain: boolean;    // applies to 1st PLT only
+  pilot: SeatState;
+  coPilot: SeatState;
   sortieType: string;
   sortieTypeOther: string;
   msnDuty: string;
   condition: Condition;
-  nvg: boolean;                // valid only when Night
+  nvg: boolean;                // valid only when Night — fully separate from Night currency
   time: string;
   dualHours: string;
   // Instrument Flight section
@@ -60,15 +70,15 @@ interface FormState {
   remarks: string;
 }
 
+const blankSeat = (): SeatState => ({ id: "", status: "1st", captain: false });
+
 const blankForm = (): FormState => ({
   id: null,
   date: new Date().toISOString().slice(0, 10),
   acType: "UH-60M",
   acNumber: "",
-  pilot: "",
-  coPilot: "",
-  firstSeat: "pilot",
-  countsAsCaptain: false,
+  pilot: { ...blankSeat(), status: "1st" },
+  coPilot: { ...blankSeat(), status: "2nd" },
   sortieType: "TRG DAY",
   sortieTypeOther: "",
   msnDuty: "",
@@ -98,17 +108,19 @@ export default function AddSortie() {
 
   // Seed pilot/co-pilot defaults once roster loads.
   useEffect(() => {
-    if (!form.pilot && PILOTS[0]) {
+    if (!form.pilot.id && PILOTS[0]) {
       setForm(f => ({
         ...f,
-        pilot: PILOTS[0].id,
-        coPilot: PILOTS[1]?.id ?? PILOTS[0].id,
+        pilot: { ...f.pilot, id: PILOTS[0].id },
+        coPilot: { ...f.coPilot, id: PILOTS[1]?.id ?? PILOTS[0].id },
       }));
     }
-  }, [PILOTS, form.pilot]);
+  }, [PILOTS, form.pilot.id]);
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm(f => ({ ...f, [k]: v }));
+  const setSeat = (which: "pilot" | "coPilot", patch: Partial<SeatState>) =>
+    setForm(f => ({ ...f, [which]: { ...f[which], ...patch } }));
 
   const pilotOpts = useMemo(
     () => PILOTS.map(p => ({ value: p.id, label: `${p.rank} ${p.name}` })),
@@ -149,48 +161,48 @@ export default function AddSortie() {
       toast({ title: "Hours required", description: "Enter Time and/or Dual hours.", variant: "destructive" });
       return;
     }
-    if (form.pilot === form.coPilot && form.pilot) {
+    if (form.pilot.id === form.coPilot.id && form.pilot.id) {
       toast({ title: "Pilot and Co-Pilot are the same", variant: "destructive" });
       return;
     }
 
     // The condition that drives bucketing: NVG overrides Night when checked.
+    // Day/Night/NVG are independent currencies — the auto-bump in
+    // squadron-data.ts only refreshes the matching expiry, never both.
     const cond: "Day" | "Night" | "NVG" =
       form.condition === "Day" ? "Day" : form.nvg ? "NVG" : "Night";
 
-    // Pilot in 1st PLT seat?  → pilotPosition / coPilotPosition derive
-    const pilotPosition: "1st" | "2nd" = form.firstSeat === "pilot" ? "1st" : "2nd";
-    const coPilotPosition: "1st" | "2nd" = form.firstSeat === "coPilot" ? "1st" : "2nd";
+    // Per-seat status: each pilot independently flagged as 1st PLT, 2nd PLT,
+    // or Dual. The sortie-level pilotPosition/coPilotPosition fields keep the
+    // raw selection so reports can break down credit by seat. The legacy
+    // "1st"/"2nd" enum is preserved by mapping Dual → "1st" on the canonical
+    // pilotPosition (the seat that owns the captain flag), while the actual
+    // dual flag controls bucket routing below.
+    const pilotPosition: "1st" | "2nd" = form.pilot.status === "2nd" ? "2nd" : "1st";
+    const coPilotPosition: "1st" | "2nd" = form.coPilot.status === "1st" ? "1st" : "2nd";
 
-    // Captain only applies to whichever seat is in 1st PLT.
-    const pilotIsCaptain = form.firstSeat === "pilot" && form.countsAsCaptain;
-    const coPilotIsCaptain = form.firstSeat === "coPilot" && form.countsAsCaptain;
+    // Captain credit is per-seat — a 2nd PLT can still hold CAP if qualified.
+    const pilotIsCaptain = !!form.pilot.captain;
+    const coPilotIsCaptain = !!form.coPilot.captain;
 
-    // Total hours that count toward this seat (flight + independent dual).
-    const totalForBuckets = time + dual;
-
-    const buckets = deriveSortieBuckets({
-      time: totalForBuckets - dual, // non-dual portion
+    // Bucket routing: the sortie-level Dual marker fires whenever EITHER seat
+    // is in Dual status. Hours are split into a non-dual portion (`time`)
+    // attributed to whichever seat is "1st" and a dual portion attributed to
+    // the dual buckets — so a (Pilot=1st PLT, Co-Pilot=Dual) sortie correctly
+    // accumulates flight + dual instruction hours on the same record.
+    const eitherDual = form.pilot.status === "Dual" || form.coPilot.status === "Dual";
+    // Single seat-aware routing pass — both seats' statuses route the same
+    // flight time into their respective bucket. The legacy "extra dual hours"
+    // input is folded into the dual bucket via a second pass with both seats
+    // forced to Dual (covers the case where a sortie logged additional dual
+    // instruction time beyond the primary block).
+    const totalTime = time + dual;
+    const merged = deriveSortieBuckets({
+      time: totalTime,
       condition: cond,
-      pilotPosition,
-      dual: false,
+      pilotStatus: form.pilot.status,
+      coPilotStatus: form.coPilot.status,
     });
-    // Dual portion routed to dual buckets in the same condition
-    const dualBuckets = deriveSortieBuckets({
-      time: dual,
-      condition: cond,
-      pilotPosition,
-      dual: true,
-    });
-    const merged = {
-      day1: buckets.day1 + dualBuckets.day1,
-      day2: buckets.day2 + dualBuckets.day2,
-      dayDual: buckets.dayDual + dualBuckets.dayDual,
-      night1: buckets.night1 + dualBuckets.night1,
-      night2: buckets.night2 + dualBuckets.night2,
-      nightDual: buckets.nightDual + dualBuckets.nightDual,
-      nvg: buckets.nvg + dualBuckets.nvg,
-    };
 
     const sortieType = form.sortieType === "Other…"
       ? form.sortieTypeOther.trim() || "OTHER"
@@ -202,8 +214,8 @@ export default function AddSortie() {
       date: form.date,
       acType: form.acType,
       acNumber: form.acNumber.trim(),
-      pilotId: form.pilot,
-      coPilotId: form.coPilot,
+      pilotId: form.pilot.id,
+      coPilotId: form.coPilot.id,
       sortieType,
       name: form.msnDuty.trim() || sortieType,
       condition: cond,
@@ -211,12 +223,17 @@ export default function AddSortie() {
       day1: merged.day1, day2: merged.day2, dayDual: merged.dayDual,
       night1: merged.night1, night2: merged.night2, nightDual: merged.nightDual,
       nvg: merged.nvg,
+      nvg1: merged.nvg1 || undefined,
+      nvg2: merged.nvg2 || undefined,
+      nvgDual: merged.nvgDual || undefined,
       sim: ifSim, // legacy `sim` = IF SIM hours
       actual: time + dual,
       time: time + dual,
-      dual: dual > 0,
+      dual: dual > 0 || eitherDual,
       pilotPosition,
       coPilotPosition,
+      pilotSeatStatus: form.pilot.status,
+      coPilotSeatStatus: form.coPilot.status,
       pilotIsCaptain,
       coPilotIsCaptain,
       msnDuty: form.msnDuty.trim() || undefined,
@@ -243,28 +260,42 @@ export default function AddSortie() {
   const loadForEdit = (s: Sortie) => {
     const cond: Condition = s.condition === "Day" ? "Day" : "Night";
     const nvg = s.condition === "NVG";
-    const firstSeat: FirstSeat = s.pilotPosition === "1st" || !s.coPilotPosition
-      ? "pilot"
-      : s.coPilotPosition === "1st" ? "coPilot" : "pilot";
-    const countsAsCaptain = firstSeat === "pilot"
-      ? !!s.pilotIsCaptain
-      : !!s.coPilotIsCaptain;
+    // Prefer the authoritative seat-status fields written by the rebuilt
+    // Add Sortie page. Only fall back to legacy reconstruction (pilotPosition
+    // / coPilotPosition + dual flag) for historical records that pre-date
+    // the per-seat schema. The legacy fallback can't tell which seat was the
+    // instructor, so it marks the 2nd PLT seat as Dual by default — the ops
+    // officer can flip it before re-saving.
+    const pilotStatus: SeatStatus = s.pilotSeatStatus
+      ?? (s.dual
+        ? (s.pilotPosition === "2nd" ? "Dual" : "1st")
+        : (s.pilotPosition === "2nd" ? "2nd" : "1st"));
+    const coPilotStatus: SeatStatus = s.coPilotSeatStatus
+      ?? (s.dual
+        ? (s.coPilotPosition === "1st" ? "1st" : "Dual")
+        : (s.coPilotPosition === "1st" ? "1st" : "2nd"));
+    // For seat-aware records the single `time` field is the authoritative
+    // flight duration; treat it as non-dual unless the legacy schema split
+    // it across `time` + dual hours.
+    const seatAware = !!(s.pilotSeatStatus || s.coPilotSeatStatus);
+    const dualHours = seatAware ? 0 : (s.dual ? (s.dayDual + s.nightDual + (s.nvgDual ?? 0)) : 0);
+    const nonDualHours = seatAware
+      ? ((s.time ?? s.actual) || 0)
+      : (((s.time ?? s.actual) || 0) - dualHours);
     setForm({
       id: s.id,
       date: s.date,
       acType: s.acType || "UH-60M",
       acNumber: s.acNumber || "",
-      pilot: s.pilotId,
-      coPilot: s.coPilotId,
-      firstSeat,
-      countsAsCaptain,
+      pilot: { id: s.pilotId, status: pilotStatus, captain: !!s.pilotIsCaptain },
+      coPilot: { id: s.coPilotId, status: coPilotStatus, captain: !!s.coPilotIsCaptain },
       sortieType: SORTIE_TYPES.includes(s.sortieType) ? s.sortieType : "Other…",
       sortieTypeOther: SORTIE_TYPES.includes(s.sortieType) ? "" : s.sortieType,
       msnDuty: s.msnDuty ?? s.name ?? "",
       condition: cond,
       nvg,
-      time: String(((s.time ?? s.actual) || 0) - (s.dual ? (s.dayDual + s.nightDual) : 0) || ""),
-      dualHours: s.dual ? String((s.dayDual + s.nightDual) || "") : "",
+      time: nonDualHours > 0 ? String(nonDualHours) : "",
+      dualHours: dualHours > 0 ? String(dualHours) : "",
       instrumentFlight: !!s.instrumentFlight,
       ifSim: s.ifSim != null ? String(s.ifSim) : "",
       ifAct: s.ifAct != null ? String(s.ifAct) : "",
@@ -317,78 +348,23 @@ export default function AddSortie() {
             <Mini label="MSN / Duty (optional)" value={form.msnDuty} onChange={v => set("msnDuty", v)} placeholder="Mission name / duty" />
           )}
 
-          {/* Crew row — single seat selector chooses who's in 1st PLT */}
+          {/* Crew row — each seat carries its own pilot, status (1st/2nd/Dual)
+              and captain flag. The two seats are fully independent. */}
           <div className="grid lg:grid-cols-2 gap-3">
-            <div className="border border-border rounded-md p-2 bg-secondary/20">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Pilot</div>
-              <select
-                className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
-                value={form.pilot}
-                onChange={e => set("pilot", e.target.value)}
-                data-testid="select-pilot"
-              >
-                {pilotOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </div>
-            <div className="border border-border rounded-md p-2 bg-secondary/20">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Co-Pilot</div>
-              <select
-                className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
-                value={form.coPilot}
-                onChange={e => set("coPilot", e.target.value)}
-                data-testid="select-copilot"
-              >
-                {pilotOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Position + Captain row */}
-          <div className="border border-border rounded-md p-3 bg-amber-500/5">
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Position (Who is 1st PLT)</div>
-                <div className="flex gap-2" data-testid="position-selector">
-                  <button
-                    type="button"
-                    onClick={() => set("firstSeat", "pilot")}
-                    data-testid="button-position-pilot"
-                    className={`flex-1 px-3 py-2 rounded-md text-xs font-semibold border transition-colors ${
-                      form.firstSeat === "pilot"
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-secondary border-border hover:bg-secondary/80"
-                    }`}
-                  >Pilot is 1st PLT</button>
-                  <button
-                    type="button"
-                    onClick={() => set("firstSeat", "coPilot")}
-                    data-testid="button-position-copilot"
-                    className={`flex-1 px-3 py-2 rounded-md text-xs font-semibold border transition-colors ${
-                      form.firstSeat === "coPilot"
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-secondary border-border hover:bg-secondary/80"
-                    }`}
-                  >Co-Pilot is 1st PLT</button>
-                </div>
-              </div>
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Captain Hours (CAP)</div>
-                <label className="inline-flex items-center gap-2 cursor-pointer select-none px-3 py-2 rounded-md bg-secondary border border-border text-xs" data-testid="toggle-captain">
-                  <input
-                    type="checkbox"
-                    checked={form.countsAsCaptain}
-                    onChange={e => set("countsAsCaptain", e.target.checked)}
-                    className="h-4 w-4 accent-amber-400"
-                  />
-                  <span className="font-semibold text-amber-300">
-                    Count 1st PLT as Captain
-                  </span>
-                </label>
-                <div className="text-[10px] text-muted-foreground mt-1">
-                  Only credited if the 1st PLT is qualified as captain on this aircraft.
-                </div>
-              </div>
-            </div>
+            <SeatPanel
+              label="Pilot"
+              testIdPrefix="pilot"
+              seat={form.pilot}
+              opts={pilotOpts}
+              onChange={patch => setSeat("pilot", patch)}
+            />
+            <SeatPanel
+              label="Co-Pilot"
+              testIdPrefix="copilot"
+              seat={form.coPilot}
+              opts={pilotOpts}
+              onChange={patch => setSeat("coPilot", patch)}
+            />
           </div>
 
           {/* Condition row */}
@@ -602,6 +578,61 @@ function Mini({ label, value, onChange, type = "text", placeholder, step }: Mini
         className="w-full mt-0.5 px-2 py-1.5 rounded-md bg-input border border-border text-xs font-mono"
       />
     </label>
+  );
+}
+
+interface SeatPanelProps {
+  label: string;
+  testIdPrefix: string;
+  seat: SeatState;
+  opts: { value: string; label: string }[];
+  onChange: (patch: Partial<SeatState>) => void;
+}
+
+// Independent per-seat panel: pilot picker + status (1st PLT / 2nd PLT /
+// Dual) + Captain checkbox. Each seat is fully independent — both seats can
+// be 1st PLT (rare but legal on multi-instructor evals), both can be Dual
+// during conversion training, etc. Captain credit is per-seat too.
+function SeatPanel({ label, testIdPrefix, seat, opts, onChange }: SeatPanelProps) {
+  const statuses: { v: SeatStatus; label: string; cls: string }[] = [
+    { v: "1st", label: "1st PLT", cls: "bg-primary text-primary-foreground border-primary" },
+    { v: "2nd", label: "2nd PLT", cls: "bg-sky-500/20 border-sky-400 text-sky-200" },
+    { v: "Dual", label: "Dual", cls: "bg-violet-500/20 border-violet-400 text-violet-200" },
+  ];
+  return (
+    <div className="border border-border rounded-md p-2.5 bg-secondary/20 space-y-2" data-testid={`seat-${testIdPrefix}`}>
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+      <select
+        className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
+        value={seat.id}
+        onChange={e => onChange({ id: e.target.value })}
+        data-testid={`select-${testIdPrefix}`}
+      >
+        {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+      <div className="flex flex-wrap gap-1.5" data-testid={`status-${testIdPrefix}`}>
+        {statuses.map(s => (
+          <button
+            key={s.v}
+            type="button"
+            onClick={() => onChange({ status: s.v })}
+            data-testid={`button-status-${testIdPrefix}-${s.v.toLowerCase()}`}
+            className={`flex-1 px-2 py-1.5 rounded-md text-[11px] font-semibold border transition-colors ${
+              seat.status === s.v ? s.cls : "bg-secondary border-border text-muted-foreground hover:bg-secondary/80"
+            }`}
+          >{s.label}</button>
+        ))}
+      </div>
+      <label className="inline-flex items-center gap-2 cursor-pointer select-none px-2 py-1.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-[11px] w-full" data-testid={`toggle-captain-${testIdPrefix}`}>
+        <input
+          type="checkbox"
+          checked={seat.captain}
+          onChange={e => onChange({ captain: e.target.checked })}
+          className="h-3.5 w-3.5 accent-amber-400"
+        />
+        <span className="font-semibold text-amber-300">Count as Captain (CAP)</span>
+      </label>
+    </div>
   );
 }
 

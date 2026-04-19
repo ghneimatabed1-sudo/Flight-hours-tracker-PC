@@ -152,7 +152,7 @@ export function computeTotals(
 }
 
 export interface CurrencyItem {
-  key: "day" | "night" | "irt" | "medical" | "sim";
+  key: "day" | "night" | "nvg" | "irt" | "medical" | "sim";
   label: string;
   expiry: string | null;
   daysRemaining: number | null;
@@ -160,9 +160,12 @@ export interface CurrencyItem {
 }
 
 export function computeCurrencies(profile: PilotProfile): CurrencyItem[] {
+  // NVG is a distinct currency from Night — surface its own tile so the
+  // pilot sees both expiries side by side and never assumes Night = NVG.
   const items: { key: CurrencyItem["key"]; label: string }[] = [
     { key: "day", label: "Day" },
     { key: "night", label: "Night" },
+    { key: "nvg", label: "NVG" },
     { key: "irt", label: "IRT" },
     { key: "medical", label: "Medical" },
     { key: "sim", label: "Simulator" },

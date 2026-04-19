@@ -109,6 +109,9 @@ function rowsToSnapshot(
     expiry: {
       day: str(expiry.day) ?? "",
       night: str(expiry.night) ?? "",
+      // NVG kept as its own field — never derived from `night`. Legacy rows
+      // without an nvg expiry render as blank ("—") in the mobile app.
+      nvg: str(expiry.nvg) ?? "",
       irt: str(expiry.irt) ?? "",
       medical: str(expiry.medical) ?? "",
       sim: str(expiry.sim) ?? "",
@@ -117,13 +120,28 @@ function rowsToSnapshot(
 
   const records: SortieRecord[] = sorties.map((s) => {
     const sd = s.data ?? {};
-    const day = num(sd.day1) + num(sd.day2) + num(sd.dayDual);
-    const night = num(sd.night1) + num(sd.night2) + num(sd.nightDual);
+    // Seat-aware attribution mirrors the dashboard's calc engine. When the
+    // sortie carries a seat status for this pilot, credit only this pilot's
+    // own routed time so dual sorties don't double-credit. Falls back to
+    // legacy flat-bucket sum for historical records.
+    const isAsPilot = s.pilot_id === pilot.id;
+    const seatStatus = isAsPilot ? sd.pilotSeatStatus : sd.coPilotSeatStatus;
+    const time = num(sd.time);
+    const cond = sd.condition;
+    let day = 0, night = 0, nvg = 0;
+    if (seatStatus && time > 0 && cond) {
+      if (cond === "Day") day = time;
+      else if (cond === "Night") night = time;
+      else if (cond === "NVG") nvg = time;
+    } else {
+      day = num(sd.day1) + num(sd.day2) + num(sd.dayDual);
+      night = num(sd.night1) + num(sd.night2) + num(sd.nightDual);
+      nvg = num(sd.nvg);
+    }
     // Captain credit, per-seat: prefer the explicit pilotIsCaptain /
     // coPilotIsCaptain flag set by the new simple-mode Add Sortie page on
     // the dashboard. Fall back to the legacy assumption (P1 = captain) so
     // historical sorties still credit captain hours correctly.
-    const isAsPilot = s.pilot_id === pilot.id;
     const isAsCoPilot = s.co_pilot_id === pilot.id;
     let cap = false;
     if (typeof sd.pilotIsCaptain === "boolean" || typeof sd.coPilotIsCaptain === "boolean") {
@@ -137,7 +155,7 @@ function rowsToSnapshot(
         sd.captain === pilot.id ||
         sd.captainPilotId === pilot.id;
     }
-    const total = num(sd.actual) || day + night + num(sd.nvg) + num(sd.sim);
+    const total = day + night + nvg + num(sd.sim);
     return {
       id: s.id,
       date: s.date,
@@ -148,7 +166,7 @@ function rowsToSnapshot(
       pilotIsCaptain: Boolean(cap),
       day,
       night,
-      nvg: num(sd.nvg),
+      nvg,
       sim: num(sd.sim),
       total,
       condition: sd.condition as "Day" | "Night" | "NVG" | undefined,

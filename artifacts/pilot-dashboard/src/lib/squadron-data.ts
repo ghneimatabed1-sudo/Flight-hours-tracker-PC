@@ -69,8 +69,20 @@ function rowToPilot(r: Record<string, unknown>): Pilot {
     totalNvg: Number(data.totalNvg ?? 0),
     totalSim: Number(data.totalSim ?? 0),
     totalCaptain: Number(data.totalCaptain ?? 0),
-    expiry: data.expiry ?? { day: "", night: "", irt: "", medical: "", sim: "" },
+    expiry: {
+      day: data.expiry?.day ?? "",
+      night: data.expiry?.night ?? "",
+      // Legacy rows had no separate `nvg` expiry — treat blank as
+      // "not yet recorded" rather than aliasing Night, so the ops officer
+      // sees an explicit "—" and is prompted to set it once.
+      nvg: data.expiry?.nvg ?? "",
+      irt: data.expiry?.irt ?? "",
+      medical: data.expiry?.medical ?? "",
+      sim: data.expiry?.sim ?? "",
+    },
     hiddenCurrencies: Array.isArray(data.hiddenCurrencies) ? data.hiddenCurrencies : undefined,
+    qualifications: Array.isArray(data.qualifications) ? data.qualifications : undefined,
+    lastSimDate: data.lastSimDate ? String(data.lastSimDate) : undefined,
   };
 }
 
@@ -251,6 +263,11 @@ function rowToSortie(r: Record<string, unknown>): Sortie {
     night2: Number(data.night2 ?? 0),
     nightDual: Number(data.nightDual ?? 0),
     nvg: Number(data.nvg ?? 0),
+    nvg1: data.nvg1 != null ? Number(data.nvg1) : undefined,
+    nvg2: data.nvg2 != null ? Number(data.nvg2) : undefined,
+    nvgDual: data.nvgDual != null ? Number(data.nvgDual) : undefined,
+    pilotSeatStatus: data.pilotSeatStatus,
+    coPilotSeatStatus: data.coPilotSeatStatus,
     sim: Number(data.sim ?? 0),
     actual: Number(data.actual ?? 0),
     condition: data.condition,
@@ -270,37 +287,57 @@ function rowToSortie(r: Record<string, unknown>): Sortie {
   };
 }
 
-// Derive the legacy day1/day2/night1/night2/dayDual/nightDual/nvg buckets
-// from the new simple-mode inputs (single Time + condition + per-seat
-// position + dual flag). Keeping the legacy fields populated means existing
-// monthly reports, archives, and the mobile app totals work unchanged.
+// Derive the 9-bucket schema (Day/Night/NVG × 1st PLT/2nd PLT/Dual) from a
+// single flight time + per-seat statuses. Both seats are routed independently:
+// the same flight `time` lands in BOTH the pilot-seat's bucket AND the
+// co-pilot-seat's bucket so a (1st × Dual) sortie correctly records both
+// flying time and dual-instruction time. computePilotTotals reads the flat
+// fields back per-pilot via the seat-status fields so neither pilot is
+// double-credited at totals time. NVG NEVER bleeds into night buckets.
+export type SeatStatus = "1st" | "2nd" | "Dual";
+
 export function deriveSortieBuckets(input: {
   time: number;
   condition: "Day" | "Night" | "NVG";
-  pilotPosition: "1st" | "2nd";
-  dual: boolean;
+  pilotStatus: SeatStatus;
+  coPilotStatus: SeatStatus;
 }): {
   day1: number; day2: number; dayDual: number;
   night1: number; night2: number; nightDual: number;
-  nvg: number; actual: number;
+  nvg: number; nvg1: number; nvg2: number; nvgDual: number;
+  actual: number;
 } {
   const t = Number.isFinite(input.time) ? Math.max(0, input.time) : 0;
-  const out = { day1: 0, day2: 0, dayDual: 0, night1: 0, night2: 0, nightDual: 0, nvg: 0, actual: t };
+  const out = {
+    day1: 0, day2: 0, dayDual: 0,
+    night1: 0, night2: 0, nightDual: 0,
+    nvg: 0, nvg1: 0, nvg2: 0, nvgDual: 0,
+    actual: t,
+  };
   if (t <= 0) return out;
-  if (input.condition === "Day") {
-    if (input.dual) out.dayDual = t;
-    else if (input.pilotPosition === "1st") out.day1 = t;
-    else out.day2 = t;
-  } else if (input.condition === "Night") {
-    if (input.dual) out.nightDual = t;
-    else if (input.pilotPosition === "1st") out.night1 = t;
-    else out.night2 = t;
-  } else {
-    // NVG goes ONLY to the NVG bucket — NEVER also to night1/night2/nightDual.
-    // This mirrors the old mobile rule and prevents NVG hours being
-    // double-counted in pilot Night totals.
-    out.nvg = t;
-  }
+  const route = (status: SeatStatus) => {
+    if (input.condition === "Day") {
+      if (status === "Dual") out.dayDual += t;
+      else if (status === "1st") out.day1 += t;
+      else out.day2 += t;
+    } else if (input.condition === "Night") {
+      if (status === "Dual") out.nightDual += t;
+      else if (status === "1st") out.night1 += t;
+      else out.night2 += t;
+    } else {
+      // NVG: route into NVG sub-bucket. The combined `nvg` field stays the
+      // single-seat amount (T) — NOT 2T — so legacy readers that sum `nvg`
+      // per pilot don't over-credit. The 9-bucket nvg1/nvg2/nvgDual carry
+      // the per-seat detail.
+      if (status === "Dual") out.nvgDual += t;
+      else if (status === "1st") out.nvg1 += t;
+      else out.nvg2 += t;
+    }
+  };
+  route(input.pilotStatus);
+  route(input.coPilotStatus);
+  // Combined `nvg` field = single flight duration for legacy readers.
+  if (input.condition === "NVG") out.nvg = t;
   return out;
 }
 
@@ -323,13 +360,16 @@ export function useSorties(): UseQueryResult<Sortie[]> & { data: Sortie[] } {
 }
 
 // Currency auto-refresh: when a Day/Night/NVG sortie is logged, push the
-// affected pilots' expiry dates forward to sortie-date + N days (default
-// 60 per RJAF UH-60M SOP; ops officer can override per-squadron via
-// Settings). Never moves an expiry backwards — if the pilot already has a
-// later date on record (from a more recent sortie), we keep the later one.
-// Applies to both P1 and P2. Day condition refreshes `day`; Night and NVG
-// conditions refresh `night` (UH-60M night ops are flown on NVG, so they
-// share a currency per squadron SOP).
+// affected pilots' expiry dates forward to sortie-date + N days (per the
+// per-currency window configured under Settings). Never moves an expiry
+// backwards — if the pilot already has a later date on record (from a more
+// recent sortie), we keep the later one. Applies to both P1 and P2.
+//
+// CRITICAL: Day/Night/NVG are FULLY INDEPENDENT — a Night sortie refreshes
+// `expiry.night` only; an NVG sortie refreshes `expiry.nvg` only. Neither
+// bumps the other. The old "Night and NVG share a currency" shortcut was
+// retired in the April 2026 rebuild because it caused pilots to look
+// current on NVG without ever actually flying it.
 import { getCurrencyWindow } from "./currency-settings";
 function bumpDate(current: string, sortieDate: string, days: number): string {
   const d = new Date(sortieDate);
@@ -354,11 +394,17 @@ async function refreshCurrenciesForSortie(
     const next = { ...p.expiry };
     if (s.condition === "Day") {
       next.day = bumpDate(p.expiry.day, s.date, w.day);
+    } else if (s.condition === "Night") {
+      next.night = bumpDate(p.expiry.night, s.date, w.night);
     } else {
-      // Night or NVG both credit the night/NVG currency window.
-      next.night = bumpDate(p.expiry.night, s.date, w.nvg);
+      // NVG only — never touches `night`.
+      next.nvg = bumpDate(p.expiry.nvg, s.date, w.nvg);
     }
-    if (next.day === p.expiry.day && next.night === p.expiry.night) continue;
+    if (
+      next.day === p.expiry.day &&
+      next.night === p.expiry.night &&
+      next.nvg === p.expiry.nvg
+    ) continue;
     await persist({ ...p, expiry: next });
   }
 }
@@ -430,7 +476,11 @@ export function useCreateSortie() {
         data: {
           day1: s.day1, day2: s.day2, dayDual: s.dayDual,
           night1: s.night1, night2: s.night2, nightDual: s.nightDual,
-          nvg: s.nvg, sim: s.sim, actual: s.actual,
+          nvg: s.nvg,
+          // 9-bucket NVG split (1st/2nd/Dual). Persisted alongside the
+          // legacy combined `nvg` so existing readers stay correct.
+          nvg1: s.nvg1, nvg2: s.nvg2, nvgDual: s.nvgDual,
+          sim: s.sim, actual: s.actual,
           condition: s.condition,
           remarks: s.remarks,
           pilotExternal: s.pilotExternal,
@@ -438,6 +488,8 @@ export function useCreateSortie() {
           time: s.time, dual: s.dual,
           pilotPosition: s.pilotPosition,
           coPilotPosition: s.coPilotPosition,
+          pilotSeatStatus: s.pilotSeatStatus,
+          coPilotSeatStatus: s.coPilotSeatStatus,
           pilotIsCaptain: s.pilotIsCaptain,
           coPilotIsCaptain: s.coPilotIsCaptain,
           msnDuty: s.msnDuty,
@@ -484,7 +536,9 @@ export function useUpdateSortie() {
         data: {
           day1: s.day1, day2: s.day2, dayDual: s.dayDual,
           night1: s.night1, night2: s.night2, nightDual: s.nightDual,
-          nvg: s.nvg, sim: s.sim, actual: s.actual,
+          nvg: s.nvg,
+          nvg1: s.nvg1, nvg2: s.nvg2, nvgDual: s.nvgDual,
+          sim: s.sim, actual: s.actual,
           condition: s.condition,
           remarks: s.remarks,
           pilotExternal: s.pilotExternal,
@@ -492,6 +546,8 @@ export function useUpdateSortie() {
           time: s.time, dual: s.dual,
           pilotPosition: s.pilotPosition,
           coPilotPosition: s.coPilotPosition,
+          pilotSeatStatus: s.pilotSeatStatus,
+          coPilotSeatStatus: s.coPilotSeatStatus,
           pilotIsCaptain: s.pilotIsCaptain,
           coPilotIsCaptain: s.coPilotIsCaptain,
           msnDuty: s.msnDuty,
@@ -1434,7 +1490,7 @@ function todayIsoLocal(): string {
 }
 
 function emptyExpiry(): Pilot["expiry"] {
-  return { day: "", night: "", irt: "", medical: "", sim: "" };
+  return { day: "", night: "", nvg: "", irt: "", medical: "", sim: "" };
 }
 
 function makeDemoPilots(): Pilot[] {

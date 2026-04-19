@@ -15,27 +15,30 @@ export default function Settings() {
 
   const [curWindow, setCurWindow] = useCurrencyWindow();
   const [curDay, setCurDay] = useState<string>(String(curWindow.day));
+  const [curNight, setCurNight] = useState<string>(String(curWindow.night));
   const [curNvg, setCurNvg] = useState<string>(String(curWindow.nvg));
   const [curIrt, setCurIrt] = useState<string>(String(curWindow.instrument));
   const [curMed, setCurMed] = useState<string>(String(curWindow.medical));
   const [curSaved, setCurSaved] = useState(false);
+  const parseOr = (raw: string, fallback: number) => {
+    const v = parseInt(raw, 10);
+    return Number.isFinite(v) && v > 0 ? v : fallback;
+  };
   const saveCurrencyWindow = (e: React.FormEvent) => {
     e.preventDefault();
-    const d = parseInt(curDay, 10);
-    const n = parseInt(curNvg, 10);
-    const i = parseInt(curIrt, 10);
-    const m = parseInt(curMed, 10);
     setCurWindow({
-      day: Number.isFinite(d) && d > 0 ? d : DEFAULT_CURRENCY_WINDOW.day,
-      nvg: Number.isFinite(n) && n > 0 ? n : DEFAULT_CURRENCY_WINDOW.nvg,
-      instrument: Number.isFinite(i) && i > 0 ? i : DEFAULT_CURRENCY_WINDOW.instrument,
-      medical: Number.isFinite(m) && m > 0 ? m : DEFAULT_CURRENCY_WINDOW.medical,
+      day: parseOr(curDay, DEFAULT_CURRENCY_WINDOW.day),
+      night: parseOr(curNight, DEFAULT_CURRENCY_WINDOW.night),
+      nvg: parseOr(curNvg, DEFAULT_CURRENCY_WINDOW.nvg),
+      instrument: parseOr(curIrt, DEFAULT_CURRENCY_WINDOW.instrument),
+      medical: parseOr(curMed, DEFAULT_CURRENCY_WINDOW.medical),
     });
     setCurSaved(true);
     setTimeout(() => setCurSaved(false), 1500);
   };
   const resetCurrencyWindow = () => {
     setCurDay(String(DEFAULT_CURRENCY_WINDOW.day));
+    setCurNight(String(DEFAULT_CURRENCY_WINDOW.night));
     setCurNvg(String(DEFAULT_CURRENCY_WINDOW.nvg));
     setCurIrt(String(DEFAULT_CURRENCY_WINDOW.instrument));
     setCurMed(String(DEFAULT_CURRENCY_WINDOW.medical));
@@ -80,7 +83,7 @@ export default function Settings() {
           <form onSubmit={saveCurrencyWindow} className="space-y-3">
             <div className="text-sm font-semibold">{t("currencyWindowTitle")}</div>
             <p className="text-xs text-muted-foreground">{t("currencyWindowBlurb")}</p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-2xl">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 max-w-3xl">
               <label className="block">
                 <span className="text-xs text-muted-foreground">{t("dayCurrencyDays")}</span>
                 <div className="flex items-center gap-2 mt-1">
@@ -91,6 +94,21 @@ export default function Settings() {
                     value={curDay}
                     onChange={e => setCurDay(e.target.value)}
                     data-testid="input-currency-window-day"
+                    className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm font-mono"
+                  />
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">{t("days")}</span>
+                </div>
+              </label>
+              <label className="block">
+                <span className="text-xs text-muted-foreground">{t("nightCurrencyDays")}</span>
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={1095}
+                    value={curNight}
+                    onChange={e => setCurNight(e.target.value)}
+                    data-testid="input-currency-window-night"
                     className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm font-mono"
                   />
                   <span className="text-xs text-muted-foreground whitespace-nowrap">{t("days")}</span>
@@ -149,6 +167,7 @@ export default function Settings() {
               <span className="text-[11px] text-muted-foreground ms-auto">
                 {t("currentWindow")}:
                 {" "}Day <span className="font-mono">{curWindow.day}d</span>
+                {" · "}Night <span className="font-mono">{curWindow.night}d</span>
                 {" · "}NVG <span className="font-mono">{curWindow.nvg}d</span>
                 {" · "}IRT <span className="font-mono">{curWindow.instrument}d</span>
                 {" · "}Med <span className="font-mono">{curWindow.medical}d</span>

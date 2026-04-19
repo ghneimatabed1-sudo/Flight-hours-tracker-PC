@@ -27,9 +27,18 @@ import {
   EyeOff,
 } from "lucide-react";
 
+// All five operational currencies (Day, Night, NVG, IRT, Medical) plus Sim
+// recency. Each is fully independent — flying Night does NOT refresh NVG and
+// vice versa. The hide toggle below sets `hiddenCurrencies` on the pilot so
+// non-applicable items (e.g. NVG for a pilot who never flies goggles) render
+// as "N/A" everywhere and are excluded from expired/warning counts.
 const cats = [
-  { k: "day", label: "Day" }, { k: "night", label: "Night" },
-  { k: "irt", label: "IRT" }, { k: "medical", label: "Medical" }, { k: "sim", label: "Sim" },
+  { k: "day", label: "Day" },
+  { k: "night", label: "Night" },
+  { k: "nvg", label: "NVG" },
+  { k: "irt", label: "IRT" },
+  { k: "medical", label: "Medical" },
+  { k: "sim", label: "Sim" },
 ] as const;
 type CurrencyKey = typeof cats[number]["k"];
 
@@ -55,7 +64,7 @@ export default function PilotDetail() {
 
   return (
     <div>
-      <PageHead title={`${p.rank} ${p.name}`} subtitle={`${p.arabicName} · ${p.id} · ${p.unit}`} actions={
+      <PageHead title={`${p.rank} ${p.name}`} subtitle={`${p.arabicName} · ${t("militaryNumber")}: ${p.militaryNumber || p.id} · ${p.unit}`} actions={
         <Link href="/roster" className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-secondary inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" />Back</Link>
       } />
 
@@ -70,6 +79,25 @@ export default function PilotDetail() {
         </Card>
         <CurrenciesCard pilot={p} />
       </div>
+
+      {/* Half-cycle (H1 Jan–Jun / H2 Jul–Dec) breakdown for the current
+          calendar year. Excludes opening balance — only counts sorties flown
+          this year so the squadron commander can see training load by half
+          at a glance. NVG is its own column, never folded into Night. */}
+      <Card className="mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-sm font-semibold">H1 / H2 Hours · {new Date().getFullYear()}</div>
+          <div className="text-[11px] text-muted-foreground">H1 Jan–Jun · H2 Jul–Dec · NVG separate from Night</div>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <HalfCard label="H1 (Jan–Jun)" h={totals.h1} />
+          <HalfCard label="H2 (Jul–Dec)" h={totals.h2} />
+        </div>
+        <div className="mt-3 pt-3 border-t border-border flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Year total (Day + Night)</span>
+          <span className="font-mono font-semibold text-primary">{totals.yearHours.toFixed(1)} hrs</span>
+        </div>
+      </Card>
 
       <MobileAccessCard pilotId={p.id} />
 
@@ -167,6 +195,22 @@ function CurrenciesCard({ pilot }: { pilot: Pilot }) {
         <p className="text-[11px] text-muted-foreground mt-2 leading-snug">{t("currencyHiddenHint")}</p>
       ) : null}
     </Card>
+  );
+}
+
+function HalfCard({ label, h }: { label: string; h: import("@/lib/calculations").HalfYearBreakdown }) {
+  return (
+    <div className="rounded-md border border-border bg-secondary/20 p-3">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">{label} · {h.sorties} sortie{h.sorties === 1 ? "" : "s"}</div>
+      <div className="grid grid-cols-2 gap-x-3 text-sm">
+        <Stat k="Day" v={h.day} />
+        <Stat k="Night" v={h.night} />
+        <Stat k="NVG" v={h.nvg} accent="text-rose-300" />
+        <Stat k="Sim" v={h.sim} />
+        <Stat k="Captain" v={h.captain} />
+        <Stat k="Total (D+N)" v={h.total} accent="font-semibold" />
+      </div>
+    </div>
   );
 }
 
