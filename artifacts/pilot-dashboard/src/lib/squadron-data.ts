@@ -281,6 +281,38 @@ export function useDeletePilot() {
 }
 
 // ── sorties ─────────────────────────────────────────────────────────────
+// Same offline-persistence pattern as `mockPilotsList` above: without this
+// mirror, anything an ops officer logged offline (a sortie, an edit, a
+// delete) lived only in this module's memory and was wiped on hard refresh.
+const MOCK_SORTIES_KEY = "rjaf.mock.sorties";
+let mockSortiesList: Sortie[] | null = null;
+function loadMockSortiesFromStorage(): Sortie[] | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(MOCK_SORTIES_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed as Sortie[];
+  } catch {
+    return null;
+  }
+}
+function saveMockSorties(): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(MOCK_SORTIES_KEY, JSON.stringify(mockSortiesList ?? []));
+  } catch { /* quota / private mode */ }
+}
+function getMockSorties(): Sortie[] {
+  if (!mockSortiesList) {
+    const fromStorage = loadMockSortiesFromStorage();
+    mockSortiesList = fromStorage ?? [...MOCK_SORTIES];
+    if (!fromStorage) saveMockSorties();
+  }
+  return mockSortiesList;
+}
+
 function rowToSortie(r: Record<string, unknown>): Sortie {
   const data = (r.data ?? {}) as Partial<Sortie>;
   return {
@@ -383,17 +415,17 @@ export function useSorties(): UseQueryResult<Sortie[]> & { data: Sortie[] } {
   const q = useQuery<Sortie[]>({
     queryKey: ["sorties"],
     queryFn: async () => {
-      if (!isLive()) return MOCK_SORTIES;
+      if (!isLive()) return [...getMockSorties()];
       const { data, error } = await supabase!
         .from("sorties").select("*").order("date", { ascending: false }).limit(500);
       if (error) throw error;
       return (data ?? []).map(rowToSortie);
     },
-    initialData: isLive() ? undefined : MOCK_SORTIES,
+    initialData: isLive() ? undefined : () => [...getMockSorties()],
     staleTime: 30_000,
     retry: isLive() ? 1 : false,
   });
-  const fallback: Sortie[] = isLive() ? [] : MOCK_SORTIES;
+  const fallback: Sortie[] = isLive() ? [] : getMockSorties();
   return { ...q, data: q.data ?? fallback } as UseQueryResult<Sortie[]> & { data: Sortie[] };
 }
 
@@ -504,7 +536,8 @@ export function useCreateSortie() {
       const frozenOverride = enforceMonthlyClose([s.date]);
       if (!isLive()) {
         const created = { ...s, id: "S" + Date.now() } as Sortie;
-        MOCK_SORTIES.push(created);
+        getMockSorties().push(created);
+        saveMockSorties();
         await applyCurrencyRefresh(s, qc);
         if (frozenOverride) {
           appendDemoAudit({
@@ -613,9 +646,11 @@ export function useUpdateSortie() {
       if (cached?.date && cached.date !== s.date) datesToCheck.push(cached.date);
       const frozenOverride = enforceMonthlyClose(datesToCheck);
       if (!isLive()) {
-        const idx = MOCK_SORTIES.findIndex(x => x.id === s.id);
+        const arr = getMockSorties();
+        const idx = arr.findIndex(x => x.id === s.id);
         if (idx < 0) throw new Error("sortie_not_found");
-        MOCK_SORTIES[idx] = s;
+        arr[idx] = s;
+        saveMockSorties();
         await applyCurrencyRefresh(s, qc);
         appendDemoAudit({
           ts: tsNow(),
@@ -697,12 +732,14 @@ export function useDeleteSortie() {
       // matching the legacy behaviour for callers that haven't yet been
       // updated to forward the date.
       const cached = (qc.getQueryData<Sortie[]>(["sorties"]) ?? []).find(x => x.id === input.id);
-      const sortieDate = input.date ?? cached?.date ?? MOCK_SORTIES.find(x => x.id === input.id)?.date;
+      const sortieDate = input.date ?? cached?.date ?? getMockSorties().find(x => x.id === input.id)?.date;
       const frozenOverride = sortieDate ? enforceMonthlyClose([sortieDate]) : null;
       if (!isLive()) {
-        const idx = MOCK_SORTIES.findIndex(x => x.id === input.id);
+        const arr = getMockSorties();
+        const idx = arr.findIndex(x => x.id === input.id);
         if (idx < 0) throw new Error("sortie_not_found");
-        const removed = MOCK_SORTIES.splice(idx, 1)[0];
+        const removed = arr.splice(idx, 1)[0];
+        saveMockSorties();
         appendDemoAudit({
           ts: tsNow(),
           user: input.actor ?? "ops.officer",
@@ -802,9 +839,11 @@ export function useRestoreSortie() {
           const idx = arr.findIndex(x => x.id === p.id);
           if (idx >= 0) arr[idx] = p; else arr.push(p);
         }
-        const sIdx = MOCK_SORTIES.findIndex(x => x.id === s.id);
-        if (sIdx >= 0) MOCK_SORTIES[sIdx] = s;
-        else MOCK_SORTIES.push(s);
+        const sArr = getMockSorties();
+        const sIdx = sArr.findIndex(x => x.id === s.id);
+        if (sIdx >= 0) sArr[sIdx] = s;
+        else sArr.push(s);
+        saveMockSorties();
         appendDemoAudit({
           ts: tsNow(),
           user: actor ?? "ops.officer",
@@ -863,9 +902,32 @@ export function useRestoreSortie() {
 }
 
 // ── notams ──────────────────────────────────────────────────────────────
+// Offline persistence — same pattern as pilots/sorties so NOTAMs published
+// without a backend survive a hard refresh.
+const MOCK_NOTAMS_KEY = "rjaf.mock.notams";
 let mockNotamsList: NotamRow[] | null = null;
+function loadMockNotamsFromStorage(): NotamRow[] | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(MOCK_NOTAMS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed as NotamRow[];
+  } catch { return null; }
+}
+function saveMockNotams(): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(MOCK_NOTAMS_KEY, JSON.stringify(mockNotamsList ?? []));
+  } catch { /* quota / private mode */ }
+}
 function getMockNotams(): NotamRow[] {
-  if (!mockNotamsList) mockNotamsList = [...MOCK_NOTAMS];
+  if (!mockNotamsList) {
+    const fromStorage = loadMockNotamsFromStorage();
+    mockNotamsList = fromStorage ?? [...MOCK_NOTAMS];
+    if (!fromStorage) saveMockNotams();
+  }
   return mockNotamsList;
 }
 export function useNotams(): UseQueryResult<NotamRow[]> & { data: NotamRow[] } {
@@ -900,6 +962,7 @@ export function useCreateNotam() {
       if (!isLive()) {
         const row = { id, date, text };
         getMockNotams().unshift(row);
+        saveMockNotams();
         return row;
       }
       const { error } = await supabase!.from("notams").insert({
@@ -920,6 +983,7 @@ export function useUpdateNotam() {
         const arr = getMockNotams();
         const idx = arr.findIndex(x => x.id === n.id);
         if (idx >= 0) arr[idx] = n;
+        saveMockNotams();
         return n;
       }
       // Always update by primary key (uuid) — notam_no is a text label and
@@ -941,6 +1005,7 @@ export function useDeleteNotam() {
         const arr = getMockNotams();
         const idx = arr.findIndex(x => x.id === n.id);
         if (idx >= 0) arr.splice(idx, 1);
+        saveMockNotams();
         return n;
       }
       if (!n.pk) throw new Error("Missing NOTAM primary key");
@@ -1008,9 +1073,31 @@ function seedLeaves(): LeaveRow[] {
 }
 
 // ── unavailable entries ─────────────────────────────────────────────────
+// Offline persistence — same pattern as pilots/sorties.
+const MOCK_UNAVAIL_KEY = "rjaf.mock.unavail";
 let mockUnavailList: UnavailEntry[] | null = null;
+function loadMockUnavailFromStorage(): UnavailEntry[] | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(MOCK_UNAVAIL_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed as UnavailEntry[];
+  } catch { return null; }
+}
+function saveMockUnavail(): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(MOCK_UNAVAIL_KEY, JSON.stringify(mockUnavailList ?? []));
+  } catch { /* quota / private mode */ }
+}
 function getMockUnavail(): UnavailEntry[] {
-  if (!mockUnavailList) mockUnavailList = seedUnavailable();
+  if (!mockUnavailList) {
+    const fromStorage = loadMockUnavailFromStorage();
+    mockUnavailList = fromStorage ?? seedUnavailable();
+    if (!fromStorage) saveMockUnavail();
+  }
   return mockUnavailList;
 }
 export function useUnavailable(): UseQueryResult<UnavailEntry[]> & { data: UnavailEntry[] } {
@@ -1052,6 +1139,7 @@ export function useCreateUnavailable() {
       if (!isLive()) {
         const row = { ...entry, id };
         getMockUnavail().push(row);
+        saveMockUnavail();
         return row;
       }
       const { data, error } = await supabase!.from("unavailable").insert({
@@ -1078,6 +1166,7 @@ export function useDeleteUnavailable() {
         const arr = getMockUnavail();
         const idx = arr.findIndex(x => x.id === id);
         if (idx >= 0) arr.splice(idx, 1);
+        saveMockUnavail();
         return { id };
       }
       const { error } = await supabase!.from("unavailable").delete().eq("id", id);
@@ -1149,9 +1238,31 @@ export function useCurrencies(): UseQueryResult<CurrencyRow[]> & { data: Currenc
 }
 
 // ── deputy users (squadron) ────────────────────────────────────────────
+// Offline persistence — same pattern as pilots/sorties.
+const MOCK_USERS_KEY = "rjaf.mock.users";
 let mockUsersList: AppUser[] | null = null;
+function loadMockUsersFromStorage(): AppUser[] | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(MOCK_USERS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed as AppUser[];
+  } catch { return null; }
+}
+function saveMockUsers(): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(MOCK_USERS_KEY, JSON.stringify(mockUsersList ?? []));
+  } catch { /* quota / private mode */ }
+}
 function getMockUsers(): AppUser[] {
-  if (!mockUsersList) mockUsersList = seedUsers();
+  if (!mockUsersList) {
+    const fromStorage = loadMockUsersFromStorage();
+    mockUsersList = fromStorage ?? seedUsers();
+    if (!fromStorage) saveMockUsers();
+  }
   return mockUsersList;
 }
 export function useSquadronUsers(): UseQueryResult<AppUser[]> & { data: AppUser[] } {
@@ -1243,6 +1354,7 @@ export function useCreateSquadronUser() {
       if (!isLive()) {
         const row = { id: String(Date.now()), username, role: "deputy" as const, created };
         getMockUsers().push(row);
+        saveMockUsers();
         return row;
       }
       // Provisioning a Supabase auth user requires the service role key, so
@@ -1317,10 +1429,12 @@ export function useImportHistory() {
           const idx = MOCK_PILOTS.findIndex(x => x.id === p.id);
           if (idx >= 0) MOCK_PILOTS[idx] = p; else MOCK_PILOTS.push(p);
         }
+        const sArr = getMockSorties();
         for (const s of taggedSorties) {
-          const idx = MOCK_SORTIES.findIndex(x => x.id === s.id);
-          if (idx >= 0) MOCK_SORTIES[idx] = s; else MOCK_SORTIES.push(s);
+          const idx = sArr.findIndex(x => x.id === s.id);
+          if (idx >= 0) sArr[idx] = s; else sArr.push(s);
         }
+        saveMockSorties();
         appendDemoAudit({
           ts: tsNow(),
           user: actor ?? "ops.lead",
@@ -1395,15 +1509,17 @@ export function useUndoLastImport() {
 
       if (!isLive()) {
         const beforeP = MOCK_PILOTS.length;
-        const beforeS = MOCK_SORTIES.length;
+        const sArr = getMockSorties();
+        const beforeS = sArr.length;
         for (let i = MOCK_PILOTS.length - 1; i >= 0; i--) {
           if (MOCK_PILOTS[i].imported && MOCK_PILOTS[i].importedAt === stamp) MOCK_PILOTS.splice(i, 1);
         }
-        for (let i = MOCK_SORTIES.length - 1; i >= 0; i--) {
-          if (MOCK_SORTIES[i].imported && MOCK_SORTIES[i].importedAt === stamp) MOCK_SORTIES.splice(i, 1);
+        for (let i = sArr.length - 1; i >= 0; i--) {
+          if (sArr[i].imported && sArr[i].importedAt === stamp) sArr.splice(i, 1);
         }
+        saveMockSorties();
         const removedP = beforeP - MOCK_PILOTS.length;
-        const removedS = beforeS - MOCK_SORTIES.length;
+        const removedS = beforeS - sArr.length;
         appendDemoAudit({
           ts: tsNow(),
           user: actor ?? "ops.lead",
@@ -1804,7 +1920,7 @@ function makeDemoSorties(date: string): Sortie[] {
 
 export function isDemoSeedLoaded(): boolean {
   if (isLive()) return false;
-  return MOCK_SORTIES.some((x) => x.importedAt === DEMO_SEED_TAG);
+  return getMockSorties().some((x) => x.importedAt === DEMO_SEED_TAG);
 }
 
 export function seedDemoDay(): void {
@@ -1816,7 +1932,8 @@ export function seedDemoDay(): void {
     if (!arr.some((x) => x.id === p.id)) arr.unshift(p);
   }
   const demoSorties = makeDemoSorties(todayIsoLocal());
-  MOCK_SORTIES.push(...demoSorties);
+  getMockSorties().push(...demoSorties);
+  saveMockSorties();
 }
 
 export function clearDemoSeed(): void {
@@ -1825,9 +1942,11 @@ export function clearDemoSeed(): void {
   for (let i = arr.length - 1; i >= 0; i--) {
     if (arr[i].importedAt === DEMO_SEED_TAG) arr.splice(i, 1);
   }
-  for (let i = MOCK_SORTIES.length - 1; i >= 0; i--) {
-    if (MOCK_SORTIES[i].importedAt === DEMO_SEED_TAG) MOCK_SORTIES.splice(i, 1);
+  const sArr = getMockSorties();
+  for (let i = sArr.length - 1; i >= 0; i--) {
+    if (sArr[i].importedAt === DEMO_SEED_TAG) sArr.splice(i, 1);
   }
+  saveMockSorties();
 }
 
 export function canSeedDemo(): boolean {
@@ -1858,9 +1977,9 @@ export function exportSquadronMockState(): SquadronMockState {
   }
   return {
     pilots: [...getMockPilots()],
-    sorties: [...MOCK_SORTIES],
+    sorties: [...getMockSorties()],
     notams: [...getMockNotams()],
-    unavail: [...mockUnavailList ?? []],
+    unavail: [...getMockUnavail()],
     users: [...getMockUsers()],
   };
 }
@@ -1869,10 +1988,14 @@ export function applySquadronMockState(s: SquadronMockState): void {
   if (isLive()) return;
   mockPilotsList = [...(s.pilots ?? [])];
   saveMockPilots();
-  MOCK_SORTIES.splice(0, MOCK_SORTIES.length, ...(s.sorties ?? []));
+  mockSortiesList = [...(s.sorties ?? [])];
+  saveMockSorties();
   mockNotamsList = [...(s.notams ?? [])];
+  saveMockNotams();
   mockUnavailList = [...(s.unavail ?? [])];
+  saveMockUnavail();
   mockUsersList = [...(s.users ?? [])];
+  saveMockUsers();
 }
 
 // ── saved duty weeks (db-backed roster archive) ─────────────────────────
