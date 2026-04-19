@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { useI18n, type Key } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList } from "lucide-react";
+import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote } from "lucide-react";
 import emblem from "@assets/rjaf_emblem.png";
 import { RecoveryCodesLowBanner } from "@/components/RecoveryCodesLowBanner";
 
@@ -48,6 +48,15 @@ export function HQLayout({ children }: { children: ReactNode }) {
               { path: "/dashboard/simulator", labelKey: "simulator" as Key, icon: <Gauge className="h-4 w-4" /> },
             ]
           : []),
+        // Squadron + Flight commanders get a read-only Unavailable list
+        // (see who in the squadron is on leave / grounded). Wing / base /
+        // HQ scope skip it — they don't drill into a single squadron's
+        // operational availability from this surface.
+        ...(user.scope === "squadron" || user.scope === "flight"
+          ? [{ path: "/dashboard/unavailable", labelKey: "nav_unavail" as Key, icon: <UserX className="h-4 w-4" /> }]
+          : []),
+        // Sticky notes calendar is a per-PC scratchpad for every commander.
+        { path: "/dashboard/sticky", labelKey: "nav_sticky" as Key, icon: <StickyNote className="h-4 w-4" /> },
         // Flight Schedule creation is squadron-level only. Flight / wing /
         // base / HQ-scope commanders don't own a specific squadron's daily
         // sheet so they don't get this page in their sidebar.

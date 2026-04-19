@@ -120,7 +120,7 @@ const emptyProgram = (date: string, defaults: Defaults): Program => ({
   dayRows: [emptyRow("D")],
   nightRows: [emptyRow("NVG")],
   mainBriefer: "",
-  briefTime: "0815",
+  briefTime: "",
   dayOps: "",
   nightOps: "",
   lecture: "",
@@ -590,7 +590,7 @@ export default function FlightProgram() {
             SQDN.CMDR inline to its right, matching rows 31-34 of the
             original worksheet. */}
         <div className="grid grid-cols-12 gap-3 items-end">
-          <table className="col-span-4 border-collapse border border-black text-[10px]">
+          <table className="col-span-6 border-collapse border border-black text-[10px]">
             <thead className="bg-gray-200">
               <tr>
                 <Th rowSpan={2}>A/C NEEDED</Th>
@@ -615,25 +615,29 @@ export default function FlightProgram() {
             </tbody>
           </table>
 
-          <div className="col-span-4 pb-1">
-            <div className="font-semibold text-[11px] mb-1">FLT.CMDR</div>
-            <input
-              value={prog.fltCmdr}
-              onChange={(e) => update("fltCmdr", e.target.value)}
-              placeholder="LTC AUDEH …………."
-              className="w-full bg-transparent border-b border-black outline-none px-1 text-[11px] text-center"
-              data-testid="input-flt-cmdr"
-            />
-          </div>
-          <div className="col-span-4 pb-1">
-            <div className="font-semibold text-[11px] mb-1">SQDN.CMDR</div>
-            <input
-              value={prog.sqdnCmdr}
-              onChange={(e) => update("sqdnCmdr", e.target.value)}
-              placeholder="LTC. BILAL ………………"
-              className="w-full bg-transparent border-b border-black outline-none px-1 text-[11px] text-center"
-              data-testid="input-sqdn-cmdr"
-            />
+          {/* FLT.CMDR / SQDN.CMDR stacked vertically (label above field, field
+              above next field) per ops-officer request — used to be a 2-up grid. */}
+          <div className="col-span-6 space-y-3 pb-1">
+            <div>
+              <div className="font-semibold text-[11px] mb-1">FLT.CMDR</div>
+              <input
+                value={prog.fltCmdr}
+                onChange={(e) => update("fltCmdr", e.target.value)}
+                placeholder="LTC AUDEH …………."
+                className="w-full bg-transparent border-b border-black outline-none px-1 text-[11px] text-center font-bold"
+                data-testid="input-flt-cmdr"
+              />
+            </div>
+            <div>
+              <div className="font-semibold text-[11px] mb-1">SQDN.CMDR</div>
+              <input
+                value={prog.sqdnCmdr}
+                onChange={(e) => update("sqdnCmdr", e.target.value)}
+                placeholder="LTC. BILAL ………………"
+                className="w-full bg-transparent border-b border-black outline-none px-1 text-[11px] text-center font-bold"
+                data-testid="input-sqdn-cmdr"
+              />
+            </div>
           </div>
         </div>
 
@@ -692,7 +696,7 @@ function CellInput({
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={`w-full bg-transparent outline-none px-1 py-0.5 text-[10px] text-center ${mono ? "font-mono" : ""}`}
+        className={`w-full bg-transparent outline-none px-1 py-0.5 text-[10px] text-center font-bold ${mono ? "font-mono" : ""}`}
       />
     </td>
   );
@@ -735,7 +739,7 @@ function RowInputs({
           list="fp-pilots"
           value={row.pilot}
           onChange={(e) => onChange({ pilot: e.target.value })}
-          className="w-full bg-transparent outline-none px-1 py-0.5 text-[10px]"
+          className="w-full bg-transparent outline-none px-1 py-0.5 text-[10px] font-bold"
         />
       </td>
       <td className="border border-black p-0">
@@ -743,7 +747,7 @@ function RowInputs({
           list="fp-pilots"
           value={row.coPilot}
           onChange={(e) => onChange({ coPilot: e.target.value })}
-          className="w-full bg-transparent outline-none px-1 py-0.5 text-[10px]"
+          className="w-full bg-transparent outline-none px-1 py-0.5 text-[10px] font-bold"
         />
       </td>
       <CellInput value={row.crewMen} onChange={(v) => onChange({ crewMen: v })} />

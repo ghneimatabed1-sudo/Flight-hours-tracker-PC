@@ -81,6 +81,8 @@ import Currencies from "@/pages/dashboard/Currencies";
 import Simulator from "@/pages/dashboard/Simulator";
 import FlightRecords from "@/pages/dashboard/FlightRecords";
 import FlightProgram from "@/pages/FlightProgram";
+import StickyNotes from "@/pages/StickyNotes";
+import CommanderUnavailable from "@/pages/dashboard/UnavailableView";
 
 function SquadronOpsRoutes() {
   return (
@@ -144,6 +146,18 @@ function AdminRoutes() {
   );
 }
 
+// Route-level guard for the read-only Unavailable list. Sidebar already
+// hides the entry for HQ / wing / base scopes; this guard makes a direct
+// URL hit (#/dashboard/unavailable) bounce back to the overview so the
+// scope restriction can't be bypassed by typing the URL.
+function CommanderUnavailableGate() {
+  const { user } = useAuth();
+  if (user?.scope !== "squadron" && user?.scope !== "flight") {
+    return <Redirect to="/dashboard" />;
+  }
+  return <CommanderUnavailable />;
+}
+
 function CommanderRoutes() {
   return (
     <Switch>
@@ -157,6 +171,8 @@ function CommanderRoutes() {
       <Route path="/dashboard/simulator" component={Simulator} />
       <Route path="/dashboard/flights" component={FlightRecords} />
       <Route path="/dashboard/flight-program" component={FlightProgram} />
+      <Route path="/dashboard/unavailable" component={CommanderUnavailableGate} />
+      <Route path="/dashboard/sticky" component={StickyNotes} />
       {/* See SquadronOpsRoutes catch-all: redirect home rather than 404. */}
       <Route><Redirect to="/dashboard" /></Route>
     </Switch>

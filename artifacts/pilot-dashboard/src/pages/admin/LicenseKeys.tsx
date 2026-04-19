@@ -99,8 +99,28 @@ export default function LicenseKeys() {
       setChangeOpen(false);
       // Force a clean restart so AuthProvider reads the wiped state and
       // the operator lands back at the Sign-In / Activation screen.
-      setTimeout(() => { window.location.reload(); }, 200);
+      setTimeout(() => { forceSignOutAndReload(); }, 200);
     }
+  }
+
+  // Hard sign-out + reload. Used by every "Reopen App Now" button so the
+  // app actually drops the current super-admin session and presents the
+  // sign-in screen for the newly-assigned role, instead of returning to
+  // the same logged-in dashboard. Wipes auth identity + auth-related
+  // session state, then reloads.
+  function forceSignOutAndReload() {
+    try {
+      localStorage.removeItem("rjaf.user");
+      localStorage.removeItem("rjaf.fails");
+      localStorage.removeItem("rjaf.lockUntil");
+      sessionStorage.clear();
+    } catch { /* ignore */ }
+    // Hash-routing aware: under file:// (Electron) and the dev server alike,
+    // wouter matches against `location.hash`. Setting both the path and the
+    // hash to "/" guarantees we land on Login (which is rendered when no
+    // user is in storage) rather than re-hydrating the previous route.
+    try { window.location.hash = "#/"; } catch { /* ignore */ }
+    window.location.reload();
   }
 
   // Local accounts list (commanders + ops) shown inside the Setup dialog so
@@ -1236,10 +1256,10 @@ export default function LicenseKeys() {
             {setupOk ? (
               <Button
                 onClick={() => {
-                  // Hard-reload so the new role lock and account take effect.
-                  // In Electron this restarts the renderer with the new auth
-                  // context; in the browser it bypasses any stale React state.
-                  window.location.reload();
+                  // Force sign-out + reload so the super admin session is
+                  // dropped and the newly-assigned operator lands at the
+                  // sign-in screen (not back at the super admin dashboard).
+                  forceSignOutAndReload();
                 }}
                 data-testid="button-setup-reopen"
                 className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
@@ -1333,7 +1353,7 @@ export default function LicenseKeys() {
               </div>
             )}
             <Button
-              onClick={() => window.location.reload()}
+              onClick={forceSignOutAndReload}
               className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-6 text-base"
               data-testid="button-overlay-reopen"
             >

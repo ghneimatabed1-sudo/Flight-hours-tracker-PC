@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
-import { usePilots } from "@/lib/squadron-data";
-import { Printer, Save, RotateCcw } from "lucide-react";
+import { usePilots, useSavedDutyWeeks, useSaveDutyWeek, useDeleteOldDutyWeeks } from "@/lib/squadron-data";
+import { Printer, Save, RotateCcw, Search, Archive } from "lucide-react";
 
 const AR_DAYS = [
   "الأحد",
@@ -67,7 +67,14 @@ export default function DutyWeek() {
   const startDate = useMemo(() => new Date(start + "T00:00:00"), [start]);
   const endDate = useMemo(() => addDays(startDate, 6), [startDate]);
 
-  const storageKey = `rjaf.dutyRoster.${sqnNumber}.${start}`;
+  // The roster itself is now persisted via the data layer
+  // (useSavedDutyWeeks / useSaveDutyWeek). In live mode this hits the
+  // `saved_duty_weeks` Supabase table; in offline / Electron mode the
+  // mock backend persists to localStorage so data survives a refresh.
+  // The 1-year hard-delete retention runs through useDeleteOldDutyWeeks.
+  const savedQ = useSavedDutyWeeks(sqnNumber);
+  const saveMut = useSaveDutyWeek();
+  const archiveMut = useDeleteOldDutyWeeks();
   const [rows, setRows] = useState<DutyRow[]>(() => Array.from({ length: 7 }, () => ({ ...EMPTY_ROW })));
   const [commanderName, setCommanderName] = useState<string>(() => localStorage.getItem("rjaf.dutyRoster.commanderName") ?? "");
   const [commanderRank, setCommanderRank] = useState<string>(() => localStorage.getItem("rjaf.dutyRoster.commanderRank") ?? "المقدم الركن الطيار");
@@ -122,16 +129,72 @@ export default function DutyWeek() {
   }
   const [savedFlash, setSavedFlash] = useState(false);
 
-  // Reload the roster whenever the user switches the start date or moves to
-  // another squadron's PC. Each (squadron, week) tuple has its own slot in
-  // localStorage so different commanders never overwrite each other.
+  // ---------- Saved-weeks index, search, monthly counter, archiving --------
+  // Saved weeks come straight from the data layer (DB in live mode,
+  // localStorage-backed mock store offline). We sweep anything older than
+  // 1 year on first mount per-squadron so the archive shrinks itself
+  // without commander intervention.
+  const savedWeeks = useMemo(() => savedQ.data.map(w => w.start), [savedQ.data]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [archiveFlash, setArchiveFlash] = useState<number | null>(null);
+  const [autoSweptFor, setAutoSweptFor] = useState<string | null>(null);
   useEffect(() => {
-    const raw = localStorage.getItem(storageKey);
-    if (raw) {
-      try { setRows(JSON.parse(raw)); return; } catch { /* fall through */ }
-    }
+    if (autoSweptFor === sqnNumber) return;
+    setAutoSweptFor(sqnNumber);
+    // Fire-and-forget; the query invalidation re-pulls the trimmed list.
+    archiveMut.mutate(sqnNumber);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sqnNumber]);
+
+  // Filtered list = matches free-text search (any substring of YYYY-MM-DD)
+  // OR sits inside the same calendar month as `searchQuery` when query is
+  // a "YYYY-MM" prefix.
+  const filteredSavedWeeks = useMemo(() => {
+    const q = searchQuery.trim();
+    if (!q) return savedWeeks;
+    return savedWeeks.filter(w => w.includes(q));
+  }, [savedWeeks, searchQuery]);
+
+  // Per-pilot monthly counter — total number of duty days each pilot
+  // has been assigned across every saved week in the same calendar month
+  // as the currently-displayed week's start date. We walk every roster
+  // for that month and count any cell (slot 1 OR slot 2) where the
+  // pilot's name (Arabic preferred, English fallback) appears as a
+  // single duty-day. This satisfies the "single number, total days, no
+  // split by type" acceptance criterion.
+  const monthOfStart = start.slice(0, 7);
+  const pilotMonthlyDays = useMemo(() => {
+    const counts: Record<string, number> = {};
+    pilots.forEach(p => { counts[p.id] = 0; });
+    const monthWeeks = savedQ.data.filter(w => w.start.startsWith(monthOfStart));
+    monthWeeks.forEach(w => {
+      w.rows.forEach(r => {
+        const names = [r.name1?.trim(), r.name2?.trim()].filter(Boolean) as string[];
+        names.forEach(n => {
+          const m = pilots.find(p => p.arabicName?.trim() === n || p.name?.trim() === n);
+          if (m) counts[m.id] = (counts[m.id] ?? 0) + 1;
+        });
+      });
+    });
+    // Return only pilots with at least 1 day so the chip list is compact.
+    return Object.entries(counts)
+      .filter(([, n]) => n > 0)
+      .map(([id, days]) => {
+        const p = pilots.find(x => x.id === id);
+        return { id, name: p?.arabicName || p?.name || id, days };
+      })
+      .sort((a, b) => b.days - a.days);
+  }, [savedQ.data, monthOfStart, pilots]);
+  const monthlyCount = pilotMonthlyDays.reduce((a, b) => a + b.days, 0);
+
+  // Reload the roster whenever the user switches the start date / squadron
+  // / data refreshes. Each (squadron, start) tuple is its own DB record so
+  // different commanders never overwrite each other.
+  useEffect(() => {
+    const found = savedQ.data.find(w => w.start === start);
+    if (found) { setRows(found.rows); return; }
     setRows(Array.from({ length: 7 }, () => ({ ...EMPTY_ROW })));
-  }, [storageKey]);
+  }, [start, sqnNumber, savedQ.data]);
 
   function updateRow(i: number, patch: Partial<DutyRow>) {
     setRows(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r));
@@ -153,12 +216,26 @@ export default function DutyWeek() {
   }
 
   function save() {
-    localStorage.setItem(storageKey, JSON.stringify(rows));
-    localStorage.setItem("rjaf.dutyRoster.commanderName", commanderName);
-    localStorage.setItem("rjaf.dutyRoster.commanderRank", commanderRank);
-    localStorage.setItem(labelKey, JSON.stringify(labels));
-    setSavedFlash(true);
-    setTimeout(() => setSavedFlash(false), 1500);
+    saveMut.mutate(
+      { squadron: sqnNumber, start, rows },
+      {
+        onSuccess: () => {
+          localStorage.setItem("rjaf.dutyRoster.commanderName", commanderName);
+          localStorage.setItem("rjaf.dutyRoster.commanderRank", commanderRank);
+          localStorage.setItem(labelKey, JSON.stringify(labels));
+          setSavedFlash(true);
+          setTimeout(() => setSavedFlash(false), 1500);
+        },
+      },
+    );
+  }
+  function manualArchive() {
+    archiveMut.mutate(sqnNumber, {
+      onSuccess: (removed) => {
+        setArchiveFlash(removed);
+        setTimeout(() => setArchiveFlash(null), 2500);
+      },
+    });
   }
 
   function clearAll() {
@@ -195,6 +272,73 @@ export default function DutyWeek() {
         </Button>
         {savedFlash && <span className="text-xs text-emerald-600 font-medium">تم الحفظ ✓</span>}
       </div>
+
+      {/* Saved Weeks browser — list of every persisted roster for this
+          squadron, with a date-substring search box, a "this month" counter
+          tied to the currently-displayed week, and a manual archive button. */}
+      <Card className="!p-3 mb-3 print:hidden">
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <div className="text-sm font-semibold">الأسابيع المحفوظة</div>
+          <span className="text-xs text-muted-foreground" data-testid="text-duty-monthly-count">
+            هذا الشهر ({monthOfStart}): <span className="font-bold gold-text">{monthlyCount}</span> يوم مداومة
+          </span>
+          <div className="ms-auto flex items-center gap-2">
+            <div className="relative">
+              <Search className="h-3.5 w-3.5 absolute start-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="بحث (YYYY-MM أو YYYY-MM-DD)"
+                className="ps-7 pe-2 py-1 rounded border border-border bg-input text-sm w-56"
+                data-testid="input-duty-search"
+              />
+            </div>
+            <Button size="sm" variant="outline" onClick={manualArchive} data-testid="button-duty-archive" title="حذف الأسابيع الأقدم من سنة">
+              <Archive className="h-3.5 w-3.5 me-1" /> أرشفة (أقدم من سنة)
+            </Button>
+            {archiveFlash !== null && (
+              <span className="text-xs text-emerald-600 font-medium" data-testid="text-archive-flash">
+                {archiveFlash === 0 ? "لا شيء للأرشفة" : `تمت أرشفة ${archiveFlash}`}
+              </span>
+            )}
+          </div>
+        </div>
+        {/* Per-pilot monthly day counts. One chip per pilot whose name
+            appears in any roster of the displayed month. Pure summary
+            view — clicking does nothing (deliberately read-only). */}
+        {pilotMonthlyDays.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1" data-testid="list-pilot-monthly">
+            {pilotMonthlyDays.map(p => (
+              <span
+                key={p.id}
+                className="inline-flex items-center gap-1 text-[11px] rounded px-1.5 py-0.5 border border-amber-400/40 bg-amber-500/10"
+                data-testid={`chip-pilot-monthly-${p.id}`}
+              >
+                <span className="font-semibold">{p.name}</span>
+                <span className="font-mono">{p.days}</span>
+              </span>
+            ))}
+          </div>
+        )}
+        {filteredSavedWeeks.length === 0 ? (
+          <div className="text-xs text-muted-foreground py-2" data-testid="empty-duty-saved">
+            لا أسابيع محفوظة بعد.
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-1.5" data-testid="list-duty-saved">
+            {filteredSavedWeeks.map(w => (
+              <button
+                key={w}
+                onClick={() => setStart(w)}
+                className={`px-2 py-1 rounded border text-xs font-mono ${start === w ? "border-amber-400 bg-amber-500/20" : "border-border hover:bg-secondary/50"}`}
+                data-testid={`button-load-week-${w}`}
+              >
+                {w}
+              </button>
+            ))}
+          </div>
+        )}
+      </Card>
 
       <Card className="!p-6 print:!p-2 print:shadow-none print:border-none" >
         <div dir="rtl" className="font-arabic">

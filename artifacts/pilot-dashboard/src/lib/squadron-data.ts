@@ -1617,3 +1617,111 @@ export function applySquadronMockState(s: SquadronMockState): void {
   mockUnavailList = [...(s.unavail ?? [])];
   mockUsersList = [...(s.users ?? [])];
 }
+
+// ── saved duty weeks (db-backed roster archive) ─────────────────────────
+// Each saved week is a single record keyed by (squadron_number, start_date)
+// containing the 7-day roster as a JSON blob. In live mode this targets a
+// Supabase table; in mock mode we keep it in localStorage so the data
+// survives page refresh in offline / Electron deployments.
+export interface SavedDutyRow {
+  rank1: string; name1: string; phone1: string;
+  rank2: string; name2: string; phone2: string;
+}
+export interface SavedDutyWeek {
+  squadron: string;
+  start: string; // YYYY-MM-DD
+  rows: SavedDutyRow[];
+  savedAt: string; // ISO
+}
+
+const SAVED_DUTY_PREFIX = "rjaf.savedDutyWeeks.";
+
+function readMockSavedWeeks(sqn: string): SavedDutyWeek[] {
+  try {
+    const raw = localStorage.getItem(SAVED_DUTY_PREFIX + sqn);
+    if (raw) return JSON.parse(raw) as SavedDutyWeek[];
+  } catch { /* fall through */ }
+  return [];
+}
+function writeMockSavedWeeks(sqn: string, list: SavedDutyWeek[]): void {
+  try { localStorage.setItem(SAVED_DUTY_PREFIX + sqn, JSON.stringify(list)); }
+  catch { /* ignore quota */ }
+}
+
+export function useSavedDutyWeeks(squadron: string): UseQueryResult<SavedDutyWeek[]> & { data: SavedDutyWeek[] } {
+  const q = useQuery<SavedDutyWeek[]>({
+    queryKey: ["saved_duty_weeks", squadron],
+    queryFn: async () => {
+      if (!isLive()) return readMockSavedWeeks(squadron);
+      const { data, error } = await supabase!
+        .from("saved_duty_weeks")
+        .select("squadron, start_date, rows, saved_at")
+        .eq("squadron", squadron)
+        .order("start_date", { ascending: false });
+      if (error) throw error;
+      return (data ?? []).map(r => ({
+        squadron: String(r.squadron),
+        start: r.start_date as string,
+        rows: (r.rows as SavedDutyRow[]) ?? [],
+        savedAt: (r.saved_at as string) ?? new Date().toISOString(),
+      }));
+    },
+    initialData: isLive() ? undefined : () => readMockSavedWeeks(squadron),
+    retry: isLive() ? 1 : false,
+  });
+  const fallback: SavedDutyWeek[] = isLive() ? [] : readMockSavedWeeks(squadron);
+  return { ...q, data: q.data ?? fallback } as UseQueryResult<SavedDutyWeek[]> & { data: SavedDutyWeek[] };
+}
+
+export function useSaveDutyWeek() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (entry: Omit<SavedDutyWeek, "savedAt">): Promise<SavedDutyWeek> => {
+      const savedAt = new Date().toISOString();
+      const full: SavedDutyWeek = { ...entry, savedAt };
+      if (!isLive()) {
+        const list = readMockSavedWeeks(entry.squadron).filter(w => w.start !== entry.start);
+        list.push(full);
+        list.sort((a, b) => b.start.localeCompare(a.start));
+        writeMockSavedWeeks(entry.squadron, list);
+        return full;
+      }
+      const { error } = await supabase!.from("saved_duty_weeks").upsert({
+        squadron: entry.squadron,
+        start_date: entry.start,
+        rows: entry.rows,
+        saved_at: savedAt,
+      }, { onConflict: "squadron,start_date" });
+      if (error) throw error;
+      return full;
+    },
+    onSuccess: (_d, vars) => qc.invalidateQueries({ queryKey: ["saved_duty_weeks", vars.squadron] }),
+  });
+}
+
+// Retention sweep: hard-delete every saved week with start_date older than
+// (today - 1 year) for the given squadron. Returns the count removed so the
+// UI can flash "archived N" feedback.
+export function useDeleteOldDutyWeeks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (squadron: string): Promise<number> => {
+      const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - 1);
+      const cutoffIso = cutoff.toISOString().slice(0, 10);
+      if (!isLive()) {
+        const list = readMockSavedWeeks(squadron);
+        const kept = list.filter(w => w.start >= cutoffIso);
+        const removed = list.length - kept.length;
+        if (removed > 0) writeMockSavedWeeks(squadron, kept);
+        return removed;
+      }
+      const { data, error } = await supabase!
+        .from("saved_duty_weeks").delete()
+        .eq("squadron", squadron).lt("start_date", cutoffIso)
+        .select("start_date");
+      if (error) throw error;
+      return (data ?? []).length;
+    },
+    onSuccess: (_n, sqn) => qc.invalidateQueries({ queryKey: ["saved_duty_weeks", sqn] }),
+  });
+}
