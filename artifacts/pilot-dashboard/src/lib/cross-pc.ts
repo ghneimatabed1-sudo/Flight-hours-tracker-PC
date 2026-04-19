@@ -1214,9 +1214,11 @@ export function canUseMessages(role: string | undefined, scope: string | undefin
 // squadron sub-account) sees nothing.
 export function canUseScheduleChain(role: string | undefined, scope: string | undefined): boolean {
   if (role === "super_admin") return true;
-  // Ops Pilot's PC is intentionally excluded from schedule sharing.
+  // Schedule sharing is strictly between Flight Commanders and their
+  // related Squadron Commander. Wing / Base / HQ tiers and the Ops Pilot
+  // PC are intentionally excluded.
   if (role === "commander") {
-    return scope === "flight" || scope === "squadron" || scope === "wing" || scope === "base";
+    return scope === "flight" || scope === "squadron";
   }
   return false;
 }

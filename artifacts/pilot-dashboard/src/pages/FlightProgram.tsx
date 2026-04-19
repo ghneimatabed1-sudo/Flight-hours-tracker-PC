@@ -124,12 +124,12 @@ export default function FlightProgram() {
   // commander on the HQ dashboard may open this page. The flight
   // commander's recipient picker is reshaped to the bound squadron
   // commander only (see `targets` below).
-  // Schedule sharing is allowed for any commander tier (flight, squadron,
-  // wing, base, hq). The Ops Pilot's PC is intentionally excluded — it
-  // only logs sorties, it doesn't share schedules.
+  // Schedule sharing is strictly between Flight Commanders and their
+  // related Squadron Commander. Every other tier (wing / base / HQ) and
+  // the Ops Pilot's PC are intentionally excluded.
   const canAccess =
     user?.role === "commander" &&
-    (user?.scope === "flight" || user?.scope === "squadron" || user?.scope === "wing" || user?.scope === "base" || user?.scope === "hq");
+    (user?.scope === "flight" || user?.scope === "squadron");
   const canPrint = canAccess;
   const isFlightCmdr = user?.role === "commander" && user?.scope === "flight";
 
@@ -156,15 +156,23 @@ export default function FlightProgram() {
   // Flight Commander PC is locked to its bound Squadron Commander only:
   // the picker shrinks to that single PC and is auto-selected.
   const flightBinding = isFlightCmdr ? getFlightBinding() : null;
+  const isSquadronCmdr = user?.role === "commander" && user?.scope === "squadron";
   const targets = useMemo(
     () => {
       const all = registry.data.filter(p => !p.isSelf);
+      // Flight Commander → locked to their bound Squadron Commander.
       if (isFlightCmdr && flightBinding) {
         return all.filter(p => p.id === flightBinding.pcId);
       }
+      // Squadron Commander → only Flight Commander PCs (flight tier) are
+      // valid recipients. Wing / Base / HQ are intentionally excluded
+      // because schedule sharing is strictly Flight ↔ Squadron.
+      if (isSquadronCmdr) {
+        return all.filter(p => p.tier === "flight");
+      }
       return all;
     },
-    [registry.data, isFlightCmdr, flightBinding?.pcId],
+    [registry.data, isFlightCmdr, isSquadronCmdr, flightBinding?.pcId],
   );
   const selectedTarget = targets.find(p => p.id === submitTo);
 
