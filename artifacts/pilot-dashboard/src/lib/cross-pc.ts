@@ -60,7 +60,41 @@ const ONLINE_WINDOW_MS = 5 * 60_000;
 // what the schedule-sharing chain enforces when picking forward targets:
 // a squadron PC can only forward up to a `wing` PC, a wing PC can only
 // forward up to a `base` PC, and a base PC terminates the chain.
-export type PcTier = "squadron" | "wing" | "base" | "hq";
+export type PcTier = "flight" | "squadron" | "wing" | "base" | "hq";
+
+// ── Flight Commander binding ────────────────────────────────────────────
+//
+// A Flight Commander PC reports up to ONE specific Squadron Commander PC
+// chosen at first-run setup. Once bound, every cross-PC surface on the
+// flight PC (schedule sharing recipient picker, messages composer) is
+// reshaped to address only that single squadron commander. The binding
+// is stored only in localStorage on the flight PC itself — the squadron
+// commander doesn't need to know the relationship in advance, the
+// inbound schedule share carries the originator id and routes the
+// approval back automatically.
+const FLIGHT_BIND_ID_KEY   = "rjaf.pc.flight.boundPcId";
+const FLIGHT_BIND_NAME_KEY = "rjaf.pc.flight.boundPcName";
+
+export interface FlightBinding {
+  pcId: string;
+  pcName: string;
+}
+
+export function getFlightBinding(): FlightBinding | null {
+  const id = localStorage.getItem(FLIGHT_BIND_ID_KEY) ?? "";
+  if (!id) return null;
+  return { pcId: id, pcName: localStorage.getItem(FLIGHT_BIND_NAME_KEY) ?? id };
+}
+
+export function setFlightBinding(b: FlightBinding | null) {
+  if (!b || !b.pcId) {
+    localStorage.removeItem(FLIGHT_BIND_ID_KEY);
+    localStorage.removeItem(FLIGHT_BIND_NAME_KEY);
+    return;
+  }
+  localStorage.setItem(FLIGHT_BIND_ID_KEY, b.pcId);
+  localStorage.setItem(FLIGHT_BIND_NAME_KEY, b.pcName || b.pcId);
+}
 
 export interface SquadronPC {
   id: string;             // canonical ecosystem id (squadron name, or
@@ -106,10 +140,18 @@ export interface RegisterPcOpts {
 }
 
 function rowToPc(r: Record<string, unknown>): SquadronPC {
+  const id = String(r.id);
+  // The xpc_registry table's tier CHECK constraint pre-dates the Flight
+  // Commander tier and only accepts squadron/wing/base/hq. To keep the
+  // schema unchanged we encode flight PCs in the id prefix ("FLIGHT:")
+  // and write tier='squadron' to the DB; on read we recover the true
+  // tier from the prefix here so the rest of the app sees "flight".
+  let tier = (r.tier as PcTier) ?? "squadron";
+  if (id.startsWith("FLIGHT:")) tier = "flight";
   return {
-    id: String(r.id),
+    id,
     squadronName: String(r.squadron_name ?? ""),
-    tier: (r.tier as PcTier) ?? "squadron",
+    tier,
     base: r.base ? String(r.base) : undefined,
     wing: r.wing ? String(r.wing) : undefined,
     lastSeen: String(r.last_seen ?? nowIso()),
@@ -153,10 +195,15 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
           { onConflict: "user_id,pc_id" },
         );
       }
+      // Flight tier is encoded in the id prefix ("FLIGHT:") because the
+      // xpc_registry CHECK constraint pre-dates the flight tier and only
+      // accepts squadron/wing/base/hq. Downgrade to 'squadron' on write
+      // and let rowToPc recover the true tier from the prefix on read.
+      const dbTier = o.tier === "flight" ? "squadron" : o.tier;
       await supabase!.from("xpc_registry").upsert({
         id: o.id,
         squadron_name: o.displayName,
-        tier: o.tier,
+        tier: dbTier,
         base: o.base ?? null,
         wing: o.wing ?? null,
         last_seen: entry.lastSeen,
@@ -946,7 +993,7 @@ const MESSAGE_RETENTION_KEY = "rjaf.xpc.messages.retention";
 export const MESSAGE_RETENTION_MAX_DAYS = 50;
 
 export type MessagePriority = "normal" | "medium" | "urgent";
-export type MessageTier = "squadron" | "wing" | "base";
+export type MessageTier = "flight" | "squadron" | "wing" | "base";
 
 export interface PrivateMessage {
   id: string;
@@ -976,16 +1023,23 @@ function writeMessages(rows: PrivateMessage[]) {
 }
 
 function rowToMessage(r: Record<string, unknown>): PrivateMessage {
+  // Recover the flight tier from the id prefix — the DB CHECK constraint
+  // doesn't allow 'flight' as a tier value yet, so flight PCs persist
+  // their messages with tier='squadron' and we fix that up here.
+  const fromPcId = String(r.from_pc_id);
+  const toPcId   = String(r.to_pc_id);
+  const fromTier: MessageTier = fromPcId.startsWith("FLIGHT:") ? "flight" : (r.from_tier as MessageTier);
+  const toTier:   MessageTier = toPcId.startsWith("FLIGHT:")   ? "flight" : (r.to_tier as MessageTier);
   return {
     id: String(r.id),
     threadId: String(r.thread_id),
-    fromPcId: String(r.from_pc_id),
+    fromPcId,
     fromPcName: String(r.from_pc_name),
-    fromTier: r.from_tier as MessageTier,
+    fromTier,
     fromUser: String(r.from_user),
-    toPcId: String(r.to_pc_id),
+    toPcId,
     toPcName: String(r.to_pc_name),
-    toTier: r.to_tier as MessageTier,
+    toTier,
     subject: String(r.subject),
     body: String(r.body),
     priority: r.priority as MessagePriority,
@@ -996,16 +1050,21 @@ function rowToMessage(r: Record<string, unknown>): PrivateMessage {
 }
 
 function messageToRow(m: PrivateMessage): Record<string, unknown> {
+  // The xpc_messages tier CHECK constraint pre-dates the flight tier;
+  // downgrade to 'squadron' on the wire and let rowToMessage recover
+  // the true tier from the FLIGHT: id prefix on read.
+  const fromTierDb = m.fromTier === "flight" ? "squadron" : m.fromTier;
+  const toTierDb   = m.toTier   === "flight" ? "squadron" : m.toTier;
   return {
     id: m.id,
     thread_id: m.threadId,
     from_pc_id: m.fromPcId,
     from_pc_name: m.fromPcName,
-    from_tier: m.fromTier,
+    from_tier: fromTierDb,
     from_user: m.fromUser,
     to_pc_id: m.toPcId,
     to_pc_name: m.toPcName,
-    to_tier: m.toTier,
+    to_tier: toTierDb,
     subject: m.subject,
     body: m.body,
     priority: m.priority,
@@ -1145,7 +1204,7 @@ export function useMarkMessageRead() {
 export function canUseMessages(role: string | undefined, scope: string | undefined): boolean {
   if (role === "super_admin") return true;
   if (role === "commander") {
-    return scope === "squadron" || scope === "wing" || scope === "base";
+    return scope === "flight" || scope === "squadron" || scope === "wing" || scope === "base";
   }
   return false;
 }

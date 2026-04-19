@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2, Bell } from "lucide-react";
 import { canUseMessages, canUseScheduleChain, registerLocalPC, purgeExpiredMessages, getLocalPcId, type PcTier } from "@/lib/cross-pc";
+import { FlightBindingGate, FlightBindingBadge } from "@/components/FlightBindingGate";
 import emblem from "@assets/rjaf_emblem.png";
 import { RecoveryCodesLowBanner } from "@/components/RecoveryCodesLowBanner";
 
@@ -43,6 +44,7 @@ export function HQLayout({ children }: { children: ReactNode }) {
       scope === "wing" ? "wing"
       : scope === "base" ? "base"
       : scope === "squadron" ? "squadron"
+      : scope === "flight" ? "flight"
       : "hq";
     const displayName = user.displayName || `${tier.toUpperCase()} CMD`;
     // Stable code from the per-PC squadron/wing/base configuration set at
@@ -160,6 +162,7 @@ export function HQLayout({ children }: { children: ReactNode }) {
                 <> · {t(("scope" + user.scope.charAt(0).toUpperCase() + user.scope.slice(1)) as Key)}</>
               )}
             </p>
+            <div className="mt-1"><FlightBindingBadge /></div>
           </div>
           <Button
             variant="ghost"
@@ -218,7 +221,9 @@ export function HQLayout({ children }: { children: ReactNode }) {
         </nav>
         <main className="flex-1 min-w-0 p-4 sm:p-6 space-y-4 overflow-y-auto">
           {isAdmin && <RecoveryCodesLowBanner />}
-          {children}
+          <FlightBindingGate>
+            {children}
+          </FlightBindingGate>
         </main>
       </div>
 

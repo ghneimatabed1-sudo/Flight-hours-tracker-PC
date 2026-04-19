@@ -11,6 +11,7 @@ import {
   useRegisteredPCs,
   useSubmitSchedule,
   getLocalPcId,
+  getFlightBinding,
 } from "@/lib/cross-pc";
 import { useToast } from "@/hooks/use-toast";
 
@@ -119,12 +120,15 @@ export default function FlightProgram() {
   const submit = useSubmitSchedule();
   const registry = useRegisteredPCs();
 
-  // Access — only the squadron ops officer (pilot officer) and the
-  // squadron commander on the HQ dashboard may open this page.
+  // Access — squadron ops officer, squadron commander, and flight
+  // commander on the HQ dashboard may open this page. The flight
+  // commander's recipient picker is reshaped to the bound squadron
+  // commander only (see `targets` below).
   const canAccess =
     user?.role === "ops" ||
-    (user?.role === "commander" && user?.scope === "squadron");
+    (user?.role === "commander" && (user?.scope === "squadron" || user?.scope === "flight"));
   const canPrint = canAccess;
+  const isFlightCmdr = user?.role === "commander" && user?.scope === "flight";
 
   const todayIso = new Date().toISOString().slice(0, 10);
   const [defaults, setDefaults]       = useState<Defaults>(() => loadDefaults());
@@ -145,12 +149,29 @@ export default function FlightProgram() {
 
   // PCs that can receive a flight schedule. The squadron sends to its
   // monitoring Wing PC, but ops officers also share peer-to-peer for
-  // visibility — so we list every registered PC that is not us.
+  // visibility — so we list every registered PC that is not us. The
+  // Flight Commander PC is locked to its bound Squadron Commander only:
+  // the picker shrinks to that single PC and is auto-selected.
+  const flightBinding = isFlightCmdr ? getFlightBinding() : null;
   const targets = useMemo(
-    () => registry.data.filter(p => !p.isSelf),
-    [registry.data],
+    () => {
+      const all = registry.data.filter(p => !p.isSelf);
+      if (isFlightCmdr && flightBinding) {
+        return all.filter(p => p.id === flightBinding.pcId);
+      }
+      return all;
+    },
+    [registry.data, isFlightCmdr, flightBinding?.pcId],
   );
   const selectedTarget = targets.find(p => p.id === submitTo);
+
+  // Auto-pick the bound squadron commander for flight commanders so the
+  // operator never has to confirm a recipient — Submit just sends.
+  useEffect(() => {
+    if (isFlightCmdr && flightBinding && submitTo !== flightBinding.pcId) {
+      setSubmitTo(flightBinding.pcId);
+    }
+  }, [isFlightCmdr, flightBinding?.pcId, submitTo]);
 
   const update = (next: ScheduleProgram) => setProg(next);
   const updateField = <K extends keyof ScheduleProgram>(k: K, v: ScheduleProgram[K]) =>
@@ -275,20 +296,32 @@ export default function FlightProgram() {
           </div>
           <div className="grid sm:grid-cols-3 gap-2">
             <label className="sm:col-span-2 flex flex-col gap-1">
-              <span className="text-[11px] text-muted-foreground">Recipient PC</span>
-              <select
-                value={submitTo}
-                onChange={(e) => setSubmitTo(e.target.value)}
-                className="px-2 py-1.5 rounded-md bg-input border border-border text-sm"
-                data-testid="select-submit-target"
-              >
-                <option value="">— pick a registered PC —</option>
-                {targets.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.squadronName} · {p.tier}{p.online ? " · online" : " · offline"}
-                  </option>
-                ))}
-              </select>
+              <span className="text-[11px] text-muted-foreground">
+                {isFlightCmdr && flightBinding ? "Recipient (bound Squadron Commander)" : "Recipient PC"}
+              </span>
+              {isFlightCmdr && flightBinding ? (
+                <div
+                  className="px-2 py-1.5 rounded-md bg-secondary/40 border border-border text-sm font-medium flex items-center justify-between"
+                  data-testid="bound-recipient"
+                >
+                  <span>{flightBinding.pcName}</span>
+                  <span className="text-[11px] text-muted-foreground">locked</span>
+                </div>
+              ) : (
+                <select
+                  value={submitTo}
+                  onChange={(e) => setSubmitTo(e.target.value)}
+                  className="px-2 py-1.5 rounded-md bg-input border border-border text-sm"
+                  data-testid="select-submit-target"
+                >
+                  <option value="">— pick a registered PC —</option>
+                  {targets.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.squadronName} · {p.tier}{p.online ? " · online" : " · offline"}
+                    </option>
+                  ))}
+                </select>
+              )}
             </label>
             <div className="flex items-end">
               <Button

@@ -11,6 +11,7 @@ import {
   MESSAGE_RETENTION_MAX_DAYS,
   canUseMessages,
   getLocalPcId,
+  getFlightBinding,
   type MessagePriority,
   type PrivateMessage,
 } from "@/lib/cross-pc";
@@ -38,6 +39,10 @@ function seenAllowed(m: PrivateMessage): boolean {
   if (a === "squadron" && b === "squadron") return true;
   if (a === "squadron" && b === "wing")     return true;
   if (a === "wing"     && b === "squadron") return true;
+  // Flight Commander ↔ bound Squadron Commander is treated as the same
+  // chain-of-command pair as squadron↔squadron for read-receipt purposes.
+  if (a === "flight"   && b === "squadron") return true;
+  if (a === "squadron" && b === "flight")   return true;
   return false;
 }
 const priorityClasses: Record<MessagePriority, string> = {
@@ -50,17 +55,20 @@ export default function Messages() {
   const { user, squadron } = useAuth();
   const { toast } = useToast();
   const allowed = canUseMessages(user?.role, user?.scope);
-  const myTier: "squadron" | "wing" | "base" =
+  const myTier: "flight" | "squadron" | "wing" | "base" =
     user?.scope === "wing" ? "wing"
     : user?.scope === "base" ? "base"
+    : user?.scope === "flight" ? "flight"
     : "squadron";
+  const isFlightCmdr = user?.role === "commander" && user?.scope === "flight";
+  const flightBinding = isFlightCmdr ? getFlightBinding() : null;
   // Use the canonical PC id written by registerLocalPC (squadron name for
   // squadron tier, "WING:..." / "BASE:..." for commander tiers) so both
   // the writer (sender) and the reader (recipient inbox filter) agree.
   const canonicalId = getLocalPcId();
   const fallbackId = myTier === "squadron"
     ? (squadron?.name ?? user?.username ?? "")
-    : `${myTier.toUpperCase()}:${user?.displayName ?? user?.username ?? "CMD"}`;
+    : `${myTier.toUpperCase()}:${squadron?.name ?? user?.username ?? user?.displayName ?? "CMD"}`;
   const myPcId = canonicalId || fallbackId || null;
   const myPcName = squadron?.name ?? user?.displayName ?? "Local PC";
 
@@ -79,10 +87,19 @@ export default function Messages() {
 
   // Private messages are limited to Squadron / Wing / Base PCs — HQ
   // and any other tiers are excluded from both the recipient picker
-  // and the inbox filter.
+  // and the inbox filter. Flight Commander PCs may only message their
+  // bound Squadron Commander, so the picker collapses to that one row.
   const selectablePCs = useMemo(
-    () => registry.data.filter(p => !p.isSelf && (p.tier === "squadron" || p.tier === "wing" || p.tier === "base")),
-    [registry.data],
+    () => {
+      const base = registry.data.filter(
+        p => !p.isSelf && (p.tier === "squadron" || p.tier === "wing" || p.tier === "base"),
+      );
+      if (isFlightCmdr && flightBinding) {
+        return base.filter(p => p.id === flightBinding.pcId);
+      }
+      return base;
+    },
+    [registry.data, isFlightCmdr, flightBinding?.pcId],
   );
 
   if (!allowed) {
@@ -107,8 +124,12 @@ export default function Messages() {
     if (!subject.trim() || !body.trim()) { toast({ title: "Subject and body required", variant: "destructive" }); return; }
     const target = registry.data.find(p => p.id === composeTo);
     if (!target) { toast({ title: "Recipient not found", variant: "destructive" }); return; }
-    if (target.tier !== "squadron" && target.tier !== "wing" && target.tier !== "base") {
-      toast({ title: "Messages restricted to Sqn/Wing/Base only", variant: "destructive" });
+    if (target.tier !== "squadron" && target.tier !== "wing" && target.tier !== "base" && target.tier !== "flight") {
+      toast({ title: "Messages restricted to Flt/Sqn/Wing/Base only", variant: "destructive" });
+      return;
+    }
+    if (isFlightCmdr && flightBinding && target.id !== flightBinding.pcId) {
+      toast({ title: "Flight Commander can only message the bound Squadron Commander", variant: "destructive" });
       return;
     }
     await send.mutateAsync({
