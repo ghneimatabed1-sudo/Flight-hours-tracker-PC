@@ -163,8 +163,21 @@ export default function Leaves() {
   function updateDraft(pilotId: string, patch: Partial<Draft>) {
     setDrafts(d => {
       const cur = d[pilotId] ?? { typeId: "", note: "" };
-      return { ...d, [pilotId]: { ...cur, ...patch } };
+      const next = { ...cur, ...patch };
+      // If the user switches away from "Other", clear any leftover reason
+      // text so it doesn't get carried into a different type.
+      if (patch.typeId !== undefined && patch.typeId !== OTHER_TYPE_ID) {
+        next.note = "";
+      }
+      return { ...d, [pilotId]: next };
     });
+  }
+
+  function deleteDailyForPilot(pilotId: string) {
+    // Same surgery as setAvailable: pluck today out of any entry that
+    // covers it, splitting multi-day ranges so surrounding days survive.
+    if (!confirm("Remove this pilot's leave for the selected day?")) return;
+    setAvailable(pilotId);
   }
 
   function setAvailable(pilotId: string) {
@@ -439,9 +452,6 @@ export default function Leaves() {
                 const effectiveType = draft.typeId || existing?.typeId || "";
                 const tp = effectiveType ? typeById[effectiveType] : undefined;
                 const isOther = effectiveType === OTHER_TYPE_ID;
-                const dirty =
-                  (draft.typeId && draft.typeId !== existing?.typeId)
-                  || (isOther && (draft.note ?? "").trim() !== (existing?.note ?? "").trim() && (draft.note ?? "").trim().length > 0);
                 return (
                   <tr key={p.id} className="border-t border-border align-middle">
                     <td className="px-3 py-2">
@@ -507,20 +517,31 @@ export default function Leaves() {
                         </Button>
                         <Button
                           size="sm"
+                          variant="outline"
+                          onClick={() => deleteDailyForPilot(p.id)}
+                          disabled={!existing}
+                          data-testid={`button-leave-delete-${p.id}`}
+                          title="Delete this pilot's leave for the selected day"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
                           onClick={() => submitDailyForPilot(p.id)}
                           disabled={
                             !effectiveType
                             || (isOther && !(draft.note ?? existing?.note ?? "").trim())
-                            || (!dirty && existing?.typeId === effectiveType && (existing?.note ?? "") === (draft.note ?? existing?.note ?? ""))
                           }
                           data-testid={`button-leave-submit-${p.id}`}
+                          title={existing ? "Save changes (overwrites today's entry)" : "Save leave for the selected day"}
                         >
-                          <Save className="h-3.5 w-3.5 me-1" /> Submit
+                          <Save className="h-3.5 w-3.5 me-1" /> {existing ? "Update" : "Submit"}
                         </Button>
                       </div>
                       {tp ? (
                         <div className="text-[10px] text-muted-foreground mt-1">
-                          Will set: <span style={{ color: tp.color }}>{tp.name}</span>
+                          {existing ? "Will overwrite to: " : "Will set: "}
+                          <span style={{ color: tp.color }}>{tp.name}</span>
                         </div>
                       ) : null}
                     </td>
