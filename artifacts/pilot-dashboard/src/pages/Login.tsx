@@ -343,7 +343,11 @@ export default function LoginGate() {
             </form>
           ) : showLogin ? (
             <form onSubmit={submitLogin} className="space-y-3">
-              <div className="text-sm font-medium">{t("loginTitle")}</div>
+              <div className="text-sm font-medium" data-testid="text-login-title">
+                {pcRoleLock === null && !(licensed && configured)
+                  ? t("firstOpenSuperAdminPrompt")
+                  : t("loginTitle")}
+              </div>
               {pcDeviceName && (
                 <div
                   className="rounded-md border border-border bg-secondary/40 px-3 py-2 text-xs"
@@ -409,9 +413,6 @@ export default function LoginGate() {
                     : t("superAdminAccess")}
                 </button>
               )}
-              <div className="text-[11px] text-muted-foreground text-center pt-1">
-                {t("loginHelp")}
-              </div>
               {hqMode && !licensed && (
                 <button type="button" onClick={() => setHqMode(false)} className="w-full text-[11px] text-muted-foreground hover:text-foreground underline">
                   ← {t("licenseTitle")}
