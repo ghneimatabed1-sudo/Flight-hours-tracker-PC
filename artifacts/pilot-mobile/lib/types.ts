@@ -55,6 +55,10 @@ export interface NotamRecord {
   text: string;
 }
 
+// 3-level priority shared with NOTAMs and dashboard private messages.
+// DB stores normal/medium/urgent; UI shows Normal / High / Very High.
+export type AlertPriority = "normal" | "medium" | "urgent";
+
 export interface AlertRecord {
   id: string;
   // ISO timestamp (date+time) — alerts are time-sensitive so we keep the
@@ -66,6 +70,8 @@ export interface AlertRecord {
   // "Flight Cmdr A"). Stored as text so we don't have to schema-couple
   // the role enum into the mobile client.
   author?: string;
+  // Defaults to "normal" when older rows pre-date the priority column.
+  priority?: AlertPriority;
 }
 
 export interface PilotSnapshot {

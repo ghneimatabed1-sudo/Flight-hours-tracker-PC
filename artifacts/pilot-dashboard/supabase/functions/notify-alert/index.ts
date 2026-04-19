@@ -99,7 +99,7 @@ Deno.serve(async (req: Request) => {
   // 1. Resolve the alert and the squadron it belongs to.
   const { data: alertRow, error: alertErr } = await admin
     .from("alerts")
-    .select("id, squadron_id, body, author, posted_at")
+    .select("id, squadron_id, body, author, posted_at, priority")
     .eq("id", alertId)
     .single();
   if (alertErr || !alertRow) {
@@ -154,13 +154,24 @@ Deno.serve(async (req: Request) => {
 
   // 3. Compose one push per device. Title = first ~40 chars of the body so
   //    it's readable on the lock screen; full body in the body field. Tap
-  //    deep-links to the in-app Alerts tab.
+  //    deep-links to the in-app Alerts tab. Higher-priority alerts get a
+  //    coloured prefix so they stand out on the lock screen even before
+  //    the user opens the app.
   const fullText = String(alertRow.body ?? "").trim();
-  const title = fullText.length <= 40 ? fullText : fullText.slice(0, 40).trimEnd() + "…";
+  const pri = String(alertRow.priority ?? "normal");
+  const prefix =
+    pri === "urgent" ? "🔴 VERY HIGH — " :
+    pri === "medium" ? "🟡 HIGH — " : "";
+  const titleBase = fullText.length <= 40 ? fullText : fullText.slice(0, 40).trimEnd() + "…";
   const subtitle = alertRow.author ? `From ${alertRow.author}` : "Squadron alert";
+  const title = prefix + (titleBase || subtitle);
+  // Map our 3-level priority onto Expo's two-level transport priority so
+  // the OS treats critical alerts more aggressively (heads-up banner on
+  // Android, Critical Alert sound on iOS where supported).
+  const expoPriority: "default" | "high" = pri === "normal" ? "default" : "high";
   const messages = tokens.map((token: string) => ({
     to: token,
-    title: title || subtitle,
+    title,
     body: fullText,
     data: {
       type: "squadron_alert",
@@ -168,10 +179,11 @@ Deno.serve(async (req: Request) => {
       squadronId: alertRow.squadron_id,
       author: alertRow.author ?? null,
       postedAt: alertRow.posted_at ?? null,
+      priority: pri,
       deepLink: "/alerts",
     },
     sound: "default",
-    priority: "high",
+    priority: expoPriority,
   }));
 
   // 4. Send in batches of 100 (Expo's documented limit per request).

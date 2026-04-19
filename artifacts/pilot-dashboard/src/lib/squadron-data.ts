@@ -36,8 +36,12 @@ import {
 
 export type { Pilot, Sortie } from "./mock";
 
-export interface NotamRow { id: string; date: string; text: string; pk?: string; }
-export interface AlertRow { id: string; postedAt: string; text: string; author: string; }
+// Shared 3-level priority used by alerts, notams and private messages.
+// DB stores 'normal' | 'medium' | 'urgent'; UI labels them Normal / High /
+// Very High and colours them green / yellow / red.
+export type ItemPriority = "normal" | "medium" | "urgent";
+export interface NotamRow { id: string; date: string; text: string; pk?: string; priority: ItemPriority; }
+export interface AlertRow { id: string; postedAt: string; text: string; author: string; priority: ItemPriority; }
 export interface DutyDay  { day: string; mainDuty: string; standby: string; rcm: string; }
 export interface UnavailEntry { id: string; pilotId: string; from: string; to: string; reason: string; }
 export interface ScheduleEntry { id: string; ac: string; config: string; crew: string[]; mission: string; takeoff: string; land: string; fuel: string; }
@@ -926,10 +930,17 @@ function saveMockNotams(): void {
 function getMockNotams(): NotamRow[] {
   if (!mockNotamsList) {
     const fromStorage = loadMockNotamsFromStorage();
-    mockNotamsList = fromStorage ?? [...MOCK_NOTAMS];
+    // Seed rows from mock.ts pre-date the priority field — default them
+    // to "normal" so the typed shape is satisfied without reseeding the
+    // demo data.
+    const seeded: NotamRow[] = fromStorage ?? MOCK_NOTAMS.map(n => ({
+      ...n,
+      priority: ((n as { priority?: string }).priority ?? "normal") as ItemPriority,
+    }));
+    mockNotamsList = seeded;
     if (!fromStorage) saveMockNotams();
   }
-  return mockNotamsList;
+  return mockNotamsList!;
 }
 // ── alerts ──────────────────────────────────────────────────────────────
 // Alerts are short, time-sensitive messages pushed by squadron / flight
@@ -969,7 +980,7 @@ export function useAlerts(): UseQueryResult<AlertRow[]> & { data: AlertRow[] } {
     queryFn: async () => {
       if (!isLive()) return [...getMockAlerts()];
       const { data, error } = await supabase!
-        .from("alerts").select("id, posted_at, body, author")
+        .from("alerts").select("id, posted_at, body, author, priority")
         .order("posted_at", { ascending: false }).limit(200);
       if (error) throw error;
       return (data ?? []).map(r => ({
@@ -977,6 +988,7 @@ export function useAlerts(): UseQueryResult<AlertRow[]> & { data: AlertRow[] } {
         postedAt: r.posted_at as string,
         text: r.body as string,
         author: (r.author as string) ?? "",
+        priority: ((r.priority as string) ?? "normal") as ItemPriority,
       }));
     },
     initialData: isLive() ? undefined : () => [...getMockAlerts()],
@@ -989,16 +1001,17 @@ export function useAlerts(): UseQueryResult<AlertRow[]> & { data: AlertRow[] } {
 export function useCreateAlert() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { text: string; author: string }) => {
+    mutationFn: async (input: { text: string; author: string; priority?: ItemPriority }) => {
       const postedAt = new Date().toISOString();
+      const priority: ItemPriority = input.priority ?? "normal";
       if (!isLive()) {
-        const row: AlertRow = { id: "A" + Date.now(), postedAt, text: input.text, author: input.author };
+        const row: AlertRow = { id: "A" + Date.now(), postedAt, text: input.text, author: input.author, priority };
         getMockAlerts().unshift(row);
         saveMockAlerts();
         return row;
       }
       const { data, error } = await supabase!.from("alerts").insert({
-        posted_at: postedAt, body: input.text, author: input.author,
+        posted_at: postedAt, body: input.text, author: input.author, priority,
       }).select("id").single();
       if (error) throw error;
       const newId = String(data?.id ?? "");
@@ -1011,7 +1024,7 @@ export function useCreateAlert() {
           .invoke("notify-alert", { body: { alertId: newId } })
           .catch((err) => console.warn("[notify-alert]", err));
       }
-      return { id: newId, postedAt, text: input.text, author: input.author };
+      return { id: newId, postedAt, text: input.text, author: input.author, priority };
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
   });
@@ -1028,7 +1041,7 @@ export function useUpdateAlert() {
         saveMockAlerts();
         return a;
       }
-      const { error } = await supabase!.from("alerts").update({ body: a.text }).eq("id", a.id);
+      const { error } = await supabase!.from("alerts").update({ body: a.text, priority: a.priority }).eq("id", a.id);
       if (error) throw error;
       return a;
     },
@@ -1061,7 +1074,7 @@ export function useNotams(): UseQueryResult<NotamRow[]> & { data: NotamRow[] } {
     queryFn: async () => {
       if (!isLive()) return [...getMockNotams()];
       const { data, error } = await supabase!
-        .from("notams").select("id, notam_no, posted_on, body")
+        .from("notams").select("id, notam_no, posted_on, body, priority")
         .order("posted_on", { ascending: false });
       if (error) throw error;
       return (data ?? []).map(r => ({
@@ -1069,6 +1082,7 @@ export function useNotams(): UseQueryResult<NotamRow[]> & { data: NotamRow[] } {
         pk: String(r.id),
         date: r.posted_on as string,
         text: r.body as string,
+        priority: ((r.priority as string) ?? "normal") as ItemPriority,
       }));
     },
     initialData: isLive() ? undefined : () => [...getMockNotams()],
@@ -1081,20 +1095,22 @@ export function useNotams(): UseQueryResult<NotamRow[]> & { data: NotamRow[] } {
 export function useCreateNotam() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (text: string) => {
+    mutationFn: async (input: string | { text: string; priority?: ItemPriority }) => {
+      const text = typeof input === "string" ? input : input.text;
+      const priority: ItemPriority = (typeof input === "string" ? "normal" : (input.priority ?? "normal"));
       const id = "N" + Date.now();
       const date = new Date().toISOString().slice(0, 10);
       if (!isLive()) {
-        const row = { id, date, text };
+        const row: NotamRow = { id, date, text, priority };
         getMockNotams().unshift(row);
         saveMockNotams();
         return row;
       }
       const { error } = await supabase!.from("notams").insert({
-        notam_no: id, posted_on: date, body: text,
+        notam_no: id, posted_on: date, body: text, priority,
       });
       if (error) throw error;
-      return { id, date, text };
+      return { id, date, text, priority };
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notams"] }),
   });
@@ -1114,7 +1130,7 @@ export function useUpdateNotam() {
       // Always update by primary key (uuid) — notam_no is a text label and
       // not guaranteed unique, so matching on it could mutate sibling rows.
       if (!n.pk) throw new Error("Missing NOTAM primary key");
-      const { error } = await supabase!.from("notams").update({ body: n.text }).eq("id", n.pk);
+      const { error } = await supabase!.from("notams").update({ body: n.text, priority: n.priority }).eq("id", n.pk);
       if (error) throw error;
       return n;
     },

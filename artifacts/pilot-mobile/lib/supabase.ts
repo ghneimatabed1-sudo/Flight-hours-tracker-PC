@@ -78,6 +78,7 @@ interface NotamRow {
   notam_no: string;
   posted_on: string;
   body: string;
+  priority?: string | null;
 }
 
 interface AlertRow {
@@ -85,6 +86,7 @@ interface AlertRow {
   posted_at: string;
   body: string;
   author: string | null;
+  priority?: string | null;
 }
 
 function num(v: unknown): number {
@@ -204,12 +206,17 @@ function rowsToSnapshot(
     text: n.body,
   }));
 
-  const alertRecords: AlertRecord[] = alerts.map((a) => ({
-    id: a.id,
-    postedAt: a.posted_at,
-    text: a.body,
-    author: a.author ?? undefined,
-  }));
+  const alertRecords: AlertRecord[] = alerts.map((a) => {
+    const raw = (a.priority ?? "normal").toLowerCase();
+    const priority = raw === "urgent" || raw === "medium" ? raw : "normal";
+    return {
+      id: a.id,
+      postedAt: a.posted_at,
+      text: a.body,
+      author: a.author ?? undefined,
+      priority: priority as AlertRecord["priority"],
+    };
+  });
 
   return {
     profile,
@@ -357,14 +364,14 @@ export async function fetchPilotSnapshotRemote(
     // the empty state — it never blocks the snapshot fetch.
     supabase
       .from("notams")
-      .select("id, notam_no, posted_on, body")
+      .select("id, notam_no, posted_on, body, priority")
       .order("posted_on", { ascending: false })
       .limit(100),
     // Alerts: same shape as NOTAMs but issued by squadron / flight
     // commanders. Same RLS caveat — the per-pilot role needs SELECT.
     supabase
       .from("alerts")
-      .select("id, posted_at, body, author")
+      .select("id, posted_at, body, author, priority")
       .order("posted_at", { ascending: false })
       .limit(100),
   ]);

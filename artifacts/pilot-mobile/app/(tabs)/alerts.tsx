@@ -123,12 +123,27 @@ export default function AlertsScreen() {
       ) : (
         alerts.map((a) => {
           const ar = isArabic(a.text);
+          // Map the 3-level priority to the agreed colour scheme.
+          const pri = a.priority ?? "normal";
+          const accent =
+            pri === "urgent" ? "#f43f5e" /* rose-500 */
+            : pri === "medium" ? "#f59e0b" /* amber-500 */
+            : "#10b981" /* emerald-500 */;
+          const priorityLabel =
+            pri === "urgent" ? "VERY HIGH"
+            : pri === "medium" ? "HIGH"
+            : "NORMAL";
           return (
             <View
               key={a.id}
               style={[
                 styles.card,
-                { backgroundColor: colors.card, borderColor: colors.border },
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  borderLeftColor: accent,
+                  borderLeftWidth: 4,
+                },
               ]}
             >
               <View style={styles.cardHead}>
@@ -140,6 +155,16 @@ export default function AlertsScreen() {
                 >
                   <Text style={[styles.idText, { color: colors.primary }]}>
                     {a.author ?? a.id}
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.priorityPill,
+                    { backgroundColor: accent + "26", borderColor: accent + "66" },
+                  ]}
+                >
+                  <Text style={[styles.priorityText, { color: accent }]}>
+                    {priorityLabel}
                   </Text>
                 </View>
                 <Text style={[styles.date, { color: colors.mutedForeground }]}>
@@ -191,7 +216,7 @@ const styles = StyleSheet.create({
   cardHead: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    flexWrap: "wrap",
     gap: 8,
   },
   idPill: {
@@ -203,6 +228,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Inter_600SemiBold",
     letterSpacing: 0.5,
+  },
+  priorityPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  priorityText: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.6,
   },
   date: {
     fontSize: 11,

@@ -18,8 +18,16 @@ import { useToast } from "@/hooks/use-toast";
 import { fmtDateTimeDDMM } from "@/lib/format";
 import { Mail, Send, Reply, Check, AlertOctagon, Settings } from "lucide-react";
 
+// User-facing labels: keep the DB enum (normal/medium/urgent) but show
+// the operator's preferred wording (Normal / High / Very High) and the
+// agreed colour scheme — green / yellow / red.
+const priorityLabels: Record<MessagePriority, string> = {
+  normal: "Normal",
+  medium: "High",
+  urgent: "Very High",
+};
 const priorityClasses: Record<MessagePriority, string> = {
-  normal: "bg-secondary text-foreground border-border",
+  normal: "bg-emerald-500/15 text-emerald-200 border-emerald-500/40",
   medium: "bg-amber-400/20 text-amber-100 border-amber-400/40",
   urgent: "bg-rose-500/20 text-rose-100 border-rose-400/40",
 };
@@ -186,7 +194,7 @@ export default function Messages() {
                       }`}
                       data-testid={`priority-${p}`}
                     >
-                      {p === "urgent" && <AlertOctagon className="h-3 w-3 inline mr-1" />}{p}
+                      {p === "urgent" && <AlertOctagon className="h-3 w-3 inline mr-1" />}{priorityLabels[p]}
                     </button>
                   ))}
                 </div>
@@ -268,17 +276,25 @@ function MessageList({ items, onReply, onMark, myPcId, kind }: {
         <Card key={m.id} className={`!p-3 border-l-4 ${
           m.priority === "urgent" ? "border-l-rose-400"
           : m.priority === "medium" ? "border-l-amber-400"
-          : "border-l-border"
+          : "border-l-emerald-500/60"
         }`} data-testid={`msg-${m.id}`}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="text-sm font-semibold truncate">{m.subject}</div>
               <div className="text-[11px] text-muted-foreground">
                 {kind === "sent" ? `to ${m.toPcName}` : `from ${m.fromPcName}`} · {fmtDateTimeDDMM(m.sentAt)}
-                {m.readAt && kind !== "sent" ? ` · read ${fmtDateTimeDDMM(m.readAt)}` : ""}
+                {/* Show the read receipt on every tab. On the inbox tab it
+                    confirms to the recipient that they've already marked
+                    this one Seen; on the sent tab it tells the sender
+                    that the other PC has acknowledged the message. */}
+                {m.readAt
+                  ? (kind === "sent"
+                      ? ` · seen by ${m.toPcName} ${fmtDateTimeDDMM(m.readAt)}`
+                      : ` · seen ${fmtDateTimeDDMM(m.readAt)}`)
+                  : (kind === "sent" ? " · not seen yet" : "")}
               </div>
             </div>
-            <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border ${priorityClasses[m.priority]}`}>{m.priority}</span>
+            <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border ${priorityClasses[m.priority]}`}>{priorityLabels[m.priority]}</span>
           </div>
           <div className="text-sm mt-2 whitespace-pre-wrap font-mono">{m.body}</div>
           {(onReply || onMark) && m.toPcId === myPcId && (
@@ -288,9 +304,9 @@ function MessageList({ items, onReply, onMark, myPcId, kind }: {
                   <Reply className="h-3 w-3" /> Reply
                 </button>
               )}
-              {onMark && (
-                <button onClick={() => onMark(m)} className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded bg-secondary border border-border" data-testid={`mark-${m.id}`}>
-                  <Check className="h-3 w-3" /> Mark read
+              {onMark && !m.readAt && (
+                <button onClick={() => onMark(m)} className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 font-semibold" data-testid={`mark-${m.id}`}>
+                  <Check className="h-3 w-3" /> Mark Seen
                 </button>
               )}
             </div>
