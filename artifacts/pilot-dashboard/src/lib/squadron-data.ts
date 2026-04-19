@@ -1001,7 +1001,17 @@ export function useCreateAlert() {
         posted_at: postedAt, body: input.text, author: input.author,
       }).select("id").single();
       if (error) throw error;
-      return { id: String(data?.id ?? ""), postedAt, text: input.text, author: input.author };
+      const newId = String(data?.id ?? "");
+      // Fire-and-forget push notification to every pilot in this squadron
+      // whose phone has reminders enabled. Failures are intentionally
+      // silent: the alert is already saved and visible in the app even
+      // if the push leg fails (e.g. Expo down, no devices registered).
+      if (newId) {
+        void supabase!.functions
+          .invoke("notify-alert", { body: { alertId: newId } })
+          .catch((err) => console.warn("[notify-alert]", err));
+      }
+      return { id: newId, postedAt, text: input.text, author: input.author };
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
   });
