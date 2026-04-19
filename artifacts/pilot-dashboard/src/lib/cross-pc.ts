@@ -5,22 +5,25 @@
 // approvals, the flight-schedule sharing chain (Squadron ↔ Wing ↔ Base),
 // and Sqn/Wing/Base private messages.
 //
-// Storage is intentionally simple: a single localStorage namespace per
-// channel ("rjaf.xpc.*"), polled by React Query so all open tabs / PCs that
-// share the browser session stay in sync. When a real Supabase backend is
-// wired up this file is the only one that needs to learn how to talk to it
-// — every page consumes these hooks and treats them as the authoritative
-// cross-PC source.
+// When VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are configured we talk
+// to four shared tables on the central Supabase project (xpc_registry,
+// xpc_pending, xpc_schedule_shares, xpc_messages). Unlike the per-squadron
+// operational tables these are intentionally cross-tenant — every PC in
+// the ecosystem can see every other PC, and a wing/base PC must read rows
+// originated by squadrons it oversees. RLS on those tables is permissive
+// (any authenticated user); per-PC filtering happens in the queryFn below.
 //
-// The localStorage simulation is enough for the in-browser preview and
-// the standalone Electron build that ships before the central server is
-// stood up: every PC sees its own slice and the registry/sync hooks paper
-// over the absence of a real link by treating known PCs as "registered but
-// offline" until they sign back in.
+// When Supabase is NOT configured (demo mode / standalone Electron preview
+// before the central server is online) we fall back to a single
+// localStorage namespace per channel ("rjaf.xpc.*"). The fallback keeps
+// the in-browser preview working and lets a single PC see its own slice;
+// other PCs render as "registered but offline" until the link comes back.
 
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import type { Sortie } from "./mock";
-import { recordAuditEvent } from "./supabase";
+import { supabase, supabaseConfigured, recordAuditEvent } from "./supabase";
+
+const isLive = () => supabaseConfigured && supabase !== null;
 
 // ── shared helpers ──────────────────────────────────────────────────────
 function readJSON<T>(key: string, fallback: T): T {
@@ -102,6 +105,17 @@ export interface RegisterPcOpts {
   wing?: string;
 }
 
+function rowToPc(r: Record<string, unknown>): SquadronPC {
+  return {
+    id: String(r.id),
+    squadronName: String(r.squadron_name ?? ""),
+    tier: (r.tier as PcTier) ?? "squadron",
+    base: r.base ? String(r.base) : undefined,
+    wing: r.wing ? String(r.wing) : undefined,
+    lastSeen: String(r.last_seen ?? nowIso()),
+  };
+}
+
 export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wing?: string) {
   // Backwards-compat: an early form was `registerLocalPC(squadronName, base, wing)`
   // — that path is preserved by promoting the squadron name to both the
@@ -111,8 +125,6 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
     : opts;
   if (!o.id) return;
   localStorage.setItem("rjaf.xpc.localId", o.id);
-  const rows = readRegistry();
-  const idx = rows.findIndex(r => r.id === o.id);
   const entry: SquadronPC = {
     id: o.id,
     squadronName: o.displayName,
@@ -121,17 +133,52 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
     wing: o.wing,
     lastSeen: nowIso(),
   };
+  // Mirror into localStorage so the offline fallback path (and a quick
+  // first paint before the Supabase round-trip resolves) has data to show.
+  const rows = readRegistry();
+  const idx = rows.findIndex(r => r.id === o.id);
   if (idx >= 0) rows[idx] = { ...rows[idx], ...entry }; else rows.push(entry);
   writeRegistry(rows);
+  // Fire-and-forget upsert into the shared registry. Failures are silent
+  // — this runs every 30s anyway so a flaky write recovers on its own.
+  // Also claim this pc id under the caller's auth.uid via xpc_user_pcs so
+  // RLS on the cross-PC tables recognises subsequent inserts/updates.
+  if (isLive()) {
+    void (async () => {
+      const { data: au } = await supabase!.auth.getUser();
+      const uid = au?.user?.id;
+      if (uid) {
+        await supabase!.from("xpc_user_pcs").upsert(
+          { user_id: uid, pc_id: o.id },
+          { onConflict: "user_id,pc_id" },
+        );
+      }
+      await supabase!.from("xpc_registry").upsert({
+        id: o.id,
+        squadron_name: o.displayName,
+        tier: o.tier,
+        base: o.base ?? null,
+        wing: o.wing ?? null,
+        last_seen: entry.lastSeen,
+      }, { onConflict: "id" });
+    })();
+  }
 }
 
 export function useRegisteredPCs(): UseQueryResult<RegisteredPC[]> & { data: RegisteredPC[] } {
   const q = useQuery<RegisteredPC[]>({
     queryKey: ["xpc", "registry"],
-    queryFn: () => {
-      const rows = readRegistry();
+    queryFn: async () => {
       const me = localPcId();
       const cutoff = Date.now() - ONLINE_WINDOW_MS;
+      let rows: SquadronPC[] = [];
+      if (isLive()) {
+        const { data, error } = await supabase!.from("xpc_registry").select("*");
+        if (error) throw error;
+        rows = (data ?? []).map(rowToPc);
+      } else {
+        rows = readRegistry();
+      }
       return rows.map(r => ({
         ...r,
         online: new Date(r.lastSeen).getTime() >= cutoff,
@@ -140,6 +187,7 @@ export function useRegisteredPCs(): UseQueryResult<RegisteredPC[]> & { data: Reg
     },
     refetchInterval: 30_000,
     staleTime: 10_000,
+    retry: isLive() ? 1 : false,
   });
   return { ...q, data: q.data ?? [] } as UseQueryResult<RegisteredPC[]> & { data: RegisteredPC[] };
 }
@@ -191,16 +239,69 @@ function writePending(rows: PendingSortie[]) {
   writeJSON(PENDING_KEY, rows);
 }
 
+function rowToPending(r: Record<string, unknown>): PendingSortie {
+  return {
+    id: String(r.id),
+    hostingSquadronId: String(r.hosting_squadron_id),
+    hostingSquadronName: String(r.hosting_squadron_name),
+    homeSquadronId: String(r.home_squadron_id),
+    homeSquadronName: String(r.home_squadron_name),
+    guestPilotName: String(r.guest_pilot_name),
+    guestPilotMilitaryNumber: r.guest_pilot_military_number ? String(r.guest_pilot_military_number) : undefined,
+    guestSeat: r.guest_seat as "pilot" | "coPilot",
+    sortie: (r.sortie ?? {}) as Omit<Sortie, "id">,
+    submittedAt: String(r.submitted_at),
+    submittedBy: String(r.submitted_by),
+    status: r.status as PendingStatus,
+    decidedAt: r.decided_at ? String(r.decided_at) : undefined,
+    decidedBy: r.decided_by ? String(r.decided_by) : undefined,
+    decisionReason: r.decision_reason ? String(r.decision_reason) : undefined,
+    editedSortie: r.edited_sortie ? (r.edited_sortie as Omit<Sortie, "id">) : undefined,
+  };
+}
+
+function pendingToRow(p: PendingSortie): Record<string, unknown> {
+  return {
+    id: p.id,
+    hosting_squadron_id: p.hostingSquadronId,
+    hosting_squadron_name: p.hostingSquadronName,
+    home_squadron_id: p.homeSquadronId,
+    home_squadron_name: p.homeSquadronName,
+    guest_pilot_name: p.guestPilotName,
+    guest_pilot_military_number: p.guestPilotMilitaryNumber ?? null,
+    guest_seat: p.guestSeat,
+    sortie: p.sortie,
+    submitted_at: p.submittedAt,
+    submitted_by: p.submittedBy,
+    status: p.status,
+    decided_at: p.decidedAt ?? null,
+    decided_by: p.decidedBy ?? null,
+    decision_reason: p.decisionReason ?? null,
+    edited_sortie: p.editedSortie ?? null,
+  };
+}
+
 export function usePendingApprovals(homeSquadronId: string | null | undefined): UseQueryResult<PendingSortie[]> & { data: PendingSortie[] } {
   const q = useQuery<PendingSortie[]>({
     queryKey: ["xpc", "pending", homeSquadronId ?? ""],
-    queryFn: () => {
+    queryFn: async () => {
       if (!homeSquadronId) return [];
+      if (isLive()) {
+        const { data, error } = await supabase!
+          .from("xpc_pending")
+          .select("*")
+          .eq("home_squadron_id", homeSquadronId)
+          .eq("status", "pending")
+          .order("submitted_at", { ascending: false });
+        if (error) throw error;
+        return (data ?? []).map(rowToPending);
+      }
       return readPending()
         .filter(p => p.homeSquadronId === homeSquadronId && p.status === "pending")
         .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
     },
     refetchInterval: 15_000,
+    retry: isLive() ? 1 : false,
   });
   return { ...q, data: q.data ?? [] } as UseQueryResult<PendingSortie[]> & { data: PendingSortie[] };
 }
@@ -210,8 +311,19 @@ export function usePendingApprovals(homeSquadronId: string | null | undefined): 
 export function useAllPending(): UseQueryResult<PendingSortie[]> & { data: PendingSortie[] } {
   const q = useQuery<PendingSortie[]>({
     queryKey: ["xpc", "pending", "all"],
-    queryFn: () => readPending().sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
+    queryFn: async () => {
+      if (isLive()) {
+        const { data, error } = await supabase!
+          .from("xpc_pending")
+          .select("*")
+          .order("submitted_at", { ascending: false });
+        if (error) throw error;
+        return (data ?? []).map(rowToPending);
+      }
+      return readPending().sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+    },
     refetchInterval: 15_000,
+    retry: isLive() ? 1 : false,
   });
   return { ...q, data: q.data ?? [] } as UseQueryResult<PendingSortie[]> & { data: PendingSortie[] };
 }
@@ -226,9 +338,14 @@ export function useSubmitPending() {
         submittedAt: nowIso(),
         status: "pending",
       };
-      const rows = readPending();
-      rows.push(row);
-      writePending(rows);
+      if (isLive()) {
+        const { error } = await supabase!.from("xpc_pending").insert(pendingToRow(row));
+        if (error) throw error;
+      } else {
+        const rows = readPending();
+        rows.push(row);
+        writePending(rows);
+      }
       await recordAuditEvent({
         type: "xpc.pending.submitted",
         actor: input.submittedBy,
@@ -252,24 +369,39 @@ export function useDecidePending() {
       reason?: string;
       editedSortie?: Omit<Sortie, "id">;
     }) => {
-      const rows = readPending();
-      const idx = rows.findIndex(r => r.id === input.id);
-      if (idx < 0) throw new Error("Pending entry not found");
-      rows[idx] = {
-        ...rows[idx],
-        status: input.decision,
-        decidedAt: nowIso(),
-        decidedBy: input.decidedBy,
-        decisionReason: input.reason,
-        editedSortie: input.editedSortie,
-      };
-      writePending(rows);
+      const decidedAt = nowIso();
+      let updated: PendingSortie | null = null;
+      if (isLive()) {
+        const { data, error } = await supabase!.from("xpc_pending").update({
+          status: input.decision,
+          decided_at: decidedAt,
+          decided_by: input.decidedBy,
+          decision_reason: input.reason ?? null,
+          edited_sortie: input.editedSortie ?? null,
+        }).eq("id", input.id).select().single();
+        if (error) throw error;
+        updated = rowToPending(data);
+      } else {
+        const rows = readPending();
+        const idx = rows.findIndex(r => r.id === input.id);
+        if (idx < 0) throw new Error("Pending entry not found");
+        rows[idx] = {
+          ...rows[idx],
+          status: input.decision,
+          decidedAt,
+          decidedBy: input.decidedBy,
+          decisionReason: input.reason,
+          editedSortie: input.editedSortie,
+        };
+        writePending(rows);
+        updated = rows[idx];
+      }
       await recordAuditEvent({
         type: `xpc.pending.${input.decision}`,
         actor: input.decidedBy,
         detail: { id: input.id, reason: input.reason },
       });
-      return rows[idx];
+      return updated;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["xpc", "pending"] });
@@ -334,10 +466,57 @@ function writeShares(rows: ScheduleShare[]) {
   writeJSON(SCHEDULE_SHARE_KEY, rows);
 }
 
+function rowToShare(r: Record<string, unknown>): ScheduleShare {
+  return {
+    id: String(r.id),
+    date: String(r.flight_date),
+    originSquadronId: String(r.origin_squadron_id),
+    originSquadronName: String(r.origin_squadron_name),
+    currentTier: r.current_tier as ScheduleTier,
+    currentPcId: r.current_pc_id ? String(r.current_pc_id) : null,
+    currentPcName: r.current_pc_name ? String(r.current_pc_name) : null,
+    status: r.status as ScheduleStatus,
+    rows: (r.rows ?? []) as ScheduleRow[],
+    baselineRows: (r.baseline_rows ?? []) as ScheduleRow[],
+    history: (r.history ?? []) as ScheduleShare["history"],
+    editedRows: r.edited_rows ? (r.edited_rows as ScheduleRow[]) : undefined,
+    editedBy: r.edited_by ? String(r.edited_by) : undefined,
+  };
+}
+
+function shareToRow(s: ScheduleShare): Record<string, unknown> {
+  return {
+    id: s.id,
+    flight_date: s.date,
+    origin_squadron_id: s.originSquadronId,
+    origin_squadron_name: s.originSquadronName,
+    current_tier: s.currentTier,
+    current_pc_id: s.currentPcId,
+    current_pc_name: s.currentPcName,
+    status: s.status,
+    rows: s.rows,
+    baseline_rows: s.baselineRows,
+    history: s.history,
+    edited_rows: s.editedRows ?? null,
+    edited_by: s.editedBy ?? null,
+    updated_at: nowIso(),
+  };
+}
+
 export function useScheduleShares(forPcId: string | null): UseQueryResult<ScheduleShare[]> & { data: ScheduleShare[] } {
   const q = useQuery<ScheduleShare[]>({
     queryKey: ["xpc", "schedule", forPcId ?? ""],
-    queryFn: () => {
+    queryFn: async () => {
+      if (isLive()) {
+        let qry = supabase!.from("xpc_schedule_shares").select("*").order("flight_date", { ascending: false });
+        if (forPcId) {
+          // Either we're the current holder OR we're the originator.
+          qry = qry.or(`current_pc_id.eq.${forPcId},origin_squadron_id.eq.${forPcId}`);
+        }
+        const { data, error } = await qry;
+        if (error) throw error;
+        return (data ?? []).map(rowToShare);
+      }
       const all = readShares();
       if (!forPcId) return all;
       return all
@@ -345,6 +524,7 @@ export function useScheduleShares(forPcId: string | null): UseQueryResult<Schedu
         .sort((a, b) => b.date.localeCompare(a.date));
     },
     refetchInterval: 15_000,
+    retry: isLive() ? 1 : false,
   });
   return { ...q, data: q.data ?? [] } as UseQueryResult<ScheduleShare[]> & { data: ScheduleShare[] };
 }
@@ -375,9 +555,14 @@ export function useSubmitSchedule() {
         baselineRows: input.rows,
         history: [{ at: nowIso(), by: input.submittedBy, tier: "squadron", action: "submitted", note: `→ ${input.targetPcName}` }],
       };
-      const all = readShares();
-      all.push(share);
-      writeShares(all);
+      if (isLive()) {
+        const { error } = await supabase!.from("xpc_schedule_shares").insert(shareToRow(share));
+        if (error) throw error;
+      } else {
+        const all = readShares();
+        all.push(share);
+        writeShares(all);
+      }
       await recordAuditEvent({
         type: "xpc.schedule.submitted",
         actor: input.submittedBy,
@@ -404,10 +589,19 @@ export function useDecideSchedule() {
       // For action=edit: revised rows; defaults to sending back to the originator.
       editedRows?: ScheduleRow[];
     }) => {
-      const all = readShares();
-      const idx = all.findIndex(s => s.id === input.id);
-      if (idx < 0) throw new Error("Schedule not found");
-      const cur = { ...all[idx] };
+      // Load current state (Supabase or local).
+      let cur: ScheduleShare;
+      if (isLive()) {
+        const { data, error } = await supabase!.from("xpc_schedule_shares").select("*").eq("id", input.id).single();
+        if (error) throw error;
+        cur = rowToShare(data);
+      } else {
+        const all = readShares();
+        const found = all.find(s => s.id === input.id);
+        if (!found) throw new Error("Schedule not found");
+        cur = { ...found };
+      }
+
       const push = (action: ScheduleStatus, note?: string) =>
         cur.history.push({ at: nowIso(), by: input.by, tier: input.tier, action, note });
 
@@ -446,8 +640,17 @@ export function useDecideSchedule() {
         cur.status = "reviewed";
         push("reviewed", `→ ${input.forwardPcName ?? ""}`);
       }
-      all[idx] = cur;
-      writeShares(all);
+
+      if (isLive()) {
+        const { error } = await supabase!.from("xpc_schedule_shares")
+          .update(shareToRow(cur)).eq("id", cur.id);
+        if (error) throw error;
+      } else {
+        const all = readShares();
+        const idx = all.findIndex(s => s.id === cur.id);
+        if (idx >= 0) all[idx] = cur;
+        writeShares(all);
+      }
       await recordAuditEvent({
         type: `xpc.schedule.${input.action}`,
         actor: input.by,
@@ -464,18 +667,33 @@ export function useAcceptScheduleEdit() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { id: string; by: string }) => {
-      const all = readShares();
-      const idx = all.findIndex(s => s.id === input.id);
-      if (idx < 0) throw new Error("Schedule not found");
-      const cur = { ...all[idx] };
+      let cur: ScheduleShare;
+      if (isLive()) {
+        const { data, error } = await supabase!.from("xpc_schedule_shares").select("*").eq("id", input.id).single();
+        if (error) throw error;
+        cur = rowToShare(data);
+      } else {
+        const all = readShares();
+        const found = all.find(s => s.id === input.id);
+        if (!found) throw new Error("Schedule not found");
+        cur = { ...found };
+      }
       if (!cur.editedRows) return cur;
       cur.rows = cur.editedRows;
       cur.baselineRows = cur.editedRows;
       cur.editedRows = undefined;
       cur.status = "approved";
       cur.history.push({ at: nowIso(), by: input.by, tier: "squadron", action: "approved", note: "originator accepted edits" });
-      all[idx] = cur;
-      writeShares(all);
+      if (isLive()) {
+        const { error } = await supabase!.from("xpc_schedule_shares")
+          .update(shareToRow(cur)).eq("id", cur.id);
+        if (error) throw error;
+      } else {
+        const all = readShares();
+        const idx = all.findIndex(s => s.id === cur.id);
+        if (idx >= 0) all[idx] = cur;
+        writeShares(all);
+      }
       await recordAuditEvent({ type: "xpc.schedule.edits.accepted", actor: input.by, detail: { id: cur.id } });
       return cur;
     },
@@ -554,6 +772,46 @@ function writeMessages(rows: PrivateMessage[]) {
   writeJSON(MESSAGES_KEY, rows);
 }
 
+function rowToMessage(r: Record<string, unknown>): PrivateMessage {
+  return {
+    id: String(r.id),
+    threadId: String(r.thread_id),
+    fromPcId: String(r.from_pc_id),
+    fromPcName: String(r.from_pc_name),
+    fromTier: r.from_tier as MessageTier,
+    fromUser: String(r.from_user),
+    toPcId: String(r.to_pc_id),
+    toPcName: String(r.to_pc_name),
+    toTier: r.to_tier as MessageTier,
+    subject: String(r.subject),
+    body: String(r.body),
+    priority: r.priority as MessagePriority,
+    sentAt: String(r.sent_at),
+    readAt: r.read_at ? String(r.read_at) : undefined,
+    inHistory: Boolean(r.in_history),
+  };
+}
+
+function messageToRow(m: PrivateMessage): Record<string, unknown> {
+  return {
+    id: m.id,
+    thread_id: m.threadId,
+    from_pc_id: m.fromPcId,
+    from_pc_name: m.fromPcName,
+    from_tier: m.fromTier,
+    from_user: m.fromUser,
+    to_pc_id: m.toPcId,
+    to_pc_name: m.toPcName,
+    to_tier: m.toTier,
+    subject: m.subject,
+    body: m.body,
+    priority: m.priority,
+    sent_at: m.sentAt,
+    read_at: m.readAt ?? null,
+    in_history: m.inHistory,
+  };
+}
+
 export function getMessageRetentionDays(): number {
   const raw = localStorage.getItem(MESSAGE_RETENTION_KEY);
   const n = raw ? Number(raw) : 30;
@@ -570,12 +828,17 @@ export function setMessageRetentionDays(days: number) {
 export function purgeExpiredMessages(): void {
   try {
     const rows = readMessages();
-    const kept = purgeExpired(rows);
+    const kept = purgeExpiredLocal(rows);
     if (kept.length !== rows.length) writeMessages(kept);
   } catch { /* localStorage may be unavailable in SSR/tests */ }
+  if (isLive()) {
+    const days = getMessageRetentionDays();
+    const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+    void supabase!.from("xpc_messages").delete().lt("sent_at", cutoff);
+  }
 }
 
-function purgeExpired(rows: PrivateMessage[]): PrivateMessage[] {
+function purgeExpiredLocal(rows: PrivateMessage[]): PrivateMessage[] {
   const days = getMessageRetentionDays();
   const cutoff = Date.now() - days * 86_400_000;
   return rows.filter(m => new Date(m.sentAt).getTime() >= cutoff);
@@ -586,15 +849,28 @@ export function useMessages(forPcId: string | null): {
 } & UseQueryResult<PrivateMessage[]> {
   const q = useQuery<PrivateMessage[]>({
     queryKey: ["xpc", "messages", forPcId ?? ""],
-    queryFn: () => {
-      const purged = purgeExpired(readMessages());
-      writeMessages(purged);
+    queryFn: async () => {
       if (!forPcId) return [];
+      if (isLive()) {
+        const days = getMessageRetentionDays();
+        const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+        const { data, error } = await supabase!
+          .from("xpc_messages")
+          .select("*")
+          .or(`from_pc_id.eq.${forPcId},to_pc_id.eq.${forPcId}`)
+          .gte("sent_at", cutoff)
+          .order("sent_at", { ascending: false });
+        if (error) throw error;
+        return (data ?? []).map(rowToMessage);
+      }
+      const purged = purgeExpiredLocal(readMessages());
+      writeMessages(purged);
       return purged
         .filter(m => m.fromPcId === forPcId || m.toPcId === forPcId)
         .sort((a, b) => b.sentAt.localeCompare(a.sentAt));
     },
     refetchInterval: 15_000,
+    retry: isLive() ? 1 : false,
   });
   const all = q.data ?? [];
   return {
@@ -616,9 +892,14 @@ export function useSendMessage() {
         sentAt: nowIso(),
         inHistory: false,
       };
-      const all = readMessages();
-      all.push(msg);
-      writeMessages(all);
+      if (isLive()) {
+        const { error } = await supabase!.from("xpc_messages").insert(messageToRow(msg));
+        if (error) throw error;
+      } else {
+        const all = readMessages();
+        all.push(msg);
+        writeMessages(all);
+      }
       await recordAuditEvent({
         type: "xpc.message.sent",
         actor: input.fromUser,
@@ -634,10 +915,18 @@ export function useMarkMessageRead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { id: string }) => {
+      const readAt = nowIso();
+      if (isLive()) {
+        const { data, error } = await supabase!.from("xpc_messages")
+          .update({ read_at: readAt, in_history: true })
+          .eq("id", input.id).select().single();
+        if (error) throw error;
+        return data ? rowToMessage(data) : null;
+      }
       const all = readMessages();
       const idx = all.findIndex(m => m.id === input.id);
       if (idx < 0) return null;
-      all[idx] = { ...all[idx], readAt: nowIso(), inHistory: true };
+      all[idx] = { ...all[idx], readAt, inHistory: true };
       writeMessages(all);
       return all[idx];
     },

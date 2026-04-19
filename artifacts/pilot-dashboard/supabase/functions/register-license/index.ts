@@ -127,11 +127,16 @@ Deno.serve(async (req: Request) => {
   //    auth.signInWithPassword calls.
   const email = `${username}@${sqnSlug(sqnNumber)}.rjaf.local`;
   const password = randomPassword();
+  // pc_id is the canonical cross-PC identifier this auth user is allowed
+  // to act as in cross-pc.ts (registry / pending / schedule / messages).
+  // For ops accounts it is exactly the squadron's name — RLS on the
+  // xpc_* tables binds writes to this claim.
   const appMeta = {
     squadron_id: squadronId,
     role: "ops",
     tier: "ops",
     squadron_number: sqnNumber,
+    pc_id: sqnName,
   };
   const userMeta = { displayName };
 
