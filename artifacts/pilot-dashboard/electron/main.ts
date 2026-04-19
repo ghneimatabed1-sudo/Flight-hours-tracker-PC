@@ -46,7 +46,7 @@ function createWindow() {
     minWidth: 1100,
     minHeight: 720,
     backgroundColor: "#0a1226",
-    title: "RJAF Squadron Ops",
+    title: "Hawk Eye",
     icon: path.join(__dirname, "..", "public", "brand", "emblem.png"),
     autoHideMenuBar: true,
     webPreferences: {
@@ -70,7 +70,7 @@ function createWindow() {
     if (!isDev) {
       try { mainWindow?.webContents.openDevTools({ mode: "detach" }); } catch { /* ignore */ }
       dialog.showErrorBox(
-        "RJAF Squadron Ops — startup error",
+        "Hawk Eye — startup error",
         `${label}\n\n${detail}\n\nA log was written to:\n${logFile}\n\n` +
         `Please send this file to the Super Admin.`,
       );

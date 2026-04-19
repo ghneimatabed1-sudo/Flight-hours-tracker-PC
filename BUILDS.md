@@ -4,9 +4,9 @@ This repo produces three artefacts for operational use:
 
 | Target                 | Platform | Builder                        | Output |
 |------------------------|----------|--------------------------------|--------|
-| Squadron Ops PC app    | Windows  | electron-builder (NSIS)        | `RJAF-SquadronOps-Setup-<ver>.exe` |
-| Pilot Logbook iOS      | iPhone   | Xcode + expo prebuild          | `.ipa` |
-| Pilot Logbook Android  | Android  | Gradle + expo prebuild         | `.apk` |
+| Hawk Eye PC app    | Windows  | electron-builder (NSIS)        | `HawkEye-Setup-<ver>.exe` |
+| Hawk Eye iOS           | iPhone   | Xcode + expo prebuild          | `.ipa` |
+| Hawk Eye Android       | Android  | Gradle + expo prebuild         | `.apk` |
 
 All three are pre-configured for **Codemagic** (`codemagic.yaml` at the
 repo root) and GitHub Actions (`.github/workflows/`). Pick whichever you
@@ -21,9 +21,9 @@ macOS, Linux, and Windows build agents in a single dashboard.
 1. Go to https://codemagic.io, sign in with GitHub/GitLab.
 2. Add this repository as a project.
 3. Codemagic auto-detects `codemagic.yaml` — you'll see three workflows:
-   - **RJAF Pilot Logbook — Android APK**
-   - **RJAF Pilot Logbook — iOS IPA**
-   - **RJAF Squadron Ops — Windows Installer**
+   - **Hawk Eye — Android APK**
+   - **Hawk Eye — iOS IPA**
+   - **Hawk Eye — Windows Installer**
 
 ### Optional secrets (set in Codemagic UI → Environment variables)
 - `INSTALL_PASSWORD` — master password the NSIS installer prompts for
@@ -67,7 +67,7 @@ pnpm install
 pnpm add -D electron@^32 electron-builder@^25 electron-updater@^6
 $env:INSTALL_PASSWORD="YourMasterPasswordHere"
 pnpm run electron:build
-# → artifacts/pilot-dashboard/release/RJAF-SquadronOps-Setup-<ver>.exe
+# → artifacts/pilot-dashboard/release/HawkEye-Setup-<ver>.exe
 ```
 
 ### IPA on macOS

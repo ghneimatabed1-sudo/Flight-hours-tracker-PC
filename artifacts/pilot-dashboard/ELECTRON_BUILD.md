@@ -1,6 +1,6 @@
-# Building the RJAF Squadron Ops Windows .exe Installer
+# Building the Hawk Eye Windows .exe Installer
 
-This document explains how to package the Squadron Ops React app into a real
+This document explains how to package the Hawk Eye React app into a real
 Windows `.exe` installer (NSIS) with a master install password and silent
 auto-update support.
 
@@ -52,7 +52,7 @@ pnpm --filter @workspace/pilot-dashboard run electron:build
 ```
 The signed installer is written to:
 ```
-artifacts/pilot-dashboard/release/RJAF-SquadronOps-Setup-1.0.0.exe
+artifacts/pilot-dashboard/release/HawkEye-Setup-1.0.0.exe
 ```
 Distribute that single file to ops officers — when they run it, NSIS will
 prompt for the master install password before any files land on disk.
@@ -71,7 +71,7 @@ on startup (see `publish` block in `electron-builder.json`). To roll a new
 version:
 1. Bump `version` in `package.json` (e.g. `1.0.1`).
 2. Run `electron:build` on a Windows machine.
-3. Upload `release/latest.yml` and the new `RJAF-SquadronOps-Setup-1.0.1.exe`
+3. Upload `release/latest.yml` and the new `HawkEye-Setup-1.0.1.exe`
    to that URL.
 Existing installations will silently download and install the update on next
 launch.

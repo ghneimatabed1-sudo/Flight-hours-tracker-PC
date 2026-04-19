@@ -2,7 +2,7 @@
   "name": "@workspace/pilot-desktop",
   "version": "1.0.0",
   "private": true,
-  "description": "RJAF Flight Hour Tracker — Windows desktop wrapper",
+  "description": "Hawk Eye — RJAF Windows desktop wrapper",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -18,7 +18,7 @@
   },
   "build": {
     "appId": "com.rjaf.flighthourtracker",
-    "productName": "Flight Hour Tracker",
+    "productName": "Hawk Eye",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -35,7 +35,7 @@
         }
       ],
       "icon": "build/icon.ico",
-      "artifactName": "FlightHourTracker-Setup-${version}.${ext}"
+      "artifactName": "HawkEye-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -44,7 +44,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Flight Hour Tracker",
+      "shortcutName": "Hawk Eye",
       "include": "build/installer.nsh",
       "deleteAppDataOnUninstall": false
     }

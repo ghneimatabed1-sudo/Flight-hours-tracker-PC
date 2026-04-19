@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell } from "electron";
 import * as path from "path";
 
-// URL of the deployed Flight Hour Tracker web dashboard. Injected at build
+// URL of the deployed Hawk Eye web dashboard. Injected at build
 // time via electron-builder's env var expansion, or falls back to the
 // Replit-hosted deployment. Ops officers never edit this directly.
 const DASHBOARD_URL = process.env.DASHBOARD_URL
@@ -13,7 +13,7 @@ function createWindow(): void {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: "Flight Hour Tracker",
+    title: "Hawk Eye",
     autoHideMenuBar: true,
     backgroundColor: "#0b0f14",
     webPreferences: {

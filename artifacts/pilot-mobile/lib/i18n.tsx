@@ -7,7 +7,7 @@ export type Lang = "en" | "ar";
 type Dict = Record<string, string>;
 
 const EN: Dict = {
-  app_name: "Pilot Logbook",
+  app_name: "Hawk Eye",
   link_title: "Link Your Profile",
   link_subtitle:
     "Enter your military number and the one-time code provided by your squadron operations officer.",
@@ -169,7 +169,7 @@ const EN: Dict = {
 };
 
 const AR: Dict = {
-  app_name: "سجل الطيار",
+  app_name: "عين الصقر",
   link_title: "ربط حسابك",
   link_subtitle:
     "أدخل رقمك العسكري ورمز التحقق لمرة واحدة الذي قدمه ضابط عمليات السرب.",

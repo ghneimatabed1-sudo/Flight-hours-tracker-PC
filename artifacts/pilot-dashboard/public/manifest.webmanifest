@@ -1,7 +1,7 @@
 {
-  "name": "Flight Hour Tracker",
-  "short_name": "FHT",
-  "description": "RJAF UH-60M Squadron Flight Hours Management",
+  "name": "Hawk Eye",
+  "short_name": "Hawk Eye",
+  "description": "Hawk Eye — RJAF UH-60M Squadron Flight Hours Management",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

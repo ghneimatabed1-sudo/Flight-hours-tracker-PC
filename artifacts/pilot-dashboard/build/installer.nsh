@@ -37,7 +37,7 @@
       Abort
     ${EndIf}
 
-    ${NSD_CreateLabel} 0 0 100% 16u "RJAF Squadron Ops — Installation Password"
+    ${NSD_CreateLabel} 0 0 100% 16u "Hawk Eye — Installation Password"
     Pop $1
 
     ${NSD_CreateLabel} 0 22u 100% 30u "Enter the master installation password issued by the RJAF Super Admin to continue."

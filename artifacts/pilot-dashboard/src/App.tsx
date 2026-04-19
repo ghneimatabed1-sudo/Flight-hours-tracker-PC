@@ -33,6 +33,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { I18nProvider } from "@/lib/i18n";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import Layout from "@/components/Layout";
+import OpeningAnimation from "@/components/OpeningAnimation";
 import { HQLayout } from "@/components/HQLayout";
 import LoginGate from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
@@ -261,6 +262,7 @@ function App() {
               </WouterRouter>
             )}
             <Toaster />
+            <OpeningAnimation />
           </TooltipProvider>
         </AuthProvider>
       </I18nProvider>

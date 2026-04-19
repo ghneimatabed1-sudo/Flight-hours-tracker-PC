@@ -1,4 +1,4 @@
-# RJAF Squadron Ops — Desktop App
+# Hawk Eye — Desktop App
 
 A bilingual (English / العربية) Windows desktop application for the squadron
 ops officer to manage all flight data — pilot roster, sortie log, currencies,

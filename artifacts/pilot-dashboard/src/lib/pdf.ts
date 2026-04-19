@@ -31,7 +31,7 @@ const STR = {
   monthlyByPilot: { en: "Monthly Hours by Pilot", ar: "الساعات الشهرية لكل طيار" },
   asOf: { en: "As of", ar: "حتى تاريخ" },
   confidential: {
-    en: "RJAF Squadron Ops · Confidential · Page",
+    en: "Hawk Eye · Confidential · Page",
     ar: "عمليات سرب القوات الجوية الملكية الأردنية · سري · صفحة",
   },
   of: { en: "of", ar: "من" },

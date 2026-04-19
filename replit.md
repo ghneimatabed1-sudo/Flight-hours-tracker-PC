@@ -1,6 +1,6 @@
 # Overview
 
-This project is a pnpm workspace monorepo using TypeScript, designed to build a comprehensive flight hours management system for the Royal Jordanian Air Force (RJAF). It includes a web-based command dashboard ("Eagle Eye HQ") for super administrators and commanders, and a mobile application for pilots.
+This project is a pnpm workspace monorepo using TypeScript, designed to build a comprehensive flight hours management system for the Royal Jordanian Air Force (RJAF). The product is branded **"Hawk Eye"** (Arabic: عين الصقر) across the dashboard, mobile app, PDF headers, and packaged installers. It includes a web-based command dashboard ("Hawk Eye HQ") for super administrators and commanders, and a mobile application for pilots.
 
 The system aims to provide:
 - **Centralized Administration:** Super admin panel for system overview, license key management, commander accounts, squadron control, and audit logging.

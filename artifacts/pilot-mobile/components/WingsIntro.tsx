@@ -1,5 +1,12 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, Easing, Image, StyleSheet, Text, View } from "react-native";
+import {
+  Animated,
+  Easing,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+} from "react-native";
 
 import { useColors } from "@/hooks/useColors";
 
@@ -8,9 +15,10 @@ type Props = {
   durationMs?: number;
 };
 
-// Brief brand intro shown right after the OS splash (which displays the
-// RJAF emblem). Fades the pilot wings in, holds, then fades out before the
-// main app (activation / link flow) takes over.
+// Brief Hawk Eye brand intro shown right after the OS splash (which
+// displays the RJAF emblem). Fades the pilot wings + Hawk Eye wordmark
+// in, holds, then fades out before the main app (activation / link
+// flow) takes over. Tap anywhere to skip.
 export default function WingsIntro({ onDone, durationMs = 1800 }: Props) {
   const colors = useColors();
   const opacity = useRef(new Animated.Value(0)).current;
@@ -50,14 +58,25 @@ export default function WingsIntro({ onDone, durationMs = 1800 }: Props) {
     return () => clearTimeout(t);
   }, [opacity, scale, durationMs, onDone]);
 
+  const skip = () => {
+    Animated.timing(opacity, {
+      toValue: 0,
+      duration: 180,
+      easing: Easing.in(Easing.quad),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) onDone();
+    });
+  };
+
   return (
-    <View
+    <Pressable
+      onPress={skip}
       style={[
         StyleSheet.absoluteFillObject,
         styles.container,
         { backgroundColor: colors.background },
       ]}
-      pointerEvents="none"
     >
       <Animated.View style={{ opacity, transform: [{ scale }] }}>
         <Image
@@ -66,13 +85,13 @@ export default function WingsIntro({ onDone, durationMs = 1800 }: Props) {
           resizeMode="contain"
         />
         <Text style={[styles.title, { color: colors.foreground }]}>
-          RJAF Pilot Logbook
+          HAWK EYE
         </Text>
         <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-          سجل الطيار
+          عين الصقر
         </Text>
       </Animated.View>
-    </View>
+    </Pressable>
   );
 }
 
