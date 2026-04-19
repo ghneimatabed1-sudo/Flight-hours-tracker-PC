@@ -39,6 +39,8 @@ export default function LicenseKeys() {
     | "ops"
     | "flight_commander"
     | "squadron_commander"
+    | "wing_commander"
+    | "base_commander"
     | "hq_commander"
     | "super_admin";
   const [setupOpen, setSetupOpen] = useState(false);
@@ -211,6 +213,8 @@ export default function LicenseKeys() {
   function roleScope(r: SetupRoleUI): CommanderScope | undefined {
     if (r === "flight_commander") return "flight";
     if (r === "squadron_commander") return "squadron";
+    if (r === "wing_commander") return "wing";
+    if (r === "base_commander") return "base";
     if (r === "hq_commander") return "hq";
     return undefined;
   }
@@ -218,6 +222,8 @@ export default function LicenseKeys() {
     if (r === "ops") return lang === "ar" ? "طيار عمليات" : "Ops Pilot";
     if (r === "flight_commander") return lang === "ar" ? "قائد طيران" : "Flight Commander";
     if (r === "squadron_commander") return lang === "ar" ? "قائد سرب" : "Squadron Commander";
+    if (r === "wing_commander") return lang === "ar" ? "قائد جناح" : "Wing Commander";
+    if (r === "base_commander") return lang === "ar" ? "قائد قاعدة" : "Base Commander";
     if (r === "hq_commander") return lang === "ar" ? "قائد القيادة" : "HQ Commander";
     return lang === "ar" ? "مدير عام" : "Super Admin";
   }
@@ -225,6 +231,8 @@ export default function LicenseKeys() {
     if (r === "ops") return lang === "ar" ? "مثال: pilot.alkhatib" : "e.g. pilot.alkhatib";
     if (r === "flight_commander") return lang === "ar" ? "مثال: flt.alali" : "e.g. flt.alali";
     if (r === "squadron_commander") return lang === "ar" ? "مثال: sqn.alali" : "e.g. sqn.alali";
+    if (r === "wing_commander") return lang === "ar" ? "مثال: wing.alali" : "e.g. wing.alali";
+    if (r === "base_commander") return lang === "ar" ? "مثال: base.alali" : "e.g. base.alali";
     return lang === "ar" ? "مثال: hq.alali" : "e.g. hq.alali";
   }
 
@@ -237,7 +245,7 @@ export default function LicenseKeys() {
     // If the active license carried a Super-Admin-assigned role, force the
     // setup dialog to that role; the operator can't widen their own tier.
     const assigned = localStorage.getItem("rjaf.assignedRole") as SetupRoleUI | null;
-    setSetupRole(assigned && ["ops","flight_commander","squadron_commander","hq_commander","super_admin"].includes(assigned) ? assigned : "ops");
+    setSetupRole(assigned && ["ops","flight_commander","squadron_commander","wing_commander","base_commander","hq_commander","super_admin"].includes(assigned) ? assigned : "ops");
     setSetupSqnName(auth.squadron?.name ?? "");
     setSetupSqnNumber(auth.squadron?.number ?? "");
     setSetupSqnBase(auth.squadron?.base ?? "");
@@ -346,8 +354,10 @@ export default function LicenseKeys() {
         // Failing this step does NOT abort setup — local sign-in still
         // works; only cross-PC data sync is degraded.
         if (supabaseConfigured && setupRole !== "ops" && roleAccountKind(setupRole) === "commander") {
-          const tierForSb: "hq" | "squadron" | "flight" =
+          const tierForSb: "hq" | "base" | "wing" | "squadron" | "flight" =
             setupRole === "hq_commander" ? "hq"
+            : setupRole === "base_commander" ? "base"
+            : setupRole === "wing_commander" ? "wing"
             : setupRole === "flight_commander" ? "flight"
             : "squadron";
           try {
@@ -440,6 +450,8 @@ export default function LicenseKeys() {
       // without expanding the PcRoleLock enum.
       const tier =
         setupRole === "hq_commander" ? "hq" :
+        setupRole === "base_commander" ? "base" :
+        setupRole === "wing_commander" ? "wing" :
         setupRole === "squadron_commander" ? "squadron" :
         setupRole === "flight_commander" ? "flight" : "";
       if (tier) localStorage.setItem("rjaf.commanderTier", tier);
@@ -488,7 +500,7 @@ export default function LicenseKeys() {
   // Super Admin chooses this here; the field operator can't override it
   // during Setup. Defaults to "ops" (the most common case — squadron
   // operations PC).
-  const [genRole, setGenRole] = useState<"ops" | "flight_commander" | "squadron_commander" | "hq_commander">("ops");
+  const [genRole, setGenRole] = useState<"ops" | "flight_commander" | "squadron_commander" | "wing_commander" | "base_commander" | "hq_commander">("ops");
   // Authorized squadrons for commander tiers. Empty for ops (the PC's own
   // squadron is implicit) and HQ (sees all). For Flight/Squadron Commander
   // PCs, the Super Admin ticks exactly which squadrons that commander is
@@ -603,10 +615,12 @@ export default function LicenseKeys() {
   // mirrors the change into the registry record so the PC's history stays
   // consistent. Only visible when this PC is licensed as a commander tier.
   const assignedRoleHere = (typeof window !== "undefined" ? localStorage.getItem("rjaf.assignedRole") : null) as
-    | "ops" | "flight_commander" | "squadron_commander" | "hq_commander" | "super_admin" | null;
+    | "ops" | "flight_commander" | "squadron_commander" | "wing_commander" | "base_commander" | "hq_commander" | "super_admin" | null;
   const showLiveAuthEditor =
     assignedRoleHere === "squadron_commander" ||
     assignedRoleHere === "flight_commander" ||
+    assignedRoleHere === "wing_commander" ||
+    assignedRoleHere === "base_commander" ||
     assignedRoleHere === "hq_commander";
   const [liveAuth, setLiveAuth] = useState<string[]>(() => {
     try { const raw = localStorage.getItem("rjaf.authorizedSquadronIds"); return raw ? JSON.parse(raw) : []; }
@@ -784,6 +798,8 @@ export default function LicenseKeys() {
                     <SelectItem value="ops">{lang === "ar" ? "طيار عمليات" : "Ops Pilot"}</SelectItem>
                     <SelectItem value="flight_commander">{lang === "ar" ? "قائد طيران" : "Flight Commander"}</SelectItem>
                     <SelectItem value="squadron_commander">{lang === "ar" ? "قائد سرب" : "Squadron Commander"}</SelectItem>
+                    <SelectItem value="wing_commander">{lang === "ar" ? "قائد جناح" : "Wing Commander"}</SelectItem>
+                    <SelectItem value="base_commander">{lang === "ar" ? "قائد قاعدة" : "Base Commander"}</SelectItem>
                     <SelectItem value="hq_commander">{lang === "ar" ? "قائد القيادة" : "Head Quarter Commander"}</SelectItem>
                   </SelectContent>
                 </Select>
@@ -829,6 +845,15 @@ export default function LicenseKeys() {
                   {lang === "ar"
                     ? "قائد القيادة يرى كل الأسراب تلقائيًا — لا حاجة لاختيار."
                     : "HQ Commander sees every squadron automatically — no selection needed."}
+                </p>
+              )}
+              {(genRole === "wing_commander" || genRole === "base_commander") && (
+                <p className="text-[11px] text-muted-foreground border border-border rounded p-2">
+                  {lang === "ar"
+                    ? "يرى كل الأسراب التابعة للجناح/القاعدة تلقائيًا — لا حاجة لاختيار."
+                    : (genRole === "wing_commander"
+                        ? "Wing Commander sees every squadron in the wing automatically — no selection needed."
+                        : "Base Commander sees every squadron at the base automatically — no selection needed.")}
                 </p>
               )}
               <div className="space-y-2">
@@ -1010,6 +1035,8 @@ export default function LicenseKeys() {
                     <SelectItem value="ops">{lang === "ar" ? "طيار عمليات (Ops)" : "Ops Pilot"}</SelectItem>
                     <SelectItem value="flight_commander">{lang === "ar" ? "قائد طيران" : "Flight Commander"}</SelectItem>
                     <SelectItem value="squadron_commander">{lang === "ar" ? "قائد سرب" : "Squadron Commander"}</SelectItem>
+                    <SelectItem value="wing_commander">{lang === "ar" ? "قائد جناح" : "Wing Commander"}</SelectItem>
+                    <SelectItem value="base_commander">{lang === "ar" ? "قائد قاعدة" : "Base Commander"}</SelectItem>
                     <SelectItem value="hq_commander">{lang === "ar" ? "قائد القيادة" : "Head Quarter Commander"}</SelectItem>
                     <SelectItem value="super_admin">{lang === "ar" ? "مدير عام" : "Super Admin"}</SelectItem>
                   </SelectContent>
@@ -1032,7 +1059,7 @@ export default function LicenseKeys() {
                 </p>
               </div>
 
-              {(setupRole === "squadron_commander" || setupRole === "flight_commander" || setupRole === "hq_commander") && (
+              {(setupRole === "squadron_commander" || setupRole === "flight_commander" || setupRole === "wing_commander" || setupRole === "base_commander" || setupRole === "hq_commander") && (
                 <div className="space-y-1">
                   <label className="text-sm font-medium">
                     {lang === "ar" ? "اسم القائد" : "Commander name"}
