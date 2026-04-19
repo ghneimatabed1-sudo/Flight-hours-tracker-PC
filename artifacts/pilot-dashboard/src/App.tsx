@@ -45,7 +45,7 @@ import PendingApprovals from "@/pages/PendingApprovals";
 import GuestBackfill from "@/pages/GuestBackfill";
 import Messages from "@/pages/Messages";
 import ScheduleChain from "@/pages/ScheduleChain";
-import { registerLocalPC, purgeExpiredMessages } from "@/lib/cross-pc";
+import { registerLocalPC, purgeExpiredMessages, getLocalPcId, type PcTier } from "@/lib/cross-pc";
 import Roster from "@/pages/Roster";
 import PilotDetail from "@/pages/PilotDetail";
 import Currency from "@/pages/Currency";
@@ -225,29 +225,67 @@ function ArchiveBootstrap() {
   // were tagged with importedAt === "DEMO_SEED" specifically so this single
   // call can strip them without touching anything real.
   useEffect(() => { clearDemoSeed(); }, []);
-  // Cross-PC registry heartbeat — register this squadron's PC and ping it
-  // every 30s so other squadrons see us as online in their pickers/chains.
-  // The id is the squadron name (squadron tier) so every consumer that
-  // filters by "is this for me?" — pending queue, schedule chain, messages
-  // — uses the same canonical value as the writer. Purges expired private
-  // messages on the same cadence (cheap localStorage sweep, capped at the
-  // user-configured retention window).
+  // Cross-PC registry heartbeat — single source of truth for "this PC is
+  // online and reachable as id X at tier T". Runs for every signed-in role
+  // except super_admin (admins don't represent a PC in the cross-PC mesh).
+  // Pings every 30s so other PCs see us as online in their pickers/chains.
+  //
+  // The id MUST be stable across logins on this PC — other PCs forward
+  // schedules / address messages to whichever id this PC was first
+  // registered under, so changing it on every mount silently strands the
+  // PC's inbound traffic at the old id. We therefore prefer the configured
+  // squadron/wing/base code (set at setup time, not the free-form display
+  // name), then the already-registered id, then fall back to the username.
+  //
+  // Tier is derived from role/scope:
+  //   - commander + scope: flight | squadron | wing | base | hq
+  //   - ops officer: squadron (Ops Pilot's PC lives at squadron tier)
+  //
+  // Purges expired private messages on the same cadence (cheap
+  // localStorage sweep, capped at the user-configured retention window).
+  const role = auth.user?.role;
+  const scope = auth.user?.scope;
+  const username = auth.user?.username;
+  const displayNameRaw = auth.user?.displayName;
+  const sqnName = auth.squadron?.name;
+  const sqnBase = auth.squadron?.base;
   useEffect(() => {
-    const sqn = auth.squadron?.name;
-    if (!sqn) return;
+    if (!role) return;
+    if (role === "super_admin") return; // admins have no PC identity
+    const tier: PcTier =
+      role === "commander"
+        ? (scope === "wing" ? "wing"
+          : scope === "base" ? "base"
+          : scope === "flight" ? "flight"
+          : scope === "hq" ? "hq"
+          : "squadron")
+        : "squadron"; // ops officer
+    const configuredCode = sqnName?.trim() || "";
+    const existingId = getLocalPcId();
+    const tierPrefix = `${tier.toUpperCase()}:`;
+    const existingMatchesTier = tier === "squadron"
+      ? existingId !== "" && !existingId.includes(":")
+      : existingId.startsWith(tierPrefix);
+    let id: string;
+    if (configuredCode) {
+      id = tier === "squadron" ? configuredCode : `${tierPrefix}${configuredCode}`;
+    } else if (existingMatchesTier) {
+      id = existingId;
+    } else if (username) {
+      id = tier === "squadron" ? username : `${tierPrefix}${username}`;
+    } else {
+      return; // no usable id yet — wait for next render
+    }
+    const displayName =
+      configuredCode || displayNameRaw || username || `${tier.toUpperCase()} PC`;
     const tick = () => {
-      registerLocalPC({
-        id: sqn,
-        displayName: sqn,
-        tier: "squadron",
-        base: auth.squadron?.base,
-      });
+      registerLocalPC({ id, displayName, tier, base: sqnBase });
       purgeExpiredMessages();
     };
     tick();
-    const id = window.setInterval(tick, 30_000);
-    return () => window.clearInterval(id);
-  }, [auth.squadron?.name, auth.squadron?.base]);
+    const handle = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(handle);
+  }, [role, scope, username, displayNameRaw, sqnName, sqnBase]);
   return null;
 }
 

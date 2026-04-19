@@ -1,11 +1,11 @@
 import { Link, useLocation } from "wouter";
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
 import { useI18n, type Key } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2, Bell } from "lucide-react";
-import { canUseMessages, canUseScheduleChain, registerLocalPC, purgeExpiredMessages, getLocalPcId, type PcTier } from "@/lib/cross-pc";
+import { canUseMessages, canUseScheduleChain } from "@/lib/cross-pc";
 import { FlightBindingGate, FlightBindingBadge } from "@/components/FlightBindingGate";
 import emblem from "@assets/rjaf_emblem.png";
 import { RecoveryCodesLowBanner } from "@/components/RecoveryCodesLowBanner";
@@ -20,68 +20,9 @@ export function HQLayout({ children }: { children: ReactNode }) {
   const { user, logout, squadron } = useAuth();
   const { t, lang, setLang, dir } = useI18n();
   const [location] = useLocation();
-
-  // Cross-PC heartbeat for commander tiers. The id is tier-prefixed
-  // (e.g. "WING:NWAC", "BASE:Marka") so wing/base PCs are distinct
-  // entries in the registry and the schedule sharing chain can pick
-  // them as forward targets without colliding with squadron PCs.
-  //
-  // The id MUST be stable across logins on this PC — other PCs forward
-  // schedules / address messages to whichever id this PC was first
-  // registered under, so changing it on every mount (e.g. by deriving
-  // from the signed-in commander's display name) silently strands the
-  // wing's inbound traffic at the old id. We therefore prefer the
-  // already-registered id (the one this PC announced the first time it
-  // came online) and only derive a fresh one on first registration. The
-  // fresh derivation pulls from the configured squadron/wing/base code
-  // — never the free-form display name — so that a wing PC set up for
-  // "NWAC" stays "WING:NWAC" no matter which commander signs in.
-  useEffect(() => {
-    if (!user || user.role !== "commander") return;
-    const scope = user.scope;
-    if (!scope) return;
-    const tier: PcTier =
-      scope === "wing" ? "wing"
-      : scope === "base" ? "base"
-      : scope === "squadron" ? "squadron"
-      : scope === "flight" ? "flight"
-      : "hq";
-    const displayName = user.displayName || `${tier.toUpperCase()} CMD`;
-    // Stable code from the per-PC squadron/wing/base configuration set at
-    // setup time. When the operator has configured a squadron name we
-    // treat that as authoritative; without it we fall back to the
-    // existing registered id (if any) and finally to the username.
-    const configuredCode = squadron?.name?.trim() || "";
-    const existingId = getLocalPcId();
-    const tierPrefix = `${tier.toUpperCase()}:`;
-    const existingMatchesTier = tier === "squadron"
-      ? existingId !== "" && !existingId.includes(":")
-      : existingId.startsWith(tierPrefix);
-    let id: string;
-    if (configuredCode) {
-      // Authoritative: derive from the configured code so that PCs
-      // previously registered under a display-name-derived id (the old
-      // bug, e.g. "WING:Wing CMD") self-heal back to the canonical
-      // "WING:NWAC" form on next sign-in.
-      id = tier === "squadron" ? configuredCode : `${tierPrefix}${configuredCode}`;
-    } else if (existingMatchesTier) {
-      // No configured code on this PC yet (common for wing/base/HQ
-      // tiers which skip squadron setup) — keep using whatever id this
-      // PC announced previously so inbound routing stays stable.
-      id = existingId;
-    } else {
-      // First-ever registration with no configured code: fall back to
-      // the username, which is stable per-account.
-      id = tier === "squadron" ? user.username : `${tierPrefix}${user.username}`;
-    }
-    const tick = () => {
-      registerLocalPC({ id, displayName, tier });
-      purgeExpiredMessages();
-    };
-    tick();
-    const handle = window.setInterval(tick, 30_000);
-    return () => window.clearInterval(handle);
-  }, [user?.role, user?.scope, user?.displayName, user?.username, squadron?.name]);
+  // PC heartbeat is centralised in App.tsx → ArchiveBootstrap so that
+  // every signed-in role (commander tiers, ops officers) registers
+  // exactly once with a stable, tier-aware id. Don't duplicate it here.
 
   if (!user) return <>{children}</>;
 
