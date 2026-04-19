@@ -1,5 +1,6 @@
 import { AlertTriangle } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
+import { isMissingSchemaError } from "@/lib/schema-errors";
 
 interface QueryLike {
   isError: boolean;
@@ -16,7 +17,11 @@ export function DataUnavailableBanner({
   testId?: string;
 }) {
   const { t } = useI18n();
-  const failed = queries.filter(q => q.isError);
+  // Missing-schema errors (pending migrations) are environmental and the
+  // page silently falls back to mock/local data. Treating them as
+  // "unavailable" would scare ops officers with a red banner whenever
+  // the central project is mid-migration, so we filter them out here.
+  const failed = queries.filter(q => q.isError && !isMissingSchemaError(q.error));
   if (failed.length === 0) return null;
   const firstError = failed.find(q => q.error instanceof Error)?.error as Error | undefined;
   const refetching = failed.some(q => q.isFetching);

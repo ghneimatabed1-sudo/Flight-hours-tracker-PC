@@ -1,5 +1,6 @@
 import { QueryClient, MutationCache, QueryCache } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
+import { isMissingSchemaError } from "./schema-errors";
 
 // Lightweight global "last error" tracker so the sidebar live-data indicator
 // can flip to red after a Supabase failure without each page wiring its own
@@ -61,13 +62,22 @@ export const queryClient = new QueryClient({
   // so the operator sees them, but they do not flip the live-data pill red
   // (the amber syncing state already covers in-flight reads).
   mutationCache: new MutationCache({
-    onError: (err) => recordDataError(describe(err)),
+    onError: (err) => {
+      // Missing-schema errors are environmental (pending migration) and
+      // should not flip the global red indicator — they fall back to the
+      // local mirror automatically.
+      if (isMissingSchemaError(err)) return;
+      recordDataError(describe(err));
+    },
     onSuccess: () => clearDataError(),
   }),
   queryCache: new QueryCache({
-    onError: (err) => toast({
-      title: "Couldn't reach the server",
-      description: describe(err),
-    }),
+    onError: (err) => {
+      if (isMissingSchemaError(err)) return;
+      toast({
+        title: "Couldn't reach the server",
+        description: describe(err),
+      });
+    },
   }),
 });
