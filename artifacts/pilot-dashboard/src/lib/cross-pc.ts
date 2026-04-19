@@ -1214,11 +1214,15 @@ export function canUseMessages(role: string | undefined, scope: string | undefin
 // squadron sub-account) sees nothing.
 export function canUseScheduleChain(role: string | undefined, scope: string | undefined): boolean {
   if (role === "super_admin") return true;
-  // Schedule sharing is strictly between Flight Commanders and their
-  // related Squadron Commander. Wing / Base / HQ tiers and the Ops Pilot
-  // PC are intentionally excluded.
+  // The schedule sharing chain runs:
+  //   Flight Cmdr ─▶ Squadron Cmdr (approve / reject)
+  //   Squadron Cmdr ─▶ Wing Cmdr (approve / reject; on approve the share
+  //                                auto-forwards down to the Base Cmdr)
+  //   Base Cmdr (read-only, terminal recipient)
+  // The Ops Pilot's PC and the HQ tier never participate.
   if (role === "commander") {
-    return scope === "flight" || scope === "squadron";
+    return scope === "flight" || scope === "squadron"
+        || scope === "wing"   || scope === "base";
   }
   return false;
 }

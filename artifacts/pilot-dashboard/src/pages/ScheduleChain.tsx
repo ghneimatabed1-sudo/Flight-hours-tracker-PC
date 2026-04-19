@@ -18,7 +18,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { usePilots } from "@/lib/squadron-data";
 import FlightScheduleSheet from "@/components/FlightScheduleSheet";
-import { Send, Check, X, PauseCircle, Pencil, ArrowRight, Plus, Printer, Trash2 } from "lucide-react";
+import { Send, Check, X, PauseCircle, Pencil, Plus, Printer, Trash2 } from "lucide-react";
 
 // Mirror of the helper in pages/FlightProgram.tsx — flattens an
 // ScheduleProgram into the compact row list the diff machinery uses.
@@ -237,30 +237,19 @@ export default function ScheduleChain() {
                         <ScheduleTable share={share} />
                       )}
                       <div className="flex flex-wrap gap-2 items-end">
-                        {/* Forward (Squadron→Wing→Base) */}
-                        {share.currentTier === "wing" && myTier === "wing" && (
-                          <div className="flex items-end gap-2">
-                            <div>
-                              <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Forward to Base PC</label>
-                              <select value={forwardTo} onChange={e => setForwardTo(e.target.value)} className="px-2 py-1 rounded bg-input border border-border text-xs" data-testid={`forward-target-${share.id}`}>
-                                <option value="">— pick Base PC —</option>
-                                {basePCs.map(p => (
-                                  <option key={p.id} value={p.id}>{p.squadronName}{p.base ? ` · ${p.base}` : ""}{p.online ? " · online" : " · offline"}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <button
-                              onClick={async () => {
-                                const t = registry.data.find(p => p.id === forwardTo);
-                                if (!t) { toast({ title: "Pick a Base PC", variant: "destructive" }); return; }
-                                await decide.mutateAsync({ id: share.id, action: "forward", by: user?.username ?? "wing", tier: myTier, forwardPcId: t.id, forwardPcName: t.squadronName });
-                                toast({ title: `Forwarded to ${t.squadronName}` });
-                              }}
-                              className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs inline-flex items-center gap-1"
-                              data-testid={`forward-${share.id}`}
-                            >
-                              <ArrowRight className="h-3 w-3" /> Forward
-                            </button>
+                        {/* Wing tier: when the wing commander approves a
+                            squadron→wing share, the program is auto-
+                            forwarded to a Base PC for read-only visibility.
+                            The wing may pick which Base PC the share lands
+                            on; default is the first registered base. */}
+                        {share.currentTier === "wing" && myTier === "wing" && basePCs.length > 0 && (
+                          <div>
+                            <label className="text-[10px] uppercase tracking-wider text-muted-foreground">On approve, send to Base PC</label>
+                            <select value={forwardTo || basePCs[0]?.id || ""} onChange={e => setForwardTo(e.target.value)} className="px-2 py-1 rounded bg-input border border-border text-xs" data-testid={`forward-target-${share.id}`}>
+                              {basePCs.map(p => (
+                                <option key={p.id} value={p.id}>{p.squadronName}{p.base ? ` · ${p.base}` : ""}{p.online ? " · online" : " · offline"}</option>
+                              ))}
+                            </select>
                           </div>
                         )}
                         <input
@@ -271,13 +260,38 @@ export default function ScheduleChain() {
                         />
                         <button
                           onClick={async () => {
-                            await decide.mutateAsync({ id: share.id, action: "approve", by: user?.username ?? "ops", tier: myTier, note: decisionNote || undefined });
-                            toast({ title: "Approved" }); setDecisionNote("");
+                            const approver = user?.username ?? "cmd";
+                            // Wing approval auto-forwards the program to a
+                            // Base PC so the base sees the approved sheet
+                            // in their inbox without an extra click. We
+                            // forward FIRST (which moves the share to the
+                            // base tier) then approve, so the approval
+                            // event lands at the right currentPcId.
+                            if (myTier === "wing" && share.currentTier === "wing" && basePCs.length > 0) {
+                              const baseId = forwardTo || basePCs[0].id;
+                              const baseTarget = basePCs.find(p => p.id === baseId) ?? basePCs[0];
+                              await decide.mutateAsync({
+                                id: share.id, action: "forward", by: approver, tier: myTier,
+                                forwardPcId: baseTarget.id, forwardPcName: baseTarget.squadronName,
+                              });
+                              await decide.mutateAsync({
+                                id: share.id, action: "approve", by: approver, tier: "base",
+                                note: decisionNote || undefined,
+                              });
+                              toast({ title: `Approved · sent to ${baseTarget.squadronName}` });
+                            } else {
+                              await decide.mutateAsync({ id: share.id, action: "approve", by: approver, tier: myTier, note: decisionNote || undefined });
+                              toast({ title: "Approved" });
+                            }
+                            setDecisionNote("");
                           }}
                           className="px-3 py-1.5 rounded-md bg-emerald-500/20 border border-emerald-400/40 text-emerald-100 text-xs font-semibold inline-flex items-center gap-1"
                           data-testid={`approve-${share.id}`}
                         >
-                          <Check className="h-3 w-3" /> Approve
+                          <Check className="h-3 w-3" />
+                          {myTier === "wing" && share.currentTier === "wing" && basePCs.length > 0
+                            ? "Approve & send to Base"
+                            : "Approve"}
                         </button>
                         <button
                           onClick={async () => {

@@ -164,11 +164,12 @@ export default function FlightProgram() {
       if (isFlightCmdr && flightBinding) {
         return all.filter(p => p.id === flightBinding.pcId);
       }
-      // Squadron Commander → only Flight Commander PCs (flight tier) are
-      // valid recipients. Wing / Base / HQ are intentionally excluded
-      // because schedule sharing is strictly Flight ↔ Squadron.
+      // Squadron Commander → only Wing Commander PCs are valid Submit
+      // targets (squadron passes the program up the chain to wing, which
+      // then auto-forwards to base on approval). Flight Commanders reach
+      // the squadron via their own Submit, so they don't appear here.
       if (isSquadronCmdr) {
-        return all.filter(p => p.tier === "flight");
+        return all.filter(p => p.tier === "wing");
       }
       return all;
     },
