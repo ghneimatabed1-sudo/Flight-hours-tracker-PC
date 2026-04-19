@@ -1,14 +1,15 @@
 import { useMemo, useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { usePilots, useSorties, useUpdateSortie, useDeleteSortie } from "@/lib/squadron-data";
+import { usePilots, useSorties, useUpdateSortie, useDeleteSortie, useRestoreSortie } from "@/lib/squadron-data";
 import { useAuth } from "@/lib/auth";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
-import { Search, Filter, Pencil, Trash2, Lock, Unlock } from "lucide-react";
-import type { Sortie } from "@/lib/mock";
-import { useFrozenAccess } from "@/lib/monthly-close";
+import { SortieDiffDialog } from "@/components/SortieDiffDialog";
+import { showUndo } from "@/lib/undo-store";
 import { useToast } from "@/hooks/use-toast";
+import { Search, Filter, Pencil, Trash2, Lock, Unlock } from "lucide-react";
+import type { Pilot, Sortie } from "@/lib/mock";
+import { useFrozenAccess } from "@/lib/monthly-close";
 
 export default function SortieLog() {
   const { t } = useI18n();
@@ -17,12 +18,17 @@ export default function SortieLog() {
   const [type, setType] = useState("All");
   const [editing, setEditing] = useState<Sortie | null>(null);
   const [deleting, setDeleting] = useState<Sortie | null>(null);
+  // Stage of the diff/undo flow once the inline edit form has been
+  // submitted: holds the proposed `after` so the change-summary dialog
+  // can render the before/after comparison before commit.
+  const [pendingEdit, setPendingEdit] = useState<{ before: Sortie; after: Sortie } | null>(null);
   const pilotsQ = usePilots();
   const sortiesQ = useSorties();
   const { data: PILOTS } = pilotsQ;
   const { data: SORTIES } = sortiesQ;
   const updateMut = useUpdateSortie();
   const deleteMut = useDeleteSortie();
+  const restoreMut = useRestoreSortie();
   const { toast } = useToast();
   const frozen = useFrozenAccess();
 
@@ -52,10 +58,47 @@ export default function SortieLog() {
     .filter(s => !q || (nameOf(s.pilotId, s.pilotExternal) + " " + nameOf(s.coPilotId, s.coPilotExternal) + " " + s.acNumber + " " + s.name).toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => b.date.localeCompare(a.date));
 
+  const snapshotPilots = (s: Sortie): Pilot[] => {
+    const ids = [s.pilotId, s.coPilotId].filter(Boolean);
+    return ids
+      .map(id => PILOTS.find(p => p.id === id))
+      .filter((p): p is Pilot => !!p)
+      .map(p => structuredClone(p));
+  };
+
+  const registerUndo = (snapshot: { sortie: Sortie; pilots: Pilot[] }, label: string) => {
+    showUndo({
+      message: label,
+      undo: async () => {
+        try {
+          await restoreMut.mutateAsync({
+            sortie: snapshot.sortie,
+            pilots: snapshot.pilots,
+            actor: user?.username,
+            reason: "undo",
+          });
+          toast({ title: "Action undone" });
+        } catch {
+          toast({ title: "Undo failed", variant: "destructive" });
+        }
+      },
+    });
+  };
+
   const onConfirmDelete = async () => {
     if (!deleting) return;
+    const snapshot = { sortie: deleting, pilots: snapshotPilots(deleting) };
     await deleteMut.mutateAsync({ id: deleting.id, date: deleting.date, actor: user?.username });
     setDeleting(null);
+    registerUndo(snapshot, "Sortie deleted.");
+  };
+
+  const onConfirmEdit = async () => {
+    if (!pendingEdit) return;
+    const snapshot = { sortie: pendingEdit.before, pilots: snapshotPilots(pendingEdit.before) };
+    await updateMut.mutateAsync({ sortie: pendingEdit.after, actor: user?.username });
+    setPendingEdit(null);
+    registerUndo(snapshot, "Sortie edited.");
   };
 
   return (
@@ -163,25 +206,34 @@ export default function SortieLog() {
           pilots={PILOTS.map(p => ({ id: p.id, label: `${p.rank} ${p.name}` }))}
           busy={updateMut.isPending}
           onCancel={() => setEditing(null)}
-          onSave={async (next) => {
-            await updateMut.mutateAsync({ sortie: next, actor: user?.username });
+          onSave={(next) => {
+            // Defer to the change-summary dialog before committing.
+            setPendingEdit({ before: editing, after: next });
             setEditing(null);
           }}
         />
       )}
 
+      {pendingEdit && (
+        <SortieDiffDialog
+          mode="edit"
+          before={pendingEdit.before}
+          after={pendingEdit.after}
+          onCancel={() => setPendingEdit(null)}
+          onConfirm={onConfirmEdit}
+          busy={updateMut.isPending}
+          pilotName={(id) => pilotMap[id] || id}
+        />
+      )}
+
       {deleting && (
-        <ConfirmDialog
-          title={t("deleteSortieTitle")}
-          message={t("deleteSortieMsg")
-            .replace("{date}", deleting.date)
-            .replace("{ac}", deleting.acNumber)
-            .replace("{pilot}", pilotMap[deleting.pilotId] || deleting.pilotId)}
-          confirmLabel={t("delete")}
-          danger
-          busy={deleteMut.isPending}
+        <SortieDiffDialog
+          mode="delete"
+          before={deleting}
           onCancel={() => setDeleting(null)}
           onConfirm={onConfirmDelete}
+          busy={deleteMut.isPending}
+          pilotName={(id) => pilotMap[id] || id}
         />
       )}
     </div>

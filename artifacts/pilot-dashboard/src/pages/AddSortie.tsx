@@ -7,10 +7,13 @@ import {
   useCreateSortie,
   useUpdateSortie,
   useDeleteSortie,
+  useRestoreSortie,
   deriveSortieBuckets,
 } from "@/lib/squadron-data";
 import { useToast } from "@/hooks/use-toast";
-import type { Sortie } from "@/lib/mock";
+import type { Pilot, Sortie } from "@/lib/mock";
+import { SortieDiffDialog } from "@/components/SortieDiffDialog";
+import { showUndo } from "@/lib/undo-store";
 import { Plane, Pencil, Trash2, X, UserPlus, User, Lock, Unlock } from "lucide-react";
 import { useRegisteredPCs, useSubmitPending } from "@/lib/cross-pc";
 import { useAuth } from "@/lib/auth";
@@ -115,10 +118,16 @@ export default function AddSortie() {
 
   const [form, setForm] = useState<FormState>(blankForm);
   const [confirmDel, setConfirmDel] = useState<Sortie | null>(null);
+  // Pending edit waiting for the change-summary dialog. We capture both
+  // the original record (for the diff + undo snapshot) and the proposed
+  // new payload (already fully bucketed) so the dialog can render the
+  // diff and the confirm handler can fire the mutation directly.
+  const [pendingEdit, setPendingEdit] = useState<{ before: Sortie; after: Sortie } | null>(null);
   const auth = useAuth();
   const frozen = useFrozenAccess();
   const lockedMessage =
     "Hours older than 12 months are frozen. Ask the super admin to authorize this PC from the Super Admin page.";
+  const restore = useRestoreSortie();
   const mySquadronId = auth.squadron?.name ?? "";
   const { data: registeredPCs = [] } = useRegisteredPCs();
   const submitPending = useSubmitPending();
@@ -279,10 +288,21 @@ export default function AddSortie() {
       ils: form.instrumentFlight ? (parseInt(form.ils || "0") || 0) : undefined,
       vor: form.instrumentFlight ? (parseInt(form.vor || "0") || 0) : undefined,
     };
+    // Edits go through the change-summary dialog first. The dialog shows
+    // the operator a side-by-side diff and, after they confirm, fires the
+    // actual mutation + registers a 30-second undo. New entries skip the
+    // diff (nothing to compare against) and commit directly.
+    if (form.id) {
+      const original = SORTIES.find(x => x.id === form.id);
+      if (original) {
+        setPendingEdit({ before: original, after: { ...payload, id: form.id } as Sortie });
+        return;
+      }
+    }
     try {
       let savedId: string | null = form.id;
       if (form.id) {
-        await update.mutateAsync({ sortie: { ...payload, id: form.id } as Sortie });
+        await update.mutateAsync({ sortie: { ...payload, id: form.id } as Sortie, actor: auth.user?.username });
         toast({ title: "Sortie updated" });
       } else {
         const created = await create.mutateAsync(payload);
@@ -392,11 +412,57 @@ export default function AddSortie() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  // Snapshot the pilots that a sortie touches so an undo can restore both
+  // their totals and their currency expiries (which only ever move forward
+  // through applyCurrencyRefresh).
+  const snapshotAffectedPilots = (s: Sortie): Pilot[] => {
+    const ids = [s.pilotId, s.coPilotId].filter(Boolean);
+    return ids
+      .map(id => PILOTS.find(p => p.id === id))
+      .filter((p): p is Pilot => !!p)
+      .map(p => structuredClone(p));
+  };
+
+  const registerSortieUndo = (snapshot: { sortie: Sortie; pilots: Pilot[] }, label: string) => {
+    showUndo({
+      message: label,
+      undo: async () => {
+        try {
+          await restore.mutateAsync({
+            sortie: snapshot.sortie,
+            pilots: snapshot.pilots,
+            actor: auth.user?.username,
+            reason: "undo",
+          });
+          toast({ title: "Action undone" });
+        } catch {
+          toast({ title: "Undo failed", variant: "destructive" });
+        }
+      },
+    });
+  };
+
+  const confirmEdit = async () => {
+    if (!pendingEdit) return;
+    const { before, after } = pendingEdit;
+    const pilotsBefore = snapshotAffectedPilots(before);
+    try {
+      await update.mutateAsync({ sortie: after, actor: auth.user?.username });
+      registerSortieUndo({ sortie: before, pilots: pilotsBefore }, "Sortie edited.");
+      setPendingEdit(null);
+      resetForm();
+    } catch {
+      /* surfaced by global error toast */
+    }
+  };
+
   const doDelete = async () => {
     if (!confirmDel) return;
+    const snapshotSortie = confirmDel;
+    const pilotsBefore = snapshotAffectedPilots(snapshotSortie);
     try {
-      await del.mutateAsync({ id: confirmDel.id, date: confirmDel.date, actor: auth.user?.username });
-      toast({ title: "Sortie deleted" });
+      await del.mutateAsync({ id: snapshotSortie.id, date: snapshotSortie.date, actor: auth.user?.username });
+      registerSortieUndo({ sortie: snapshotSortie, pilots: pilotsBefore }, "Sortie deleted.");
     } finally {
       setConfirmDel(null);
     }
@@ -670,18 +736,32 @@ export default function AddSortie() {
       </Card>
 
       {confirmDel && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setConfirmDel(null)}>
-          <div className="bg-card border border-border rounded-lg p-4 max-w-md w-full" onClick={e => e.stopPropagation()} data-testid="dialog-confirm-delete">
-            <div className="font-semibold mb-1">Delete this sortie?</div>
-            <div className="text-xs text-muted-foreground mb-3">
-              {confirmDel.date} · {confirmDel.acType} {confirmDel.acNumber} · {confirmDel.sortieType}
-            </div>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setConfirmDel(null)} className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs">Cancel</button>
-              <button onClick={doDelete} className="px-3 py-1.5 rounded-md bg-rose-600 text-white text-xs font-semibold" data-testid="button-confirm-delete">Delete</button>
-            </div>
-          </div>
-        </div>
+        <SortieDiffDialog
+          mode="delete"
+          before={confirmDel}
+          onCancel={() => setConfirmDel(null)}
+          onConfirm={doDelete}
+          busy={del.isPending}
+          pilotName={(id) => {
+            const p = pilotById(id);
+            return p ? `${p.rank} ${p.name}` : id;
+          }}
+        />
+      )}
+
+      {pendingEdit && (
+        <SortieDiffDialog
+          mode="edit"
+          before={pendingEdit.before}
+          after={pendingEdit.after}
+          onCancel={() => setPendingEdit(null)}
+          onConfirm={confirmEdit}
+          busy={update.isPending}
+          pilotName={(id) => {
+            const p = pilotById(id);
+            return p ? `${p.rank} ${p.name}` : id;
+          }}
+        />
       )}
     </div>
   );

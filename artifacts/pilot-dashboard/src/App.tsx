@@ -29,6 +29,7 @@ import { queryClient } from "@/lib/query-client";
 import { runArchiveCheck } from "@/lib/archive";
 import { clearDemoSeed } from "@/lib/squadron-data";
 import { Toaster } from "@/components/ui/toaster";
+import { UndoToast } from "@/components/UndoToast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { I18nProvider } from "@/lib/i18n";
 import { AuthProvider, useAuth } from "@/lib/auth";
@@ -263,6 +264,7 @@ function App() {
             )}
             <Toaster />
             <OpeningAnimation />
+            <UndoToast />
           </TooltipProvider>
         </AuthProvider>
       </I18nProvider>

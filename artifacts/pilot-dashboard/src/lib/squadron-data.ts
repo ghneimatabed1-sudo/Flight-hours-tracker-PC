@@ -568,7 +568,7 @@ function enforceMonthlyClose(dates: string[]): {
 export function useUpdateSortie() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { sortie: Sortie; actor?: string }) => {
+    mutationFn: async (input: { sortie: Sortie; actor?: string; reason?: string }) => {
       const s = input.sortie;
       // Honour the original sortie's date for the close check too — if a
       // historical row is being moved into another month, BOTH the old and
@@ -587,7 +587,11 @@ export function useUpdateSortie() {
         appendDemoAudit({
           ts: tsNow(),
           user: input.actor ?? "ops.officer",
-          action: frozenOverride ? "Sortie edit (frozen override)" : "Sortie edit",
+          action: frozenOverride
+            ? `Sortie edit (frozen override${input.reason ? `; ${input.reason}` : ""})`
+            : input.reason
+              ? `Sortie edit (${input.reason})`
+              : "Sortie edit",
           target: frozenOverride
             ? `${s.id} · ${s.date} · ${s.acNumber} · pc:${frozenOverride.pcName} · months:${frozenOverride.months.join(",")}`
             : `${s.id} · ${s.date} · ${s.acNumber}`,
@@ -632,8 +636,11 @@ export function useUpdateSortie() {
               frozenMonths: frozenOverride.months,
               pcId: frozenOverride.pcId,
               pcName: frozenOverride.pcName,
+              ...(input.reason ? { reason: input.reason } : {}),
             }
-          : { id: s.id, date: s.date, acNumber: s.acNumber },
+          : input.reason
+            ? { id: s.id, date: s.date, acNumber: s.acNumber, reason: input.reason }
+            : { id: s.id, date: s.date, acNumber: s.acNumber },
       });
       return s;
     },
@@ -650,7 +657,7 @@ export function useUpdateSortie() {
 export function useDeleteSortie() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { id: string; date?: string; actor?: string }) => {
+    mutationFn: async (input: { id: string; date?: string; actor?: string; reason?: string }) => {
       // Resolve the sortie's date from cache or in-memory mock so the
       // close check works even when the caller didn't pass it explicitly.
       // Without a known date we err on the side of "unknown ⇒ allow",
@@ -666,7 +673,11 @@ export function useDeleteSortie() {
         appendDemoAudit({
           ts: tsNow(),
           user: input.actor ?? "ops.officer",
-          action: frozenOverride ? "Sortie delete (frozen override)" : "Sortie delete",
+          action: frozenOverride
+            ? `Sortie delete (frozen override${input.reason ? `; ${input.reason}` : ""})`
+            : input.reason
+              ? `Sortie delete (${input.reason})`
+              : "Sortie delete",
           target: frozenOverride
             ? `${removed.id} · ${removed.date} · ${removed.acNumber} · pc:${frozenOverride.pcName} · months:${frozenOverride.months.join(",")}`
             : `${removed.id} · ${removed.date} · ${removed.acNumber}`,
@@ -685,13 +696,134 @@ export function useDeleteSortie() {
               frozenMonths: frozenOverride.months,
               pcId: frozenOverride.pcId,
               pcName: frozenOverride.pcName,
+              ...(input.reason ? { reason: input.reason } : {}),
             }
-          : { id: input.id, date: sortieDate },
+          : input.reason
+            ? { id: input.id, date: sortieDate, reason: input.reason }
+            : { id: input.id, date: sortieDate },
       });
       return { id: input.id };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sorties"] });
+      qc.invalidateQueries({ queryKey: ["audit_log"] });
+    },
+  });
+}
+
+// Helper that produces the JSONB `data` payload Supabase expects for a
+// pilots row. Centralised so the restore path (below) writes exactly the
+// same shape as useUpdatePilot/useCreatePilot — keeping any field in lock-
+// step across the three writers.
+function pilotDataPayload(p: Pilot) {
+  return {
+    callSign: p.callSign,
+    flightName: p.flightName,
+    name: p.name,
+    arabicName: p.arabicName,
+    militaryNumber: p.militaryNumber,
+    rank: p.rank,
+    phone: p.phone,
+    address: p.address,
+    unit: p.unit,
+    available: p.available,
+    openingDay: p.openingDay,
+    openingNight: p.openingNight,
+    openingNvg: p.openingNvg,
+    doctorNote: p.doctorNote,
+    monthDay: p.monthDay,
+    monthNight: p.monthNight,
+    monthNvg: p.monthNvg,
+    monthSim: p.monthSim,
+    monthCaptain: p.monthCaptain,
+    totalDay: p.totalDay,
+    totalNight: p.totalNight,
+    totalNvg: p.totalNvg,
+    totalSim: p.totalSim,
+    totalCaptain: p.totalCaptain,
+    expiry: p.expiry,
+    hiddenCurrencies: p.hiddenCurrencies,
+    qualifications: p.qualifications,
+    lastSimDate: p.lastSimDate,
+  };
+}
+
+// Restore a sortie that was previously edited or deleted, optionally
+// restoring affected pilot rows alongside it. Used exclusively by the
+// 30-second undo toast — the caller snapshots the prior state, then
+// invokes this mutation if the operator clicks Undo. Currency expiries
+// only ever move forward through applyCurrencyRefresh, so reverting an
+// edit that bumped a date requires us to push the OLD pilot snapshot
+// back; that's why this mutation accepts a `pilots` array rather than
+// re-deriving it from sortie data.
+export function useRestoreSortie() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { sortie: Sortie; pilots?: Pilot[]; actor?: string; reason?: string }) => {
+      const { sortie: s, pilots = [], actor, reason } = input;
+      if (!isLive()) {
+        // Restore pilots first so totals/currencies snap back to their
+        // pre-action values before any consumer reads them.
+        const arr = getMockPilots();
+        for (const p of pilots) {
+          const idx = arr.findIndex(x => x.id === p.id);
+          if (idx >= 0) arr[idx] = p; else arr.push(p);
+        }
+        const sIdx = MOCK_SORTIES.findIndex(x => x.id === s.id);
+        if (sIdx >= 0) MOCK_SORTIES[sIdx] = s;
+        else MOCK_SORTIES.push(s);
+        appendDemoAudit({
+          ts: tsNow(),
+          user: actor ?? "ops.officer",
+          action: reason ? `Sortie restore (${reason})` : "Sortie restore (undo)",
+          target: `${s.id} · ${s.date} · ${s.acNumber}`,
+        });
+        return s;
+      }
+      // Live: restore pilots one by one, then upsert the sortie.
+      for (const p of pilots) {
+        const { error } = await supabase!.from("pilots").update({
+          name: p.name, arabic_name: p.arabicName, rank: p.rank, phone: p.phone,
+          unit: p.unit, available: p.available, data: pilotDataPayload(p),
+        }).eq("id", p.id);
+        if (error) throw error;
+      }
+      const { error } = await supabase!.from("sorties").upsert({
+        id: s.id,
+        pilot_id: s.pilotId,
+        co_pilot_id: s.coPilotId,
+        date: s.date,
+        ac_type: s.acType,
+        ac_number: s.acNumber,
+        sortie_type: s.sortieType,
+        sortie_name: s.name,
+        data: {
+          day1: s.day1, day2: s.day2, dayDual: s.dayDual,
+          night1: s.night1, night2: s.night2, nightDual: s.nightDual,
+          nvg: s.nvg, nvg1: s.nvg1, nvg2: s.nvg2, nvgDual: s.nvgDual,
+          sim: s.sim, actual: s.actual,
+          condition: s.condition, remarks: s.remarks,
+          pilotExternal: s.pilotExternal, coPilotExternal: s.coPilotExternal,
+          time: s.time, dual: s.dual,
+          pilotPosition: s.pilotPosition, coPilotPosition: s.coPilotPosition,
+          pilotSeatStatus: s.pilotSeatStatus, coPilotSeatStatus: s.coPilotSeatStatus,
+          pilotIsCaptain: s.pilotIsCaptain, coPilotIsCaptain: s.coPilotIsCaptain,
+          msnDuty: s.msnDuty,
+          instrumentFlight: s.instrumentFlight,
+          ifSim: s.ifSim, ifAct: s.ifAct, ils: s.ils, vor: s.vor,
+        },
+      }, { onConflict: "id" });
+      if (error) throw error;
+      await recordAuditEvent({
+        type: "sortie.restore",
+        actor,
+        detail: { id: s.id, reason: reason ?? "undo" },
+      });
+      return s;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sorties"] });
+      qc.invalidateQueries({ queryKey: ["pilots"] });
       qc.invalidateQueries({ queryKey: ["audit_log"] });
     },
   });
