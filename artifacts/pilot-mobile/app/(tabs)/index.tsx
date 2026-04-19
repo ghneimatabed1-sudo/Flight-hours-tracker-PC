@@ -22,12 +22,9 @@ function formatSyncTime(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  // DD-MM HH:mm — matches the squadron-wide DD-MM-YYYY family.
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}-${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function timeOfDayKey(hour: number): "home_greet_morning" | "home_greet_afternoon" | "home_greet_evening" {
@@ -66,12 +63,10 @@ export default function HomeScreen() {
 
   const greetKey = timeOfDayKey(now.getHours());
   const greeting = t(greetKey);
-  const monthLabel = now
-    .toLocaleDateString(isRTL ? "ar-JO" : "en-GB", { month: "short", year: "numeric" })
-    .toUpperCase();
-  const todayDate = now
-    .toLocaleDateString(isRTL ? "ar-JO" : "en-GB", { weekday: "short", day: "2-digit", month: "short" })
-    .toUpperCase();
+  // DD-MM-YYYY squadron standard. Month label = MM-YYYY.
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const monthLabel = `${pad(now.getMonth() + 1)}-${now.getFullYear()}`;
+  const todayDate = `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()}`;
   const localTime = now.toLocaleTimeString(isRTL ? "ar-JO" : "en-GB", {
     hour: "2-digit",
     minute: "2-digit",

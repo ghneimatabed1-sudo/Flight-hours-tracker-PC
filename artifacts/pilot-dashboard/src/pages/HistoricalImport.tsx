@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { useImportHistory, useUndoLastImport, getLastImportStamp, type Pilot, type Sortie } from "@/lib/squadron-data";
 import { Upload, FileText, AlertCircle, CheckCircle2, X, Undo2 } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { fmtDateTimeDDMM } from "@/lib/format";
 
 type RowError = { row: number; reason: string };
 type Parsed<T> = { rows: T[]; errors: RowError[]; rawCount: number };
@@ -287,7 +288,7 @@ export default function HistoricalImport() {
             disabled={undoMut.isPending}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-secondary border border-border text-sm font-medium hover:bg-secondary/80 disabled:opacity-50"
             data-testid="button-undo-import"
-            title={`${t("undoLastImportHelp")}: ${new Date(lastImportStamp).toLocaleString()}`}
+            title={`${t("undoLastImportHelp")}: ${fmtDateTimeDDMM(lastImportStamp)}`}
           >
             <Undo2 className="h-3.5 w-3.5" />
             {undoMut.isPending ? t("syncing") : t("undoLastImport")}

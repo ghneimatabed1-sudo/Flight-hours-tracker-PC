@@ -1,6 +1,6 @@
 import type { CurrencyStatus } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
-import { statusClass, currencyStatus } from "@/lib/format";
+import { statusClass, currencyStatus, fmtDDMM, fmtDDMMYYYY } from "@/lib/format";
 
 function statusLabelKey(s: CurrencyStatus): "current" | "warning" | "expiringSoon" | "expired" {
   if (s === "expired") return "expired";
@@ -9,11 +9,10 @@ function statusLabelKey(s: CurrencyStatus): "current" | "warning" | "expiringSoo
   return "current";
 }
 
-function fmtShort(date: string, lang: string): string {
-  return new Date(date).toLocaleDateString(lang === "ar" ? "ar-EG" : "en-GB", {
-    day: "2-digit",
-    month: "short",
-  });
+function fmtShort(date: string, _lang: string): string {
+  // DD-MM keeps badges compact while staying consistent with the
+  // squadron-wide DD-MM-YYYY standard.
+  return fmtDDMM(date);
 }
 
 export function StatusBadge({ status, date }: { status: CurrencyStatus; date?: string | null }) {
@@ -31,9 +30,9 @@ export function StatusBadge({ status, date }: { status: CurrencyStatus; date?: s
 }
 
 export function CurrencyCell({ date }: { date: string }) {
-  const { lang } = useI18n();
+  useI18n();
   const status = currencyStatus(date);
-  const formatted = new Date(date).toLocaleDateString(lang === "ar" ? "ar-EG" : "en-GB", { year: "2-digit", month: "short", day: "2-digit" });
+  const formatted = fmtDDMMYYYY(date);
   return (
     <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium tabular-nums ${statusClass(status)}`}>
       {formatted}

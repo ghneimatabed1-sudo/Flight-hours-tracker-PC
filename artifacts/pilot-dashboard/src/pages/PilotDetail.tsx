@@ -225,7 +225,12 @@ function Stat({ k, v, accent = "" }: { k: string; v: number; accent?: string }) 
 
 function fmtDateTime(iso: string | null | undefined) {
   if (!iso) return "—";
-  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  } catch { return iso; }
 }
 
 function statusBadge(t: ReturnType<typeof useI18n>["t"], status: PilotLinkStatus): { label: string; cls: string } {

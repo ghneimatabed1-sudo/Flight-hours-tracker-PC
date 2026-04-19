@@ -15,6 +15,7 @@ import {
   type PrivateMessage,
 } from "@/lib/cross-pc";
 import { useToast } from "@/hooks/use-toast";
+import { fmtDateTimeDDMM } from "@/lib/format";
 import { Mail, Send, Reply, Check, AlertOctagon, Settings } from "lucide-react";
 
 const priorityClasses: Record<MessagePriority, string> = {
@@ -273,8 +274,8 @@ function MessageList({ items, onReply, onMark, myPcId, kind }: {
             <div className="min-w-0">
               <div className="text-sm font-semibold truncate">{m.subject}</div>
               <div className="text-[11px] text-muted-foreground">
-                {kind === "sent" ? `to ${m.toPcName}` : `from ${m.fromPcName}`} · {new Date(m.sentAt).toLocaleString()}
-                {m.readAt && kind !== "sent" ? ` · read ${new Date(m.readAt).toLocaleString()}` : ""}
+                {kind === "sent" ? `to ${m.toPcName}` : `from ${m.fromPcName}`} · {fmtDateTimeDDMM(m.sentAt)}
+                {m.readAt && kind !== "sent" ? ` · read ${fmtDateTimeDDMM(m.readAt)}` : ""}
               </div>
             </div>
             <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border ${priorityClasses[m.priority]}`}>{m.priority}</span>

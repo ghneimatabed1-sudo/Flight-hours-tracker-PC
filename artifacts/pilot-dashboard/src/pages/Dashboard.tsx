@@ -37,7 +37,9 @@ function LiveClockStrip({ lang }: { lang: "en" | "ar" }) {
     };
   }, []);
   const time = now.toLocaleTimeString(lang === "ar" ? "ar-JO" : "en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
-  const date = now.toLocaleDateString(lang === "ar" ? "ar-JO" : "en-GB", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+  // Squadron-wide DD-MM-YYYY (no weekday — keeps the strip compact and
+  // matches every other date display in the app).
+  const date = `${String(now.getDate()).padStart(2, "0")}-${String(now.getMonth() + 1).padStart(2, "0")}-${now.getFullYear()}`;
   const zulu = now.toISOString().slice(11, 16) + "Z";
   return (
     <div className="flex items-center gap-2">
@@ -91,6 +93,7 @@ export default function Dashboard() {
   const warnCount = expiring.filter(e => e.status === "warn").length;
 
   const monthLabel = now.toLocaleDateString(lang === "ar" ? "ar-JO" : "en-GB", { month: "short", year: "numeric" }).toUpperCase();
+  void lang;
 
   return (
     <div className="space-y-4">

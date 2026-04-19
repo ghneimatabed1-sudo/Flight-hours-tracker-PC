@@ -14,6 +14,7 @@ import {
   Clock,
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
+import { fmtDateTimeDDMM } from "@/lib/format";
 import {
   exportBackup,
   decodeBackup,
@@ -458,7 +459,7 @@ export function BackupCard() {
               <Clock className="h-3.5 w-3.5 text-muted-foreground" />
               <span className="text-muted-foreground">{tx("Last auto-backup:", "آخر نسخة تلقائية:")}</span>
               <span className="font-mono" data-testid="text-last-auto">
-                {lastAt ? new Date(lastAt).toLocaleString() : tx("Never", "لم تُنشأ بعد")}
+                {lastAt ? fmtDateTimeDDMM(lastAt) : tx("Never", "لم تُنشأ بعد")}
               </span>
             </div>
             <div className="flex items-center gap-1.5">
@@ -557,7 +558,7 @@ export function BackupCard() {
           {phase.kind === "decoded" && (
             <div className="space-y-2 pt-2 border-t border-border/60 text-xs">
               <div className="rounded-md bg-muted/60 p-2 font-mono leading-relaxed" data-testid="text-backup-summary">
-                <div>{t("backup_created")}: {new Date(phase.payload.createdAt).toLocaleString()}</div>
+                <div>{t("backup_created")}: {fmtDateTimeDDMM(phase.payload.createdAt)}</div>
                 <div>{t("backup_squadron")}: {phase.payload.squadronId || "—"}</div>
                 <div>{t("backup_device")}: {phase.payload.deviceName || "—"}</div>
                 <div>

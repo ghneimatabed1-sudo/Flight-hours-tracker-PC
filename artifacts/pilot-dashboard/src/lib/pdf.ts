@@ -159,8 +159,29 @@ async function setupDoc(lang: PdfLang): Promise<jsPDF> {
 
 const baseFont = (lang: PdfLang) => (lang === "ar" ? ARABIC_FONT_NAME : "helvetica");
 
-function fmtDate(d = new Date()): string {
-  return d.toISOString().slice(0, 10);
+// DD-MM-YYYY everywhere in PDF land — squadron-wide standard. The pad
+// helper keeps the format strict (single-digit days/months padded).
+function pad2(n: number): string { return n < 10 ? `0${n}` : String(n); }
+
+// DD-MM-YYYY for headers, "as-of" dates, signature blocks, etc.
+function fmtDate(d: string | Date | number = new Date()): string {
+  const v = d instanceof Date ? d : new Date(d);
+  if (isNaN(v.getTime())) return "—";
+  return `${pad2(v.getDate())}-${pad2(v.getMonth() + 1)}-${v.getFullYear()}`;
+}
+
+// YYYYMMDD slug — used as a filename suffix so reports sort
+// chronologically in the OS file picker. Filenames stay ASCII so
+// Windows Explorer doesn't mangle them.
+function fileStamp(d: Date = new Date()): string {
+  return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}`;
+}
+
+// Inclusive date-range filter (yyyy-mm-dd strings).
+function inRange(iso: string, from?: string, to?: string): boolean {
+  if (from && iso < from) return false;
+  if (to && iso > to) return false;
+  return true;
 }
 
 function pilotName(p: Pilot, lang: PdfLang): string {
@@ -273,7 +294,7 @@ export async function exportAuthorizationReport(sqdn: SquadronInfo, pilots: Pilo
   doc.text(`${shape(tr("date_label", lang))}: ${fmtDate()}`, 8, finalY + 30);
 
   footer(doc, lang);
-  save(doc, `authorization-report-${lang}-${fmtDate()}.pdf`);
+  save(doc, `authorization-report-${lang}-${fileStamp()}.pdf`);
 }
 
 // ---------- Pilot Data Pages ----------
@@ -337,7 +358,7 @@ export async function exportPilotDataPages(sqdn: SquadronInfo, pilots: Pilot[], 
   });
 
   footer(doc, lang);
-  save(doc, `pilot-data-pages-${lang}-${fmtDate()}.pdf`);
+  save(doc, `pilot-data-pages-${lang}-${fileStamp()}.pdf`);
 }
 
 // ---------- Total's Page ----------
@@ -391,7 +412,7 @@ export async function exportTotalsPage(sqdn: SquadronInfo, pilots: Pilot[], lang
   });
 
   footer(doc, lang);
-  save(doc, `totals-page-${lang}-${fmtDate()}.pdf`);
+  save(doc, `totals-page-${lang}-${fileStamp()}.pdf`);
 }
 
 // ---------- Squadron Summary ----------
@@ -482,7 +503,704 @@ export async function exportSquadronSummary(sqdn: SquadronInfo, pilots: Pilot[],
   });
 
   footer(doc, lang);
-  save(doc, `squadron-summary-${lang}-${fmtDate()}.pdf`);
+  save(doc, `squadron-summary-${lang}-${fileStamp()}.pdf`);
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Extended PDF exports — every report below uses the shared header /
+// footer / DD-MM-YYYY date helpers above, so the global polish rules
+// (no UI chrome, RJAF emblem, page-fit, color-coded currency badges)
+// are honoured automatically.
+// ───────────────────────────────────────────────────────────────────
+
+interface DateRange { from?: string; to?: string }
+
+function rangeLabel(r: DateRange, lang: PdfLang): string {
+  if (!r.from && !r.to) return `${shape(tr("asOf", lang))} ${fmtDate()}`;
+  return `${r.from ? fmtDate(r.from) : "—"} → ${r.to ? fmtDate(r.to) : "—"}`;
+}
+
+// ─── Roster ───────────────────────────────────────────────────────
+export async function exportRoster(sqdn: SquadronInfo, pilots: Pilot[], lang: PdfLang = "en") {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(doc, sqdn, lang === "ar" ? "كشف السرب" : "Squadron Roster", emblem, lang);
+
+  autoTable(doc, {
+    startY: 42,
+    head: [[
+      tr("col_num", lang),
+      shape(tr("col_pilot", lang)),
+      shape(tr("field_arabic", lang)),
+      shape(tr("col_unit", lang)),
+      shape(tr("field_phone", lang)),
+      shape(tr("field_available", lang)),
+    ]],
+    body: pilots.map((p) => [
+      p.id,
+      pilotName(p, lang),
+      shape(p.arabicName || "—"),
+      shape(p.unit),
+      p.phone || "—",
+      p.available ? shape(tr("yes", lang)) : shape(tr("no", lang)),
+    ]),
+    styles: { fontSize: 9, cellPadding: 1.8, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  footer(doc, lang);
+  save(doc, `roster-${lang}-${fileStamp()}.pdf`);
+}
+
+// ─── Currency status (color-coded) ────────────────────────────────
+type ExpiryKey = "day" | "night" | "nvg" | "irt" | "medical" | "sim";
+
+function statusColour(iso: string): [number, number, number] {
+  const days = (new Date(iso).getTime() - Date.now()) / 86400000;
+  if (isNaN(days) || days < 0) return [254, 202, 202];   // red — expired
+  if (days < 15) return [254, 240, 138];                  // yellow — warn
+  return [187, 247, 208];                                  // green — current
+}
+
+export async function exportCurrencyStatus(sqdn: SquadronInfo, pilots: Pilot[], lang: PdfLang = "en") {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(doc, sqdn, lang === "ar" ? "حالة المؤهلات" : "Currency Status", emblem, lang);
+
+  const head = [[
+    shape(tr("col_pilot", lang)),
+    shape(tr("exp_day", lang)),
+    shape(tr("exp_night", lang)),
+    shape(tr("col_nvg", lang)),
+    shape(tr("exp_irt", lang)),
+    shape(tr("exp_medical", lang)),
+    shape(tr("exp_sim", lang)),
+  ]];
+
+  const expiryKeys: ExpiryKey[] = ["day", "night", "nvg", "irt", "medical", "sim"];
+  const body = pilots.map((p) => [
+    pilotName(p, lang),
+    ...expiryKeys.map((k) => fmtDate(p.expiry[k])),
+  ]);
+
+  autoTable(doc, {
+    startY: 42,
+    head, body,
+    styles: { fontSize: 8.5, cellPadding: 1.6, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    didParseCell: (data) => {
+      if (data.section !== "body" || data.column.index === 0) return;
+      const k = expiryKeys[data.column.index - 1];
+      const iso = pilots[data.row.index]?.expiry[k];
+      if (!iso) return;
+      data.cell.styles.fillColor = statusColour(iso);
+      data.cell.styles.textColor = [20, 24, 32];
+    },
+    margin: { left: 8, right: 8 },
+  });
+
+  footer(doc, lang);
+  save(doc, `currency-status-${lang}-${fileStamp()}.pdf`);
+}
+
+// ─── Sortie log (date-range) ──────────────────────────────────────
+export async function exportSortieLog(
+  sqdn: SquadronInfo, pilots: Pilot[], sorties: Sortie[], range: DateRange, lang: PdfLang = "en",
+) {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(doc, sqdn, `${lang === "ar" ? "سجل الطلعات" : "Sortie Log"} · ${rangeLabel(range, lang)}`, emblem, lang);
+
+  const pilotMap = new Map(pilots.map((p) => [p.id, p]));
+  const filtered = sorties
+    .filter((s) => inRange(s.date, range.from, range.to))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  autoTable(doc, {
+    startY: 42,
+    head: [[
+      shape(tr("date_label", lang)),
+      lang === "ar" ? "نوع الطائرة" : "AC",
+      shape(tr("col_pilot", lang)),
+      lang === "ar" ? "مساعد" : "Co-pilot",
+      lang === "ar" ? "النوع" : "Type",
+      shape(tr("col_day", lang)),
+      shape(tr("col_night", lang)),
+      shape(tr("col_nvg", lang)),
+      shape(tr("col_sim", lang)),
+      lang === "ar" ? "الفعلي" : "Actual",
+    ]],
+    body: filtered.map((s) => {
+      const pilot = pilotMap.get(s.pilotId);
+      const co = pilotMap.get(s.coPilotId);
+      const pName = pilot ? pilotName(pilot, lang) : (s.pilotExternal?.name ? `${shape(s.pilotExternal.name)} *` : "—");
+      const cName = co ? pilotName(co, lang) : (s.coPilotExternal?.name ? `${shape(s.coPilotExternal.name)} *` : "—");
+      return [
+        fmtDate(s.date),
+        `${s.acType} ${s.acNumber}`.trim(),
+        pName,
+        cName,
+        shape(s.sortieType || s.name || "—"),
+        (s.day1 + s.day2 + s.dayDual).toFixed(1),
+        (s.night1 + s.night2 + s.nightDual).toFixed(1),
+        (s.nvg ?? 0).toFixed(1),
+        (s.sim ?? 0).toFixed(1),
+        (s.actual ?? 0).toFixed(1),
+      ];
+    }),
+    styles: { fontSize: 8, cellPadding: 1.4, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  footer(doc, lang);
+  save(doc, `sortie-log-${lang}-${fileStamp()}.pdf`);
+}
+
+// ─── Rankings (sorted by total flight hours) ──────────────────────
+export async function exportRankings(sqdn: SquadronInfo, pilots: Pilot[], lang: PdfLang = "en") {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(doc, sqdn, lang === "ar" ? "ترتيب الطيارين حسب الساعات" : "Squadron Rankings — Total Hours", emblem, lang);
+
+  const ranked = [...pilots].sort((a, b) => {
+    const ta = a.totalDay + a.totalNight + a.totalNvg;
+    const tb = b.totalDay + b.totalNight + b.totalNvg;
+    return tb - ta;
+  });
+
+  autoTable(doc, {
+    startY: 42,
+    head: [[
+      lang === "ar" ? "الترتيب" : "Rank",
+      shape(tr("col_pilot", lang)),
+      shape(tr("col_unit", lang)),
+      shape(tr("col_day", lang)),
+      shape(tr("col_night", lang)),
+      shape(tr("col_nvg", lang)),
+      shape(tr("col_sim", lang)),
+      shape(tr("col_captain", lang)),
+      lang === "ar" ? "الإجمالي" : "Total",
+    ]],
+    body: ranked.map((p, i) => [
+      String(i + 1),
+      pilotName(p, lang),
+      shape(p.unit),
+      p.totalDay.toFixed(1),
+      p.totalNight.toFixed(1),
+      p.totalNvg.toFixed(1),
+      p.totalSim.toFixed(1),
+      p.totalCaptain.toFixed(1),
+      (p.totalDay + p.totalNight + p.totalNvg).toFixed(1),
+    ]),
+    styles: { fontSize: 9, cellPadding: 1.6, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  footer(doc, lang);
+  save(doc, `rankings-${lang}-${fileStamp()}.pdf`);
+}
+
+// ─── External pilots (guests) ─────────────────────────────────────
+export async function exportExternalPilots(sqdn: SquadronInfo, sorties: Sortie[], lang: PdfLang = "en") {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(doc, sqdn, lang === "ar" ? "الطيارون الخارجيون" : "External Pilots", emblem, lang);
+
+  // Roll up guest entries — each external name + squadron pair becomes
+  // a row with their total recorded hours and number of flights here.
+  type Row = { name: string; squadron: string; flights: number; hours: number; lastDate: string };
+  const map = new Map<string, Row>();
+  const eat = (s: Sortie, ext: { name: string; squadron: string } | undefined) => {
+    if (!ext) return;
+    const k = `${ext.squadron}::${ext.name}`;
+    const cur = map.get(k) ?? { name: ext.name, squadron: ext.squadron, flights: 0, hours: 0, lastDate: s.date };
+    cur.flights += 1;
+    cur.hours += s.actual ?? 0;
+    if (s.date > cur.lastDate) cur.lastDate = s.date;
+    map.set(k, cur);
+  };
+  sorties.forEach((s) => { eat(s, s.pilotExternal); eat(s, s.coPilotExternal); });
+
+  const rows = [...map.values()].sort((a, b) => b.hours - a.hours);
+
+  autoTable(doc, {
+    startY: 42,
+    head: [[
+      shape(tr("col_pilot", lang)),
+      lang === "ar" ? "السرب" : "Squadron",
+      lang === "ar" ? "عدد الطلعات" : "Flights",
+      lang === "ar" ? "الساعات" : "Hours",
+      lang === "ar" ? "آخر طلعة" : "Last flight",
+    ]],
+    body: rows.length === 0
+      ? [[lang === "ar" ? "لا يوجد" : "No external pilots on record.", "", "", "", ""]]
+      : rows.map((r) => [shape(r.name), shape(r.squadron), String(r.flights), r.hours.toFixed(1), fmtDate(r.lastDate)]),
+    styles: { fontSize: 9, cellPadding: 1.8, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  footer(doc, lang);
+  save(doc, `external-pilots-${lang}-${fileStamp()}.pdf`);
+}
+
+// ─── Per-pilot logbook (date-range) ───────────────────────────────
+export async function exportPilotLogbook(
+  sqdn: SquadronInfo, pilot: Pilot, sorties: Sortie[], range: DateRange, lang: PdfLang = "en",
+) {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(
+    doc, sqdn,
+    `${lang === "ar" ? "سجل طيران الطيار" : "Pilot Logbook"} · ${pilotName(pilot, lang)} · ${rangeLabel(range, lang)}`,
+    emblem, lang,
+  );
+
+  const own = sorties
+    .filter((s) => (s.pilotId === pilot.id || s.coPilotId === pilot.id) && inRange(s.date, range.from, range.to))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  autoTable(doc, {
+    startY: 42,
+    head: [[
+      shape(tr("date_label", lang)),
+      lang === "ar" ? "نوع الطائرة" : "AC",
+      lang === "ar" ? "المقعد" : "Seat",
+      lang === "ar" ? "النوع" : "Mission",
+      shape(tr("col_day", lang)),
+      shape(tr("col_night", lang)),
+      shape(tr("col_nvg", lang)),
+      shape(tr("col_sim", lang)),
+      lang === "ar" ? "الفعلي" : "Actual",
+    ]],
+    body: own.map((s) => {
+      const seat = s.pilotId === pilot.id ? (lang === "ar" ? "قائد" : "Pilot") : (lang === "ar" ? "مساعد" : "Co-pilot");
+      return [
+        fmtDate(s.date),
+        `${s.acType} ${s.acNumber}`.trim(),
+        seat,
+        shape(s.sortieType || s.name || "—"),
+        (s.day1 + s.day2 + s.dayDual).toFixed(1),
+        (s.night1 + s.night2 + s.nightDual).toFixed(1),
+        (s.nvg ?? 0).toFixed(1),
+        (s.sim ?? 0).toFixed(1),
+        (s.actual ?? 0).toFixed(1),
+      ];
+    }),
+    styles: { fontSize: 8.5, cellPadding: 1.4, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  // Totals row
+  const totDay = own.reduce((a, s) => a + s.day1 + s.day2 + s.dayDual, 0);
+  const totNight = own.reduce((a, s) => a + s.night1 + s.night2 + s.nightDual, 0);
+  const totNvg = own.reduce((a, s) => a + (s.nvg ?? 0), 0);
+  const totSim = own.reduce((a, s) => a + (s.sim ?? 0), 0);
+  const totAct = own.reduce((a, s) => a + (s.actual ?? 0), 0);
+  const y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
+  doc.setFont(baseFont(lang), "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(20, 24, 32);
+  doc.text(
+    `${shape(tr("squadron_total", lang))}: D ${totDay.toFixed(1)} · N ${totNight.toFixed(1)} · NVG ${totNvg.toFixed(1)} · SIM ${totSim.toFixed(1)} · ${lang === "ar" ? "إجمالي" : "Total"} ${totAct.toFixed(1)}`,
+    8, y,
+  );
+
+  footer(doc, lang);
+  save(doc, `logbook-${pilot.id}-${lang}-${fileStamp()}.pdf`);
+}
+
+// ─── Audit log (date-range) ───────────────────────────────────────
+export interface AuditEntry { at: string; user: string; action: string; entity?: string; detail?: string }
+export async function exportAuditLog(sqdn: SquadronInfo, rows: AuditEntry[], range: DateRange, lang: PdfLang = "en") {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(doc, sqdn, `${lang === "ar" ? "سجل التدقيق" : "Audit Log"} · ${rangeLabel(range, lang)}`, emblem, lang);
+
+  const filtered = rows
+    .filter((r) => inRange(r.at.slice(0, 10), range.from, range.to))
+    .sort((a, b) => a.at.localeCompare(b.at));
+
+  autoTable(doc, {
+    startY: 42,
+    head: [[
+      lang === "ar" ? "وقت الحدث" : "When",
+      lang === "ar" ? "المستخدم" : "User",
+      lang === "ar" ? "الإجراء" : "Action",
+      lang === "ar" ? "الكائن" : "Entity",
+      lang === "ar" ? "التفاصيل" : "Detail",
+    ]],
+    body: filtered.map((r) => {
+      const d = new Date(r.at);
+      const stamp = isNaN(d.getTime()) ? r.at : `${fmtDate(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+      return [stamp, shape(r.user), shape(r.action), shape(r.entity || "—"), shape(r.detail || "—")];
+    }),
+    styles: { fontSize: 8, cellPadding: 1.4, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    columnStyles: { 4: { cellWidth: 80 } },
+    margin: { left: 8, right: 8 },
+  });
+
+  footer(doc, lang);
+  save(doc, `audit-log-${lang}-${fileStamp()}.pdf`);
+}
+
+// ─── Reminders log ────────────────────────────────────────────────
+export interface ReminderLogEntry { pilot: string; type: string; threshold?: string; lastSent?: string; nextDue?: string }
+export async function exportRemindersLog(sqdn: SquadronInfo, rows: ReminderLogEntry[], lang: PdfLang = "en") {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(doc, sqdn, lang === "ar" ? "سجل التذكيرات" : "Reminders Log", emblem, lang);
+
+  autoTable(doc, {
+    startY: 42,
+    head: [[
+      shape(tr("col_pilot", lang)),
+      lang === "ar" ? "النوع" : "Type",
+      lang === "ar" ? "الحد" : "Threshold",
+      lang === "ar" ? "آخر إرسال" : "Last sent",
+      lang === "ar" ? "التالي" : "Next due",
+    ]],
+    body: rows.length === 0
+      ? [[lang === "ar" ? "لا يوجد" : "No reminders configured.", "", "", "", ""]]
+      : rows.map((r) => [
+          shape(r.pilot), shape(r.type), shape(r.threshold || "—"),
+          r.lastSent ? fmtDate(r.lastSent) : "—",
+          r.nextDue ? fmtDate(r.nextDue) : "—",
+        ]),
+    styles: { fontSize: 9, cellPadding: 1.6, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  footer(doc, lang);
+  save(doc, `reminders-log-${lang}-${fileStamp()}.pdf`);
+}
+
+// ─── NOTAMs ───────────────────────────────────────────────────────
+export interface NotamLine { id: string; date: string; text: string }
+export async function exportNotams(sqdn: SquadronInfo, notams: NotamLine[], lang: PdfLang = "en") {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(doc, sqdn, "NOTAMs", emblem, lang);
+
+  autoTable(doc, {
+    startY: 42,
+    head: [["#", shape(tr("date_label", lang)), lang === "ar" ? "النص" : "Text"]],
+    body: notams
+      .slice()
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .map((n, i) => [String(i + 1), fmtDate(n.date), shape(n.text)]),
+    styles: { fontSize: 9, cellPadding: 1.8, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    columnStyles: { 0: { cellWidth: 12 }, 1: { cellWidth: 32 } },
+    margin: { left: 8, right: 8 },
+  });
+
+  footer(doc, lang);
+  save(doc, `notams-${lang}-${fileStamp()}.pdf`);
+}
+
+// ─── Nav routes ───────────────────────────────────────────────────
+export interface NavRouteLine { id: string; name: string; aircraft: string; description?: string; estimatedHours?: number; waypoints: { name: string; coords?: string }[] }
+export async function exportNavRoutes(sqdn: SquadronInfo, routes: NavRouteLine[], lang: PdfLang = "en") {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(doc, sqdn, lang === "ar" ? "مسارات الملاحة" : "Nav Routes", emblem, lang);
+
+  autoTable(doc, {
+    startY: 42,
+    head: [[
+      lang === "ar" ? "المسار" : "Route",
+      lang === "ar" ? "الطائرة" : "Aircraft",
+      lang === "ar" ? "الساعات التقديرية" : "Est. hours",
+      lang === "ar" ? "نقاط الطريق" : "Waypoints",
+    ]],
+    body: routes.map((r) => [
+      shape(r.name),
+      shape(r.aircraft),
+      r.estimatedHours != null ? r.estimatedHours.toFixed(1) : "—",
+      shape(r.waypoints.map((w) => w.name + (w.coords ? ` (${w.coords})` : "")).join(" → ") || "—"),
+    ]),
+    styles: { fontSize: 9, cellPadding: 1.8, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    columnStyles: { 3: { cellWidth: 130 } },
+    margin: { left: 8, right: 8 },
+  });
+
+  footer(doc, lang);
+  save(doc, `nav-routes-${lang}-${fileStamp()}.pdf`);
+}
+
+// ─── Risk Assessment ──────────────────────────────────────────────
+export interface RiskRow { factor: string; weight: number; score: number }
+export async function exportRiskAssessment(
+  sqdn: SquadronInfo, rows: RiskRow[], total: number, level: string, lang: PdfLang = "en",
+) {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(doc, sqdn, lang === "ar" ? "تقييم المخاطر" : "Risk Assessment", emblem, lang);
+
+  autoTable(doc, {
+    startY: 42,
+    head: [[
+      lang === "ar" ? "العامل" : "Factor",
+      lang === "ar" ? "الوزن" : "Weight",
+      lang === "ar" ? "النتيجة" : "Score",
+    ]],
+    body: rows.map((r) => [shape(r.factor), String(r.weight), String(r.score)]),
+    styles: { fontSize: 10, cellPadding: 2, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  const y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
+  doc.setFont(baseFont(lang), "normal");
+  doc.setFontSize(11);
+  doc.setTextColor(20, 24, 32);
+  doc.text(`${lang === "ar" ? "الإجمالي" : "Total"}: ${total} · ${lang === "ar" ? "المستوى" : "Level"}: ${shape(level)}`, 8, y);
+
+  footer(doc, lang);
+  save(doc, `risk-assessment-${lang}-${fileStamp()}.pdf`);
+}
+
+// ─── Flight schedule ──────────────────────────────────────────────
+export interface ScheduleLine { ac: string; config: string; crew: string; mission: string; takeoff: string; land: string; fuel: string }
+export async function exportFlightSchedule(
+  sqdn: SquadronInfo, dateIso: string, lines: ScheduleLine[], lang: PdfLang = "en",
+) {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(doc, sqdn, `${lang === "ar" ? "برنامج الطيران" : "Flight Schedule"} · ${fmtDate(dateIso)}`, emblem, lang);
+
+  autoTable(doc, {
+    startY: 42,
+    head: [[
+      lang === "ar" ? "الطائرة" : "AC",
+      lang === "ar" ? "التهيئة" : "Config",
+      lang === "ar" ? "الطاقم" : "Crew",
+      lang === "ar" ? "المهمة" : "Mission",
+      lang === "ar" ? "الإقلاع" : "Takeoff",
+      lang === "ar" ? "الهبوط" : "Land",
+      lang === "ar" ? "الوقود" : "Fuel",
+    ]],
+    body: lines.map((l) => [shape(l.ac), shape(l.config), shape(l.crew), shape(l.mission), l.takeoff, l.land, l.fuel]),
+    styles: { fontSize: 9, cellPadding: 1.8, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  footer(doc, lang);
+  save(doc, `flight-schedule-${lang}-${fileStamp()}.pdf`);
+}
+
+// ─── Duty week ────────────────────────────────────────────────────
+export interface DutyLine { day: string; mainDuty: string; standby: string; rcm: string }
+export async function exportDutyWeek(
+  sqdn: SquadronInfo, period: string, days: DutyLine[], counters: { name: string; count: number }[], lang: PdfLang = "en",
+) {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(doc, sqdn, `${lang === "ar" ? "أسبوع الجاهزية" : "Duty Week"} · ${period}`, emblem, lang);
+
+  autoTable(doc, {
+    startY: 42,
+    head: [[
+      lang === "ar" ? "اليوم" : "Day",
+      lang === "ar" ? "ضابط اليوم" : "Main duty",
+      lang === "ar" ? "الاحتياط" : "Standby",
+      "RCM",
+    ]],
+    body: days.map((d) => [d.day, shape(d.mainDuty), shape(d.standby), shape(d.rcm)]),
+    styles: { fontSize: 10, cellPadding: 2, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  if (counters.length) {
+    const y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
+    doc.setFont(baseFont(lang), "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(20, 24, 32);
+    doc.text(lang === "ar" ? "العداد الشهري" : "Monthly counter", 8, y);
+    autoTable(doc, {
+      startY: y + 2,
+      head: [[shape(tr("col_pilot", lang)), lang === "ar" ? "عدد الأيام" : "Days"]],
+      body: counters.map((c) => [shape(c.name), String(c.count)]),
+      styles: { fontSize: 9, cellPadding: 1.6, ...tableStyles(lang) },
+      headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+      margin: { left: 8, right: 8 },
+    });
+  }
+
+  footer(doc, lang);
+  save(doc, `duty-week-${period}-${lang}-${fileStamp()}.pdf`);
+}
+
+// ─── Leaves ───────────────────────────────────────────────────────
+export interface LeavesLine { pilot: string; months: number[]; total: number }
+export async function exportLeaves(
+  sqdn: SquadronInfo, year: number, rows: LeavesLine[], lang: PdfLang = "en",
+) {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(doc, sqdn, `${lang === "ar" ? "الإجازات" : "Leaves"} · ${year}`, emblem, lang);
+
+  const monthNames = lang === "ar"
+    ? ["كان2", "شباط", "آذار", "نيسان", "أيار", "حزير", "تموز", "آب", "أيلول", "تش1", "تش2", "كان1"]
+    : ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  autoTable(doc, {
+    startY: 42,
+    head: [[shape(tr("col_pilot", lang)), ...monthNames, lang === "ar" ? "الإجمالي" : "Total"]],
+    body: rows.map((r) => [shape(r.pilot), ...r.months.map((m) => String(m || "")), String(r.total)]),
+    styles: { fontSize: 8.5, cellPadding: 1.4, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  footer(doc, lang);
+  save(doc, `leaves-${year}-${lang}-${fileStamp()}.pdf`);
+}
+
+// ─── 6-Month Cycle (H1/H2) ────────────────────────────────────────
+export interface CycleLine { pilot: string; h1: number; h2: number; target: number }
+export async function exportCycle(
+  sqdn: SquadronInfo, half: "H1" | "H2", rows: CycleLine[], lang: PdfLang = "en",
+) {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(doc, sqdn, `${lang === "ar" ? "الدورة نصف السنوية" : "6-Month Cycle"} · ${half}`, emblem, lang);
+
+  autoTable(doc, {
+    startY: 42,
+    head: [[
+      shape(tr("col_pilot", lang)),
+      "H1", "H2",
+      lang === "ar" ? "الهدف" : "Target",
+      lang === "ar" ? "النسبة" : "% of target",
+    ]],
+    body: rows.map((r) => {
+      const total = r.h1 + r.h2;
+      const pct = r.target > 0 ? Math.round((total / r.target) * 100) : 0;
+      return [shape(r.pilot), r.h1.toFixed(1), r.h2.toFixed(1), r.target.toFixed(1), `${pct}%`];
+    }),
+    styles: { fontSize: 9, cellPadding: 1.6, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  footer(doc, lang);
+  save(doc, `cycle-${half}-${lang}-${fileStamp()}.pdf`);
+}
+
+// ─── Individual Pilot Record (full dossier) ───────────────────────
+export async function exportIndividualPilotRecord(
+  sqdn: SquadronInfo, pilot: Pilot, sorties: Sortie[], lang: PdfLang = "en",
+) {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+  drawHeader(doc, sqdn, `${lang === "ar" ? "السجل الكامل للطيار" : "Individual Pilot Record"} · ${pilotName(pilot, lang)}`, emblem, lang);
+
+  // Identity block
+  autoTable(doc, {
+    startY: 42, theme: "grid",
+    body: [
+      [shape(tr("field_name", lang)), pilotName(pilot, lang), shape(tr("field_arabic", lang)), shape(pilot.arabicName || "—")],
+      [shape(tr("field_id", lang)), pilot.id, shape(tr("field_unit", lang)), shape(pilot.unit)],
+      [shape(tr("field_phone", lang)), pilot.phone || "—", shape(tr("field_address", lang)), shape(pilot.address || "—")],
+      [shape(tr("field_available", lang)), pilot.available ? shape(tr("yes", lang)) : shape(tr("no", lang)),
+       shape(tr("field_doctor", lang)), shape(pilot.doctorNote || "—")],
+    ],
+    styles: { fontSize: 9, cellPadding: 2, ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  // H1/H2 + career hours
+  let y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 4;
+  doc.setFont(baseFont(lang), "normal"); doc.setFontSize(10); doc.setTextColor(20, 24, 32);
+  doc.text(shape(tr("hoursSummary", lang)), 8, y);
+  autoTable(doc, {
+    startY: y + 2,
+    head: [[shape(tr("col_bucket", lang)), shape(tr("col_day", lang)), shape(tr("col_night", lang)),
+            shape(tr("col_nvg", lang)), shape(tr("col_sim", lang)), shape(tr("col_captain", lang))]],
+    body: [
+      [shape(tr("bucket_opening", lang)), pilot.openingDay.toFixed(1), pilot.openingNight.toFixed(1),
+       pilot.openingNvg.toFixed(1), "—", "—"],
+      [shape(tr("bucket_month", lang)), pilot.monthDay.toFixed(1), pilot.monthNight.toFixed(1),
+       pilot.monthNvg.toFixed(1), pilot.monthSim.toFixed(1), pilot.monthCaptain.toFixed(1)],
+      [shape(tr("bucket_total", lang)), pilot.totalDay.toFixed(1), pilot.totalNight.toFixed(1),
+       pilot.totalNvg.toFixed(1), pilot.totalSim.toFixed(1), pilot.totalCaptain.toFixed(1)],
+    ],
+    styles: { fontSize: 9, cellPadding: 2, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  // Currencies (color-coded)
+  y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 4;
+  doc.text(shape(tr("currencyExpiry", lang)), 8, y);
+  const expiryKeys: ExpiryKey[] = ["day", "night", "nvg", "irt", "medical", "sim"];
+  autoTable(doc, {
+    startY: y + 2,
+    head: [expiryKeys.map((k) => {
+      // STR has exp_day / exp_night / exp_irt / exp_medical / exp_sim but
+      // no exp_nvg, so fall back to col_nvg for that one column header.
+      const key = k === "nvg" ? "col_nvg" : `exp_${k}`;
+      return shape(tr(key as keyof typeof STR, lang));
+    })],
+    body: [expiryKeys.map((k) => fmtDate(pilot.expiry[k]))],
+    didParseCell: (data) => {
+      if (data.section !== "body") return;
+      const k = expiryKeys[data.column.index];
+      data.cell.styles.fillColor = statusColour(pilot.expiry[k]);
+      data.cell.styles.textColor = [20, 24, 32];
+    },
+    styles: { fontSize: 9, cellPadding: 2, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  // Last 30 sorties
+  y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 4;
+  doc.text(lang === "ar" ? "آخر 30 طلعة" : "Last 30 sorties", 8, y);
+  const last30 = sorties
+    .filter((s) => s.pilotId === pilot.id || s.coPilotId === pilot.id)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 30);
+  autoTable(doc, {
+    startY: y + 2,
+    head: [[
+      shape(tr("date_label", lang)),
+      lang === "ar" ? "نوع الطائرة" : "AC",
+      lang === "ar" ? "النوع" : "Mission",
+      shape(tr("col_day", lang)),
+      shape(tr("col_night", lang)),
+      shape(tr("col_nvg", lang)),
+      lang === "ar" ? "الفعلي" : "Actual",
+    ]],
+    body: last30.length === 0
+      ? [[lang === "ar" ? "لا توجد طلعات" : "No sorties on record.", "", "", "", "", "", ""]]
+      : last30.map((s) => [
+          fmtDate(s.date),
+          `${s.acType} ${s.acNumber}`.trim(),
+          shape(s.sortieType || s.name || "—"),
+          (s.day1 + s.day2 + s.dayDual).toFixed(1),
+          (s.night1 + s.night2 + s.nightDual).toFixed(1),
+          (s.nvg ?? 0).toFixed(1),
+          (s.actual ?? 0).toFixed(1),
+        ]),
+    styles: { fontSize: 8.5, cellPadding: 1.4, ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  footer(doc, lang);
+  save(doc, `pilot-record-${pilot.id}-${lang}-${fileStamp()}.pdf`);
 }
 
 export const PDF_EXPORTS = {
@@ -490,4 +1208,20 @@ export const PDF_EXPORTS = {
   pilotData: exportPilotDataPages,
   totals: exportTotalsPage,
   summary: exportSquadronSummary,
+  roster: exportRoster,
+  currencyStatus: exportCurrencyStatus,
+  sortieLog: exportSortieLog,
+  rankings: exportRankings,
+  externalPilots: exportExternalPilots,
+  pilotLogbook: exportPilotLogbook,
+  auditLog: exportAuditLog,
+  remindersLog: exportRemindersLog,
+  notams: exportNotams,
+  navRoutes: exportNavRoutes,
+  riskAssessment: exportRiskAssessment,
+  flightSchedule: exportFlightSchedule,
+  dutyWeek: exportDutyWeek,
+  leaves: exportLeaves,
+  cycle: exportCycle,
+  individualPilotRecord: exportIndividualPilotRecord,
 } as const;

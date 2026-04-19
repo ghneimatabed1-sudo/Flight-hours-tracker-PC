@@ -8,6 +8,7 @@ import {
 } from "@/lib/cross-pc";
 import { useToast } from "@/hooks/use-toast";
 import { useCreateSortie, usePilots } from "@/lib/squadron-data";
+import { fmtDateTimeDDMM } from "@/lib/format";
 import { Inbox, Check, X, PauseCircle, Pencil } from "lucide-react";
 
 // Pending Approvals — home-squadron ops officer reviews sorties that
@@ -125,7 +126,7 @@ export default function PendingApprovals() {
                       <Field label="Day" value={(s.day1 + s.day2 + s.dayDual).toFixed(1)} />
                       <Field label="Night" value={(s.night1 + s.night2 + s.nightDual).toFixed(1)} />
                       <Field label="NVG" value={(s.nvg ?? 0).toFixed(1)} />
-                      <Field label="Submitted" value={new Date(row.submittedAt).toLocaleString()} />
+                      <Field label="Submitted" value={fmtDateTimeDDMM(row.submittedAt)} />
                     </div>
                     {s.remarks && (
                       <div className="text-xs">

@@ -803,10 +803,11 @@ function MonthCalendar({
   }
   while (cells.length % 7 !== 0) cells.push(null);
 
-  const monthLabel = firstOfMonth.toLocaleDateString(
-    lang === "ar" ? "ar-JO" : "en-GB",
-    { month: "long", year: "numeric" },
-  );
+  // MM-YYYY in line with the squadron-wide DD-MM-YYYY standard. Localised
+  // weekday / month names elsewhere on the calendar still come from the
+  // language; the *period* itself stays numeric.
+  const monthLabel = `${String(mIdx).padStart(2, "0")}-${y}`;
+  void lang;
   const weekdayLabels = lang === "ar"
     ? ["أحد", "اثن", "ثلا", "أرب", "خمي", "جمع", "سبت"]
     : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

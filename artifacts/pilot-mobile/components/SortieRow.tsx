@@ -11,14 +11,11 @@ interface Props {
 }
 
 function formatDate(d: string): string {
+  // Squadron-wide DD-MM-YYYY (matches the ops dashboard, every PDF, and
+  // every printable surface so pilots see one consistent date format).
   const parts = d.split("-");
   if (parts.length !== 3) return d;
-  const date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-  return date.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return `${parts[2]}-${parts[1]}-${parts[0]}`;
 }
 
 export function SortieRow({ sortie }: Props) {

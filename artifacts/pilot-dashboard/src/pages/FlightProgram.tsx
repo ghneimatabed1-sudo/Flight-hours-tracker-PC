@@ -154,17 +154,13 @@ const dayOfWeek = (iso: string, lang: string): string => {
   return d.toLocaleDateString(lang === "ar" ? "ar" : "en-US", { weekday: "long" });
 };
 
-// Human-readable date for the printed sheet: "18 APR 2026" / "18 أبريل 2026".
+// Human-readable date for the printed sheet: DD-MM-YYYY (squadron standard).
 // Keeps the form looking like a real signed document instead of a raw ISO.
-const formatDate = (iso: string, lang: string): string => {
+const formatDate = (iso: string, _lang: string): string => {
   if (!iso) return "";
   const d = new Date(iso + "T00:00:00");
-  const out = d.toLocaleDateString(lang === "ar" ? "ar" : "en-US", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-  return lang === "ar" ? out : out.toUpperCase();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
 };
 
 export default function FlightProgram() {

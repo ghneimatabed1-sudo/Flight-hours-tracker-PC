@@ -1,4 +1,4 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useI18n, type Key as TKey } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
@@ -53,6 +53,22 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [loc] = useLocation();
   const [open, setOpen] = useState(true);
   const [online] = useState(navigator.onLine);
+
+  // Theme: dark (default — military) or light (daylight / briefing room).
+  // Persisted per device in localStorage so commanders / ops officers
+  // don't have to re-pick on every load. Applied by toggling the class
+  // on <html>; the CSS variables in index.css do the rest.
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    if (typeof window === "undefined") return "dark";
+    const saved = window.localStorage.getItem("rjaf.theme");
+    return saved === "light" ? "light" : "dark";
+  });
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove("dark", "light");
+    root.classList.add(theme);
+    try { window.localStorage.setItem("rjaf.theme", theme); } catch { /* storage may be blocked */ }
+  }, [theme]);
 
   return (
     <div className="min-h-screen brand-bg flex">
@@ -137,9 +153,14 @@ export default function Layout({ children }: { children: ReactNode }) {
             <button onClick={() => setLang(lang === "en" ? "ar" : "en")} className="text-xs px-2 py-1 rounded-md border border-border hover:bg-secondary">
               {lang === "en" ? t("arabic") : t("english")}
             </button>
-            <button className="p-2 rounded-md hover:bg-secondary" title="Theme (always dark)">
-              <Moon className="h-4 w-4" />
-              <Sun className="hidden" />
+            <button
+              className="p-2 rounded-md hover:bg-secondary"
+              title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              data-testid="button-theme-toggle"
+              data-print-hide
+            >
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
             <div className="hidden md:flex items-center gap-2 ml-2 pl-3 border-l border-border">
               <div className="text-right rtl:text-left leading-tight" data-testid="text-signed-in-as">

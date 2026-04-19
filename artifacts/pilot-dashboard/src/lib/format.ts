@@ -59,15 +59,55 @@ export function pilotWorstDate(p: Pilot): string | null {
   return best && best.status !== "current" ? best.date : null;
 }
 
-export function fmtDate(d: string, lang: string): string {
-  return new Date(d).toLocaleDateString(lang === "ar" ? "ar-EG" : "en-GB", {
-    year: "numeric", month: "short", day: "2-digit",
-  });
+// ─── Date formatting ─────────────────────────────────────────────
+// The squadron / RJAF standard for every printed surface and on-screen
+// date display is **DD-MM-YYYY** (e.g. 18-04-2026). Centralising it
+// here means one change here flows everywhere that imports `fmtDate`.
+function pad2(n: number): string { return n < 10 ? `0${n}` : String(n); }
+
+function toDate(d: string | Date | number | null | undefined): Date | null {
+  if (d == null || d === "") return null;
+  const v = d instanceof Date ? d : new Date(d);
+  return isNaN(v.getTime()) ? null : v;
 }
 
-export function fmtDateTime(d: string, lang: string): string {
-  return new Date(d).toLocaleString(lang === "ar" ? "ar-EG" : "en-GB", {
-    year: "numeric", month: "short", day: "2-digit",
-    hour: "2-digit", minute: "2-digit",
-  });
+// DD-MM-YYYY — the canonical squadron / PDF / print date format.
+export function fmtDDMMYYYY(d: string | Date | number | null | undefined): string {
+  const v = toDate(d);
+  if (!v) return "—";
+  return `${pad2(v.getDate())}-${pad2(v.getMonth() + 1)}-${v.getFullYear()}`;
 }
+
+// DD-MM (year omitted) — used for compact badges and calendar headers.
+export function fmtDDMM(d: string | Date | number | null | undefined): string {
+  const v = toDate(d);
+  if (!v) return "—";
+  return `${pad2(v.getDate())}-${pad2(v.getMonth() + 1)}`;
+}
+
+// DD-MM-YYYY HH:mm — for audit log / message timestamps.
+export function fmtDateTimeDDMM(d: string | Date | number | null | undefined): string {
+  const v = toDate(d);
+  if (!v) return "—";
+  return `${fmtDDMMYYYY(v)} ${pad2(v.getHours())}:${pad2(v.getMinutes())}`;
+}
+
+// Month-Year header (e.g. "APR 2026" / "نيسان 2026").
+export function fmtMonthYear(period: string | Date, lang: string = "en"): string {
+  let d: Date;
+  if (typeof period === "string" && /^\d{4}-\d{2}$/.test(period)) {
+    const [y, m] = period.split("-").map(Number);
+    d = new Date(y, m - 1, 1);
+  } else {
+    d = period instanceof Date ? period : new Date(period);
+  }
+  if (isNaN(d.getTime())) return String(period);
+  return d.toLocaleDateString(lang === "ar" ? "ar-EG" : "en-GB", {
+    year: "numeric", month: "short",
+  }).toUpperCase();
+}
+
+// Backwards-compatible aliases — every caller that used to render a
+// short-month date now gets DD-MM-YYYY without further changes.
+export function fmtDate(d: string, _lang?: string): string { return fmtDDMMYYYY(d); }
+export function fmtDateTime(d: string, _lang?: string): string { return fmtDateTimeDDMM(d); }

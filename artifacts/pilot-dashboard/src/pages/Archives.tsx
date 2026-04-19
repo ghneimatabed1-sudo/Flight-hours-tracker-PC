@@ -19,9 +19,11 @@ export default function Archives() {
 
   const fmtPeriod = (p: string) => {
     if (p.length === 4) return p;
+    // MM-YYYY (DD-MM-YYYY without the day for monthly archives) — keeps
+    // archive labels in the same family as every other date in the app.
     const [y, m] = p.split("-");
-    const d = new Date(Number(y), Number(m) - 1, 1);
-    return d.toLocaleDateString(lang === "ar" ? "ar-EG" : "en-US", { year: "numeric", month: "long" });
+    void lang;
+    return `${m}-${y}`;
   };
 
   const onCheckNow = () => { runArchiveCheck(); setTick(x => x + 1); };

@@ -53,6 +53,75 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* ─────────────────────────────────────────────────────────────────
+   Light theme (printable / daylight). The app defaults to the
+   military dark theme below; the operator can flip via the topbar
+   toggle. The choice persists per device in localStorage("theme").
+   The light theme is intentionally restrained — it keeps the gold
+   accent so the brand identity carries over, but uses neutral
+   off-whites so currency badges stay legible on paper or in
+   bright cockpits / briefing rooms.
+───────────────────────────────────────────────────────────────── */
+.light {
+  --button-outline: rgba(0,0,0, .10);
+  --badge-outline: rgba(0,0,0, .05);
+  --opaque-button-border-intensity: 9;
+  --elevate-1: rgba(0,0,0, .03);
+  --elevate-2: rgba(0,0,0, .07);
+
+  --background: 40 30% 96%;
+  --foreground: 220 30% 12%;
+  --border: 220 14% 82%;
+  --input: 220 14% 92%;
+  --ring: 42 80% 45%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 220 30% 12%;
+  --card-border: 220 14% 82%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 30% 12%;
+  --popover-border: 220 14% 82%;
+
+  --primary: 42 80% 40%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 220 14% 92%;
+  --secondary-foreground: 220 30% 12%;
+
+  --muted: 220 14% 92%;
+  --muted-foreground: 220 12% 38%;
+
+  --accent: 42 80% 45%;
+  --accent-foreground: 0 0% 100%;
+
+  --destructive: 0 70% 45%;
+  --destructive-foreground: 0 0% 100%;
+
+  --chart-1: 42 80% 45%;
+  --chart-2: 200 70% 45%;
+  --chart-3: 0 70% 45%;
+  --chart-4: 140 50% 38%;
+  --chart-5: 280 50% 50%;
+
+  --sidebar: 40 30% 94%;
+  --sidebar-foreground: 220 30% 12%;
+  --sidebar-border: 220 14% 82%;
+  --sidebar-primary: 42 80% 40%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 220 14% 88%;
+  --sidebar-accent-foreground: 220 30% 12%;
+  --sidebar-ring: 42 80% 45%;
+
+  --primary-border: hsl(42 80% 32%);
+  --secondary-border: hsl(220 14% 78%);
+  --muted-border: hsl(220 14% 82%);
+  --accent-border: hsl(42 80% 32%);
+  --destructive-border: hsl(0 70% 35%);
+  --sidebar-primary-border: hsl(42 80% 32%);
+  --sidebar-accent-border: hsl(220 14% 78%);
+}
+
 /* Force military dark theme as the default */
 :root, .dark {
   --button-outline: rgba(255,255,255, .10);
@@ -246,36 +315,128 @@ html, body, #root {
 .currency-expired { background-color: rgb(254 202 202); color: rgb(127 29 29); }
 .dark .currency-expired { background-color: rgb(127 29 29 / 0.4); color: rgb(254 202 202); }
 
-/* Print-friendly pilot table export */
+/* ─── Print stylesheet ──────────────────────────────────────────────
+   Single source of truth for every printable surface in the app.
+   Goals (from the global polish task):
+   • No sidebars, navigation, or other UI chrome leaks onto paper.
+   • No buttons, action bars, dialogs, popovers, or toast notifications.
+   • Content fits inside the printable A4 area — no edge-clipping.
+   • Currency badge colours preserved (so red/yellow/green keep meaning).
+   • DD-MM-YYYY date format is enforced by the JS date helpers, so the
+     CSS only has to make sure the page doesn't re-introduce noise.
+─────────────────────────────────────────────────────────────────── */
 .print-only { display: none; }
 @media print {
   @page { size: A4 landscape; margin: 12mm; }
-  html, body { background: #fff !important; color: #000 !important; }
+
+  html, body {
+    background: #fff !important;
+    color: #000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Anything explicitly opted out of print. */
   .no-print { display: none !important; }
   /* Schedule diff highlights are screen-only — paper output stays clean. */
   .no-print-diff { background: transparent !important; text-decoration: none !important; opacity: 1 !important; }
   .print-only { display: block !important; }
+
+  /* App chrome — NEVER on paper. Sidebar, top header, sticky nav. */
+  aside,
+  header,
+  nav.sidebar,
+  [data-sidebar],
+  [data-print-hide],
+  [role="navigation"],
+  [role="toolbar"],
+  [role="dialog"],
+  [role="alertdialog"],
+  [data-radix-popper-content-wrapper],
+  [data-sonner-toaster],
+  [data-state="open"][data-side],
+  .toaster,
+  .sonner,
+  .ConfirmDialog,
+  .modal,
+  .Toastify,
+  .reminders-pop,
+  .live-data-indicator,
+  .tooltip,
+  [data-state="open"].popover,
+  [data-radix-portal] {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* Strip every interactive control from paper. The page content keeps
+     its tables, headings, and read-only data. */
+  button,
+  [role="button"],
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  a[href]:not(.print-keep) {
+    display: none !important;
+  }
+  /* Form inputs collapse to their text value where possible. */
+  input[type="text"],
+  input[type="number"],
+  input[type="date"],
+  input[type="month"],
+  select,
+  textarea {
+    border: none !important;
+    background: transparent !important;
+    color: #000 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+
+  main { padding: 0 !important; margin: 0 !important; overflow: visible !important; }
+  .min-h-screen { min-height: 0 !important; }
+  body * { box-shadow: none !important; }
+
+  /* Force black text on every printable surface so dark-theme greys
+     don't bleed through. Currency badges keep their explicit colours
+     via the rules below. */
+  .panel, .frame-gold, .brand-bg, .scan, [class*="bg-card"], [class*="bg-secondary"],
+  [class*="bg-popover"], [class*="bg-sidebar"], [class*="bg-background"] {
+    background: #fff !important;
+    color: #000 !important;
+    border-color: #ccc !important;
+  }
+  .gold-grad, .gold-text, .hero-num {
+    background: none !important;
+    -webkit-text-fill-color: #000 !important;
+    color: #000 !important;
+  }
+
+  /* Generic table polish for any page that opts into print-area. */
   .print-area { color: #000 !important; background: #fff !important; }
   .print-area table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
   .print-area th, .print-area td { border: 1px solid #ccc; padding: 4px 6px; text-align: start; vertical-align: middle; }
-  .print-area thead { background: #f4f4f4 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  .print-area .currency-current,
-  .print-area .currency-warning,
-  .print-area .currency-expired {
+  .print-area thead { background: #f4f4f4 !important; }
+
+  /* Currency badges keep their colour-coding on paper so commanders
+     can scan red/yellow at a glance. */
+  .currency-current,
+  .currency-warning,
+  .currency-expired {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     color-adjust: exact !important;
   }
+
   .print-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 12px; }
   .print-header h1 { font-size: 16px; font-weight: 700; margin: 0; }
   .print-header .meta { font-size: 10.5px; color: #333; text-align: end; }
-  tr { page-break-inside: avoid; }
 
-  /* Hide app chrome on every printout — sidebar, topbar, scroll padding.
-     Without this the browser captures the whole window and the printable
-     content gets pushed off the page. */
-  aside, header { display: none !important; }
-  main { padding: 0 !important; margin: 0 !important; overflow: visible !important; }
-  .min-h-screen { min-height: 0 !important; }
-  body * { box-shadow: none !important; }
+  /* Avoid orphan rows / split tables across pages. */
+  tr, .avoid-break { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+
+  /* Pages that prefer portrait layout opt in. */
+  .print-portrait { page-break-before: always; }
+  @page :first { margin-top: 12mm; }
 }
