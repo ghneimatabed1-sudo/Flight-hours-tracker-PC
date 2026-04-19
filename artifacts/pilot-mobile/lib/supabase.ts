@@ -116,6 +116,14 @@ function rowsToSnapshot(
       medical: str(expiry.medical) ?? "",
       sim: str(expiry.sim) ?? "",
     },
+    // Mirror ops's hide-currency selection from the dashboard so the mobile
+    // currency screen omits N/A tiles (e.g. a non-NVG-qualified pilot will
+    // not see an NVG tile at all).
+    hiddenCurrencies: Array.isArray(d.hiddenCurrencies)
+      ? (d.hiddenCurrencies as string[]).filter((k): k is "day" | "night" | "nvg" | "irt" | "medical" | "sim" =>
+          k === "day" || k === "night" || k === "nvg" || k === "irt" || k === "medical" || k === "sim"
+        )
+      : undefined,
   };
 
   const records: SortieRecord[] = sorties.map((s) => {

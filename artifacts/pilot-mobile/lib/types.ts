@@ -26,6 +26,10 @@ export interface PilotProfile {
     medical: string;
     sim: string;
   };
+  // Currencies the squadron ops lead has marked N/A for this pilot (e.g. a
+  // pilot who is not NVG-qualified). Hidden currencies are omitted from the
+  // mobile currency screen entirely so the pilot doesn't see a stale tile.
+  hiddenCurrencies?: ("day" | "night" | "nvg" | "irt" | "medical" | "sim")[];
 }
 
 export interface SortieRecord {

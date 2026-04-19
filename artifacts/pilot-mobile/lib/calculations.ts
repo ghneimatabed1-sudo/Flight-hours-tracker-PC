@@ -171,10 +171,16 @@ export function computeCurrencies(profile: PilotProfile): CurrencyItem[] {
     { key: "sim", label: "Simulator" },
   ];
 
+  // Ops can mark a currency N/A for a pilot on the dashboard
+  // (e.g. a non-NVG-qualified pilot). Hidden currencies are dropped from
+  // the mobile list entirely so the pilot doesn't see a stale tile.
+  const hidden = new Set(profile.hiddenCurrencies ?? []);
+  const visible = items.filter((i) => !hidden.has(i.key));
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  return items.map(({ key, label }) => {
+  return visible.map(({ key, label }) => {
     const raw = profile.expiry?.[key];
     if (!raw) {
       return { key, label, expiry: null, daysRemaining: null, status: "missing" };
