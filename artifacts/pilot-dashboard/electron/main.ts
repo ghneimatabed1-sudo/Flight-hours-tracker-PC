@@ -45,6 +45,10 @@ function createWindow() {
     height: 900,
     minWidth: 1100,
     minHeight: 720,
+    // Launch maximized + true full-screen so operators get the whole
+    // dashboard on any monitor without manual resizing.
+    show: false,
+    fullscreen: true,
     backgroundColor: "#0a1226",
     title: "Hawk Eye",
     icon: path.join(__dirname, "..", "public", "brand", "hawkeye-logo.png"),
@@ -58,6 +62,13 @@ function createWindow() {
   });
 
   Menu.setApplicationMenu(null);
+
+  // Reveal the window only once the renderer paints its first frame so
+  // operators don't see a flash of empty chrome before full-screen kicks in.
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
+    mainWindow?.focus();
+  });
 
   // ── Diagnostics so we never ship another silent blue-screen ─────────
   // If the renderer fails to load (bad path, missing asset, ESM blocked
