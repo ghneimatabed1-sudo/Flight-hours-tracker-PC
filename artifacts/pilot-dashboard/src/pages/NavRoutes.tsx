@@ -7,23 +7,39 @@ import { Plus, Trash2, Map, Save, Printer, ArrowUp, ArrowDown } from "lucide-rea
 /**
  * Nav Routes — manual builder.
  *
- * Up to 20 routes. Each route has a name, an ordered list of waypoints
- * (NAME / LAT / LON / NOTES), and a derived total flight time computed by
+ * Up to 20 routes. Each route has a name, an ordered list of up to
+ * MAX_WAYPOINTS waypoints (just the waypoint name + leg time in minutes —
+ * no lat/lon, no notes), and a derived total flight time computed by
  * summing per-leg minutes the operator types into each waypoint cell.
  *
+ * Each waypoint is rendered as its own row (vertical list, never side
+ * by side) so the briefer reads them top-to-bottom like a flight plan
+ * leg sheet.
+ *
  * Stored locally so any commander/ops officer can maintain their own
- * working set on this PC; printable for crew briefs.
+ * working set on this PC; printable for crew briefs. Lat/lon and notes
+ * fields on legacy stored routes are silently ignored on render but
+ * preserved in the JSON so older sheets aren't destroyed.
  *
  * Storage: rjaf.navRoutes.v1
  */
 
 const STORAGE_KEY = "rjaf.navRoutes.v1";
 const MAX_ROUTES = 20;
+const MAX_WAYPOINTS = 15;
 
-interface Waypoint { id: string; name: string; lat: string; lon: string; legMin: number; notes: string; }
+interface Waypoint {
+  id: string;
+  name: string;
+  legMin: number;
+  /** Legacy fields — preserved on disk for older saves but not rendered. */
+  lat?: string;
+  lon?: string;
+  notes?: string;
+}
 interface NavRoute { id: string; name: string; aircraft: string; description: string; waypoints: Waypoint[]; }
 
-function emptyWp(): Waypoint { return { id: crypto.randomUUID(), name: "", lat: "", lon: "", legMin: 0, notes: "" }; }
+function emptyWp(): Waypoint { return { id: crypto.randomUUID(), name: "", legMin: 0 }; }
 function emptyRoute(): NavRoute { return { id: crypto.randomUUID(), name: "New Route", aircraft: "UH-60M", description: "", waypoints: [emptyWp(), emptyWp()] }; }
 
 function load(): NavRoute[] {
@@ -75,7 +91,14 @@ export default function NavRoutes() {
     })));
   }
   function addWp(routeId: string) {
-    setRoutes(prev => prev.map(r => r.id !== routeId ? r : ({ ...r, waypoints: [...r.waypoints, emptyWp()] })));
+    setRoutes(prev => prev.map(r => {
+      if (r.id !== routeId) return r;
+      if (r.waypoints.length >= MAX_WAYPOINTS) {
+        alert(`Maximum ${MAX_WAYPOINTS} waypoints per route.`);
+        return r;
+      }
+      return { ...r, waypoints: [...r.waypoints, emptyWp()] };
+    }));
   }
   function removeWp(routeId: string, wpId: string) {
     setRoutes(prev => prev.map(r => r.id !== routeId ? r : ({ ...r, waypoints: r.waypoints.filter(w => w.id !== wpId) })));
@@ -219,17 +242,16 @@ export default function NavRoutes() {
               </label>
             </div>
 
-            <div className="overflow-x-auto">
+            {/* Vertical leg list — one waypoint per row, just the name +
+                leg time. No lat/lon, no notes. Up to MAX_WAYPOINTS rows. */}
+            <div>
               <table className="w-full text-sm border-collapse">
                 <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
                   <tr>
                     <th className="px-2 py-2 text-left w-10">#</th>
                     <th className="px-2 py-2 text-left">Waypoint</th>
-                    <th className="px-2 py-2 text-left">Lat</th>
-                    <th className="px-2 py-2 text-left">Lon</th>
-                    <th className="px-2 py-2 text-right">Leg (min)</th>
-                    <th className="px-2 py-2 text-left">Notes</th>
-                    <th className="px-2 py-2 text-right print:hidden">—</th>
+                    <th className="px-2 py-2 text-right w-28">Leg (min)</th>
+                    <th className="px-2 py-2 text-right print:hidden w-32">—</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -238,23 +260,13 @@ export default function NavRoutes() {
                       <td className="px-2 py-1 text-center font-mono text-muted-foreground">{i + 1}</td>
                       <td className="px-1 py-1">
                         <input value={w.name} onChange={e => updateWp(active.id, w.id, { name: e.target.value })}
+                          placeholder={i === 0 ? "Departure" : i === active.waypoints.length - 1 ? "Destination" : "Waypoint"}
                           className="w-full px-2 py-1 rounded bg-input border border-border text-sm" data-testid={`input-wp-name-${i}`} />
                       </td>
-                      <td className="px-1 py-1">
-                        <input value={w.lat} onChange={e => updateWp(active.id, w.id, { lat: e.target.value })}
-                          className="w-28 px-2 py-1 rounded bg-input border border-border text-sm font-mono" data-testid={`input-wp-lat-${i}`} />
-                      </td>
-                      <td className="px-1 py-1">
-                        <input value={w.lon} onChange={e => updateWp(active.id, w.id, { lon: e.target.value })}
-                          className="w-28 px-2 py-1 rounded bg-input border border-border text-sm font-mono" data-testid={`input-wp-lon-${i}`} />
-                      </td>
                       <td className="px-1 py-1 text-right">
-                        <input type="number" min={0} value={w.legMin} onChange={e => updateWp(active.id, w.id, { legMin: Number(e.target.value) || 0 })}
-                          className="w-20 px-2 py-1 rounded bg-input border border-border text-sm font-mono text-right" data-testid={`input-wp-min-${i}`} />
-                      </td>
-                      <td className="px-1 py-1">
-                        <input value={w.notes} onChange={e => updateWp(active.id, w.id, { notes: e.target.value })}
-                          className="w-full px-2 py-1 rounded bg-input border border-border text-sm" data-testid={`input-wp-notes-${i}`} />
+                        <input type="number" min={0} value={w.legMin}
+                          onChange={e => updateWp(active.id, w.id, { legMin: Number(e.target.value) || 0 })}
+                          className="w-24 px-2 py-1 rounded bg-input border border-border text-sm font-mono text-right" data-testid={`input-wp-min-${i}`} />
                       </td>
                       <td className="px-2 py-1 text-right print:hidden whitespace-nowrap">
                         <button onClick={() => moveWp(active.id, w.id, -1)}
@@ -280,20 +292,29 @@ export default function NavRoutes() {
                 </tbody>
                 <tfoot>
                   <tr className="border-t-2 border-border">
-                    <td colSpan={4} className="px-2 py-2 text-right font-semibold uppercase text-xs text-muted-foreground">
+                    <td colSpan={2} className="px-2 py-2 text-right font-semibold uppercase text-xs text-muted-foreground">
                       Total flight time
                     </td>
                     <td className="px-2 py-2 text-right font-mono font-bold gold-text" data-testid="text-route-total">{fmtHours(totalMin)}</td>
-                    <td colSpan={2} />
+                    <td className="print:hidden" />
                   </tr>
                 </tfoot>
               </table>
             </div>
 
-            <div className="mt-3 print:hidden">
-              <Button size="sm" variant="outline" onClick={() => addWp(active.id)} data-testid="button-add-wp">
+            <div className="mt-3 print:hidden flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => addWp(active.id)}
+                disabled={active.waypoints.length >= MAX_WAYPOINTS}
+                data-testid="button-add-wp"
+              >
                 <Plus className="h-4 w-4 me-1" /> Add Waypoint
               </Button>
+              <span className="text-[11px] text-muted-foreground">
+                {active.waypoints.length} / {MAX_WAYPOINTS} waypoints
+              </span>
             </div>
           </Card>
         ) : (
