@@ -621,25 +621,29 @@ export default function FlightProgram() {
             </tbody>
           </table>
 
-          {/* FLT.CMDR / SQDN.CMDR stacked vertically (label above field, field
-              above next field) per ops-officer request — used to be a 2-up grid. */}
-          <div className="col-span-6 space-y-3 pb-1">
-            <div>
-              <div className="font-semibold text-[11px] mb-1">FLT.CMDR</div>
+          {/* Signature block — FLT.CMDR on the LEFT, SQDN.CMDR on the
+              RIGHT (positions are fixed and must never swap). The printed
+              role + officer name stay locked at the top of each column;
+              the editable field underneath is where the ops officer
+              types the actual signing remark / acknowledgement, so the
+              result appears BELOW the name rather than replacing it. */}
+          <div className="col-span-6 grid grid-cols-2 gap-4 pb-1">
+            <div className="text-center">
+              <div className="font-semibold text-[11px]">FLT.CMDR</div>
+              <div className="font-bold text-[11px] mb-1">LTC AUDEH …………….</div>
               <input
                 value={prog.fltCmdr}
                 onChange={(e) => update("fltCmdr", e.target.value)}
-                placeholder="LTC AUDEH …………."
                 className="w-full bg-transparent border-b border-black outline-none px-1 text-[11px] text-center font-bold"
                 data-testid="input-flt-cmdr"
               />
             </div>
-            <div>
-              <div className="font-semibold text-[11px] mb-1">SQDN.CMDR</div>
+            <div className="text-center">
+              <div className="font-semibold text-[11px]">SQDN.CMDR</div>
+              <div className="font-bold text-[11px] mb-1">LTC. BILAL ………………</div>
               <input
                 value={prog.sqdnCmdr}
                 onChange={(e) => update("sqdnCmdr", e.target.value)}
-                placeholder="LTC. BILAL ………………"
                 className="w-full bg-transparent border-b border-black outline-none px-1 text-[11px] text-center font-bold"
                 data-testid="input-sqdn-cmdr"
               />
