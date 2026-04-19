@@ -90,10 +90,11 @@ export default function Layout({ children }: { children: ReactNode }) {
             // other roles don't see it in the sidebar and the page itself
             // blocks direct URL access.
             if (p === "/flight-program") {
-              // Only the squadron ops officer (pilot officer) owns the sheet
-              // on the squadron PC. No other sidebar role — not even super
-              // admin — gets this entry.
-              return user?.role === "ops";
+              // The Flight Schedule label is hidden from the operations
+              // pilot's sidebar at the operator's request — the route
+              // itself stays available for whoever still needs it via
+              // direct URL or another entry point.
+              return false;
             }
             if (p === "/ops-team") {
               // Only the lead ops pilot manages the assigned ops sub-accounts.
@@ -110,7 +111,13 @@ export default function Layout({ children }: { children: ReactNode }) {
             // Approvals belongs to the squadron ops officer specifically —
             // it cascades into the local calc engine on accept.
             if (p === "/messages") return canUseMessages(user?.role, undefined);
-            if (p === "/schedule-chain") return true; // squadron ops always allowed
+            if (p === "/schedule-chain") {
+              // Sharing Schedule label hidden from the operations pilot's
+              // sidebar at the operator's request — the route remains
+              // mounted so commanders / sub-account flows that link in
+              // directly keep working.
+              return user?.role !== "ops";
+            }
             if (p === "/pending") return user?.role === "ops" || user?.role === "super_admin";
             return true;
           }).map(({ p, k, I }) => {
