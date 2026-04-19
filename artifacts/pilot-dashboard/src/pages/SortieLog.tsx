@@ -5,8 +5,10 @@ import { usePilots, useSorties, useUpdateSortie, useDeleteSortie } from "@/lib/s
 import { useAuth } from "@/lib/auth";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
-import { Search, Filter, Pencil, Trash2 } from "lucide-react";
+import { Search, Filter, Pencil, Trash2, Lock, Unlock } from "lucide-react";
 import type { Sortie } from "@/lib/mock";
+import { useFrozenAccess } from "@/lib/monthly-close";
+import { useToast } from "@/hooks/use-toast";
 
 export default function SortieLog() {
   const { t } = useI18n();
@@ -21,6 +23,25 @@ export default function SortieLog() {
   const { data: SORTIES } = sortiesQ;
   const updateMut = useUpdateSortie();
   const deleteMut = useDeleteSortie();
+  const { toast } = useToast();
+  const frozen = useFrozenAccess();
+
+  const lockedMessage =
+    "Hours older than 12 months are frozen. Ask the super admin to authorize this PC from Settings.";
+  const tryEdit = (s: Sortie) => {
+    if (!frozen.canEdit(s.date)) {
+      toast({ title: "Frozen records", description: lockedMessage, variant: "destructive" });
+      return;
+    }
+    setEditing(s);
+  };
+  const tryDelete = (s: Sortie) => {
+    if (!frozen.canEdit(s.date)) {
+      toast({ title: "Frozen records", description: lockedMessage, variant: "destructive" });
+      return;
+    }
+    setDeleting(s);
+  };
 
   const pilotMap = useMemo(() => Object.fromEntries(PILOTS.map(p => [p.id, p.name])), [PILOTS]);
   const types = useMemo(() => ["All", ...Array.from(new Set(SORTIES.map(s => s.sortieType)))], [SORTIES]);
@@ -33,7 +54,7 @@ export default function SortieLog() {
 
   const onConfirmDelete = async () => {
     if (!deleting) return;
-    await deleteMut.mutateAsync({ id: deleting.id, actor: user?.username });
+    await deleteMut.mutateAsync({ id: deleting.id, date: deleting.date, actor: user?.username });
     setDeleting(null);
   };
 
@@ -77,9 +98,19 @@ export default function SortieLog() {
                   </td>
                 </tr>
               )}
-              {rows.map(s => (
-                <tr key={s.id} className="border-t border-border row-hover" data-testid={`row-sortie-${s.id}`}>
-                  <Td mono>{s.date}</Td>
+              {rows.map(s => {
+                const isFrozen = frozen.isFrozen(s.date);
+                const canEdit = frozen.canEdit(s.date);
+                const locked = isFrozen && !canEdit;
+                return (
+                <tr key={s.id} className={`border-t border-border row-hover ${locked ? "opacity-90" : ""}`} data-testid={`row-sortie-${s.id}`}>
+                  <Td mono>
+                    <span className="inline-flex items-center gap-1">
+                      {s.date}
+                      {locked && <Lock className="h-3 w-3 text-muted-foreground" aria-label="Frozen (older than 12 months)" />}
+                      {isFrozen && canEdit && <Unlock className="h-3 w-3 text-amber-300" aria-label="Frozen — this PC is authorized to edit" />}
+                    </span>
+                  </Td>
                   <Td>{s.acType}</Td>
                   <Td mono>{s.acNumber}</Td>
                   <Td><SeatCell id={s.pilotId} ext={s.pilotExternal} nameMap={pilotMap} /></Td>
@@ -96,21 +127,31 @@ export default function SortieLog() {
                   <Td mono right>{s.sim || "—"}</Td>
                   <Td mono right>{s.actual}</Td>
                   <Td right>
-                    <div className="inline-flex gap-1">
-                      <button onClick={() => setEditing(s)}
-                        className="p-1 rounded hover:bg-secondary"
-                        title={t("edit")} data-testid={`button-edit-sortie-${s.id}`}>
+                    <div className="inline-flex gap-1 items-center">
+                      <button
+                        onClick={() => tryEdit(s)}
+                        disabled={locked}
+                        className={`p-1 rounded ${locked ? "opacity-40 cursor-not-allowed" : "hover:bg-secondary"}`}
+                        title={locked ? lockedMessage : t("edit")}
+                        aria-disabled={locked}
+                        data-testid={`button-edit-sortie-${s.id}`}
+                      >
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
-                      <button onClick={() => setDeleting(s)}
-                        className="p-1 rounded hover:bg-destructive/20 text-destructive"
-                        title={t("delete")} data-testid={`button-delete-sortie-${s.id}`}>
+                      <button
+                        onClick={() => tryDelete(s)}
+                        disabled={locked}
+                        className={`p-1 rounded ${locked ? "opacity-40 cursor-not-allowed" : "hover:bg-destructive/20 text-destructive"}`}
+                        title={locked ? lockedMessage : t("delete")}
+                        aria-disabled={locked}
+                        data-testid={`button-delete-sortie-${s.id}`}
+                      >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </Td>
                 </tr>
-              ))}
+              );})}
             </tbody>
           </table>
         </div>

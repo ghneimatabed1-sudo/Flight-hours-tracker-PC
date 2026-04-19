@@ -5,9 +5,12 @@ import { squadrons, pilots, licenseKeys } from "@/lib/mockData";
 import { pilotWorstStatus } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
+import { FrozenAccessPanel } from "@/components/FrozenAccessPanel";
+import { useAuth } from "@/lib/auth";
 
 export default function AdminOverview() {
   const { t, lang } = useI18n();
+  const { user } = useAuth();
   const enabledSquadrons = squadrons.filter(s => s.enabled);
   const expired = pilots.filter(p => { const s = pilotWorstStatus(p); return s === "expired" || s === "critical"; }).length;
   const warning = pilots.filter(p => { const s = pilotWorstStatus(p); return s === "warning" || s === "expiringSoon"; }).length;
@@ -82,6 +85,12 @@ export default function AdminOverview() {
             </table>
           </div>
           <p className="text-xs text-muted-foreground mt-2">{warning} {t("expiringSoon")}</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-4">
+          <FrozenAccessPanel actor={user?.username ?? "super.admin"} />
         </CardContent>
       </Card>
     </div>

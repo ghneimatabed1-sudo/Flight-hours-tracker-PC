@@ -11,10 +11,11 @@ import {
 } from "@/lib/squadron-data";
 import { useToast } from "@/hooks/use-toast";
 import type { Sortie } from "@/lib/mock";
-import { Plane, Pencil, Trash2, X, UserPlus, User } from "lucide-react";
+import { Plane, Pencil, Trash2, X, UserPlus, User, Lock, Unlock } from "lucide-react";
 import { useRegisteredPCs, useSubmitPending } from "@/lib/cross-pc";
 import { useAuth } from "@/lib/auth";
 import type { ExternalPilotRef } from "@/lib/mock";
+import { useFrozenAccess } from "@/lib/monthly-close";
 
 // Simple Add Sortie form — mirrors the legacy mobile app's logic:
 //   • One Position toggle: which seat is in 1st PLT (the other = 2nd PLT)
@@ -115,6 +116,9 @@ export default function AddSortie() {
   const [form, setForm] = useState<FormState>(blankForm);
   const [confirmDel, setConfirmDel] = useState<Sortie | null>(null);
   const auth = useAuth();
+  const frozen = useFrozenAccess();
+  const lockedMessage =
+    "Hours older than 12 months are frozen. Ask the super admin to authorize this PC from the Super Admin page.";
   const mySquadronId = auth.squadron?.name ?? "";
   const { data: registeredPCs = [] } = useRegisteredPCs();
   const submitPending = useSubmitPending();
@@ -314,8 +318,14 @@ export default function AddSortie() {
         toast({ title: `Sent to ${seatsForPending.length} squadron${seatsForPending.length > 1 ? "s" : ""} for approval` });
       }
       resetForm();
-    } catch {
-      /* surfaced by global error toast */
+    } catch (err) {
+      // The frozen-records gate throws `month_frozen` when this PC isn't
+      // authorized to write into a date older than 12 months. Surface that
+      // as a friendly message so the operator knows what to ask for.
+      if (err instanceof Error && err.message === "month_frozen") {
+        toast({ title: "Frozen records", description: lockedMessage, variant: "destructive" });
+      }
+      /* other errors surfaced by global error toast */
     }
   };
 
@@ -385,11 +395,30 @@ export default function AddSortie() {
   const doDelete = async () => {
     if (!confirmDel) return;
     try {
-      await del.mutateAsync({ id: confirmDel.id });
+      await del.mutateAsync({ id: confirmDel.id, date: confirmDel.date, actor: auth.user?.username });
       toast({ title: "Sortie deleted" });
     } finally {
       setConfirmDel(null);
     }
+  };
+
+  // Frozen-window gating for the Recent Sorties list. When a row's date is
+  // older than 12 months and this PC isn't on the super admin's authorized
+  // list, edit/delete are disabled with a tooltip pointing the operator to
+  // the Super Admin page.
+  const tryEdit = (s: Sortie) => {
+    if (!frozen.canEdit(s.date)) {
+      toast({ title: "Frozen records", description: lockedMessage, variant: "destructive" });
+      return;
+    }
+    loadForEdit(s);
+  };
+  const tryDelete = (s: Sortie) => {
+    if (!frozen.canEdit(s.date)) {
+      toast({ title: "Frozen records", description: lockedMessage, variant: "destructive" });
+      return;
+    }
+    setConfirmDel(s);
   };
 
   const seatLabel = (id: string, ext?: { name: string }) => {
@@ -581,9 +610,18 @@ export default function AddSortie() {
               {todaySorties.map(s => {
                 const time = s.time ?? s.actual ?? (s.day1 + s.day2 + s.dayDual + s.night1 + s.night2 + s.nightDual + (s.nvg || 0));
                 const dn = s.condition === "NVG" ? "NVG" : s.condition === "Night" ? "N" : "D";
+                const isFrozen = frozen.isFrozen(s.date);
+                const canEdit = frozen.canEdit(s.date);
+                const locked = isFrozen && !canEdit;
                 return (
-                  <tr key={s.id} className={`border-b border-border/50 hover:bg-secondary/30 ${form.id === s.id ? "bg-primary/10" : ""}`} data-testid={`sortie-row-${s.id}`}>
-                    <td className="py-1.5 pr-2">{s.date}</td>
+                  <tr key={s.id} className={`border-b border-border/50 hover:bg-secondary/30 ${form.id === s.id ? "bg-primary/10" : ""} ${locked ? "opacity-90" : ""}`} data-testid={`sortie-row-${s.id}`}>
+                    <td className="py-1.5 pr-2">
+                      <span className="inline-flex items-center gap-1">
+                        {s.date}
+                        {locked && <Lock className="h-3 w-3 text-muted-foreground" aria-label="Frozen (older than 12 months)" />}
+                        {isFrozen && canEdit && <Unlock className="h-3 w-3 text-amber-300" aria-label="Frozen — this PC is authorized to edit" />}
+                      </span>
+                    </td>
                     <td className="pr-2">{s.acType} {s.acNumber}</td>
                     <td className="pr-2">{seatLabel(s.pilotId, s.pilotExternal)}{s.pilotIsCaptain ? <span className="ml-1 text-[9px] text-amber-300">CAPT</span> : null}</td>
                     <td className="pr-2">{seatLabel(s.coPilotId, s.coPilotExternal)}{s.coPilotIsCaptain ? <span className="ml-1 text-[9px] text-amber-300">CAPT</span> : null}</td>
@@ -593,10 +631,24 @@ export default function AddSortie() {
                     <td className="pr-2">{s.instrumentFlight ? "✓" : ""}</td>
                     <td className="pr-2 text-right">{Number(time || 0).toFixed(1)}</td>
                     <td className="pr-2 text-right whitespace-nowrap">
-                      <button onClick={() => loadForEdit(s)} className="px-1.5 py-0.5 rounded border border-border bg-secondary text-[10px] inline-flex items-center gap-0.5 mr-1" data-testid={`button-edit-${s.id}`}>
+                      <button
+                        onClick={() => tryEdit(s)}
+                        disabled={locked}
+                        title={locked ? lockedMessage : "Edit"}
+                        aria-disabled={locked}
+                        className={`px-1.5 py-0.5 rounded border text-[10px] inline-flex items-center gap-0.5 mr-1 ${locked ? "border-border bg-secondary opacity-40 cursor-not-allowed" : "border-border bg-secondary"}`}
+                        data-testid={`button-edit-${s.id}`}
+                      >
                         <Pencil className="h-3 w-3" /> Edit
                       </button>
-                      <button onClick={() => setConfirmDel(s)} className="px-1.5 py-0.5 rounded border border-rose-400/40 bg-rose-500/10 text-rose-200 text-[10px] inline-flex items-center gap-0.5" data-testid={`button-delete-${s.id}`}>
+                      <button
+                        onClick={() => tryDelete(s)}
+                        disabled={locked}
+                        title={locked ? lockedMessage : "Delete"}
+                        aria-disabled={locked}
+                        className={`px-1.5 py-0.5 rounded border text-[10px] inline-flex items-center gap-0.5 ${locked ? "border-rose-400/40 bg-rose-500/10 text-rose-200 opacity-40 cursor-not-allowed" : "border-rose-400/40 bg-rose-500/10 text-rose-200"}`}
+                        data-testid={`button-delete-${s.id}`}
+                      >
                         <Trash2 className="h-3 w-3" /> Del
                       </button>
                     </td>

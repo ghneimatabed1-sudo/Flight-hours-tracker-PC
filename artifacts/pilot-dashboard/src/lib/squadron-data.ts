@@ -20,6 +20,12 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { supabase, supabaseConfigured, recordAuditEvent } from "./supabase";
 import {
+  isFrozenMonth,
+  monthOf,
+  isThisPcAuthorized,
+  getThisPc,
+} from "./monthly-close";
+import {
   PILOTS as MOCK_PILOTS,
   SORTIES as MOCK_SORTIES,
   NOTAMS as MOCK_NOTAMS,
@@ -458,11 +464,23 @@ async function applyCurrencyRefresh(
 export function useCreateSortie() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (s: Omit<Sortie, "id">) => {
+    mutationFn: async (input: Omit<Sortie, "id"> | { sortie: Omit<Sortie, "id">; actor?: string }) => {
+      // Backwards-compat: callers may pass a bare sortie OR { sortie, actor }.
+      const s = ("sortie" in input ? input.sortie : input) as Omit<Sortie, "id">;
+      const actor = "sortie" in input ? input.actor : undefined;
+      const frozenOverride = enforceMonthlyClose([s.date]);
       if (!isLive()) {
         const created = { ...s, id: "S" + Date.now() } as Sortie;
         MOCK_SORTIES.push(created);
         await applyCurrencyRefresh(s, qc);
+        if (frozenOverride) {
+          appendDemoAudit({
+            ts: tsNow(),
+            user: actor ?? "ops.officer",
+            action: "Sortie create (frozen override)",
+            target: `${created.id} · ${created.date} · ${created.acNumber} · pc:${frozenOverride.pcName}`,
+          });
+        }
         return created;
       }
       const { data, error } = await supabase!.from("sorties").insert({
@@ -499,13 +517,49 @@ export function useCreateSortie() {
       }).select().single();
       if (error) throw error;
       await applyCurrencyRefresh(s, qc);
-      return rowToSortie(data);
+      const created = rowToSortie(data);
+      if (frozenOverride) {
+        await recordAuditEvent({
+          type: "sortie.create",
+          actor,
+          detail: {
+            id: created.id, date: created.date, acNumber: created.acNumber,
+            frozenOverride: true,
+            frozenMonths: frozenOverride.months,
+            pcId: frozenOverride.pcId,
+            pcName: frozenOverride.pcName,
+          },
+        });
+      }
+      return created;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sorties"] });
       qc.invalidateQueries({ queryKey: ["pilots"] });
+      qc.invalidateQueries({ queryKey: ["audit_log"] });
     },
   });
+}
+
+// Frozen-month gate. Throws `month_frozen` when any of the supplied dates
+// sits in the frozen window (>12 months old) AND this PC is not on the
+// super-admin's authorized list. When the PC IS authorized the call
+// returns a small payload describing the override so callers can attach
+// PC identity + frozen month(s) to the audit trail.
+// Multiple dates may be checked at once — useful when an edit moves a
+// sortie BETWEEN months: ALL frozen months involved are checked together.
+function enforceMonthlyClose(dates: string[]): {
+  months: string[]; pcId: string; pcName: string;
+} | null {
+  const months = Array.from(new Set(dates.filter(d => isFrozenMonth(d)).map(monthOf)));
+  if (months.length === 0) return null;
+  if (!isThisPcAuthorized()) {
+    const err = new Error("month_frozen");
+    (err as Error & { frozenMonth?: string }).frozenMonth = months[0];
+    throw err;
+  }
+  const pc = getThisPc();
+  return { months, pcId: pc.id, pcName: pc.name };
 }
 
 // Update an existing sortie. Demo mode mutates the in-memory mock; live mode
@@ -516,6 +570,15 @@ export function useUpdateSortie() {
   return useMutation({
     mutationFn: async (input: { sortie: Sortie; actor?: string }) => {
       const s = input.sortie;
+      // Honour the original sortie's date for the close check too — if a
+      // historical row is being moved into another month, BOTH the old and
+      // the new month must be open. Without this, an operator could shift
+      // a closed-month sortie into the live month and edit it freely,
+      // bypassing the lock entirely.
+      const cached = (qc.getQueryData<Sortie[]>(["sorties"]) ?? []).find(x => x.id === s.id);
+      const datesToCheck = [s.date];
+      if (cached?.date && cached.date !== s.date) datesToCheck.push(cached.date);
+      const frozenOverride = enforceMonthlyClose(datesToCheck);
       if (!isLive()) {
         const idx = MOCK_SORTIES.findIndex(x => x.id === s.id);
         if (idx < 0) throw new Error("sortie_not_found");
@@ -524,8 +587,10 @@ export function useUpdateSortie() {
         appendDemoAudit({
           ts: tsNow(),
           user: input.actor ?? "ops.officer",
-          action: "Sortie edit",
-          target: `${s.id} · ${s.date} · ${s.acNumber}`,
+          action: frozenOverride ? "Sortie edit (frozen override)" : "Sortie edit",
+          target: frozenOverride
+            ? `${s.id} · ${s.date} · ${s.acNumber} · pc:${frozenOverride.pcName} · months:${frozenOverride.months.join(",")}`
+            : `${s.id} · ${s.date} · ${s.acNumber}`,
         });
         return s;
       }
@@ -560,7 +625,15 @@ export function useUpdateSortie() {
       await recordAuditEvent({
         type: "sortie.update",
         actor: input.actor,
-        detail: { id: s.id, date: s.date, acNumber: s.acNumber },
+        detail: frozenOverride
+          ? {
+              id: s.id, date: s.date, acNumber: s.acNumber,
+              frozenOverride: true,
+              frozenMonths: frozenOverride.months,
+              pcId: frozenOverride.pcId,
+              pcName: frozenOverride.pcName,
+            }
+          : { id: s.id, date: s.date, acNumber: s.acNumber },
       });
       return s;
     },
@@ -577,7 +650,15 @@ export function useUpdateSortie() {
 export function useDeleteSortie() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { id: string; actor?: string }) => {
+    mutationFn: async (input: { id: string; date?: string; actor?: string }) => {
+      // Resolve the sortie's date from cache or in-memory mock so the
+      // close check works even when the caller didn't pass it explicitly.
+      // Without a known date we err on the side of "unknown ⇒ allow",
+      // matching the legacy behaviour for callers that haven't yet been
+      // updated to forward the date.
+      const cached = (qc.getQueryData<Sortie[]>(["sorties"]) ?? []).find(x => x.id === input.id);
+      const sortieDate = input.date ?? cached?.date ?? MOCK_SORTIES.find(x => x.id === input.id)?.date;
+      const frozenOverride = sortieDate ? enforceMonthlyClose([sortieDate]) : null;
       if (!isLive()) {
         const idx = MOCK_SORTIES.findIndex(x => x.id === input.id);
         if (idx < 0) throw new Error("sortie_not_found");
@@ -585,8 +666,10 @@ export function useDeleteSortie() {
         appendDemoAudit({
           ts: tsNow(),
           user: input.actor ?? "ops.officer",
-          action: "Sortie delete",
-          target: `${removed.id} · ${removed.date} · ${removed.acNumber}`,
+          action: frozenOverride ? "Sortie delete (frozen override)" : "Sortie delete",
+          target: frozenOverride
+            ? `${removed.id} · ${removed.date} · ${removed.acNumber} · pc:${frozenOverride.pcName} · months:${frozenOverride.months.join(",")}`
+            : `${removed.id} · ${removed.date} · ${removed.acNumber}`,
         });
         return { id: input.id };
       }
@@ -595,7 +678,15 @@ export function useDeleteSortie() {
       await recordAuditEvent({
         type: "sortie.delete",
         actor: input.actor,
-        detail: { id: input.id },
+        detail: frozenOverride
+          ? {
+              id: input.id, date: sortieDate,
+              frozenOverride: true,
+              frozenMonths: frozenOverride.months,
+              pcId: frozenOverride.pcId,
+              pcName: frozenOverride.pcName,
+            }
+          : { id: input.id, date: sortieDate },
       });
       return { id: input.id };
     },
