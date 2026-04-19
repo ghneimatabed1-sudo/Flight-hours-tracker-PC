@@ -137,6 +137,7 @@ const EN: Dict = {
   // Reminders
   currency_day: "Day",
   currency_night: "Night",
+  currency_nvg: "NVG",
   currency_irt: "IRT",
   currency_medical: "Medical",
   currency_sim: "Simulator",
@@ -298,6 +299,7 @@ const AR: Dict = {
   // Reminders
   currency_day: "نهار",
   currency_night: "ليل",
+  currency_nvg: "NVG",
   currency_irt: "IRT",
   currency_medical: "طبية",
   currency_sim: "محاكاة",

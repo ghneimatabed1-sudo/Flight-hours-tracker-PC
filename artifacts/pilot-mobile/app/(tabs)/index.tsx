@@ -12,9 +12,10 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { CurrencyTile } from "@/components/CurrencyTile";
 import { Stat } from "@/components/Stat";
 import { useColors } from "@/hooks/useColors";
-import { computeTotals, formatHours } from "@/lib/calculations";
+import { computeCurrencies, computeTotals, formatHours } from "@/lib/calculations";
 import { useAppData } from "@/lib/data";
 import { useI18n } from "@/lib/i18n";
 
@@ -49,6 +50,11 @@ export default function HomeScreen() {
     () => (snapshot ? computeTotals(snapshot.profile, snapshot.sorties) : null),
     [snapshot]
   );
+
+  const currencyStrip = useMemo(() => {
+    if (!snapshot) return [];
+    return computeCurrencies(snapshot.profile).filter((c) => c.key !== "sim");
+  }, [snapshot]);
 
   if (!snapshot || !totals) return null;
 
@@ -120,6 +126,15 @@ export default function HomeScreen() {
           {profile.squadron || profile.unit}
         </Text>
       </View>
+
+      {/* ── Currency strip ─────────────────────── */}
+      {currencyStrip.length > 0 ? (
+        <View style={[styles.currencyStrip, { flexDirection: rowDir }]}>
+          {currencyStrip.map((item) => (
+            <CurrencyTile key={item.key} item={item} />
+          ))}
+        </View>
+      ) : null}
 
       {/* ── Hero card ──────────────────────────── */}
       <View
@@ -481,6 +496,12 @@ const styles = StyleSheet.create({
   tickTR: { position: "absolute", top: 8, right: 8, width: 12, height: 12, borderTopWidth: 1, borderRightWidth: 1, opacity: 0.7 },
   tickBL: { position: "absolute", bottom: 8, left: 8, width: 12, height: 12, borderBottomWidth: 1, borderLeftWidth: 1, opacity: 0.7 },
   tickBR: { position: "absolute", bottom: 8, right: 8, width: 12, height: 12, borderBottomWidth: 1, borderRightWidth: 1, opacity: 0.7 },
+
+  // currency strip
+  currencyStrip: {
+    gap: 6,
+    alignItems: "stretch",
+  },
 
   // grids
   row: { flexDirection: "row", gap: 12 },
