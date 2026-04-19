@@ -486,12 +486,12 @@ export default function LoginGate() {
           </div>
 
           <div className="text-center">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              {t("creditsDeveloper")}
-            </div>
-            <div className="text-sm font-semibold text-foreground tracking-wide mt-0.5">
-              Capt. ABEDALQADER GHUNMAT
-            </div>
+            <span
+              className="text-sm uppercase tracking-[0.2em] font-bold bg-gradient-to-r from-amber-400 via-amber-200 to-amber-400 bg-clip-text text-transparent select-none"
+              data-testid="text-credit-login"
+            >
+              DEVELOPED BY CAPT. ABEDALQADER GHUNMAT
+            </span>
           </div>
 
           <div className="flex flex-wrap justify-center gap-2">
@@ -520,14 +520,6 @@ export default function LoginGate() {
 
         <div className="text-[10px] text-center text-muted-foreground mt-5">
           © RJAF — Encrypted in transit (TLS) and at rest. Audit logged.
-        </div>
-        <div className="text-[11px] text-center mt-2">
-          <span
-            className="uppercase tracking-[0.2em] font-semibold bg-gradient-to-r from-amber-400 via-amber-200 to-amber-400 bg-clip-text text-transparent select-none"
-            data-testid="text-credit-login"
-          >
-            Developed by Capt. ABEDALQADER GHUNMAT
-          </span>
         </div>
       </div>
     </div>
