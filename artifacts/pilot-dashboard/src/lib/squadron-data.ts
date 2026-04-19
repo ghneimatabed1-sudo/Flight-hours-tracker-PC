@@ -92,9 +92,38 @@ function rowToPilot(r: Record<string, unknown>): Pilot {
   };
 }
 
+// Offline persistence: when there's no Supabase, the roster used to live
+// only in this module-scoped array, so a hard refresh wiped every pilot
+// the ops officer had added/edited/deleted (and broke the Pending
+// Approvals picker that depends on the roster). We mirror the working
+// list into localStorage on every mutation and re-hydrate from there on
+// first read so offline edits survive reloads.
+const MOCK_PILOTS_KEY = "rjaf.mock.pilots";
 let mockPilotsList: Pilot[] | null = null;
+function loadMockPilotsFromStorage(): Pilot[] | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(MOCK_PILOTS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed as Pilot[];
+  } catch {
+    return null;
+  }
+}
+function saveMockPilots(): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(MOCK_PILOTS_KEY, JSON.stringify(mockPilotsList ?? []));
+  } catch { /* quota / private mode */ }
+}
 function getMockPilots(): Pilot[] {
-  if (!mockPilotsList) mockPilotsList = [...MOCK_PILOTS];
+  if (!mockPilotsList) {
+    const fromStorage = loadMockPilotsFromStorage();
+    mockPilotsList = fromStorage ?? [...MOCK_PILOTS];
+    if (!fromStorage) saveMockPilots();
+  }
   return mockPilotsList;
 }
 
@@ -123,6 +152,7 @@ export function useUpdatePilot() {
         const arr = getMockPilots();
         const idx = arr.findIndex(x => x.id === p.id);
         if (idx >= 0) arr[idx] = p;
+        saveMockPilots();
         return p;
       }
       const { data, error } = await supabase!.from("pilots").update({
@@ -182,6 +212,7 @@ export function useCreatePilot() {
           throw new Error(`Pilot ID ${p.id} already exists`);
         }
         arr.unshift(p);
+        saveMockPilots();
         return p;
       }
       const { data, error } = await supabase!.from("pilots").insert({
@@ -238,6 +269,7 @@ export function useDeletePilot() {
         const arr = getMockPilots();
         const idx = arr.findIndex(x => x.id === id);
         if (idx >= 0) arr.splice(idx, 1);
+        saveMockPilots();
         return { id };
       }
       const { error } = await supabase!.from("pilots").delete().eq("id", id);
@@ -428,6 +460,7 @@ async function applyCurrencyRefresh(
       async (p) => {
         const idx = arr.findIndex((x) => x.id === p.id);
         if (idx >= 0) arr[idx] = p;
+        saveMockPilots();
       },
     );
     return;
@@ -1835,6 +1868,7 @@ export function exportSquadronMockState(): SquadronMockState {
 export function applySquadronMockState(s: SquadronMockState): void {
   if (isLive()) return;
   mockPilotsList = [...(s.pilots ?? [])];
+  saveMockPilots();
   MOCK_SORTIES.splice(0, MOCK_SORTIES.length, ...(s.sorties ?? []));
   mockNotamsList = [...(s.notams ?? [])];
   mockUnavailList = [...(s.unavail ?? [])];
