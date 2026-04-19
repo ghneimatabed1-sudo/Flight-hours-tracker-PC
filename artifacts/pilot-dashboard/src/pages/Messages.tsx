@@ -26,6 +26,20 @@ const priorityLabels: Record<MessagePriority, string> = {
   medium: "High",
   urgent: "Very High",
 };
+
+// "Seen" / read-receipt is only meaningful for the chain of command the
+// operator described: inside a single squadron (Flight Cmdr ↔ Squadron
+// Cmdr) and between a Squadron Cmdr and the Wing Cmdr that monitors
+// them. Anything involving a Base PC — or any other tier pair — keeps
+// the message visible but hides the seen UI on both ends.
+function seenAllowed(m: PrivateMessage): boolean {
+  const a = m.fromTier;
+  const b = m.toTier;
+  if (a === "squadron" && b === "squadron") return true;
+  if (a === "squadron" && b === "wing")     return true;
+  if (a === "wing"     && b === "squadron") return true;
+  return false;
+}
 const priorityClasses: Record<MessagePriority, string> = {
   normal: "bg-emerald-500/15 text-emerald-200 border-emerald-500/40",
   medium: "bg-amber-400/20 text-amber-100 border-amber-400/40",
