@@ -102,6 +102,14 @@ export default function ScheduleChain() {
     () => registry.data.filter(p => !p.isSelf && p.tier === "base"),
     [registry.data],
   );
+  // Wing/Base want at-a-glance visibility of which downstream squadron
+  // PCs are currently registered, so they know which units may send
+  // schedule shares. Squadron tier is the unit producing the schedule;
+  // the registry id for that tier is the squadron's name.
+  const squadronPCs = useMemo(
+    () => registry.data.filter(p => !p.isSelf && p.tier === "squadron"),
+    [registry.data],
+  );
 
   if (!allowed) {
     return (
@@ -204,6 +212,30 @@ export default function ScheduleChain() {
         </Card>
       )}
 
+      {/* Wing/Base see which downstream squadron PCs are currently
+          registered, so they know which units may originate shares. */}
+      {(myTier === "wing" || myTier === "base") && (
+        <Card className="mb-3">
+          <div className="text-sm font-semibold mb-2">Registered Squadron PCs ({squadronPCs.length})</div>
+          {squadronPCs.length === 0 ? (
+            <div className="text-xs text-muted-foreground py-2">No squadron PC has registered yet.</div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {squadronPCs.map(p => (
+                <span
+                  key={p.id}
+                  className="text-[11px] px-2 py-1 rounded bg-sky-500/15 text-sky-200 border border-sky-400/30"
+                  data-testid={`sqn-pc-${p.id}`}
+                  title={`Last seen ${new Date(p.lastSeen).toLocaleString()}`}
+                >
+                  {p.squadronName}
+                </span>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
       {/* Incoming for this PC */}
       <Card className="mb-3">
         <div className="text-sm font-semibold mb-2">Incoming · awaiting your action ({incoming.length})</div>
@@ -216,9 +248,14 @@ export default function ScheduleChain() {
               return (
                 <div key={share.id} className="border border-border rounded-md" data-testid={`incoming-${share.id}`}>
                   <button type="button" onClick={() => setReviewing(open ? null : share.id)} className="w-full px-3 py-2 flex items-center justify-between hover:bg-secondary/30 text-left">
-                    <div>
-                      <div className="text-sm font-semibold">{share.date} · from {share.originSquadronName}</div>
-                      <div className="text-[11px] text-muted-foreground">{share.rows.length} sortie{share.rows.length === 1 ? "" : "s"} · status {share.status}</div>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[10px] uppercase tracking-wider px-2 py-1 rounded bg-sky-500/20 text-sky-200 border border-sky-400/30 font-semibold whitespace-nowrap" data-testid={`origin-sqn-${share.id}`}>
+                        {share.originSquadronName}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold truncate">{share.date}</div>
+                        <div className="text-[11px] text-muted-foreground">{share.rows.length} sortie{share.rows.length === 1 ? "" : "s"} · status {share.status}</div>
+                      </div>
                     </div>
                     <span className="text-[10px] uppercase tracking-wider px-2 py-1 rounded bg-amber-500/20 text-amber-200 border border-amber-400/30">{share.currentTier}</span>
                   </button>
