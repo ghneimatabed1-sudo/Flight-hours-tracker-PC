@@ -15,7 +15,7 @@
   "asar": true,
   "win": {
     "target": [{ "target": "nsis", "arch": ["x64"] }],
-    "icon": "public/brand/emblem.png",
+    "icon": "public/brand/hawkeye-logo.png",
     "publisherName": "Captain Abed Ghneimat",
     "artifactName": "HawkEye-Setup-${version}.${ext}"
   },

@@ -82,38 +82,33 @@ export default function OpeningAnimation() {
           }}
         >
           <motion.img
-            src="brand/emblem.png"
+            src="brand/hawkeye-logo.svg"
             alt=""
             initial={{ opacity: 0, scale: 0.94 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.7, ease: "easeOut" }}
             style={{
-              width: 128,
-              height: 128,
+              width: 144,
+              height: 144,
               objectFit: "contain",
-              marginBottom: 28,
+              marginBottom: 24,
               filter: "drop-shadow(0 4px 18px rgba(0,0,0,0.6))",
             }}
           />
 
-          <motion.div
+          <motion.img
+            src="brand/hawkeye-wordmark.svg"
+            alt="HAWK EYE"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.5, ease: "easeOut" }}
             style={{
-              fontSize: 38,
-              fontWeight: 700,
-              letterSpacing: "0.32em",
-              textTransform: "uppercase",
-              background:
-                "linear-gradient(180deg, #f5d98a 0%, #b88a2e 100%)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              backgroundClip: "text",
+              height: 56,
+              width: "auto",
+              maxWidth: "min(520px, 80vw)",
+              objectFit: "contain",
             }}
-          >
-            HAWK EYE
-          </motion.div>
+          />
 
           <motion.div
             initial={{ scaleX: 0, opacity: 0 }}

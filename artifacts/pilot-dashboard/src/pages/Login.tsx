@@ -163,9 +163,13 @@ export default function LoginGate() {
 
       <div className="w-full max-w-md">
         <div className="flex flex-col items-center mb-6">
-          <img src="brand/emblem.png" className="h-24 w-24 object-contain mb-3" alt="RJAF Emblem" />
-          <div className="text-2xl font-semibold gold-grad text-center">{t("appName")}</div>
-          <div className="text-xs text-muted-foreground text-center mt-1">{t("appTag")}</div>
+          <img src="brand/hawkeye-logo.svg" className="h-24 w-24 object-contain mb-3" alt="Hawk Eye" />
+          <img
+            src="brand/hawkeye-wordmark.svg"
+            className="h-10 max-w-full object-contain"
+            alt={t("appName")}
+          />
+          <div className="text-xs text-muted-foreground text-center mt-2">{t("appTag")}</div>
         </div>
 
         <div className="panel p-6">

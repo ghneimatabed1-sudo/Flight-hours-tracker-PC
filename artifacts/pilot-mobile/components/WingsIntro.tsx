@@ -80,8 +80,8 @@ export default function WingsIntro({ onDone, durationMs = 1800 }: Props) {
     >
       <Animated.View style={{ opacity, transform: [{ scale }] }}>
         <Image
-          source={require("../assets/images/wings.png")}
-          style={styles.wings}
+          source={require("../assets/images/hawkeye-logo.png")}
+          style={styles.logo}
           resizeMode="contain"
         />
         <Text style={[styles.title, { color: colors.foreground }]}>
@@ -101,9 +101,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     zIndex: 1000,
   },
-  wings: {
-    width: 220,
-    height: 140,
+  logo: {
+    width: 160,
+    height: 160,
     alignSelf: "center",
   },
   title: {

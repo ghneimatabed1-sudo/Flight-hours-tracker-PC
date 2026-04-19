@@ -47,7 +47,7 @@ function createWindow() {
     minHeight: 720,
     backgroundColor: "#0a1226",
     title: "Hawk Eye",
-    icon: path.join(__dirname, "..", "public", "brand", "emblem.png"),
+    icon: path.join(__dirname, "..", "public", "brand", "hawkeye-logo.png"),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),

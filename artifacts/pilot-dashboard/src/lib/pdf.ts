@@ -104,7 +104,7 @@ function shape(text: string | number | undefined | null): string {
 let cachedEmblem: string | null = null;
 async function loadEmblem(): Promise<string> {
   if (cachedEmblem) return cachedEmblem;
-  const res = await fetch(`${import.meta.env.BASE_URL}brand/emblem.png`);
+  const res = await fetch(`${import.meta.env.BASE_URL}brand/hawkeye-logo.png`);
   const blob = await res.blob();
   cachedEmblem = await new Promise<string>((resolve, reject) => {
     const fr = new FileReader();
