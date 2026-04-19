@@ -105,11 +105,24 @@ export async function registerForPushNotifications(
   }
   if (status !== "granted") return { ok: false, error: "permission_denied" };
 
-  if (!projectId) return { ok: false, error: "no_project_id" };
+  // Prefer an Expo push token (requires the EAS projectId). When the EAS
+  // projectId is not configured for this build (e.g. Codemagic builds that
+  // bypass EAS), gracefully fall back to a raw native device token (FCM
+  // on Android, APNs on iOS) so push setup still completes. The server can
+  // route to either format.
+  if (projectId) {
+    try {
+      const tokenResp = await Notifications.getExpoPushTokenAsync({ projectId });
+      return { ok: true, token: tokenResp.data };
+    } catch {
+      // fall through to raw device token
+    }
+  }
 
   try {
-    const tokenResp = await Notifications.getExpoPushTokenAsync({ projectId });
-    return { ok: true, token: tokenResp.data };
+    const dev = await Notifications.getDevicePushTokenAsync();
+    const raw = typeof dev.data === "string" ? dev.data : JSON.stringify(dev.data);
+    return { ok: true, token: raw };
   } catch {
     return { ok: false, error: "expo_error" };
   }

@@ -12,6 +12,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -26,17 +27,16 @@ import {
   registerForPushNotifications,
   resolveProjectId,
   saveReminderPrefs,
-  THRESHOLD_PRESETS,
   type CurrencyKey,
   type ReminderPrefs,
 } from "@/lib/notifications";
 
+// Simulator currency intentionally excluded — it does not get reminders.
 const CURRENCY_LIST: { key: CurrencyKey; tk: string }[] = [
   { key: "day", tk: "currency_day" },
   { key: "night", tk: "currency_night" },
   { key: "irt", tk: "currency_irt" },
   { key: "medical", tk: "currency_medical" },
-  { key: "sim", tk: "currency_sim" },
 ];
 
 export default function RemindersScreen() {
@@ -129,13 +129,11 @@ export default function RemindersScreen() {
     [persist, prefs, t]
   );
 
-  const toggleThreshold = useCallback(
+  const addThreshold = useCallback(
     (key: CurrencyKey, days: number) => {
       const current = prefs.thresholds[key] ?? [];
-      const has = current.includes(days);
-      const next = normaliseThresholds(
-        has ? current.filter((d) => d !== days) : [...current, days]
-      );
+      if (current.includes(days)) return;
+      const next = normaliseThresholds([...current, days]);
       void persist({
         ...prefs,
         thresholds: { ...prefs.thresholds, [key]: next },
@@ -145,6 +143,23 @@ export default function RemindersScreen() {
     },
     [persist, prefs]
   );
+
+  const removeThreshold = useCallback(
+    (key: CurrencyKey, days: number) => {
+      const current = prefs.thresholds[key] ?? [];
+      const next = normaliseThresholds(current.filter((d) => d !== days));
+      void persist({
+        ...prefs,
+        thresholds: { ...prefs.thresholds, [key]: next },
+      });
+      if (Platform.OS !== "web")
+        Haptics.selectionAsync().catch(() => {});
+    },
+    [persist, prefs]
+  );
+
+  // One pending input per currency so each card has its own text field state.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   const topPad = (Platform.OS === "web" ? 67 : insets.top) + 8;
 
@@ -291,50 +306,101 @@ export default function RemindersScreen() {
                 >
                   {t(tk)}
                 </Text>
+                {/* Custom day input. The pilot types any number of days
+                    (0–365) and taps Add. Each saved value becomes a chip
+                    that can be removed with an inline ✕. */}
                 <View
                   style={[
-                    styles.chipRow,
+                    styles.inputRow,
                     { flexDirection: isRTL ? "row-reverse" : "row" },
                   ]}
                 >
-                  {THRESHOLD_PRESETS.map((d) => {
-                    const selected = list.includes(d);
-                    return (
+                  <TextInput
+                    value={drafts[key] ?? ""}
+                    onChangeText={(v) =>
+                      setDrafts((d) => ({ ...d, [key]: v.replace(/[^0-9]/g, "") }))
+                    }
+                    placeholder={t("reminders_input_placeholder")}
+                    placeholderTextColor={colors.mutedForeground}
+                    keyboardType="number-pad"
+                    maxLength={3}
+                    style={[
+                      styles.dayInput,
+                      {
+                        backgroundColor: colors.muted,
+                        borderColor: colors.border,
+                        color: colors.foreground,
+                        textAlign: isRTL ? "right" : "left",
+                      },
+                    ]}
+                    editable={!busy}
+                  />
+                  <Pressable
+                    onPress={() => {
+                      const raw = drafts[key]?.trim() ?? "";
+                      if (!raw) return;
+                      const n = Math.trunc(Number(raw));
+                      if (!Number.isFinite(n) || n < 0 || n > 365) return;
+                      addThreshold(key, n);
+                      setDrafts((d) => ({ ...d, [key]: "" }));
+                    }}
+                    disabled={busy || !(drafts[key]?.trim())}
+                    style={({ pressed }) => [
+                      styles.addBtn,
+                      {
+                        backgroundColor: colors.primary,
+                        opacity: pressed || busy || !(drafts[key]?.trim()) ? 0.7 : 1,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.addBtnText, { color: colors.primaryForeground }]}>
+                      {t("reminders_add")}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                {list.length > 0 ? (
+                  <View
+                    style={[
+                      styles.chipRow,
+                      { flexDirection: isRTL ? "row-reverse" : "row" },
+                    ]}
+                  >
+                    {list.map((d) => (
                       <Pressable
                         key={d}
-                        onPress={() => toggleThreshold(key, d)}
+                        onPress={() => removeThreshold(key, d)}
                         disabled={busy}
                         style={({ pressed }) => [
                           styles.chip,
                           {
-                            backgroundColor: selected
-                              ? colors.primary
-                              : colors.muted,
-                            borderColor: selected
-                              ? colors.primary
-                              : colors.border,
-                            opacity: pressed ? 0.7 : 1,
+                            backgroundColor: colors.primary,
+                            borderColor: colors.primary,
+                            opacity: pressed ? 0.6 : 1,
+                            flexDirection: isRTL ? "row-reverse" : "row",
+                            gap: 6,
                           },
                         ]}
                       >
                         <Text
                           style={[
                             styles.chipText,
-                            {
-                              color: selected
-                                ? colors.primaryForeground
-                                : colors.foreground,
-                            },
+                            { color: colors.primaryForeground },
                           ]}
                         >
                           {d === 0
                             ? t("reminders_chip_today")
                             : `${d}${t("reminders_chip_day_suffix")}`}
                         </Text>
+                        <Feather
+                          name="x"
+                          size={12}
+                          color={colors.primaryForeground}
+                        />
                       </Pressable>
-                    );
-                  })}
-                </View>
+                    ))}
+                  </View>
+                ) : null}
                 <Text
                   style={[
                     styles.helperText,
@@ -441,6 +507,29 @@ const styles = StyleSheet.create({
   chipRow: {
     flexWrap: "wrap",
     gap: 6,
+  },
+  inputRow: {
+    alignItems: "center",
+    gap: 8,
+  },
+  dayInput: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
+  },
+  addBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 10,
+  },
+  addBtnText: {
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.4,
   },
   chip: {
     paddingHorizontal: 12,

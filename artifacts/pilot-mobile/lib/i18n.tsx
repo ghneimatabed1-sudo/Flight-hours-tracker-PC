@@ -183,6 +183,8 @@ const EN: Dict = {
     "Push setup incomplete — contact your operations officer.",
   reminders_token_error: "Could not register for push notifications.",
   reminders_save_error: "Could not save your reminder settings.",
+  reminders_input_placeholder: "Days before expiry",
+  reminders_add: "Add",
 };
 
 const AR: Dict = {
@@ -362,6 +364,8 @@ const AR: Dict = {
     "إعداد الإشعارات غير مكتمل — تواصل مع ضابط العمليات.",
   reminders_token_error: "تعذر تسجيل الإشعارات الفورية.",
   reminders_save_error: "تعذر حفظ إعدادات التذكيرات.",
+  reminders_input_placeholder: "عدد الأيام قبل الانتهاء",
+  reminders_add: "إضافة",
 };
 
 const DICTS: Record<Lang, Dict> = { en: EN, ar: AR };
