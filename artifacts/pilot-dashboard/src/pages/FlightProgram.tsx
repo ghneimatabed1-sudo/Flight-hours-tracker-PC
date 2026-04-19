@@ -124,9 +124,12 @@ export default function FlightProgram() {
   // commander on the HQ dashboard may open this page. The flight
   // commander's recipient picker is reshaped to the bound squadron
   // commander only (see `targets` below).
+  // Schedule sharing is allowed for any commander tier (flight, squadron,
+  // wing, base, hq). The Ops Pilot's PC is intentionally excluded — it
+  // only logs sorties, it doesn't share schedules.
   const canAccess =
-    user?.role === "ops" ||
-    (user?.role === "commander" && (user?.scope === "squadron" || user?.scope === "flight"));
+    user?.role === "commander" &&
+    (user?.scope === "flight" || user?.scope === "squadron" || user?.scope === "wing" || user?.scope === "base" || user?.scope === "hq");
   const canPrint = canAccess;
   const isFlightCmdr = user?.role === "commander" && user?.scope === "flight";
 

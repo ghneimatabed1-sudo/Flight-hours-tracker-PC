@@ -1214,7 +1214,7 @@ export function canUseMessages(role: string | undefined, scope: string | undefin
 // squadron sub-account) sees nothing.
 export function canUseScheduleChain(role: string | undefined, scope: string | undefined): boolean {
   if (role === "super_admin") return true;
-  if (role === "ops") return true;
+  // Ops Pilot's PC is intentionally excluded from schedule sharing.
   if (role === "commander") {
     return scope === "flight" || scope === "squadron" || scope === "wing" || scope === "base";
   }
