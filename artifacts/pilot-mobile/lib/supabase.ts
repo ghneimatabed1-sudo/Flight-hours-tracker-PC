@@ -7,7 +7,7 @@ import * as SecureStore from "expo-secure-store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 
-import type { PilotProfile, PilotSnapshot, SortieRecord } from "./types";
+import type { NotamRecord, PilotProfile, PilotSnapshot, SortieRecord } from "./types";
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -73,6 +73,13 @@ interface SquadronRow {
   base: string;
 }
 
+interface NotamRow {
+  id: string;
+  notam_no: string;
+  posted_on: string;
+  body: string;
+}
+
 function num(v: unknown): number {
   const n = typeof v === "number" ? v : Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
@@ -85,7 +92,8 @@ function str(v: unknown): string | undefined {
 function rowsToSnapshot(
   pilot: PilotRow,
   squadron: SquadronRow | null,
-  sorties: SortieRow[]
+  sorties: SortieRow[],
+  notams: NotamRow[] = []
 ): PilotSnapshot {
   const d = pilot.data ?? {};
   const expiry = (d.expiry as Record<string, string> | undefined) ?? {};
@@ -182,7 +190,18 @@ function rowsToSnapshot(
     };
   });
 
-  return { profile, sorties: records, fetchedAt: new Date().toISOString() };
+  const notamRecords: NotamRecord[] = notams.map((n) => ({
+    id: n.notam_no,
+    date: n.posted_on,
+    text: n.body,
+  }));
+
+  return {
+    profile,
+    sorties: records,
+    notams: notamRecords,
+    fetchedAt: new Date().toISOString(),
+  };
 }
 
 export type LinkErrorCode =
@@ -300,19 +319,31 @@ export async function fetchPilotSnapshotRemote(
   if (pilotErr) return { ok: false, error: classifyError(pilotErr.message) };
   if (!pilotRow) return { ok: false, error: "revoked" };
 
-  const [{ data: squadronRow }, { data: sortieRows, error: sortiesErr }] =
-    await Promise.all([
-      supabase
-        .from("squadrons")
-        .select("id, number, name, base")
-        .eq("id", (pilotRow as PilotRow).squadron_id)
-        .maybeSingle(),
-      supabase
-        .from("sorties")
-        .select("id, date, pilot_id, co_pilot_id, data")
-        .or(`pilot_id.eq.${pilotId},co_pilot_id.eq.${pilotId}`)
-        .order("date", { ascending: false }),
-    ]);
+  const [
+    { data: squadronRow },
+    { data: sortieRows, error: sortiesErr },
+    { data: notamRows },
+  ] = await Promise.all([
+    supabase
+      .from("squadrons")
+      .select("id, number, name, base")
+      .eq("id", (pilotRow as PilotRow).squadron_id)
+      .maybeSingle(),
+    supabase
+      .from("sorties")
+      .select("id, date, pilot_id, co_pilot_id, data")
+      .or(`pilot_id.eq.${pilotId},co_pilot_id.eq.${pilotId}`)
+      .order("date", { ascending: false }),
+    // NOTAMs are squadron-scoped and read-only on mobile. RLS on the
+    // `notams` table must allow SELECT for the per-pilot auth role; if it
+    // doesn't, this query simply returns no rows and the NOTAMs tab shows
+    // the empty state — it never blocks the snapshot fetch.
+    supabase
+      .from("notams")
+      .select("id, notam_no, posted_on, body")
+      .order("posted_on", { ascending: false })
+      .limit(100),
+  ]);
 
   if (sortiesErr) return { ok: false, error: classifyError(sortiesErr.message) };
 
@@ -321,7 +352,8 @@ export async function fetchPilotSnapshotRemote(
     snapshot: rowsToSnapshot(
       pilotRow as PilotRow,
       (squadronRow as SquadronRow | null) ?? null,
-      (sortieRows as SortieRow[] | null) ?? []
+      (sortieRows as SortieRow[] | null) ?? [],
+      (notamRows as NotamRow[] | null) ?? []
     ),
   };
 }

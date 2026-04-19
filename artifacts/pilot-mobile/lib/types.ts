@@ -49,8 +49,15 @@ export interface SortieRecord {
   remarks?: string;
 }
 
+export interface NotamRecord {
+  id: string;
+  date: string;
+  text: string;
+}
+
 export interface PilotSnapshot {
   profile: PilotProfile;
   sorties: SortieRecord[];
+  notams?: NotamRecord[];
   fetchedAt: string;
 }

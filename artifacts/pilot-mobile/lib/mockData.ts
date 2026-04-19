@@ -151,5 +151,17 @@ const demoSorties: SortieRecord[] = [
 export const demoSnapshot: PilotSnapshot = {
   profile: demoProfile,
   sorties: demoSorties,
+  notams: [
+    {
+      id: "N-2026-014",
+      date: new Date().toISOString().slice(0, 10),
+      text: "Runway 26L closed for maintenance from 0600–1000Z. Use 26R for all departures and arrivals.",
+    },
+    {
+      id: "N-2026-013",
+      date: new Date(Date.now() - 86400000).toISOString().slice(0, 10),
+      text: "تنبيه: تدريبات إطلاق ليلية في منطقة التدريب (شرق) من الساعة 20:00 حتى 23:00. يُمنع الطيران تحت ارتفاع 3000 قدم.",
+    },
+  ],
   fetchedAt: new Date().toISOString(),
 };

@@ -71,6 +71,15 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="notams"
+        options={{
+          title: t("tab_notams"),
+          tabBarIcon: ({ color }) => (
+            <Feather name="alert-triangle" size={22} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           title: t("tab_settings"),

@@ -1,15 +1,25 @@
 import { useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
+import { useAuth } from "@/lib/auth";
 import { useNotams, useCreateNotam, useUpdateNotam, useDeleteNotam, type NotamRow } from "@/lib/squadron-data";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Megaphone, Pencil, Trash2, Check, X } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 
+// Only the squadron Ops Pilot owns NOTAM publishing. Squadron / Flight /
+// Wing / Base commanders see the same list as a read-only feed (broadcast
+// from the Ops Pilot PC into their dashboards via Supabase + RLS), so they
+// know what restrictions the squadron has issued without being able to
+// edit or withdraw them.
+const WRITE_ROLES = new Set(["ops", "super_admin"]);
+
 export default function NotamsPage() {
   const { t } = useI18n();
   const { toast } = useToast();
+  const { user } = useAuth();
+  const canWrite = WRITE_ROLES.has(user?.role ?? "");
   const notamsQ = useNotams();
   const { data: list } = notamsQ;
   const create = useCreateNotam();
@@ -54,10 +64,13 @@ export default function NotamsPage() {
 
   return (
     <div>
-      <PageHead title={t("nav_notams")} subtitle="Navigation notices by date" />
+      <PageHead
+        title={t("nav_notams")}
+        subtitle={canWrite ? "Navigation notices by date" : "Read-only feed published by squadron operations"}
+      />
       <DataUnavailableBanner queries={[notamsQ]} testId="banner-notams-unavailable" />
-      <div className="grid lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 space-y-2">
+      <div className={canWrite ? "grid lg:grid-cols-3 gap-4" : "space-y-2"}>
+        <div className={canWrite ? "lg:col-span-2 space-y-2" : "space-y-2"}>
           {list.length === 0 && (
             <Card data-testid="empty-notams" className="text-center text-xs text-muted-foreground py-6">
               {notamsQ.isError ? "—" : t("no_records")}
@@ -77,11 +90,11 @@ export default function NotamsPage() {
                     className="w-full mt-1 px-2 py-1.5 rounded-md bg-input border border-border text-sm"
                   />
                 ) : (
-                  <div className="text-sm">{n.text}</div>
+                  <div className="text-sm whitespace-pre-wrap" dir="auto">{n.text}</div>
                 )}
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                {editingId === n.id ? (
+                {!canWrite ? null : editingId === n.id ? (
                   <>
                     <button onClick={() => saveEdit(n)} disabled={update.isPending} className="p-1.5 rounded hover:bg-emerald-500/20 text-emerald-400" title="Save" data-testid={`button-save-notam-${n.id}`}>
                       <Check className="h-3.5 w-3.5" />
@@ -104,15 +117,18 @@ export default function NotamsPage() {
             </Card>
           ))}
         </div>
-        <Card>
-          <form onSubmit={add} className="space-y-3">
-            <div className="text-sm font-semibold">New NOTAM</div>
-            <textarea rows={5} value={text} onChange={e=>setText(e.target.value)} placeholder="Enter NOTAM text…"
-              data-testid="input-new-notam"
-              className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm" />
-            <button data-testid="button-publish-notam" disabled={create.isPending} className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium inline-flex items-center justify-center gap-1.5 disabled:opacity-50"><Plus className="h-4 w-4" /> Publish</button>
-          </form>
-        </Card>
+        {canWrite && (
+          <Card>
+            <form onSubmit={add} className="space-y-3">
+              <div className="text-sm font-semibold">New NOTAM</div>
+              <textarea rows={5} value={text} onChange={e=>setText(e.target.value)} placeholder="Enter NOTAM text…"
+                data-testid="input-new-notam"
+                dir="auto"
+                className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm" />
+              <button data-testid="button-publish-notam" disabled={create.isPending} className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium inline-flex items-center justify-center gap-1.5 disabled:opacity-50"><Plus className="h-4 w-4" /> Publish</button>
+            </form>
+          </Card>
+        )}
       </div>
 
       {confirmDelete && (
