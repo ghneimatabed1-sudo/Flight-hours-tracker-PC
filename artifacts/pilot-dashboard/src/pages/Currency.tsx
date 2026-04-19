@@ -21,10 +21,19 @@ function saveHidden(s: Set<string>) {
 }
 
 function statusOf(d: string) {
-  const days = Math.floor((+new Date(d) - Date.now()) / 86400000);
-  if (days < 0) return { cls: "status-bad", lbl: `EXPIRED ${-days}d`, days };
-  if (days < 30) return { cls: "status-warn", lbl: `${days}d`, days };
-  return { cls: "status-ok", lbl: `${days}d`, days };
+  if (!d) return { cls: "status-warn", lbl: "—", days: 0 };
+  // Compare LOCAL midnight to LOCAL midnight so a date entered as
+  // "today" is never accidentally counted as "yesterday" because of a
+  // timezone offset (e.g. Jordan UTC+3 vs the JS Date UTC parser).
+  const parts = d.split("-").map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return { cls: "status-warn", lbl: "—", days: 0 };
+  const expiry = new Date(parts[0], parts[1] - 1, parts[2]).getTime();
+  const now = new Date(); const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const days = Math.round((expiry - today) / 86400000);
+  if (days < 0)  return { cls: "status-bad",  lbl: `EXPIRED ${-days}d ago`, days };
+  if (days === 0) return { cls: "status-warn", lbl: "Expires today", days };
+  if (days < 30) return { cls: "status-warn", lbl: `${days}d left`, days };
+  return { cls: "status-ok", lbl: `${days}d left`, days };
 }
 
 export default function Currency() {
@@ -53,7 +62,7 @@ export default function Currency() {
 
   return (
     <div>
-      <PageHead title={t("nav_currency")} subtitle="Sorted by expiry · color-coded" actions={
+      <PageHead title={t("nav_currency")} subtitle="Each date is when the currency EXPIRES (not when the check was performed). Sorted by expiry · color-coded." actions={
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowHidden(v => !v)}

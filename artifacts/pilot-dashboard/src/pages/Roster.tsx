@@ -286,13 +286,19 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
             <NumField label={t("openingNvg")} value={p.openingNvg} onChange={v => set("openingNvg", v)} testId="input-openingNvg" />
           </div>
           <div className="grid grid-cols-3 gap-3 pt-2 border-t border-border">
-            <div className="col-span-3 text-xs text-muted-foreground font-semibold uppercase tracking-wider">Currency Expiries</div>
-            <Field label="Day" value={p.expiry.day} onChange={v => set("expiry", { ...p.expiry, day: v })} type="date" testId="input-expDay" />
-            <Field label="Night" value={p.expiry.night} onChange={v => set("expiry", { ...p.expiry, night: v })} type="date" testId="input-expNight" />
-            <Field label="NVG" value={p.expiry.nvg} onChange={v => set("expiry", { ...p.expiry, nvg: v })} type="date" testId="input-expNvg" />
-            <Field label="IRT" value={p.expiry.irt} onChange={v => set("expiry", { ...p.expiry, irt: v })} type="date" testId="input-expIrt" />
-            <Field label="Medical" value={p.expiry.medical} onChange={v => set("expiry", { ...p.expiry, medical: v })} type="date" testId="input-expMedical" />
-            <Field label="Sim" value={p.expiry.sim} onChange={v => set("expiry", { ...p.expiry, sim: v })} type="date" testId="input-expSim" />
+            <div className="col-span-3">
+              <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Currency Expiry Dates</div>
+              <div className="text-[11px] text-amber-300 mt-1">
+                Enter the date each currency <strong>EXPIRES</strong> (runs out) — NOT the date the check was performed.
+                A date in the past will show as EXPIRED in red.
+              </div>
+            </div>
+            <Field label="Day expires on"     value={p.expiry.day}     onChange={v => set("expiry", { ...p.expiry, day: v })}     type="date" testId="input-expDay" />
+            <Field label="Night expires on"   value={p.expiry.night}   onChange={v => set("expiry", { ...p.expiry, night: v })}   type="date" testId="input-expNight" />
+            <Field label="NVG expires on"     value={p.expiry.nvg}     onChange={v => set("expiry", { ...p.expiry, nvg: v })}     type="date" testId="input-expNvg" />
+            <Field label="IRT expires on"     value={p.expiry.irt}     onChange={v => set("expiry", { ...p.expiry, irt: v })}     type="date" testId="input-expIrt" />
+            <Field label="Medical expires on" value={p.expiry.medical} onChange={v => set("expiry", { ...p.expiry, medical: v })} type="date" testId="input-expMedical" />
+            <Field label="Sim expires on"     value={p.expiry.sim}     onChange={v => set("expiry", { ...p.expiry, sim: v })}     type="date" testId="input-expSim" />
           </div>
           <div className="grid grid-cols-3 gap-3 pt-2 border-t border-border">
             <label className="block text-xs col-span-3 sm:col-span-1">

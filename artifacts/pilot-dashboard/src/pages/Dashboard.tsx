@@ -14,7 +14,15 @@ import {
 type Severity = "ok" | "warn" | "bad";
 
 function statusOf(dateStr: string): Severity {
-  const days = Math.floor((+new Date(dateStr) - Date.now()) / 86400000);
+  if (!dateStr) return "warn";
+  // Local-midnight comparison so a date entered as "today" in the
+  // operator's timezone never flips to "expired" because of UTC drift.
+  const parts = dateStr.split("-").map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return "warn";
+  const expiry = new Date(parts[0], parts[1] - 1, parts[2]).getTime();
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const days = Math.round((expiry - today) / 86400000);
   if (days < 0) return "bad";
   if (days < 30) return "warn";
   return "ok";
