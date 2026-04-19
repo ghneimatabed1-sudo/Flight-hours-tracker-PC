@@ -286,47 +286,58 @@ function MessageList({ items, onReply, onMark, myPcId, kind }: {
   }
   return (
     <div className="space-y-2">
-      {items.map(m => (
-        <Card key={m.id} className={`!p-3 border-l-4 ${
-          m.priority === "urgent" ? "border-l-rose-400"
-          : m.priority === "medium" ? "border-l-amber-400"
-          : "border-l-emerald-500/60"
-        }`} data-testid={`msg-${m.id}`}>
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold truncate">{m.subject}</div>
-              <div className="text-[11px] text-muted-foreground">
-                {kind === "sent" ? `to ${m.toPcName}` : `from ${m.fromPcName}`} · {fmtDateTimeDDMM(m.sentAt)}
-                {/* Show the read receipt on every tab. On the inbox tab it
-                    confirms to the recipient that they've already marked
-                    this one Seen; on the sent tab it tells the sender
-                    that the other PC has acknowledged the message. */}
-                {m.readAt
-                  ? (kind === "sent"
-                      ? ` · seen by ${m.toPcName} ${fmtDateTimeDDMM(m.readAt)}`
-                      : ` · seen ${fmtDateTimeDDMM(m.readAt)}`)
-                  : (kind === "sent" ? " · not seen yet" : "")}
+      {items.map(m => {
+        // Read-receipt UI is only available on the chain-of-command pairs
+        // the operator authorised: squadron-internal (Sqn Cmdr ↔ Flight
+        // Cmdr) and Squadron Cmdr ↔ Wing Cmdr (either direction).
+        const seenOK = seenAllowed(m);
+        // Render "User · PC" so it's instantly clear who is talking from
+        // which PC. The username comes from the sender's own login.
+        const fromLabel = `${m.fromUser} · ${m.fromPcName}`;
+        const toLabel   = `${m.toPcName}`;
+        return (
+          <Card key={m.id} className={`!p-3 border-l-4 ${
+            m.priority === "urgent" ? "border-l-rose-400"
+            : m.priority === "medium" ? "border-l-amber-400"
+            : "border-l-emerald-500/60"
+          }`} data-testid={`msg-${m.id}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold truncate">{m.subject}</div>
+                <div className="text-[11px] text-muted-foreground">
+                  {kind === "sent" ? `to ${toLabel}` : `from ${fromLabel}`} · {fmtDateTimeDDMM(m.sentAt)}
+                  {/* Read-receipt line — only rendered for the authorised
+                      chain-of-command pairs. On every other PC pair the
+                      message still appears, just without the seen UI. */}
+                  {seenOK && (
+                    m.readAt
+                      ? (kind === "sent"
+                          ? ` · seen by ${m.toPcName} ${fmtDateTimeDDMM(m.readAt)}`
+                          : ` · seen ${fmtDateTimeDDMM(m.readAt)}`)
+                      : (kind === "sent" ? " · not seen yet" : "")
+                  )}
+                </div>
               </div>
+              <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border ${priorityClasses[m.priority]}`}>{priorityLabels[m.priority]}</span>
             </div>
-            <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border ${priorityClasses[m.priority]}`}>{priorityLabels[m.priority]}</span>
-          </div>
-          <div className="text-sm mt-2 whitespace-pre-wrap font-mono">{m.body}</div>
-          {(onReply || onMark) && m.toPcId === myPcId && (
-            <div className="flex gap-2 mt-2">
-              {onReply && (
-                <button onClick={() => onReply(m)} className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded bg-secondary border border-border" data-testid={`reply-${m.id}`}>
-                  <Reply className="h-3 w-3" /> Reply
-                </button>
-              )}
-              {onMark && !m.readAt && (
-                <button onClick={() => onMark(m)} className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 font-semibold" data-testid={`mark-${m.id}`}>
-                  <Check className="h-3 w-3" /> Mark Seen
-                </button>
-              )}
-            </div>
-          )}
-        </Card>
-      ))}
+            <div className="text-sm mt-2 whitespace-pre-wrap font-mono">{m.body}</div>
+            {(onReply || onMark) && m.toPcId === myPcId && (
+              <div className="flex gap-2 mt-2">
+                {onReply && (
+                  <button onClick={() => onReply(m)} className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded bg-secondary border border-border" data-testid={`reply-${m.id}`}>
+                    <Reply className="h-3 w-3" /> Reply
+                  </button>
+                )}
+                {onMark && seenOK && !m.readAt && (
+                  <button onClick={() => onMark(m)} className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 font-semibold" data-testid={`mark-${m.id}`}>
+                    <Check className="h-3 w-3" /> Mark Seen
+                  </button>
+                )}
+              </div>
+            )}
+          </Card>
+        );
+      })}
     </div>
   );
 }
