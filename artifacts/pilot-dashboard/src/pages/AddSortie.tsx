@@ -515,7 +515,7 @@ export default function AddSortie() {
 
   return (
     <div>
-      <PageHead title={t("nav_addsortie")} subtitle="New flight entry · auto-syncs to Supabase" />
+      <PageHead title={t("nav_addsortie")} subtitle="New flight entry" />
 
       <Card className="mb-4">
         <form onSubmit={submit} className="space-y-3" data-testid="form-add-sortie">
