@@ -9,6 +9,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useCreateSortie, usePilots } from "@/lib/squadron-data";
 import { fmtDateTimeDDMM } from "@/lib/format";
+import { matchGuestPilot } from "@/lib/match-guest-pilot";
 import { Inbox, Check, X, PauseCircle, Pencil } from "lucide-react";
 
 // Pending Approvals — home-squadron ops officer reviews sorties that
@@ -35,18 +36,24 @@ export default function PendingApprovals() {
   const [pilotChoice, setPilotChoice] = useState<Record<string, string>>({});
 
   const pilotOpts = useMemo(
-    () => PILOTS.map(p => ({ value: p.id, label: `${p.rank} ${p.name}` })),
+    () => PILOTS.map(p => ({
+      value: p.id,
+      // Show the military number alongside the name so the ops officer can
+      // tell apart roster pilots that share a name (e.g. multiple "Ahmad
+      // Khalil"s) at a glance from the dropdown.
+      label: `${p.rank} ${p.name}${p.militaryNumber ? ` · #${p.militaryNumber}` : ""}`,
+    })),
     [PILOTS],
   );
-  const fuzzyMatch = (name: string) => {
-    const norm = (s: string) => s.toLowerCase().replace(/[^a-z\u0600-\u06ff]+/g, "");
-    const n = norm(name);
-    return PILOTS.find(p => norm(`${p.rank} ${p.name}`).includes(n) || n.includes(norm(p.name)));
-  };
+  const matchFor = (row: PendingSortie) =>
+    matchGuestPilot(PILOTS, {
+      name: row.guestPilotName,
+      militaryNumber: row.guestPilotMilitaryNumber,
+    });
 
   const decideAndCascade = async (row: PendingSortie, action: "accepted" | "rejected" | "deleted" | "edited", reason?: string) => {
     if (action === "accepted") {
-      const pickId = pilotChoice[row.id] ?? fuzzyMatch(row.guestPilotName)?.id ?? "";
+      const pickId = pilotChoice[row.id] ?? matchFor(row)?.id ?? "";
       if (!pickId) {
         toast({
           title: "Pick a local pilot first",
@@ -139,7 +146,7 @@ export default function PendingApprovals() {
                         Credit hours / currencies to local pilot
                       </div>
                       <select
-                        value={pilotChoice[row.id] ?? fuzzyMatch(row.guestPilotName)?.id ?? ""}
+                        value={pilotChoice[row.id] ?? matchFor(row)?.id ?? ""}
                         onChange={e => setPilotChoice(c => ({ ...c, [row.id]: e.target.value }))}
                         className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
                         data-testid={`pilot-pick-${row.id}`}
