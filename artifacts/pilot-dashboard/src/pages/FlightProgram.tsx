@@ -462,6 +462,16 @@ export default function FlightProgram() {
           </div>
         </div>
 
+        {/* Pilot autocomplete options for the <input list="fp-pilots"/>
+            cells in every row. Rendered ONCE outside the table — placing
+            a <datalist> inside <tr>/<tbody> is invalid HTML and triggers
+            a React hydration warning. */}
+        <datalist id="fp-pilots">
+          {pilotOptions.map((p) => (
+            <option key={p.value} value={p.value}>{p.label}</option>
+          ))}
+        </datalist>
+
         {/* Main table. One <table> spans DAY + NIGHT sections with
             band headers between them — matches the Excel layout. */}
         <table className="w-full border-collapse border border-black">
@@ -754,11 +764,6 @@ function RowInputs({
       <CellInput value={row.remarks} onChange={(v) => onChange({ remarks: v })} />
       <CellInput value={row.atcTakeoff} onChange={(v) => onChange({ atcTakeoff: v })} mono />
       <CellInput value={row.atcLanding} onChange={(v) => onChange({ atcLanding: v })} mono />
-      <datalist id="fp-pilots">
-        {pilotOptions.map((p) => (
-          <option key={p.value} value={p.value}>{p.label}</option>
-        ))}
-      </datalist>
     </tr>
   );
 }
