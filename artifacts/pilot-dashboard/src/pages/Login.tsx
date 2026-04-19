@@ -163,7 +163,7 @@ export default function LoginGate() {
 
       <div className="w-full max-w-md">
         <div className="flex flex-col items-center mb-6">
-          <img src="brand/hawkeye-logo.svg" className="h-24 w-24 object-contain mb-3" alt="Hawk Eye" />
+          <img src="brand/emblem.png" className="h-24 w-24 object-contain mb-3" alt="Royal Jordanian Air Force" />
           <img
             src="brand/hawkeye-wordmark.svg"
             className="h-10 max-w-full object-contain"
