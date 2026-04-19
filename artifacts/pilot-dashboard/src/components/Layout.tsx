@@ -6,8 +6,9 @@ import {
   LayoutDashboard, ListChecks, PlusCircle, Users, BadgeCheck, AlertOctagon,
   Trophy, CalendarRange, PalmtreeIcon, UserX, Calendar, ClipboardList,
   ShieldAlert, FileText, Megaphone, Map, Tags, FileDown, UserCog, Settings,
-  Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle, Archive, Bell, UserPlus, Users2, FileBarChart,
+  Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle, Archive, Bell, UserPlus, Users2, FileBarChart, Inbox, Mail, Share2,
 } from "lucide-react";
+import { canUseMessages } from "@/lib/cross-pc";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
 
 type Item = { p: string; k: TKey; I: typeof LayoutDashboard };
@@ -15,7 +16,10 @@ const ITEMS: readonly Item[] = [
   { p: "/", k: "nav_dashboard", I: LayoutDashboard },
   { p: "/sortie-log", k: "nav_sortielog", I: ListChecks },
   { p: "/sortie-add", k: "nav_addsortie", I: PlusCircle },
+  { p: "/pending", k: "nav_pending" as TKey, I: Inbox },
   { p: "/external-pilots", k: "nav_externalpilots", I: UserPlus },
+  { p: "/schedule-chain", k: "nav_schedule_chain" as TKey, I: Share2 },
+  { p: "/messages", k: "nav_messages" as TKey, I: Mail },
   { p: "/roster", k: "nav_roster", I: Users },
   { p: "/currency", k: "nav_currency", I: BadgeCheck },
   { p: "/expired", k: "nav_expired", I: AlertOctagon },
@@ -84,6 +88,14 @@ export default function Layout({ children }: { children: ReactNode }) {
               // by the squadron ops officer.
               return user?.role === "ops";
             }
+            // Cross-PC features are gated by role+scope. Messages excludes
+            // Flight Cmdr and Ops Pilot deputies; Schedule Sharing excludes
+            // Ops Pilot deputies but lets Flight Cmdrs participate. Pending
+            // Approvals belongs to the squadron ops officer specifically —
+            // it cascades into the local calc engine on accept.
+            if (p === "/messages") return canUseMessages(user?.role, undefined);
+            if (p === "/schedule-chain") return true; // squadron ops always allowed
+            if (p === "/pending") return user?.role === "ops" || user?.role === "super_admin";
             return true;
           }).map(({ p, k, I }) => {
             const active = loc === p || (p !== "/" && loc.startsWith(p));

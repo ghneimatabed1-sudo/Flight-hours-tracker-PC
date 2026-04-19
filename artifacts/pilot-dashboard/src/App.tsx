@@ -39,6 +39,10 @@ import Dashboard from "@/pages/Dashboard";
 import SortieLog from "@/pages/SortieLog";
 import AddSortie from "@/pages/AddSortie";
 import ExternalPilots from "@/pages/ExternalPilots";
+import PendingApprovals from "@/pages/PendingApprovals";
+import Messages from "@/pages/Messages";
+import ScheduleChain from "@/pages/ScheduleChain";
+import { registerLocalPC, purgeExpiredMessages } from "@/lib/cross-pc";
 import Roster from "@/pages/Roster";
 import PilotDetail from "@/pages/PilotDetail";
 import Currency from "@/pages/Currency";
@@ -91,6 +95,9 @@ function SquadronOpsRoutes() {
       <Route path="/sortie-log" component={SortieLog} />
       <Route path="/sortie-add" component={AddSortie} />
       <Route path="/external-pilots" component={ExternalPilots} />
+      <Route path="/pending" component={PendingApprovals} />
+      <Route path="/schedule-chain" component={ScheduleChain} />
+      <Route path="/messages" component={Messages} />
       <Route path="/roster" component={Roster} />
       <Route path="/pilot/:id" component={PilotDetail} />
       <Route path="/currency" component={Currency} />
@@ -173,6 +180,8 @@ function CommanderRoutes() {
       <Route path="/dashboard/flight-program" component={FlightProgram} />
       <Route path="/dashboard/unavailable" component={CommanderUnavailableGate} />
       <Route path="/dashboard/sticky" component={StickyNotes} />
+      <Route path="/dashboard/schedule-chain" component={ScheduleChain} />
+      <Route path="/dashboard/messages" component={Messages} />
       {/* See SquadronOpsRoutes catch-all: redirect home rather than 404. */}
       <Route><Redirect to="/dashboard" /></Route>
     </Switch>
@@ -203,12 +212,36 @@ function Shell() {
 }
 
 function ArchiveBootstrap() {
+  const auth = useAuth();
   useEffect(() => { runArchiveCheck(); }, []);
   // Wipe any leftover demo/sample data (demo pilots + demo sorties) so the
   // squadron starts with an empty dataset for real operations. Demo records
   // were tagged with importedAt === "DEMO_SEED" specifically so this single
   // call can strip them without touching anything real.
   useEffect(() => { clearDemoSeed(); }, []);
+  // Cross-PC registry heartbeat — register this squadron's PC and ping it
+  // every 30s so other squadrons see us as online in their pickers/chains.
+  // The id is the squadron name (squadron tier) so every consumer that
+  // filters by "is this for me?" — pending queue, schedule chain, messages
+  // — uses the same canonical value as the writer. Purges expired private
+  // messages on the same cadence (cheap localStorage sweep, capped at the
+  // user-configured retention window).
+  useEffect(() => {
+    const sqn = auth.squadron?.name;
+    if (!sqn) return;
+    const tick = () => {
+      registerLocalPC({
+        id: sqn,
+        displayName: sqn,
+        tier: "squadron",
+        base: auth.squadron?.base,
+      });
+      purgeExpiredMessages();
+    };
+    tick();
+    const id = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(id);
+  }, [auth.squadron?.name, auth.squadron?.base]);
   return null;
 }
 

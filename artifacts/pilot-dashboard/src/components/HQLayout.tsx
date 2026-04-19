@@ -1,10 +1,11 @@
 import { Link, useLocation } from "wouter";
-import { type ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
 import { useI18n, type Key } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote } from "lucide-react";
+import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2 } from "lucide-react";
+import { canUseMessages, canUseScheduleChain, registerLocalPC, purgeExpiredMessages, type PcTier } from "@/lib/cross-pc";
 import emblem from "@assets/rjaf_emblem.png";
 import { RecoveryCodesLowBanner } from "@/components/RecoveryCodesLowBanner";
 
@@ -18,6 +19,30 @@ export function HQLayout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const { t, lang, setLang, dir } = useI18n();
   const [location] = useLocation();
+
+  // Cross-PC heartbeat for commander tiers. The id is tier-prefixed
+  // (e.g. "WING:NWAC", "BASE:Marka") so wing/base PCs are distinct
+  // entries in the registry and the schedule sharing chain can pick
+  // them as forward targets without colliding with squadron PCs.
+  useEffect(() => {
+    if (!user || user.role !== "commander") return;
+    const scope = user.scope;
+    if (!scope) return;
+    const tier: PcTier =
+      scope === "wing" ? "wing"
+      : scope === "base" ? "base"
+      : scope === "squadron" ? "squadron"
+      : "hq";
+    const displayName = user.displayName || `${tier.toUpperCase()} CMD`;
+    const id = tier === "squadron" ? displayName : `${tier.toUpperCase()}:${displayName}`;
+    const tick = () => {
+      registerLocalPC({ id, displayName, tier });
+      purgeExpiredMessages();
+    };
+    tick();
+    const handle = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(handle);
+  }, [user?.role, user?.scope, user?.displayName]);
 
   if (!user) return <>{children}</>;
 
@@ -60,6 +85,12 @@ export function HQLayout({ children }: { children: ReactNode }) {
         // Flight Schedule creation is squadron-level only. Flight / wing /
         // base / HQ-scope commanders don't own a specific squadron's daily
         // sheet so they don't get this page in their sidebar.
+        ...(canUseScheduleChain(user.role, user.scope)
+          ? [{ path: "/dashboard/schedule-chain", labelKey: "nav_schedule_chain" as Key, icon: <Share2 className="h-4 w-4" /> }]
+          : []),
+        ...(canUseMessages(user.role, user.scope)
+          ? [{ path: "/dashboard/messages", labelKey: "nav_messages" as Key, icon: <Mail className="h-4 w-4" /> }]
+          : []),
       ];
 
   return (

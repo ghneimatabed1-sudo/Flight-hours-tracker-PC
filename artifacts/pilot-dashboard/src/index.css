@@ -252,6 +252,8 @@ html, body, #root {
   @page { size: A4 landscape; margin: 12mm; }
   html, body { background: #fff !important; color: #000 !important; }
   .no-print { display: none !important; }
+  /* Schedule diff highlights are screen-only — paper output stays clean. */
+  .no-print-diff { background: transparent !important; text-decoration: none !important; opacity: 1 !important; }
   .print-only { display: block !important; }
   .print-area { color: #000 !important; background: #fff !important; }
   .print-area table { width: 100%; border-collapse: collapse; font-size: 10.5px; }

@@ -11,7 +11,10 @@ import {
 } from "@/lib/squadron-data";
 import { useToast } from "@/hooks/use-toast";
 import type { Sortie } from "@/lib/mock";
-import { Plane, Pencil, Trash2, X } from "lucide-react";
+import { Plane, Pencil, Trash2, X, UserPlus, User } from "lucide-react";
+import { useRegisteredPCs, useSubmitPending } from "@/lib/cross-pc";
+import { useAuth } from "@/lib/auth";
+import type { ExternalPilotRef } from "@/lib/mock";
 
 // Simple Add Sortie form — mirrors the legacy mobile app's logic:
 //   • One Position toggle: which seat is in 1st PLT (the other = 2nd PLT)
@@ -45,6 +48,12 @@ interface SeatState {
   id: string;
   status: SeatStatus;
   captain: boolean;
+  // External (guest) pilot details. When `external` is set, the seat is
+  // a guest from another squadron — `id` is left blank and the seat's
+  // hours don't credit a local roster pilot. If the guest's home squadron
+  // is in the cross-PC registry, `homePcId` carries that PC's id so the
+  // submit handler can route a pending entry to that squadron.
+  external?: ExternalPilotRef & { homePcId?: string; militaryNumber?: string };
 }
 
 interface FormState {
@@ -105,6 +114,10 @@ export default function AddSortie() {
 
   const [form, setForm] = useState<FormState>(blankForm);
   const [confirmDel, setConfirmDel] = useState<Sortie | null>(null);
+  const auth = useAuth();
+  const mySquadronId = auth.squadron?.name ?? "";
+  const { data: registeredPCs = [] } = useRegisteredPCs();
+  const submitPending = useSubmitPending();
 
   // Seed pilot/co-pilot defaults once roster loads.
   useEffect(() => {
@@ -161,8 +174,21 @@ export default function AddSortie() {
       toast({ title: "Hours required", description: "Enter Time and/or Dual hours.", variant: "destructive" });
       return;
     }
-    if (form.pilot.id === form.coPilot.id && form.pilot.id) {
+    if (
+      !form.pilot.external &&
+      !form.coPilot.external &&
+      form.pilot.id === form.coPilot.id &&
+      form.pilot.id
+    ) {
       toast({ title: "Pilot and Co-Pilot are the same", variant: "destructive" });
+      return;
+    }
+    if (form.pilot.external && !form.pilot.external.name.trim()) {
+      toast({ title: "Guest pilot name required", variant: "destructive" });
+      return;
+    }
+    if (form.coPilot.external && !form.coPilot.external.name.trim()) {
+      toast({ title: "Guest co-pilot name required", variant: "destructive" });
       return;
     }
 
@@ -214,8 +240,14 @@ export default function AddSortie() {
       date: form.date,
       acType: form.acType,
       acNumber: form.acNumber.trim(),
-      pilotId: form.pilot.id,
-      coPilotId: form.coPilot.id,
+      pilotId: form.pilot.external ? "" : form.pilot.id,
+      coPilotId: form.coPilot.external ? "" : form.coPilot.id,
+      pilotExternal: form.pilot.external
+        ? { name: form.pilot.external.name.trim(), squadron: form.pilot.external.squadron.trim() }
+        : undefined,
+      coPilotExternal: form.coPilot.external
+        ? { name: form.coPilot.external.name.trim(), squadron: form.coPilot.external.squadron.trim() }
+        : undefined,
       sortieType,
       name: form.msnDuty.trim() || sortieType,
       condition: cond,
@@ -244,12 +276,42 @@ export default function AddSortie() {
       vor: form.instrumentFlight ? (parseInt(form.vor || "0") || 0) : undefined,
     };
     try {
+      let savedId: string | null = form.id;
       if (form.id) {
         await update.mutateAsync({ sortie: { ...payload, id: form.id } as Sortie });
         toast({ title: "Sortie updated" });
       } else {
-        await create.mutateAsync(payload);
+        const created = await create.mutateAsync(payload);
+        savedId = (created as Sortie | undefined)?.id ?? null;
         toast({ title: "Sortie added" });
+      }
+      // Cross-PC: when a guest seat carries a `homePcId`, push a pending
+      // entry to that squadron's queue. Their ops officer reviews it on the
+      // Pending Approvals page; on accept it cascades through their
+      // useCreateSortie pipeline and bumps totals/currencies/captain hours.
+      const seatsForPending: { which: "pilot" | "coPilot"; seat: typeof form.pilot }[] = [];
+      if (form.pilot.external?.homePcId) seatsForPending.push({ which: "pilot", seat: form.pilot });
+      if (form.coPilot.external?.homePcId) seatsForPending.push({ which: "coPilot", seat: form.coPilot });
+      for (const { which, seat: s } of seatsForPending) {
+        if (!s.external?.homePcId) continue;
+        try {
+          await submitPending.mutateAsync({
+            hostingSquadronId: mySquadronId,
+            hostingSquadronName: mySquadronId,
+            homeSquadronId: s.external.homePcId,
+            homeSquadronName: s.external.squadron,
+            guestPilotName: s.external.name,
+            guestPilotMilitaryNumber: s.external.militaryNumber,
+            guestSeat: which,
+            submittedBy: auth.user?.username ?? mySquadronId,
+            sortie: payload,
+          });
+        } catch {
+          toast({ title: "Pending entry not sent", description: `Could not reach ${s.external.squadron}.`, variant: "destructive" });
+        }
+      }
+      if (seatsForPending.length > 0) {
+        toast({ title: `Sent to ${seatsForPending.length} squadron${seatsForPending.length > 1 ? "s" : ""} for approval` });
       }
       resetForm();
     } catch {
@@ -287,8 +349,22 @@ export default function AddSortie() {
       date: s.date,
       acType: s.acType || "UH-60M",
       acNumber: s.acNumber || "",
-      pilot: { id: s.pilotId, status: pilotStatus, captain: !!s.pilotIsCaptain },
-      coPilot: { id: s.coPilotId, status: coPilotStatus, captain: !!s.coPilotIsCaptain },
+      pilot: {
+        id: s.pilotId,
+        status: pilotStatus,
+        captain: !!s.pilotIsCaptain,
+        external: s.pilotExternal
+          ? { ...s.pilotExternal, homePcId: registeredPCs.find(p => p.squadronName === s.pilotExternal!.squadron)?.id }
+          : undefined,
+      },
+      coPilot: {
+        id: s.coPilotId,
+        status: coPilotStatus,
+        captain: !!s.coPilotIsCaptain,
+        external: s.coPilotExternal
+          ? { ...s.coPilotExternal, homePcId: registeredPCs.find(p => p.squadronName === s.coPilotExternal!.squadron)?.id }
+          : undefined,
+      },
       sortieType: SORTIE_TYPES.includes(s.sortieType) ? s.sortieType : "Other…",
       sortieTypeOther: SORTIE_TYPES.includes(s.sortieType) ? "" : s.sortieType,
       msnDuty: s.msnDuty ?? s.name ?? "",
@@ -357,6 +433,8 @@ export default function AddSortie() {
               seat={form.pilot}
               opts={pilotOpts}
               onChange={patch => setSeat("pilot", patch)}
+              registeredPCs={registeredPCs}
+              mySquadronId={mySquadronId}
             />
             <SeatPanel
               label="Co-Pilot"
@@ -364,6 +442,8 @@ export default function AddSortie() {
               seat={form.coPilot}
               opts={pilotOpts}
               onChange={patch => setSeat("coPilot", patch)}
+              registeredPCs={registeredPCs}
+              mySquadronId={mySquadronId}
             />
           </div>
 
@@ -587,13 +667,20 @@ interface SeatPanelProps {
   seat: SeatState;
   opts: { value: string; label: string }[];
   onChange: (patch: Partial<SeatState>) => void;
+  registeredPCs: { id: string; squadronName: string; online: boolean; tier: import("@/lib/cross-pc").PcTier }[];
+  mySquadronId: string;
 }
 
 // Independent per-seat panel: pilot picker + status (1st PLT / 2nd PLT /
 // Dual) + Captain checkbox. Each seat is fully independent — both seats can
 // be 1st PLT (rare but legal on multi-instructor evals), both can be Dual
 // during conversion training, etc. Captain credit is per-seat too.
-function SeatPanel({ label, testIdPrefix, seat, opts, onChange }: SeatPanelProps) {
+function SeatPanel({ label, testIdPrefix, seat, opts, onChange, registeredPCs, mySquadronId }: SeatPanelProps) {
+  const guest = !!seat.external;
+  const setGuest = (on: boolean) => {
+    if (on) onChange({ id: "", external: { name: "", squadron: "" } });
+    else onChange({ external: undefined });
+  };
   const statuses: { v: SeatStatus; label: string; cls: string }[] = [
     { v: "1st", label: "1st PLT", cls: "bg-primary text-primary-foreground border-primary" },
     { v: "2nd", label: "2nd PLT", cls: "bg-sky-500/20 border-sky-400 text-sky-200" },
@@ -601,15 +688,93 @@ function SeatPanel({ label, testIdPrefix, seat, opts, onChange }: SeatPanelProps
   ];
   return (
     <div className="border border-border rounded-md p-2.5 bg-secondary/20 space-y-2" data-testid={`seat-${testIdPrefix}`}>
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
-      <select
-        className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
-        value={seat.id}
-        onChange={e => onChange({ id: e.target.value })}
-        data-testid={`select-${testIdPrefix}`}
-      >
-        {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+        <button
+          type="button"
+          onClick={() => setGuest(!guest)}
+          data-testid={`button-guest-${testIdPrefix}`}
+          className={`px-2 py-0.5 rounded text-[10px] font-semibold border inline-flex items-center gap-1 ${
+            guest
+              ? "bg-emerald-500/20 border-emerald-400 text-emerald-200"
+              : "bg-secondary border-border text-muted-foreground hover:bg-secondary/80"
+          }`}
+          title="Toggle guest pilot from another squadron"
+        >
+          {guest ? <UserPlus className="h-3 w-3" /> : <User className="h-3 w-3" />}
+          {guest ? "Guest" : "Roster"}
+        </button>
+      </div>
+      {guest ? (
+        <div className="space-y-1.5">
+          {/* Squadron picker first — registered PCs are listed in the
+              dropdown so accepted entries can be routed back to that
+              squadron's app. The free-text option (or unrecognised value)
+              becomes a manual-entry record that doesn't auto-route. */}
+          <select
+            className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
+            value={(() => {
+              const match = registeredPCs.find(p => p.squadronName === seat.external?.squadron && p.id !== mySquadronId && p.tier === "squadron");
+              return match ? match.id : "__manual";
+            })()}
+            onChange={e => {
+              const v = e.target.value;
+              if (v === "__manual") onChange({ external: { ...(seat.external ?? { name: "" }), squadron: "", homePcId: undefined } });
+              else {
+                const pc = registeredPCs.find(p => p.id === v);
+                onChange({ external: { ...(seat.external ?? { name: "" }), squadron: pc?.squadronName ?? "", homePcId: pc?.id } });
+              }
+            }}
+            data-testid={`select-guest-pc-${testIdPrefix}`}
+          >
+            <option value="__manual">— Manual entry (squadron not registered) —</option>
+            {/* Only squadron-tier PCs make sense as "home squadron" — wing/base/HQ
+                entries do not own pilot rosters and cannot review guest sorties. */}
+            {registeredPCs.filter(p => p.id !== mySquadronId && p.tier === "squadron").map(p => (
+              <option key={p.id} value={p.id}>{p.squadronName} {p.online ? "● online" : "○ offline"}</option>
+            ))}
+          </select>
+          {(() => {
+            const match = registeredPCs.find(p => p.squadronName === seat.external?.squadron && p.id !== mySquadronId);
+            if (match) return null;
+            return (
+              <input
+                type="text"
+                value={seat.external?.squadron ?? ""}
+                onChange={e => onChange({ external: { ...(seat.external ?? { name: "" }), squadron: e.target.value } })}
+                placeholder="Squadron name (e.g. 7 Sqn)"
+                className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
+                data-testid={`input-guest-squadron-${testIdPrefix}`}
+              />
+            );
+          })()}
+          <input
+            type="text"
+            value={seat.external?.name ?? ""}
+            onChange={e => onChange({ external: { ...(seat.external ?? { squadron: "" }), name: e.target.value } })}
+            placeholder="Pilot name (rank + name)"
+            className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
+            data-testid={`input-guest-name-${testIdPrefix}`}
+          />
+          <input
+            type="text"
+            value={seat.external?.militaryNumber ?? ""}
+            onChange={e => onChange({ external: { ...(seat.external ?? { name: "", squadron: "" }), militaryNumber: e.target.value } })}
+            placeholder="Military number (optional)"
+            className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs font-mono"
+            data-testid={`input-guest-mil-${testIdPrefix}`}
+          />
+        </div>
+      ) : (
+        <select
+          className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
+          value={seat.id}
+          onChange={e => onChange({ id: e.target.value })}
+          data-testid={`select-${testIdPrefix}`}
+        >
+          {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      )}
       <div className="flex flex-wrap gap-1.5" data-testid={`status-${testIdPrefix}`}>
         {statuses.map(s => (
           <button
