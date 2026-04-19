@@ -347,6 +347,39 @@ export default function LoginGate() {
                 ? <div className="text-xs text-amber-400">{t("lockedOut")} ({lockedRemaining}s)</div>
                 : err && <div className="text-xs text-destructive">{err}</div>}
               <button data-testid="button-signin" disabled={lockedRemaining > 0} className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 disabled:opacity-50">{t("signIn")}</button>
+              {/* Dev-only escape hatch: when running in the in-browser preview
+                  (no Supabase backend, hostname is replit.dev / localhost) the
+                  2FA secret + lockout live in localStorage. If the operator
+                  enters the wrong TOTP a few times they get locked out for 5
+                  min with no way to recover without DevTools — which is awful
+                  for iterating on the UI. This button only renders in that
+                  exact preview context, never in shipped Electron builds or
+                  any deployed Supabase environment. */}
+              {(() => {
+                const h = typeof window !== "undefined" ? window.location.hostname : "";
+                const isDevPreview =
+                  h.endsWith(".replit.dev") || h.endsWith(".repl.co") || h === "localhost" || h === "127.0.0.1";
+                if (!isDevPreview) return null;
+                return (
+                  <button
+                    type="button"
+                    data-testid="button-dev-reset-2fa"
+                    onClick={() => {
+                      try {
+                        localStorage.removeItem("rjaf.lockUntil");
+                        localStorage.removeItem("rjaf.failedAttempts");
+                        localStorage.removeItem("rjaf.adminTotp.secret");
+                        localStorage.removeItem("rjaf.adminTotp.recoveryCodes");
+                        localStorage.removeItem("rjaf.adminTotp.recoveryUsed");
+                      } catch {}
+                      window.location.reload();
+                    }}
+                    className="w-full text-[10px] text-muted-foreground/70 hover:text-amber-400 underline underline-offset-2"
+                  >
+                    Reset lockout & 2FA enrollment (dev preview only)
+                  </button>
+                );
+              })()}
               {u.trim().toLowerCase() !== "admin" && (
                 <button
                   type="button"
