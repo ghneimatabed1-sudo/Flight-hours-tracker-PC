@@ -14,6 +14,8 @@ import { createCommander, deleteCommander, listCommanders, resetCommanderPasswor
 import type { CommanderScope } from "@/lib/types";
 import { fmtDate, fmtDateTime } from "@/lib/format";
 import { KeyRound, Copy, Check, User as UserIcon, Wrench, Lock, Shuffle } from "lucide-react";
+import { useRegisteredPCs } from "@/lib/cross-pc";
+import { Checkbox } from "@/components/ui/checkbox";
 
 function genKey(code: string): string {
   const rnd = Array.from({ length: 16 }, () => Math.floor(Math.random() * 36).toString(36).toUpperCase()).join("");
@@ -30,6 +32,11 @@ export default function LicenseKeys() {
   const { t, lang } = useI18n();
   const auth = useAuth();
   const [keys, setKeys] = useState<LicenseKey[]>(() => listLicenseKeys());
+  // Live list of every PC that has registered into the cross-PC ecosystem.
+  // We filter to squadron-tier entries when populating the setup-time
+  // pickers so commanders are only ever bound to real ops squadron PCs.
+  const registeredPcs = useRegisteredPCs();
+  const opsSquadronPcs = registeredPcs.data.filter(p => p.tier === "squadron");
 
   // Setup-dialog roles. We keep five UI choices but collapse the three
   // commander tiers into the same underlying PcRoleLock value ("commander"),
@@ -48,6 +55,14 @@ export default function LicenseKeys() {
   const [setupSqnName, setSetupSqnName] = useState("");
   const [setupSqnNumber, setSetupSqnNumber] = useState("");
   const [setupSqnBase, setSetupSqnBase] = useState("");
+  // For squadron/flight commander setup: the registered ops squadron PC this
+  // commander is bound to. Empty string means "type squadron details
+  // manually" (the fallback for when the ops PC has not yet activated).
+  const [setupLinkedPcId, setSetupLinkedPcId] = useState<string>("");
+  // For wing/base commander setup: the list of registered ops squadron PCs
+  // this commander will monitor. Stored on the commander record as
+  // squadronIds so RLS / pickers can scope reads.
+  const [setupMonitoredPcIds, setSetupMonitoredPcIds] = useState<string[]>([]);
   const [setupCommanderName, setSetupCommanderName] = useState("");
   const [setupDeviceName, setSetupDeviceName] = useState("");
   const [setupOpsUsername, setSetupOpsUsername] = useState("");
@@ -253,6 +268,8 @@ export default function LicenseKeys() {
     setSetupDeviceName(auth.pcDeviceName ?? "");
     setSetupOpsUsername("");
     setSetupAccountPassword("");
+    setSetupLinkedPcId("");
+    setSetupMonitoredPcIds([]);
   }
   // True when the current license-key record assigned a role from the admin
   // page. We use this to disable the role selector inside the Setup dialog.
@@ -288,6 +305,22 @@ export default function LicenseKeys() {
         setSetupErr(lang === "ar" ? "أدخل اسم القائد." : "Enter the commander's name.");
         return;
       }
+      // Squadron / flight commander must be bound to a registered ops PC
+      // (chosen from the picker). Without this, cross-PC reads have no
+      // squadron id to filter by and the commander would see nothing.
+      if ((setupRole === "squadron_commander" || setupRole === "flight_commander") && !setupLinkedPcId) {
+        setSetupErr(lang === "ar"
+          ? "اختر جهاز سرب العمليات المرتبط بهذا القائد."
+          : "Pick the ops squadron PC this commander is linked to.");
+        return;
+      }
+      // Wing / base commander must monitor at least one ops squadron PC.
+      if ((setupRole === "wing_commander" || setupRole === "base_commander") && setupMonitoredPcIds.length === 0) {
+        setSetupErr(lang === "ar"
+          ? "اختر سرباً واحداً على الأقل لمراقبته."
+          : "Pick at least one squadron PC to monitor.");
+        return;
+      }
 
       // Block setup until the per-PC fingerprint has actually resolved —
       // otherwise the auto-activated license gets bound to "FP-PENDING" and
@@ -314,12 +347,30 @@ export default function LicenseKeys() {
         const chosen = setupAccountPassword.trim();
         const initialPassword = chosen || generateInitialPassword();
 
+        // Squadron-monitoring scope for this commander, decided at setup time:
+        //   • squadron / flight commander → 1 ops squadron PC (the one whose
+        //     id was picked from the registry, or empty if the admin chose
+        //     manual squadron entry — the local squadron lock still binds
+        //     them to that squadron).
+        //   • wing / base commander → all the squadron PCs the admin
+        //     ticked. RLS reads & cross-PC pickers honour this list.
+        //   • hq commander → every known squadron (handled by registering
+        //     all squadron ids automatically).
+        //   • ops → empty (ops only sees its own squadron).
+        const monitoredSquadronIds: string[] =
+          setupRole === "wing_commander" || setupRole === "base_commander"
+            ? [...setupMonitoredPcIds]
+            : (setupRole === "squadron_commander" || setupRole === "flight_commander")
+              ? (setupLinkedPcId ? [setupLinkedPcId] : [])
+              : setupRole === "hq_commander"
+                ? squadrons.map(s => s.id)
+                : [];
         const create = await createCommander({
           username: accountUsername,
           displayName: commanderName || accountUsername,
           role: roleAccountKind(setupRole),
           scope: roleScope(setupRole),
-          squadronIds: [],
+          squadronIds: monitoredSquadronIds,
         });
         if (!create.ok || !create.record) {
           if (create.error === "duplicate_username") {
@@ -1074,6 +1125,110 @@ export default function LicenseKeys() {
                     className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
                     data-testid="input-setup-commander-name"
                   />
+                </div>
+              )}
+
+              {/* Pick the ops squadron PC this commander is bound to.
+                  Squadron + flight commanders are bound to exactly ONE ops PC
+                  (their squadron); wing + base commanders may monitor any
+                  number of ops PCs in the ecosystem. The list is sourced
+                  from the live cross-PC registry — i.e. only ops PCs that
+                  have already been set up appear here. If none have, the
+                  admin can still proceed and the binding can be filled in
+                  later from this same dialog after the ops PC activates. */}
+              {(setupRole === "squadron_commander" || setupRole === "flight_commander") && (
+                <div className="space-y-1.5 rounded-md border border-emerald-300/40 bg-emerald-50/60 dark:bg-emerald-950/20 p-3">
+                  <label className="text-sm font-medium text-emerald-900 dark:text-emerald-200">
+                    {lang === "ar" ? "جهاز سرب العمليات المرتبط" : "Linked ops squadron PC"}
+                    <span className="text-red-500 ms-1">*</span>
+                  </label>
+                  {opsSquadronPcs.length === 0 ? (
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                      {lang === "ar"
+                        ? "لا توجد أجهزة سرب عمليات مسجلة بعد. أعدّ جهاز سرب العمليات أولاً ثم أعد فتح هذه النافذة."
+                        : "No ops squadron PCs are registered yet. Set up the ops squadron PC first, then re-open this dialog."}
+                    </p>
+                  ) : (
+                    <Select
+                      value={setupLinkedPcId}
+                      onValueChange={(v) => {
+                        setSetupLinkedPcId(v);
+                        const pc = opsSquadronPcs.find(p => p.id === v);
+                        if (pc) {
+                          setSetupSqnName(pc.squadronName);
+                          if (pc.base) setSetupSqnBase(pc.base);
+                        }
+                      }}
+                    >
+                      <SelectTrigger data-testid="select-setup-linked-pc">
+                        <SelectValue placeholder={lang === "ar" ? "اختر سرباً" : "Choose a squadron"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {opsSquadronPcs.map(pc => (
+                          <SelectItem key={pc.id} value={pc.id} data-testid={`option-linked-pc-${pc.id}`}>
+                            {pc.squadronName}{pc.base ? ` — ${pc.base}` : ""}{pc.online ? " ●" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <p className="text-[10px] text-emerald-900/70 dark:text-emerald-200/70">
+                    {lang === "ar"
+                      ? "هذا القائد سيرى بيانات هذا السرب فقط."
+                      : "This commander will only see data from the squadron picked here."}
+                  </p>
+                </div>
+              )}
+
+              {(setupRole === "wing_commander" || setupRole === "base_commander") && (
+                <div className="space-y-2 rounded-md border border-indigo-300/40 bg-indigo-50/60 dark:bg-indigo-950/20 p-3">
+                  <label className="text-sm font-medium text-indigo-900 dark:text-indigo-200">
+                    {lang === "ar" ? "أجهزة أسراب العمليات التي يراقبها" : "Ops squadron PCs to monitor"}
+                    <span className="text-red-500 ms-1">*</span>
+                  </label>
+                  {opsSquadronPcs.length === 0 ? (
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                      {lang === "ar"
+                        ? "لا توجد أجهزة سرب عمليات مسجلة بعد. أعدّ أجهزة أسراب العمليات أولاً، ثم أعد فتح هذه النافذة لتحديد الأسراب التي يراقبها هذا القائد."
+                        : "No ops squadron PCs are registered yet. Set up the ops squadron PCs first, then re-open this dialog to tick the squadrons this commander will monitor."}
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pe-1">
+                      {opsSquadronPcs.map(pc => {
+                        const checked = setupMonitoredPcIds.includes(pc.id);
+                        return (
+                          <label
+                            key={pc.id}
+                            className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-indigo-100/40 dark:hover:bg-indigo-900/20 cursor-pointer"
+                            data-testid={`row-monitored-pc-${pc.id}`}
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(v) => {
+                                setSetupMonitoredPcIds(prev =>
+                                  v ? Array.from(new Set([...prev, pc.id]))
+                                    : prev.filter(x => x !== pc.id),
+                                );
+                              }}
+                              data-testid={`checkbox-monitored-pc-${pc.id}`}
+                            />
+                            <span className="text-sm flex-1">
+                              {pc.squadronName}
+                              {pc.base ? <span className="text-muted-foreground"> — {pc.base}</span> : null}
+                            </span>
+                            {pc.online && (
+                              <span className="text-[10px] text-emerald-600 dark:text-emerald-400">●</span>
+                            )}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-indigo-900/70 dark:text-indigo-200/70">
+                    {lang === "ar"
+                      ? `محدد: ${setupMonitoredPcIds.length} من ${opsSquadronPcs.length}`
+                      : `Selected: ${setupMonitoredPcIds.length} of ${opsSquadronPcs.length}`}
+                  </p>
                 </div>
               )}
 
