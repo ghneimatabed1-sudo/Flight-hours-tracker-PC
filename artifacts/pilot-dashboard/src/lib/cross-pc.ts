@@ -25,6 +25,32 @@ import { supabase, supabaseConfigured, recordAuditEvent } from "./supabase";
 
 const isLive = () => supabaseConfigured && supabase !== null;
 
+// PostgREST returns PGRST205 when a table referenced in code does not yet
+// exist in the central Supabase schema (i.e. migrations 0011/0012/0013
+// have not been applied). When that happens the cross-PC layer should
+// degrade gracefully — fall back to the local mirror and stay quiet —
+// instead of spamming a "Couldn't reach the server" toast every poll
+// interval. Detect both the structured Supabase error and a plain Error
+// whose .message embeds the PostgREST JSON.
+function isMissingTableError(err: unknown): boolean {
+  if (!err) return false;
+  const code = (err as { code?: string }).code;
+  if (code === "PGRST205" || code === "42P01") return true;
+  const msg = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  return /PGRST205|Could not find the table|does not exist/i.test(msg);
+}
+
+// Wrap a Supabase query so PGRST205 (missing table) is swallowed and a
+// caller-supplied local fallback runs instead. Other errors still throw.
+async function liveOrLocal<T>(remote: () => Promise<T>, local: () => T | Promise<T>): Promise<T> {
+  try {
+    return await remote();
+  } catch (err) {
+    if (isMissingTableError(err)) return await local();
+    throw err;
+  }
+}
+
 // ── shared helpers ──────────────────────────────────────────────────────
 function readJSON<T>(key: string, fallback: T): T {
   try {
@@ -187,27 +213,27 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
   // RLS on the cross-PC tables recognises subsequent inserts/updates.
   if (isLive()) {
     void (async () => {
-      const { data: au } = await supabase!.auth.getUser();
-      const uid = au?.user?.id;
-      if (uid) {
-        await supabase!.from("xpc_user_pcs").upsert(
-          { user_id: uid, pc_id: o.id },
-          { onConflict: "user_id,pc_id" },
-        );
+      try {
+        const { data: au } = await supabase!.auth.getUser();
+        const uid = au?.user?.id;
+        if (uid) {
+          await supabase!.from("xpc_user_pcs").upsert(
+            { user_id: uid, pc_id: o.id },
+            { onConflict: "user_id,pc_id" },
+          );
+        }
+        const dbTier = o.tier === "flight" ? "squadron" : o.tier;
+        await supabase!.from("xpc_registry").upsert({
+          id: o.id,
+          squadron_name: o.displayName,
+          tier: dbTier,
+          base: o.base ?? null,
+          wing: o.wing ?? null,
+          last_seen: entry.lastSeen,
+        }, { onConflict: "id" });
+      } catch {
+        // Silent. Local mirror is authoritative until migrations land.
       }
-      // Flight tier is encoded in the id prefix ("FLIGHT:") because the
-      // xpc_registry CHECK constraint pre-dates the flight tier and only
-      // accepts squadron/wing/base/hq. Downgrade to 'squadron' on write
-      // and let rowToPc recover the true tier from the prefix on read.
-      const dbTier = o.tier === "flight" ? "squadron" : o.tier;
-      await supabase!.from("xpc_registry").upsert({
-        id: o.id,
-        squadron_name: o.displayName,
-        tier: dbTier,
-        base: o.base ?? null,
-        wing: o.wing ?? null,
-        last_seen: entry.lastSeen,
-      }, { onConflict: "id" });
     })();
   }
 }
@@ -220,9 +246,14 @@ export function useRegisteredPCs(): UseQueryResult<RegisteredPC[]> & { data: Reg
       const cutoff = Date.now() - ONLINE_WINDOW_MS;
       let rows: SquadronPC[] = [];
       if (isLive()) {
-        const { data, error } = await supabase!.from("xpc_registry").select("*");
-        if (error) throw error;
-        rows = (data ?? []).map(rowToPc);
+        rows = await liveOrLocal(
+          async () => {
+            const { data, error } = await supabase!.from("xpc_registry").select("*");
+            if (error) throw error;
+            return (data ?? []).map(rowToPc);
+          },
+          () => readRegistry(),
+        );
       } else {
         rows = readRegistry();
       }
@@ -333,19 +364,25 @@ export function usePendingApprovals(homeSquadronId: string | null | undefined): 
     queryKey: ["xpc", "pending", homeSquadronId ?? ""],
     queryFn: async () => {
       if (!homeSquadronId) return [];
-      if (isLive()) {
-        const { data, error } = await supabase!
-          .from("xpc_pending")
-          .select("*")
-          .eq("home_squadron_id", homeSquadronId)
-          .eq("status", "pending")
-          .order("submitted_at", { ascending: false });
-        if (error) throw error;
-        return (data ?? []).map(rowToPending);
-      }
-      return readPending()
+      const localFallback = () => readPending()
         .filter(p => p.homeSquadronId === homeSquadronId && p.status === "pending")
         .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+      if (isLive()) {
+        return await liveOrLocal(
+          async () => {
+            const { data, error } = await supabase!
+              .from("xpc_pending")
+              .select("*")
+              .eq("home_squadron_id", homeSquadronId)
+              .eq("status", "pending")
+              .order("submitted_at", { ascending: false });
+            if (error) throw error;
+            return (data ?? []).map(rowToPending);
+          },
+          localFallback,
+        );
+      }
+      return localFallback();
     },
     refetchInterval: 15_000,
     retry: isLive() ? 1 : false,
@@ -359,15 +396,21 @@ export function useAllPending(): UseQueryResult<PendingSortie[]> & { data: Pendi
   const q = useQuery<PendingSortie[]>({
     queryKey: ["xpc", "pending", "all"],
     queryFn: async () => {
+      const localFallback = () => readPending().sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
       if (isLive()) {
-        const { data, error } = await supabase!
-          .from("xpc_pending")
-          .select("*")
-          .order("submitted_at", { ascending: false });
-        if (error) throw error;
-        return (data ?? []).map(rowToPending);
+        return await liveOrLocal(
+          async () => {
+            const { data, error } = await supabase!
+              .from("xpc_pending")
+              .select("*")
+              .order("submitted_at", { ascending: false });
+            if (error) throw error;
+            return (data ?? []).map(rowToPending);
+          },
+          localFallback,
+        );
       }
-      return readPending().sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+      return localFallback();
     },
     refetchInterval: 15_000,
     retry: isLive() ? 1 : false,
@@ -712,29 +755,34 @@ export function useScheduleShares(forPcId: string | null): UseQueryResult<Schedu
   const q = useQuery<ScheduleShare[]>({
     queryKey: ["xpc", "schedule", forPcId ?? ""],
     queryFn: async () => {
+      const localFallback = () => {
+        const all = readShares();
+        if (!forPcId) return all;
+        return all
+          .filter(s =>
+            s.currentPcId === forPcId
+            || s.originSquadronId === forPcId
+            || (s.status === "approved" && (s.chainPcIds ?? []).includes(forPcId))
+          )
+          .sort((a, b) => b.date.localeCompare(a.date));
+      };
       if (isLive()) {
-        let qry = supabase!.from("xpc_schedule_shares").select("*").order("flight_date", { ascending: false });
-        if (forPcId) {
-          // Visible if we are the current holder, the originator, OR
-          // the share has been approved and we are anywhere in the
-          // chain that handled it.
-          qry = qry.or(
-            `current_pc_id.eq.${forPcId},origin_squadron_id.eq.${forPcId},and(status.eq.approved,chain_pc_ids.cs.{${forPcId}})`,
-          );
-        }
-        const { data, error } = await qry;
-        if (error) throw error;
-        return (data ?? []).map(rowToShare);
+        return await liveOrLocal(
+          async () => {
+            let qry = supabase!.from("xpc_schedule_shares").select("*").order("flight_date", { ascending: false });
+            if (forPcId) {
+              qry = qry.or(
+                `current_pc_id.eq.${forPcId},origin_squadron_id.eq.${forPcId},and(status.eq.approved,chain_pc_ids.cs.{${forPcId}})`,
+              );
+            }
+            const { data, error } = await qry;
+            if (error) throw error;
+            return (data ?? []).map(rowToShare);
+          },
+          localFallback,
+        );
       }
-      const all = readShares();
-      if (!forPcId) return all;
-      return all
-        .filter(s =>
-          s.currentPcId === forPcId
-          || s.originSquadronId === forPcId
-          || (s.status === "approved" && (s.chainPcIds ?? []).includes(forPcId))
-        )
-        .sort((a, b) => b.date.localeCompare(a.date));
+      return localFallback();
     },
     refetchInterval: 15_000,
     retry: isLive() ? 1 : false,
@@ -1117,23 +1165,31 @@ export function useMessages(forPcId: string | null): {
     queryKey: ["xpc", "messages", forPcId ?? ""],
     queryFn: async () => {
       if (!forPcId) return [];
+      const localFallback = () => {
+        const purged = purgeExpiredLocal(readMessages());
+        writeMessages(purged);
+        return purged
+          .filter(m => m.fromPcId === forPcId || m.toPcId === forPcId)
+          .sort((a, b) => b.sentAt.localeCompare(a.sentAt));
+      };
       if (isLive()) {
-        const days = getMessageRetentionDays();
-        const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
-        const { data, error } = await supabase!
-          .from("xpc_messages")
-          .select("*")
-          .or(`from_pc_id.eq.${forPcId},to_pc_id.eq.${forPcId}`)
-          .gte("sent_at", cutoff)
-          .order("sent_at", { ascending: false });
-        if (error) throw error;
-        return (data ?? []).map(rowToMessage);
+        return await liveOrLocal(
+          async () => {
+            const days = getMessageRetentionDays();
+            const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+            const { data, error } = await supabase!
+              .from("xpc_messages")
+              .select("*")
+              .or(`from_pc_id.eq.${forPcId},to_pc_id.eq.${forPcId}`)
+              .gte("sent_at", cutoff)
+              .order("sent_at", { ascending: false });
+            if (error) throw error;
+            return (data ?? []).map(rowToMessage);
+          },
+          localFallback,
+        );
       }
-      const purged = purgeExpiredLocal(readMessages());
-      writeMessages(purged);
-      return purged
-        .filter(m => m.fromPcId === forPcId || m.toPcId === forPcId)
-        .sort((a, b) => b.sentAt.localeCompare(a.sentAt));
+      return localFallback();
     },
     refetchInterval: 15_000,
     retry: isLive() ? 1 : false,
