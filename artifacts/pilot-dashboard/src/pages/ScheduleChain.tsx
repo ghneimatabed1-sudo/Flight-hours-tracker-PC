@@ -12,9 +12,31 @@ import {
   getLocalPcId,
   type ScheduleRow,
   type ScheduleShare,
+  type ScheduleProgram,
+  type ScheduleProgramRow,
 } from "@/lib/cross-pc";
 import { useToast } from "@/hooks/use-toast";
+import { usePilots } from "@/lib/squadron-data";
+import FlightScheduleSheet from "@/components/FlightScheduleSheet";
 import { Send, Check, X, PauseCircle, Pencil, ArrowRight, Plus, Printer, Trash2 } from "lucide-react";
+
+// Mirror of the helper in pages/FlightProgram.tsx — flattens an
+// ScheduleProgram into the compact row list the diff machinery uses.
+function programToShareRows(p: ScheduleProgram): ScheduleRow[] {
+  const rows: ScheduleProgramRow[] = [...p.dayRows, ...p.nightRows];
+  return rows
+    .filter(r => r.acType.trim() || r.pilot.trim() || r.msnDuty.trim() || r.toTime.trim())
+    .map((r, i) => ({
+      id:       `R-${i}`,
+      ac:       `${r.acType}${r.dn ? ` ${r.dn}` : ""}`.trim(),
+      config:   r.configuration,
+      crew:     [r.pilot, r.coPilot].filter(Boolean),
+      mission:  r.msnDuty,
+      takeoff:  r.toTime || r.atcTakeoff,
+      land:     r.atcLanding,
+      fuel:     r.fuel,
+    }));
+}
 
 // Flight Schedule Sharing Chain — Squadron → Wing → Base. Each PC is named
 // in the share dialog; tier order is enforced (no skipping). Edits default
@@ -50,6 +72,11 @@ export default function ScheduleChain() {
   const submit = useSubmitSchedule();
   const decide = useDecideSchedule();
   const acceptEdits = useAcceptScheduleEdit();
+  const pilotsQ = usePilots();
+  const pilotOptions = useMemo(
+    () => pilotsQ.data.map(p => ({ value: p.name, label: `${p.rank} ${p.name}` })),
+    [pilotsQ.data],
+  );
 
   const [draftRows, setDraftRows] = useState<ScheduleRow[]>([blankRow()]);
   const [draftDate, setDraftDate] = useState(new Date().toISOString().slice(0, 10));
@@ -57,6 +84,10 @@ export default function ScheduleChain() {
   const [reviewing, setReviewing] = useState<string | null>(null);
   const [forwardTo, setForwardTo] = useState("");
   const [decisionNote, setDecisionNote] = useState("");
+  // Per-share local edit buffers — when an incoming share carries a
+  // full program snapshot we let the reviewer edit it in place, then
+  // Save & return ships the revised program back to the originator.
+  const [editBuffer, setEditBuffer] = useState<Record<string, ScheduleProgram>>({});
 
   // Squadron tier may only forward up to a Wing PC. Wing tier may only
   // forward to a Base PC. Base tier terminates the chain — no skipping
@@ -190,7 +221,20 @@ export default function ScheduleChain() {
                   </button>
                   {open && (
                     <div className="border-t border-border p-3 space-y-3">
-                      <ScheduleTable share={share} />
+                      {share.program ? (
+                        <FlightScheduleSheet
+                          prog={editBuffer[share.id] ?? share.program}
+                          onChange={editBuffer[share.id]
+                            ? (next) => setEditBuffer(b => ({ ...b, [share.id]: next }))
+                            : undefined}
+                          pilotOptions={pilotOptions}
+                          statusLabel={editBuffer[share.id] ? "EDITING" : share.status.toUpperCase()}
+                          approvedAt={share.approvedAt}
+                          approvedBy={share.approvedBy}
+                        />
+                      ) : (
+                        <ScheduleTable share={share} />
+                      )}
                       <div className="flex flex-wrap gap-2 items-end">
                         {/* Forward (Squadron→Wing→Base) */}
                         {share.currentTier === "wing" && myTier === "wing" && (
@@ -253,14 +297,68 @@ export default function ScheduleChain() {
                         >
                           <PauseCircle className="h-3 w-3" /> Hold
                         </button>
+                        {share.program ? (
+                          editBuffer[share.id] ? (
+                            <>
+                              <button
+                                onClick={async () => {
+                                  const buf = editBuffer[share.id];
+                                  await decide.mutateAsync({
+                                    id: share.id,
+                                    action: "edit",
+                                    by: user?.username ?? "ops",
+                                    tier: myTier,
+                                    note: decisionNote || undefined,
+                                    editedProgram: buf,
+                                    editedRows: programToShareRows(buf),
+                                  });
+                                  setEditBuffer(b => { const { [share.id]: _, ...rest } = b; return rest; });
+                                  setDecisionNote("");
+                                  toast({ title: "Edits returned to originator" });
+                                }}
+                                className="px-3 py-1.5 rounded-md bg-amber-500/20 border border-amber-400/40 text-amber-100 text-xs font-semibold inline-flex items-center gap-1"
+                                data-testid={`save-edit-${share.id}`}
+                              >
+                                <Pencil className="h-3 w-3" /> Save & return to originator
+                              </button>
+                              <button
+                                onClick={() => setEditBuffer(b => { const { [share.id]: _, ...rest } = b; return rest; })}
+                                className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs inline-flex items-center gap-1"
+                              >
+                                Cancel edit
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={() =>
+                                setEditBuffer(b => ({
+                                  ...b,
+                                  [share.id]: JSON.parse(JSON.stringify(share.program)) as ScheduleProgram,
+                                }))
+                              }
+                              className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs inline-flex items-center gap-1"
+                              data-testid={`edit-${share.id}`}
+                            >
+                              <Pencil className="h-3 w-3" /> Edit sheet
+                            </button>
+                          )
+                        ) : (
+                          <button
+                            onClick={async () => {
+                              await decide.mutateAsync({ id: share.id, action: "edit", by: user?.username ?? "ops", tier: myTier, note: decisionNote || undefined, editedRows: share.rows });
+                              toast({ title: "Edits returned to originator" }); setDecisionNote("");
+                            }}
+                            className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs inline-flex items-center gap-1"
+                          >
+                            <Pencil className="h-3 w-3" /> Edit & return
+                          </button>
+                        )}
                         <button
-                          onClick={async () => {
-                            await decide.mutateAsync({ id: share.id, action: "edit", by: user?.username ?? "ops", tier: myTier, note: decisionNote || undefined, editedRows: share.rows });
-                            toast({ title: "Edits returned to originator" }); setDecisionNote("");
-                          }}
-                          className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs inline-flex items-center gap-1"
+                          onClick={() => window.print()}
+                          className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs inline-flex items-center gap-1 no-print"
+                          data-testid={`print-${share.id}`}
                         >
-                          <Pencil className="h-3 w-3" /> Edit & return
+                          <Printer className="h-3 w-3" /> Print
                         </button>
                       </div>
                     </div>
@@ -293,8 +391,18 @@ export default function ScheduleChain() {
                 <div className="text-[11px] text-muted-foreground mb-2">
                   Now at: {share.currentPcName ?? "—"} ({share.currentTier})
                 </div>
-                <ScheduleTable share={share} />
-                {share.editedRows && (
+                {share.program ? (
+                  <FlightScheduleSheet
+                    prog={share.editedProgram ?? share.program}
+                    pilotOptions={pilotOptions}
+                    statusLabel={share.editedProgram ? "EDIT PROPOSED" : share.status.toUpperCase()}
+                    approvedAt={share.approvedAt}
+                    approvedBy={share.approvedBy}
+                  />
+                ) : (
+                  <ScheduleTable share={share} />
+                )}
+                {(share.editedRows || share.editedProgram) && (
                   <div className="mt-2 flex gap-2">
                     <button
                       onClick={async () => { await acceptEdits.mutateAsync({ id: share.id, by: user?.username ?? "ops" }); toast({ title: "Accepted edits" }); }}

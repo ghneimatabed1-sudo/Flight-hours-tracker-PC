@@ -521,6 +521,50 @@ export interface ScheduleRow {
   fuel: string;
 }
 
+// Full Flight Program snapshot — when an ops officer submits the daily
+// flight schedule from the FlightProgram page, we ship the entire sheet
+// (helo header + airbase/squadron + bands + briefing strip + A/C-needed
+// strip + signatures) so the recipient sees the SAME paper, not a
+// stripped-down summary table. Mirrors the Program interface in
+// pages/FlightProgram.tsx; kept as a plain JSON shape so it travels in
+// xpc_schedule_shares.program (jsonb).
+export interface ScheduleProgramRow {
+  dn: string;
+  acType: string;
+  toTime: string;
+  pilot: string;
+  coPilot: string;
+  /** Legacy field — no longer rendered. Kept so old saved sheets parse. */
+  crewMen?: string;
+  msnDuty: string;
+  duration: string;
+  fuel: string;
+  configuration: string;
+  remarks: string;
+  atcTakeoff: string;
+  atcLanding: string;
+}
+export interface ScheduleProgram {
+  date: string;
+  mode: "DAY" | "NIGHT" | "NVG" | "DAY_AND_NVG" | "DAY_AND_NIGHT";
+  airbase: string;
+  squadron: string;
+  dayRows: ScheduleProgramRow[];
+  nightRows: ScheduleProgramRow[];
+  mainBriefer: string;
+  briefTime: string;
+  dayOps: string;
+  nightOps: string;
+  lecture: string;
+  capte: string;
+  nightBrief: string;
+  reportingTime: string;
+  acNeededDay: { main: string; stby: string };
+  acNeededNight: { main: string; stby: string };
+  fltCmdr: string;
+  sqdnCmdr: string;
+}
+
 export interface ScheduleShare {
   id: string;
   date: string;
@@ -547,6 +591,16 @@ export interface ScheduleShare {
   // originator accepts they replace `rows` and `editedRows` clears.
   editedRows?: ScheduleRow[];
   editedBy?: string;
+  // Full RJAF flight schedule sheet snapshot. Optional for backwards
+  // compatibility with older shares that only carried the row list.
+  program?: ScheduleProgram;
+  editedProgram?: ScheduleProgram;
+  // PCs (besides origin + current holder) that are allowed to view this
+  // share once it has been approved — operator chose "visible to whole
+  // chain so far". Populated as the sheet moves through tiers.
+  chainPcIds?: string[];
+  approvedAt?: string;
+  approvedBy?: string;
 }
 
 function readShares(): ScheduleShare[] {
@@ -571,6 +625,11 @@ function rowToShare(r: Record<string, unknown>): ScheduleShare {
     history: (r.history ?? []) as ScheduleShare["history"],
     editedRows: r.edited_rows ? (r.edited_rows as ScheduleRow[]) : undefined,
     editedBy: r.edited_by ? String(r.edited_by) : undefined,
+    program: r.program ? (r.program as ScheduleProgram) : undefined,
+    editedProgram: r.edited_program ? (r.edited_program as ScheduleProgram) : undefined,
+    chainPcIds: Array.isArray(r.chain_pc_ids) ? (r.chain_pc_ids as string[]) : undefined,
+    approvedAt: r.approved_at ? String(r.approved_at) : undefined,
+    approvedBy: r.approved_by ? String(r.approved_by) : undefined,
   };
 }
 
@@ -589,6 +648,11 @@ function shareToRow(s: ScheduleShare): Record<string, unknown> {
     history: s.history,
     edited_rows: s.editedRows ?? null,
     edited_by: s.editedBy ?? null,
+    program: s.program ?? null,
+    edited_program: s.editedProgram ?? null,
+    chain_pc_ids: s.chainPcIds ?? [],
+    approved_at: s.approvedAt ?? null,
+    approved_by: s.approvedBy ?? null,
     updated_at: nowIso(),
   };
 }
@@ -600,8 +664,12 @@ export function useScheduleShares(forPcId: string | null): UseQueryResult<Schedu
       if (isLive()) {
         let qry = supabase!.from("xpc_schedule_shares").select("*").order("flight_date", { ascending: false });
         if (forPcId) {
-          // Either we're the current holder OR we're the originator.
-          qry = qry.or(`current_pc_id.eq.${forPcId},origin_squadron_id.eq.${forPcId}`);
+          // Visible if we are the current holder, the originator, OR
+          // the share has been approved and we are anywhere in the
+          // chain that handled it.
+          qry = qry.or(
+            `current_pc_id.eq.${forPcId},origin_squadron_id.eq.${forPcId},and(status.eq.approved,chain_pc_ids.cs.{${forPcId}})`,
+          );
         }
         const { data, error } = await qry;
         if (error) throw error;
@@ -610,7 +678,11 @@ export function useScheduleShares(forPcId: string | null): UseQueryResult<Schedu
       const all = readShares();
       if (!forPcId) return all;
       return all
-        .filter(s => s.currentPcId === forPcId || s.originSquadronId === forPcId)
+        .filter(s =>
+          s.currentPcId === forPcId
+          || s.originSquadronId === forPcId
+          || (s.status === "approved" && (s.chainPcIds ?? []).includes(forPcId))
+        )
         .sort((a, b) => b.date.localeCompare(a.date));
     },
     refetchInterval: 15_000,
@@ -630,20 +702,32 @@ export function useSubmitSchedule() {
       // Wing PC that should review next.
       targetPcId: string;
       targetPcName: string;
+      // Tier of the recipient — defaults to wing for legacy callers but
+      // the FlightProgram Submit dialog passes the actual tier of the
+      // chosen PC (squadron / wing / base) so the recipient sees the
+      // share land in their inbox regardless of the chain step.
+      targetTier?: ScheduleTier;
       submittedBy: string;
+      // Optional full sheet snapshot — when present the recipient
+      // renders the same RJAF flight schedule paper, not a stripped
+      // table. The legacy `rows` payload is still derived for the
+      // existing diff machinery.
+      program?: ScheduleProgram;
     }) => {
       const share: ScheduleShare = {
         id: genId("SCH"),
         date: input.date,
         originSquadronId: input.originSquadronId,
         originSquadronName: input.originSquadronName,
-        currentTier: "wing",
+        currentTier: input.targetTier ?? "wing",
         currentPcId: input.targetPcId,
         currentPcName: input.targetPcName,
         status: "submitted",
         rows: input.rows,
         baselineRows: input.rows,
         history: [{ at: nowIso(), by: input.submittedBy, tier: "squadron", action: "submitted", note: `→ ${input.targetPcName}` }],
+        program: input.program,
+        chainPcIds: [input.originSquadronId, input.targetPcId],
       };
       if (isLive()) {
         const { error } = await supabase!.from("xpc_schedule_shares").insert(shareToRow(share));
@@ -678,6 +762,10 @@ export function useDecideSchedule() {
       forwardPcName?: string;
       // For action=edit: revised rows; defaults to sending back to the originator.
       editedRows?: ScheduleRow[];
+      // For action=edit on a full-sheet share: the revised RJAF program
+      // snapshot. Mirrors editedRows but carries the whole paper so the
+      // originator's diff dialog can show what changed in context.
+      editedProgram?: ScheduleProgram;
     }) => {
       // Load current state (Supabase or local).
       let cur: ScheduleShare;
@@ -697,6 +785,16 @@ export function useDecideSchedule() {
 
       if (input.action === "approve") {
         cur.status = "approved";
+        cur.approvedAt = nowIso();
+        cur.approvedBy = input.by;
+        // Operator chose: once approved, the sheet becomes visible to
+        // every PC that has touched the chain so far. The chainPcIds
+        // already accumulates everyone (origin + each forward target);
+        // we just guarantee both endpoints are present.
+        const ids = new Set<string>(cur.chainPcIds ?? []);
+        ids.add(cur.originSquadronId);
+        if (cur.currentPcId) ids.add(cur.currentPcId);
+        cur.chainPcIds = Array.from(ids);
         push("approved", input.note);
       } else if (input.action === "reject") {
         cur.status = "rejected";
@@ -710,8 +808,10 @@ export function useDecideSchedule() {
       } else if (input.action === "edit") {
         cur.status = "edited";
         cur.editedRows = input.editedRows ?? cur.rows;
+        cur.editedProgram = input.editedProgram ?? cur.program;
         cur.editedBy = input.by;
-        // Edits default to resending to the originator for confirmation.
+        // Edits ALWAYS go back to the originating squadron — the operator
+        // wants to re-approve the change before it propagates further.
         cur.currentPcId = cur.originSquadronId;
         cur.currentPcName = cur.originSquadronName;
         cur.currentTier = "squadron";
@@ -728,6 +828,13 @@ export function useDecideSchedule() {
         cur.currentPcId = input.forwardPcId ?? null;
         cur.currentPcName = input.forwardPcName ?? null;
         cur.status = "reviewed";
+        // Track every PC that has handled the share so the approve-time
+        // visibility rule can include them.
+        if (input.forwardPcId) {
+          const ids = new Set<string>(cur.chainPcIds ?? []);
+          ids.add(input.forwardPcId);
+          cur.chainPcIds = Array.from(ids);
+        }
         push("reviewed", `→ ${input.forwardPcName ?? ""}`);
       }
 
@@ -768,9 +875,15 @@ export function useAcceptScheduleEdit() {
         if (!found) throw new Error("Schedule not found");
         cur = { ...found };
       }
-      if (!cur.editedRows) return cur;
-      cur.rows = cur.editedRows;
-      cur.baselineRows = cur.editedRows;
+      if (!cur.editedRows && !cur.editedProgram) return cur;
+      if (cur.editedRows) {
+        cur.rows = cur.editedRows;
+        cur.baselineRows = cur.editedRows;
+      }
+      if (cur.editedProgram) {
+        cur.program = cur.editedProgram;
+      }
+      cur.editedProgram = undefined;
       cur.editedRows = undefined;
       cur.status = "approved";
       cur.history.push({ at: nowIso(), by: input.by, tier: "squadron", action: "approved", note: "originator accepted edits" });
