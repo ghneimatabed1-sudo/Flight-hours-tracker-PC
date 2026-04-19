@@ -12,9 +12,9 @@ import { Plus, Trash2, Map, Save, Printer, ArrowUp, ArrowDown } from "lucide-rea
  * no lat/lon, no notes), and a derived total flight time computed by
  * summing per-leg minutes the operator types into each waypoint cell.
  *
- * Each waypoint is rendered as its own row (vertical list, never side
- * by side) so the briefer reads them top-to-bottom like a flight plan
- * leg sheet.
+ * Each waypoint is rendered as its own small card laid out side-by-side
+ * (a horizontal flex-wrap row), so the operator can see the whole leg
+ * sequence at a glance: WP1 ▸ WP2 ▸ WP3 ▸ … up to MAX_WAYPOINTS.
  *
  * Stored locally so any commander/ops officer can maintain their own
  * working set on this PC; printable for crew briefs. Lat/lon and notes
@@ -242,64 +242,76 @@ export default function NavRoutes() {
               </label>
             </div>
 
-            {/* Vertical leg list — one waypoint per row, just the name +
-                leg time. No lat/lon, no notes. Up to MAX_WAYPOINTS rows. */}
-            <div>
-              <table className="w-full text-sm border-collapse">
-                <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
-                  <tr>
-                    <th className="px-2 py-2 text-left w-10">#</th>
-                    <th className="px-2 py-2 text-left">Waypoint</th>
-                    <th className="px-2 py-2 text-right w-28">Leg (min)</th>
-                    <th className="px-2 py-2 text-right print:hidden w-32">—</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {active.waypoints.map((w, i) => (
-                    <tr key={w.id} className="border-t border-border">
-                      <td className="px-2 py-1 text-center font-mono text-muted-foreground">{i + 1}</td>
-                      <td className="px-1 py-1">
-                        <input value={w.name} onChange={e => updateWp(active.id, w.id, { name: e.target.value })}
-                          placeholder={i === 0 ? "Departure" : i === active.waypoints.length - 1 ? "Destination" : "Waypoint"}
-                          className="w-full px-2 py-1 rounded bg-input border border-border text-sm" data-testid={`input-wp-name-${i}`} />
-                      </td>
-                      <td className="px-1 py-1 text-right">
-                        <input type="number" min={0} value={w.legMin}
-                          onChange={e => updateWp(active.id, w.id, { legMin: Number(e.target.value) || 0 })}
-                          className="w-24 px-2 py-1 rounded bg-input border border-border text-sm font-mono text-right" data-testid={`input-wp-min-${i}`} />
-                      </td>
-                      <td className="px-2 py-1 text-right print:hidden whitespace-nowrap">
+            {/* Horizontal leg strip — each waypoint is its own small card
+                rendered side-by-side with the next, wrapping to the next
+                line when the row fills up. WP1 ▸ WP2 ▸ WP3 ▸ … with the
+                little chevrons making the leg flow obvious. Each card has
+                the waypoint name on top and the leg-time (minutes from
+                the previous waypoint) below it. */}
+            <div className="flex flex-wrap items-stretch gap-1.5" data-testid="waypoint-strip">
+              {active.waypoints.map((w, i) => (
+                <div key={w.id} className="flex items-stretch">
+                  <div
+                    className="w-[120px] rounded-md border border-border bg-secondary/20 p-1.5 flex flex-col gap-1"
+                    data-testid={`wp-card-${i}`}
+                  >
+                    <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
+                      <span>#{i + 1}</span>
+                      <div className="flex items-center gap-0.5 print:hidden">
                         <button onClick={() => moveWp(active.id, w.id, -1)}
                           disabled={i === 0}
-                          className="p-1 rounded hover:bg-secondary disabled:opacity-30" title="Move up"
+                          className="p-0.5 rounded hover:bg-secondary disabled:opacity-30" title="Move left"
                           data-testid={`button-wp-up-${i}`}>
-                          <ArrowUp className="h-3.5 w-3.5" />
+                          <ArrowUp className="h-3 w-3 -rotate-90" />
                         </button>
                         <button onClick={() => moveWp(active.id, w.id, 1)}
                           disabled={i === active.waypoints.length - 1}
-                          className="p-1 rounded hover:bg-secondary disabled:opacity-30" title="Move down"
+                          className="p-0.5 rounded hover:bg-secondary disabled:opacity-30" title="Move right"
                           data-testid={`button-wp-down-${i}`}>
-                          <ArrowDown className="h-3.5 w-3.5" />
+                          <ArrowDown className="h-3 w-3 -rotate-90" />
                         </button>
                         <button onClick={() => removeWp(active.id, w.id)}
-                          className="p-1 rounded hover:bg-destructive/20 text-destructive" title="Remove waypoint"
+                          className="p-0.5 rounded hover:bg-destructive/20 text-destructive" title="Remove waypoint"
                           data-testid={`button-remove-wp-${i}`}>
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 className="h-3 w-3" />
                         </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 border-border">
-                    <td colSpan={2} className="px-2 py-2 text-right font-semibold uppercase text-xs text-muted-foreground">
-                      Total flight time
-                    </td>
-                    <td className="px-2 py-2 text-right font-mono font-bold gold-text" data-testid="text-route-total">{fmtHours(totalMin)}</td>
-                    <td className="print:hidden" />
-                  </tr>
-                </tfoot>
-              </table>
+                      </div>
+                    </div>
+                    <input
+                      value={w.name}
+                      onChange={e => updateWp(active.id, w.id, { name: e.target.value })}
+                      placeholder={i === 0 ? "Dep" : i === active.waypoints.length - 1 ? "Dest" : "WP"}
+                      className="w-full px-1.5 py-1 rounded bg-input border border-border text-sm font-semibold uppercase tracking-wide"
+                      data-testid={`input-wp-name-${i}`}
+                    />
+                    <label className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                      <span className="shrink-0">Leg</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={w.legMin}
+                        onChange={e => updateWp(active.id, w.id, { legMin: Number(e.target.value) || 0 })}
+                        className="w-full px-1.5 py-0.5 rounded bg-input border border-border text-xs font-mono text-right tabular-nums"
+                        data-testid={`input-wp-min-${i}`}
+                      />
+                      <span className="shrink-0 text-muted-foreground">m</span>
+                    </label>
+                  </div>
+                  {/* Chevron between cards — hides on the last card and
+                      on the right edge of the wrap row (CSS handles wrap
+                      naturally; chevron just rides along for clarity). */}
+                  {i < active.waypoints.length - 1 && (
+                    <div className="self-center px-0.5 text-muted-foreground select-none" aria-hidden>
+                      ▸
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-3 flex items-center justify-end gap-2 border-t border-border pt-2">
+              <span className="text-xs uppercase tracking-wide text-muted-foreground">Total flight time</span>
+              <span className="font-mono font-bold gold-text" data-testid="text-route-total">{fmtHours(totalMin)}</span>
             </div>
 
             <div className="mt-3 print:hidden flex items-center gap-2">
