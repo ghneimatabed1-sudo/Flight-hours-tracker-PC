@@ -30,6 +30,7 @@ function programToShareRows(p: ScheduleProgram): ScheduleRow[] {
       id:       `R-${i}`,
       ac:       `${r.acType}${r.dn ? ` ${r.dn}` : ""}`.trim(),
       config:   r.configuration,
+      route:    r.route ?? "",
       crew:     [r.pilot, r.coPilot].filter(Boolean),
       mission:  r.msnDuty,
       takeoff:  r.toTime || r.atcTakeoff,
@@ -45,7 +46,7 @@ function programToShareRows(p: ScheduleProgram): ScheduleRow[] {
 
 const blankRow = (): ScheduleRow => ({
   id: `R-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-  ac: "", config: "", crew: [], mission: "", takeoff: "", land: "", fuel: "",
+  ac: "", config: "", route: "", crew: [], mission: "", takeoff: "", land: "", fuel: "",
 });
 
 export default function ScheduleChain() {
@@ -172,15 +173,16 @@ export default function ScheduleChain() {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                <tr><th className="px-1 text-left">A/C</th><th className="px-1 text-left">Config</th><th className="px-1 text-left">Pilot</th><th className="px-1 text-left">Co-Pilot</th><th className="px-1 text-left">Mission</th><th className="px-1 text-left">Takeoff</th><th className="px-1 text-left">Land</th><th className="px-1 text-left">Fuel</th><th /></tr>
+                <tr><th className="px-1 text-left">A/C</th><th className="px-1 text-left">Pilot</th><th className="px-1 text-left">Co-Pilot</th><th className="px-1 text-left">Config</th><th className="px-1 text-left">Route</th><th className="px-1 text-left">Mission</th><th className="px-1 text-left">Takeoff</th><th className="px-1 text-left">Land</th><th className="px-1 text-left">Fuel</th><th /></tr>
               </thead>
               <tbody>
                 {draftRows.map(r => (
                   <tr key={r.id} className="border-t border-border">
                     <td className="p-1"><input value={r.ac} onChange={e => updateRow(r.id, { ac: e.target.value })} className="w-20 px-1 py-1 bg-input border border-border rounded text-xs font-mono" /></td>
-                    <td className="p-1"><input value={r.config} onChange={e => updateRow(r.id, { config: e.target.value })} className="w-24 px-1 py-1 bg-input border border-border rounded text-xs" /></td>
                     <td className="p-1"><input value={r.crew[0] ?? ""} onChange={e => updateRow(r.id, { crew: [e.target.value, r.crew[1] ?? ""].filter((v, i) => v || i === 0) })} className="w-32 px-1 py-1 bg-input border border-border rounded text-xs" placeholder="Pilot" data-testid="input-draft-pilot" /></td>
                     <td className="p-1"><input value={r.crew[1] ?? ""} onChange={e => updateRow(r.id, { crew: [r.crew[0] ?? "", e.target.value].filter((v, i) => v || i === 0) })} className="w-32 px-1 py-1 bg-input border border-border rounded text-xs" placeholder="Co-Pilot" data-testid="input-draft-copilot" /></td>
+                    <td className="p-1"><input value={r.config} onChange={e => updateRow(r.id, { config: e.target.value })} className="w-24 px-1 py-1 bg-input border border-border rounded text-xs" /></td>
+                    <td className="p-1"><input value={r.route ?? ""} onChange={e => updateRow(r.id, { route: e.target.value })} className="w-32 px-1 py-1 bg-input border border-border rounded text-xs" placeholder="OJAM-OJAQ" data-testid="input-draft-route" /></td>
                     <td className="p-1"><input value={r.mission} onChange={e => updateRow(r.id, { mission: e.target.value })} className="w-32 px-1 py-1 bg-input border border-border rounded text-xs" /></td>
                     <td className="p-1"><input value={r.takeoff} onChange={e => updateRow(r.id, { takeoff: e.target.value })} className="w-16 px-1 py-1 bg-input border border-border rounded text-xs font-mono" placeholder="0800" /></td>
                     <td className="p-1"><input value={r.land} onChange={e => updateRow(r.id, { land: e.target.value })} className="w-16 px-1 py-1 bg-input border border-border rounded text-xs font-mono" placeholder="0930" /></td>
@@ -454,9 +456,10 @@ function ScheduleTable({ share }: { share: ScheduleShare }) {
         <thead className="text-[10px] uppercase tracking-wider text-muted-foreground bg-secondary/30">
           <tr>
             <th className="px-2 py-1 text-left">A/C</th>
-            <th className="px-2 py-1 text-left">Config</th>
             <th className="px-2 py-1 text-left">Pilot</th>
             <th className="px-2 py-1 text-left">Co-Pilot</th>
+            <th className="px-2 py-1 text-left">Config</th>
+            <th className="px-2 py-1 text-left">Route</th>
             <th className="px-2 py-1 text-left">Mission</th>
             <th className="px-2 py-1 text-right">Takeoff</th>
             <th className="px-2 py-1 text-right">Land</th>
@@ -474,9 +477,10 @@ function ScheduleTable({ share }: { share: ScheduleShare }) {
             return (
               <tr key={r.id} className={`border-t border-border ${cls}`} data-testid={`diff-${d.kind}`}>
                 <td className="px-2 py-1 font-mono">{r.ac}</td>
-                <td className="px-2 py-1">{r.config}</td>
                 <td className="px-2 py-1">{r.crew[0] ?? ""}</td>
                 <td className="px-2 py-1">{r.crew[1] ?? ""}</td>
+                <td className="px-2 py-1">{r.config}</td>
+                <td className="px-2 py-1">{r.route ?? ""}</td>
                 <td className="px-2 py-1">{r.mission}</td>
                 <td className="px-2 py-1 text-right font-mono">{r.takeoff}</td>
                 <td className="px-2 py-1 text-right font-mono">{r.land}</td>

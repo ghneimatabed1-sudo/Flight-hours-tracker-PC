@@ -103,6 +103,7 @@ function programToShareRows(p: ScheduleProgram) {
       id:       `R-${i}`,
       ac:       `${r.acType}${r.dn ? ` ${r.dn}` : ""}`.trim(),
       config:   r.configuration,
+      route:    r.route ?? "",
       crew:     [r.pilot, r.coPilot].filter(Boolean),
       mission:  r.msnDuty,
       takeoff:  r.toTime || r.atcTakeoff,

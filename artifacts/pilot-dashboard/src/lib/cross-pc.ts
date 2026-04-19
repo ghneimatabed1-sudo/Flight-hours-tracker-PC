@@ -561,6 +561,8 @@ export interface ScheduleRow {
   id: string;
   ac: string;
   config: string;
+  /** Free-form mission route, e.g. "OJAM-OJAQ-OJAM" or "Local". */
+  route?: string;
   crew: string[];
   mission: string;
   takeoff: string;
@@ -587,6 +589,8 @@ export interface ScheduleProgramRow {
   duration: string;
   fuel: string;
   configuration: string;
+  /** Free-form mission route. Optional so older saved sheets parse. */
+  route?: string;
   remarks: string;
   atcTakeoff: string;
   atcLanding: string;

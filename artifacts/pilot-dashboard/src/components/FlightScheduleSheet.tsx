@@ -59,6 +59,7 @@ export function emptyProgramRow(dn: string, acType: string): ScheduleProgramRow 
     duration: "",
     fuel: "",
     configuration: "",
+    route: "",
     remarks: "",
     atcTakeoff: "",
     atcLanding: "",
@@ -196,35 +197,38 @@ export default function FlightScheduleSheet({
       </datalist>
 
       {/* MAIN TABLE — DAY + NIGHT bands.
-          Crew block is PILOT + CO-PILOT only (CREW-MEN retired).
-          Total columns: 13.  */}
+          Column order matches the originator's requested layout:
+            NO · D/N · A/C TYPE · PILOT · CO-PILOT · CONFIGURATION · ROUTE
+            · T/O TIME · MSN/DUTY · DUR. · FUEL · REMARKS · ATC T/O · ATC LDG
+          Total columns: 14. */}
       <table className="w-full border-collapse border border-black">
         <thead className="bg-gray-200">
           <tr>
             <Th w="3%"  rowSpan={2}>NO</Th>
-            <Th w="5%"  rowSpan={2}>D/N</Th>
-            <Th w="8%"  rowSpan={2}>A/C TYPE</Th>
-            <Th w="6%"  rowSpan={2}>T/O TIME</Th>
+            <Th w="4%"  rowSpan={2}>D/N</Th>
+            <Th w="7%"  rowSpan={2}>A/C TYPE</Th>
             <Th        colSpan={2}>CREW</Th>
-            <Th w="13%" rowSpan={2}>MSN \ DUTY</Th>
-            <Th w="6%"  rowSpan={2}>DUR.</Th>
-            <Th w="6%"  rowSpan={2}>FUEL</Th>
-            <Th w="13%" rowSpan={2}>CONFIGURATION</Th>
-            <Th w="12%" rowSpan={2}>REMARKS</Th>
+            <Th w="11%" rowSpan={2}>CONFIGURATION</Th>
+            <Th w="11%" rowSpan={2}>ROUTE</Th>
+            <Th w="6%"  rowSpan={2}>T/O TIME</Th>
+            <Th w="11%" rowSpan={2}>MSN \ DUTY</Th>
+            <Th w="5%"  rowSpan={2}>DUR.</Th>
+            <Th w="5%"  rowSpan={2}>FUEL</Th>
+            <Th w="10%" rowSpan={2}>REMARKS</Th>
             <Th        colSpan={2}>ATC USE</Th>
           </tr>
           <tr>
-            <Th w="11%">PILOT</Th>
-            <Th w="11%">CO-PILOT</Th>
-            <Th w="6%">TAKE OFF</Th>
-            <Th w="6%">LANDING</Th>
+            <Th w="9%">PILOT</Th>
+            <Th w="9%">CO-PILOT</Th>
+            <Th w="5%">TAKE OFF</Th>
+            <Th w="5%">LANDING</Th>
           </tr>
         </thead>
         <tbody>
           {showDay && (
             <>
               <tr>
-                <td colSpan={13} className="border border-black bg-gray-100 text-center font-bold py-0.5">DAY</td>
+                <td colSpan={14} className="border border-black bg-gray-100 text-center font-bold py-0.5">DAY</td>
               </tr>
               {prog.dayRows.map((r, i) => (
                 <RowInputs
@@ -238,7 +242,7 @@ export default function FlightScheduleSheet({
               ))}
               {!readOnly && (
                 <tr className="no-print">
-                  <td colSpan={13} className="border border-black bg-white text-left p-1">
+                  <td colSpan={14} className="border border-black bg-white text-left p-1">
                     <button
                       type="button"
                       onClick={() => addRow("dayRows")}
@@ -256,7 +260,7 @@ export default function FlightScheduleSheet({
           {showNight && (
             <>
               <tr>
-                <td colSpan={13} className="border border-black bg-gray-100 text-center font-bold py-0.5">{nightLabel}</td>
+                <td colSpan={14} className="border border-black bg-gray-100 text-center font-bold py-0.5">{nightLabel}</td>
               </tr>
               {prog.nightRows.map((r, i) => (
                 <RowInputs
@@ -270,7 +274,7 @@ export default function FlightScheduleSheet({
               ))}
               {!readOnly && (
                 <tr className="no-print">
-                  <td colSpan={13} className="border border-black bg-white text-left p-1">
+                  <td colSpan={14} className="border border-black bg-white text-left p-1">
                     <button
                       type="button"
                       onClick={() => addRow("nightRows")}
@@ -460,7 +464,6 @@ function RowInputs({
       </td>
       <CellInput value={row.dn}             readOnly={readOnly} onChange={(v) => onChange({ dn: v })} mono />
       <CellInput value={row.acType}         readOnly={readOnly} onChange={(v) => onChange({ acType: v })} />
-      <CellInput value={row.toTime}         readOnly={readOnly} onChange={(v) => onChange({ toTime: v })} mono />
       {readOnly ? (
         <td className="border border-black px-1 py-0.5 text-[10px] font-bold text-center">{row.pilot || "\u00A0"}</td>
       ) : (
@@ -475,10 +478,12 @@ function RowInputs({
           <input list="fp-pilots" value={row.coPilot} onChange={(e) => onChange({ coPilot: e.target.value })} className={pilotInputCls} />
         </td>
       )}
+      <CellInput value={row.configuration}  readOnly={readOnly} onChange={(v) => onChange({ configuration: v })} />
+      <CellInput value={row.route ?? ""}    readOnly={readOnly} onChange={(v) => onChange({ route: v })} />
+      <CellInput value={row.toTime}         readOnly={readOnly} onChange={(v) => onChange({ toTime: v })} mono />
       <CellInput value={row.msnDuty}        readOnly={readOnly} onChange={(v) => onChange({ msnDuty: v })} />
       <CellInput value={row.duration}       readOnly={readOnly} onChange={(v) => onChange({ duration: v })} mono />
       <CellInput value={row.fuel}           readOnly={readOnly} onChange={(v) => onChange({ fuel: v })} mono />
-      <CellInput value={row.configuration}  readOnly={readOnly} onChange={(v) => onChange({ configuration: v })} />
       <CellInput value={row.remarks}        readOnly={readOnly} onChange={(v) => onChange({ remarks: v })} />
       <CellInput value={row.atcTakeoff}     readOnly={readOnly} onChange={(v) => onChange({ atcTakeoff: v })} mono />
       <CellInput value={row.atcLanding}     readOnly={readOnly} onChange={(v) => onChange({ atcLanding: v })} mono />
