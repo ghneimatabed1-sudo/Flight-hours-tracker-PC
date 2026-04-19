@@ -10,7 +10,9 @@ import { useToast } from "@/hooks/use-toast";
 import { useCreateSortie, usePilots } from "@/lib/squadron-data";
 import { fmtDateTimeDDMM } from "@/lib/format";
 import { matchGuestPilot, guestMilitaryNumberHasNoMatch } from "@/lib/match-guest-pilot";
-import { Inbox, Check, X, PauseCircle, Pencil, AlertTriangle } from "lucide-react";
+import { Inbox, Check, X, PauseCircle, Pencil, AlertTriangle, History } from "lucide-react";
+import { Link } from "wouter";
+import { useGuestEntriesNeedingBackfill, isGuestMilUnknown } from "@/lib/cross-pc";
 
 // Pending Approvals — home-squadron ops officer reviews sorties that
 // another (hosting) squadron logged for one of her pilots. Accept cascades
@@ -24,6 +26,7 @@ export default function PendingApprovals() {
   // wired up this becomes a real squadron uuid.
   const homeSquadronId = squadron?.name ?? null;
   const pendingQ = usePendingApprovals(homeSquadronId);
+  const backfillQ = useGuestEntriesNeedingBackfill(homeSquadronId);
   const decide = useDecidePending();
   const createSortie = useCreateSortie();
   const { data: PILOTS } = usePilots();
@@ -97,6 +100,27 @@ export default function PendingApprovals() {
         title="Pending Approvals"
         subtitle={`Cross-squadron sorties awaiting your review · ${pendingQ.data.length} pending`}
       />
+      {backfillQ.data.length > 0 && (
+        <div
+          className="mb-3 flex items-center justify-between gap-3 rounded-md border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
+          data-testid="backfill-prompt"
+        >
+          <div className="flex items-start gap-2">
+            <History className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <div>
+              <strong>{backfillQ.data.length}</strong> legacy guest entr{backfillQ.data.length === 1 ? "y is" : "ies are"} missing a military number.
+              These still rely on name-only matching — backfill them to credit hours safely.
+            </div>
+          </div>
+          <Link
+            href="/pending/backfill"
+            className="shrink-0 px-2.5 py-1 rounded-md bg-amber-500/20 border border-amber-400/40 text-amber-100 font-semibold hover:bg-amber-500/30"
+            data-testid="link-open-backfill"
+          >
+            Open backfill queue
+          </Link>
+        </div>
+      )}
       {pendingQ.data.length === 0 ? (
         <Card>
           <div className="text-sm text-muted-foreground text-center py-10 inline-flex items-center gap-2 w-full justify-center">
@@ -119,7 +143,11 @@ export default function PendingApprovals() {
                   <div className="min-w-0">
                     <div className="font-semibold text-amber-200 truncate">
                       {row.guestPilotName}
-                      {row.guestPilotMilitaryNumber ? <span className="text-xs text-muted-foreground"> · #{row.guestPilotMilitaryNumber}</span> : null}
+                      {row.guestPilotMilitaryNumber
+                        ? (isGuestMilUnknown(row.guestPilotMilitaryNumber)
+                            ? <span className="text-xs text-muted-foreground"> · # unknown</span>
+                            : <span className="text-xs text-muted-foreground"> · #{row.guestPilotMilitaryNumber}</span>)
+                        : null}
                     </div>
                     <div className="text-xs text-muted-foreground">
                       hosted by <span className="text-foreground">{row.hostingSquadronName}</span> · {s.date} · {s.acType} {s.acNumber} · {time}h {s.condition}
@@ -149,7 +177,8 @@ export default function PendingApprovals() {
                       <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
                         Credit hours / currencies to local pilot
                       </div>
-                      {guestMilitaryNumberHasNoMatch(PILOTS, { militaryNumber: row.guestPilotMilitaryNumber }) &&
+                      {!isGuestMilUnknown(row.guestPilotMilitaryNumber) &&
+                        guestMilitaryNumberHasNoMatch(PILOTS, { militaryNumber: row.guestPilotMilitaryNumber }) &&
                         !pilotChoice[row.id] &&
                         !dismissedMilWarn[row.id] && (
                           <div

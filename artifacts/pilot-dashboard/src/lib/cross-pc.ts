@@ -359,6 +359,96 @@ export function useSubmitPending() {
   });
 }
 
+// Sentinel stored in `guestPilotMilitaryNumber` when the home-squadron
+// ops officer has actively reviewed a legacy entry and confirmed the
+// hosting squadron cannot supply the visiting pilot's number. Treated as
+// "explicitly unknown" so the entry stops appearing in the backfill
+// queue but matchGuestPilot still refuses to do a name-only credit.
+export const GUEST_MIL_UNKNOWN = "UNKNOWN";
+export function isGuestMilUnknown(n: string | undefined | null): boolean {
+  return (n ?? "").trim().toUpperCase() === GUEST_MIL_UNKNOWN;
+}
+
+// All guest entries (pending + accepted) for the home squadron whose
+// guestPilotMilitaryNumber is genuinely missing — i.e. neither a real
+// number nor the explicit-unknown sentinel. Drives the legacy backfill
+// queue.
+export function useGuestEntriesNeedingBackfill(homeSquadronId: string | null | undefined): UseQueryResult<PendingSortie[]> & { data: PendingSortie[] } {
+  const q = useQuery<PendingSortie[]>({
+    queryKey: ["xpc", "pending", "backfill", homeSquadronId ?? ""],
+    queryFn: async () => {
+      if (!homeSquadronId) return [];
+      let rows: PendingSortie[] = [];
+      if (isLive()) {
+        const { data, error } = await supabase!
+          .from("xpc_pending")
+          .select("*")
+          .eq("home_squadron_id", homeSquadronId)
+          .in("status", ["pending", "accepted"])
+          .order("submitted_at", { ascending: false });
+        if (error) throw error;
+        rows = (data ?? []).map(rowToPending);
+      } else {
+        rows = readPending()
+          .filter(p => p.homeSquadronId === homeSquadronId && (p.status === "pending" || p.status === "accepted"))
+          .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+      }
+      return rows.filter(r => !(r.guestPilotMilitaryNumber ?? "").trim());
+    },
+    refetchInterval: 30_000,
+    retry: isLive() ? 1 : false,
+  });
+  return { ...q, data: q.data ?? [] } as UseQueryResult<PendingSortie[]> & { data: PendingSortie[] };
+}
+
+// Stamp a military number (or the explicit-unknown sentinel) onto a
+// historical guest entry. Records an audit event so the backfill is
+// traceable alongside the original submission/decision events.
+export function useBackfillGuestMilNumber() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      id: string;
+      militaryNumber: string; // pass GUEST_MIL_UNKNOWN to mark unknown
+      by: string;
+    }) => {
+      const value = input.militaryNumber.trim();
+      if (!value) throw new Error("Military number required");
+      let updated: PendingSortie | null = null;
+      if (isLive()) {
+        const { data, error } = await supabase!
+          .from("xpc_pending")
+          .update({ guest_pilot_military_number: value })
+          .eq("id", input.id)
+          .select()
+          .single();
+        if (error) throw error;
+        updated = rowToPending(data);
+      } else {
+        const rows = readPending();
+        const idx = rows.findIndex(r => r.id === input.id);
+        if (idx < 0) throw new Error("Pending entry not found");
+        rows[idx] = { ...rows[idx], guestPilotMilitaryNumber: value };
+        writePending(rows);
+        updated = rows[idx];
+      }
+      await recordAuditEvent({
+        type: "xpc.pending.backfilled",
+        actor: input.by,
+        detail: {
+          id: input.id,
+          militaryNumber: value,
+          markedUnknown: isGuestMilUnknown(value),
+        },
+      });
+      return updated;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["xpc", "pending"] });
+    },
+  });
+}
+
 export function useDecidePending() {
   const qc = useQueryClient();
   return useMutation({

@@ -42,6 +42,7 @@ import SortieLog from "@/pages/SortieLog";
 import AddSortie from "@/pages/AddSortie";
 import ExternalPilots from "@/pages/ExternalPilots";
 import PendingApprovals from "@/pages/PendingApprovals";
+import GuestBackfill from "@/pages/GuestBackfill";
 import Messages from "@/pages/Messages";
 import ScheduleChain from "@/pages/ScheduleChain";
 import { registerLocalPC, purgeExpiredMessages } from "@/lib/cross-pc";
@@ -98,6 +99,7 @@ function SquadronOpsRoutes() {
       <Route path="/sortie-log" component={SortieLog} />
       <Route path="/sortie-add" component={AddSortie} />
       <Route path="/external-pilots" component={ExternalPilots} />
+      <Route path="/pending/backfill" component={GuestBackfill} />
       <Route path="/pending" component={PendingApprovals} />
       <Route path="/schedule-chain" component={ScheduleChain} />
       <Route path="/messages" component={Messages} />
