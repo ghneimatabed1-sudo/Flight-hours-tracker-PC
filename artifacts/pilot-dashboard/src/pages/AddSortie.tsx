@@ -204,6 +204,26 @@ export default function AddSortie() {
       toast({ title: "Guest co-pilot name required", variant: "destructive" });
       return;
     }
+    // Require the visiting pilot's military number on guest seats so the
+    // home-squadron matcher can credit the correct person. Without it the
+    // downstream flow falls back to risky name-only matching, which can
+    // mis-credit hours when two pilots share a similar name.
+    if (form.pilot.external && !(form.pilot.external.militaryNumber ?? "").trim()) {
+      toast({
+        title: "Guest pilot military number required",
+        description: "Ask the visiting pilot for their military number so credit goes to the right person.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (form.coPilot.external && !(form.coPilot.external.militaryNumber ?? "").trim()) {
+      toast({
+        title: "Guest co-pilot military number required",
+        description: "Ask the visiting pilot for their military number so credit goes to the right person.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     // The condition that drives bucketing: NVG overrides Night when checked.
     // Day/Night/NVG are independent currencies — the auto-bump in
@@ -888,14 +908,25 @@ function SeatPanel({ label, testIdPrefix, seat, opts, onChange, registeredPCs, m
             className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
             data-testid={`input-guest-name-${testIdPrefix}`}
           />
-          <input
-            type="text"
-            value={seat.external?.militaryNumber ?? ""}
-            onChange={e => onChange({ external: { ...(seat.external ?? { name: "", squadron: "" }), militaryNumber: e.target.value } })}
-            placeholder="Military number (optional)"
-            className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs font-mono"
-            data-testid={`input-guest-mil-${testIdPrefix}`}
-          />
+          <div className="space-y-0.5">
+            <input
+              type="text"
+              required
+              aria-required="true"
+              value={seat.external?.militaryNumber ?? ""}
+              onChange={e => onChange({ external: { ...(seat.external ?? { name: "", squadron: "" }), militaryNumber: e.target.value } })}
+              placeholder="Military number (required) *"
+              className={`w-full px-2 py-1.5 rounded-md bg-input border text-xs font-mono ${
+                (seat.external?.militaryNumber ?? "").trim()
+                  ? "border-border"
+                  : "border-amber-500/60"
+              }`}
+              data-testid={`input-guest-mil-${testIdPrefix}`}
+            />
+            <p className="text-[10px] text-muted-foreground leading-tight">
+              Ask the visiting pilot for their military number so credit goes to the right person.
+            </p>
+          </div>
         </div>
       ) : (
         <select
