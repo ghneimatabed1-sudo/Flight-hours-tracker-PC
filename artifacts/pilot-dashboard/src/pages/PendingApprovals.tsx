@@ -9,8 +9,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useCreateSortie, usePilots } from "@/lib/squadron-data";
 import { fmtDateTimeDDMM } from "@/lib/format";
-import { matchGuestPilot } from "@/lib/match-guest-pilot";
-import { Inbox, Check, X, PauseCircle, Pencil } from "lucide-react";
+import { matchGuestPilot, guestMilitaryNumberHasNoMatch } from "@/lib/match-guest-pilot";
+import { Inbox, Check, X, PauseCircle, Pencil, AlertTriangle } from "lucide-react";
 
 // Pending Approvals — home-squadron ops officer reviews sorties that
 // another (hosting) squadron logged for one of her pilots. Accept cascades
@@ -34,6 +34,10 @@ export default function PendingApprovals() {
   // roster pilot the guest entry should be credited to before the
   // cascade. Defaults to a fuzzy name match when one exists.
   const [pilotChoice, setPilotChoice] = useState<Record<string, string>>({});
+  // Per-row dismissal of the "military number doesn't match anyone" warning.
+  // The warning also auto-hides once the ops officer makes a manual pick
+  // (handled in the render below by checking pilotChoice[row.id]).
+  const [dismissedMilWarn, setDismissedMilWarn] = useState<Record<string, boolean>>({});
 
   const pilotOpts = useMemo(
     () => PILOTS.map(p => ({
@@ -145,6 +149,28 @@ export default function PendingApprovals() {
                       <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
                         Credit hours / currencies to local pilot
                       </div>
+                      {guestMilitaryNumberHasNoMatch(PILOTS, { militaryNumber: row.guestPilotMilitaryNumber }) &&
+                        !pilotChoice[row.id] &&
+                        !dismissedMilWarn[row.id] && (
+                          <div
+                            className="mb-2 flex items-start gap-2 rounded border border-amber-400/40 bg-amber-500/10 p-2 text-xs text-amber-100"
+                            data-testid={`mil-warn-${row.id}`}
+                          >
+                            <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                            <div className="flex-1">
+                              No roster pilot matches military number #{row.guestPilotMilitaryNumber} — pick manually or contact the hosting squadron.
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setDismissedMilWarn(d => ({ ...d, [row.id]: true }))}
+                              className="text-amber-200/80 hover:text-amber-100"
+                              aria-label="Dismiss warning"
+                              data-testid={`mil-warn-dismiss-${row.id}`}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
                       <select
                         value={pilotChoice[row.id] ?? matchFor(row)?.id ?? ""}
                         onChange={e => setPilotChoice(c => ({ ...c, [row.id]: e.target.value }))}

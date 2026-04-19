@@ -37,3 +37,17 @@ export function matchGuestPilot<P extends GuestMatchCandidate>(
     normName(`${p.rank ?? ""} ${p.name}`).includes(n) || n.includes(normName(p.name)),
   );
 }
+
+// True when the guest sortie carries a military number but no roster pilot
+// claims it — i.e. the matcher returned undefined specifically because the
+// supplied number is stale/mistyped/transferred-out, not just because the
+// number was missing. Lets the UI show a targeted warning instead of an
+// unexplained empty picker.
+export function guestMilitaryNumberHasNoMatch<P extends GuestMatchCandidate>(
+  pilots: readonly P[],
+  guest: { militaryNumber?: string },
+): boolean {
+  const milKey = normMil(guest.militaryNumber);
+  if (!milKey) return false;
+  return !pilots.some(p => normMil(p.militaryNumber) === milKey);
+}
