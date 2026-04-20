@@ -51,7 +51,6 @@ import { registerLocalPC, purgeExpiredMessages, getLocalPcId, type PcTier } from
 import Roster from "@/pages/Roster";
 import PilotDetail from "@/pages/PilotDetail";
 import Currency from "@/pages/Currency";
-import ExpiredAfter from "@/pages/ExpiredAfter";
 import Rankings from "@/pages/Rankings";
 import Cycle from "@/pages/Cycle";
 import Leaves from "@/pages/Leaves";
@@ -87,7 +86,6 @@ import PilotsTable from "@/pages/dashboard/PilotsTable";
 import DashboardPilotDetail from "@/pages/dashboard/PilotDetail";
 import Alerts from "@/pages/dashboard/Alerts";
 import PilotAlerts from "@/pages/dashboard/PilotAlerts";
-import Currencies from "@/pages/dashboard/Currencies";
 import Simulator from "@/pages/dashboard/Simulator";
 import FlightRecords from "@/pages/dashboard/FlightRecords";
 import FlightProgram from "@/pages/FlightProgram";
@@ -108,7 +106,6 @@ function SquadronOpsRoutes() {
       <Route path="/roster" component={Roster} />
       <Route path="/pilot/:id" component={PilotDetail} />
       <Route path="/currency" component={Currency} />
-      <Route path="/expired" component={ExpiredAfter} />
       <Route path="/rankings" component={Rankings} />
       <Route path="/cycle" component={Cycle} />
       <Route path="/leaves" component={Leaves} />
@@ -182,7 +179,6 @@ function CommanderRoutes() {
       <Route path="/dashboard/pilot/:id" component={DashboardPilotDetail} />
       <Route path="/dashboard/alerts" component={Alerts} />
       <Route path="/dashboard/pilot-alerts" component={PilotAlerts} />
-      <Route path="/dashboard/currencies" component={Currencies} />
       <Route path="/dashboard/simulator" component={Simulator} />
       <Route path="/dashboard/flights" component={FlightRecords} />
       <Route path="/dashboard/flight-program" component={FlightProgram} />

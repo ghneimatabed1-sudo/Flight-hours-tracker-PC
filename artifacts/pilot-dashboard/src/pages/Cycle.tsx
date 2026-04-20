@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { SIX_MONTH_TASKS } from "@/lib/mock";
-import { usePilots, useSorties, useCurrencies } from "@/lib/squadron-data";
+import { usePilots, useSorties } from "@/lib/squadron-data";
 import { computeAllTotals, formatHours } from "@/lib/calculations";
 import { supabaseConfigured } from "@/lib/supabase";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
@@ -13,15 +13,14 @@ export default function Cycle() {
   const { t } = useI18n();
   const pilotsQ = usePilots();
   const sortiesQ = useSorties();
-  const currQ = useCurrencies();
   const { data: PILOTS } = pilotsQ;
   const { data: SORTIES } = sortiesQ;
-  const { data: CURR } = currQ;
-  const lookup = new Map(CURR.map(c => [`${c.pilotId}|${c.task}`, c.status]));
+  // The legacy `currencies` Supabase table was a silent dead-end (never
+  // written to). With it removed, live status defaults to "missing" in
+  // production and falls back to deterministic demo values offline so the
+  // grid still renders something for screenshots / training.
   const demo = rng(7);
-  const statusOf = (pid: string, task: string): "done" | "partial" | "missing" => {
-    const live = lookup.get(`${pid}|${task}`);
-    if (live) return live;
+  const statusOf = (_pid: string, _task: string): "done" | "partial" | "missing" => {
     if (supabaseConfigured) return "missing";
     const v = demo();
     return v > 0.4 ? "done" : v > 0.2 ? "partial" : "missing";
@@ -33,7 +32,7 @@ export default function Cycle() {
   return (
     <div>
       <PageHead title={t("nav_cycle")} subtitle={`Six-month cycle · ${yearLabel}`} />
-      <DataUnavailableBanner queries={[pilotsQ, sortiesQ, currQ]} testId="banner-cycle-unavailable" />
+      <DataUnavailableBanner queries={[pilotsQ, sortiesQ]} testId="banner-cycle-unavailable" />
 
       <Card className="mb-4 !p-0 overflow-hidden">
         <div className="px-4 py-2 border-b border-border flex items-center justify-between">
@@ -112,7 +111,7 @@ export default function Cycle() {
             {PILOTS.length === 0 && (
               <tr>
                 <td colSpan={SIX_MONTH_TASKS.length + 1} className="px-3 py-6 text-center text-muted-foreground" data-testid="empty-cycle">
-                  {pilotsQ.isError || currQ.isError ? "—" : t("no_records")}
+                  {pilotsQ.isError ? "—" : t("no_records")}
                 </td>
               </tr>
             )}

@@ -126,14 +126,20 @@ export function computeTotals(
   const totalSim = safeNum(profile.openingSim) + aSim;
   const totalCaptain = safeNum(profile.openingCaptain) + aCap;
 
-  const grandTotal = totalDay + totalNight;
+  // Captain / Second Pilot is a split of *actual flying hours only* (Day +
+  // Night). NVG and Sim are tracked separately and must never be charged
+  // against the P1/P2 split — they are not stick-time on a real aircraft.
+  const flyingTotal = totalDay + totalNight;
+  // Grand Total *does* include NVG + Sim so it matches the squadron PC
+  // dashboard exactly. Canonical formula, kept identical on both surfaces.
+  const grandTotal = flyingTotal + totalNvg + totalSim;
   return {
     totalDay,
     totalNight,
     totalNvg,
     totalSim,
     totalCaptain,
-    totalSecondPilot: Math.max(0, grandTotal - totalCaptain),
+    totalSecondPilot: Math.max(0, flyingTotal - totalCaptain),
     grandTotal,
     totalSorties: sorties.length,
     monthDay: mDay,

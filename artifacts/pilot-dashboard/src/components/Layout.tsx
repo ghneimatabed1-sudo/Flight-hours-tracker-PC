@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import { useI18n, type Key as TKey } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import {
-  LayoutDashboard, ListChecks, PlusCircle, Users, BadgeCheck, AlertOctagon,
+  LayoutDashboard, ListChecks, PlusCircle, Users, BadgeCheck,
   Trophy, CalendarRange, PalmtreeIcon, UserX, Calendar, ClipboardList,
   ShieldAlert, FileText, Megaphone, Map, Tags, FileDown, UserCog, Settings,
   Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle,
@@ -39,7 +39,6 @@ const ITEMS: readonly Item[] = [
   { p: "/messages", k: "nav_messages" as TKey, I: MailIcon },
   { p: "/roster", k: "nav_roster", I: Users },
   { p: "/currency", k: "nav_currency", I: BadgeCheck },
-  { p: "/expired", k: "nav_expired", I: AlertOctagon },
   { p: "/rankings", k: "nav_rankings", I: Trophy },
   { p: "/cycle", k: "nav_cycle", I: CalendarRange },
   { p: "/leaves", k: "nav_leaves", I: PalmtreeIcon },

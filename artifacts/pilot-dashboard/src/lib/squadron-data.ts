@@ -1367,26 +1367,13 @@ function seedSchedule(): ScheduleEntry[] {
   ];
 }
 
-// ── currencies (6-month tasks) ──────────────────────────────────────────
-export function useCurrencies(): UseQueryResult<CurrencyRow[]> & { data: CurrencyRow[] } {
-  const q = useQuery<CurrencyRow[]>({
-    queryKey: ["currencies"],
-    queryFn: async () => {
-      if (!isLive()) return [];
-      const { data, error } = await supabase!
-        .from("currencies").select("pilot_id, task, status");
-      if (error) throw error;
-      return (data ?? []).map(r => ({
-        pilotId: r.pilot_id as string,
-        task: r.task as string,
-        status: r.status as CurrencyRow["status"],
-      }));
-    },
-    initialData: [],
-    retry: isLive() ? 1 : false,
-  });
-  return { ...q, data: q.data ?? [] } as UseQueryResult<CurrencyRow[]> & { data: CurrencyRow[] };
-}
+// NOTE: The legacy `currencies` table read + `useCurrencies` hook were
+// removed in v1.0.51 along with the rolled-up Currencies dashboard and
+// Expired-After page. The `currencies` Postgres table was never written
+// to by any client, so the read always returned an empty array — a silent
+// data hole. Per-pilot currency expiries continue to live on the `pilots`
+// row (Pilot.expiry, six-month task statuses) and are still rendered on
+// the per-pilot ops page (`/currency`).
 
 // ── deputy users (squadron) ────────────────────────────────────────────
 // Offline persistence — same pattern as pilots/sorties.
