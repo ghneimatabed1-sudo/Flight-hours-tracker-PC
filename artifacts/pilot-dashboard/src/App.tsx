@@ -51,6 +51,7 @@ import { registerLocalPC, purgeExpiredMessages, getLocalPcId, type PcTier } from
 import Roster from "@/pages/Roster";
 import PilotDetail from "@/pages/PilotDetail";
 import Currency from "@/pages/Currency";
+import ExpiredAfter from "@/pages/ExpiredAfter";
 import Rankings from "@/pages/Rankings";
 import Cycle from "@/pages/Cycle";
 import Leaves from "@/pages/Leaves";
