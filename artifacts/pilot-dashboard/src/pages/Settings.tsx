@@ -10,7 +10,113 @@ import {
 } from "@/lib/auth";
 import { useCurrencyWindow, DEFAULT_CURRENCY_WINDOW } from "@/lib/currency-settings";
 import { usePilots, useAllLinkedDevices, useRevokePilotDevices } from "@/lib/squadron-data";
-import { Smartphone, ShieldOff, Loader2 } from "lucide-react";
+import { Smartphone, ShieldOff, Loader2, AlertTriangle } from "lucide-react";
+
+function ReleaseLicenseButton({ onConfirm }: { onConfirm: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [secs, setSecs] = useState(10);
+  const [typed, setTyped] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setSecs(10);
+    setTyped("");
+    const id = setInterval(() => {
+      setSecs(s => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [open]);
+
+  const canConfirm = secs === 0 && typed.trim().toUpperCase() === "RELEASE";
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        data-testid="button-release-license"
+        className="px-3 py-1.5 rounded-md text-sm bg-destructive/20 text-destructive border border-destructive/40 hover:bg-destructive/30"
+      >
+        Release license
+      </button>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          data-testid="modal-release-license"
+        >
+          <div className="w-full max-w-md rounded-lg border border-destructive/60 bg-card shadow-2xl">
+            <div className="flex items-start gap-3 p-4 border-b border-border">
+              <AlertTriangle className="h-6 w-6 text-destructive shrink-0 mt-0.5" />
+              <div>
+                <div className="text-base font-semibold text-destructive">Release license — are you sure?</div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  This frees the license slot for this PC. You will be signed out and sent
+                  back to the License Activation screen, and you'll need a valid license key
+                  (or a Super Admin sign-in) to get back in.
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs space-y-1.5">
+                <div className="font-medium text-destructive">What this does NOT do:</div>
+                <ul className="list-disc ms-4 space-y-0.5 text-foreground/90">
+                  <li>It does <span className="font-semibold">not</span> delete pilots, sorties, or any cloud data.</li>
+                  <li>It does <span className="font-semibold">not</span> revoke the key from the server.</li>
+                </ul>
+                <div className="font-medium text-destructive pt-1">What it DOES:</div>
+                <ul className="list-disc ms-4 space-y-0.5 text-foreground/90">
+                  <li>Clears this PC's stored credentials and license marker.</li>
+                  <li>Forces a fresh activation on next launch.</li>
+                </ul>
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground">
+                  Type <span className="font-mono font-semibold text-destructive">RELEASE</span> to confirm:
+                </label>
+                <input
+                  value={typed}
+                  onChange={e => setTyped(e.target.value)}
+                  data-testid="input-release-confirm"
+                  autoFocus
+                  className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border font-mono text-sm uppercase tracking-wider"
+                  placeholder="RELEASE"
+                />
+              </div>
+
+              {secs > 0 && (
+                <div className="text-[11px] text-amber-400 text-center">
+                  Confirm button unlocks in <span className="font-mono font-semibold">{secs}s</span>…
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 p-4 border-t border-border">
+              <button
+                onClick={() => setOpen(false)}
+                data-testid="button-release-cancel"
+                className="px-4 py-2 rounded-md text-sm bg-secondary border border-border hover:bg-secondary/80"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { setOpen(false); onConfirm(); }}
+                disabled={!canConfirm}
+                data-testid="button-release-confirm"
+                className="px-4 py-2 rounded-md text-sm font-semibold bg-destructive text-destructive-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {secs > 0 ? `Wait ${secs}s` : "Release license"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 // In-app auto-updater UI. The Electron main process already polls the
 // public Releases repo at startup and downloads new builds in the
@@ -364,7 +470,7 @@ export default function Settings() {
           <div className="text-sm font-semibold">License & Hardware</div>
           <div className="text-xs text-muted-foreground">PC fingerprint (locked):</div>
           <div className="font-mono text-xs break-all bg-secondary p-2 rounded border border-border">{fingerprint}</div>
-          <button onClick={releaseLicense} className="px-3 py-1.5 rounded-md text-sm bg-destructive/20 text-destructive border border-destructive/40">Release license</button>
+          <ReleaseLicenseButton onConfirm={releaseLicense} />
           <hr className="border-border" />
           <InactivityTimeoutSection />
           <hr className="border-border" />
