@@ -15,7 +15,7 @@
   "asar": true,
   "win": {
     "target": [{ "target": "nsis", "arch": ["x64"] }],
-    "icon": "public/brand/hawkeye-logo.png",
+    "icon": "build/icon.ico",
     "publisherName": "Captain Abed Ghneimat",
     "artifactName": "HawkEye-Setup-${version}.${ext}"
   },
@@ -27,6 +27,9 @@
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
     "shortcutName": "Hawk Eye",
+    "installerIcon": "build/icon.ico",
+    "uninstallerIcon": "build/icon.ico",
+    "installerHeaderIcon": "build/icon.ico",
     "include": "build/installer.nsh"
   },
   "publish": [

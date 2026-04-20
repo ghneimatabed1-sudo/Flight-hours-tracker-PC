@@ -12,6 +12,24 @@ The system aims to provide:
 
 The business vision is to modernize RJAF's flight operations management, improve data accuracy, enhance decision-making through real-time insights, and streamline administrative tasks.
 
+# Brand Assets
+
+The Hawk Eye / RJAF Squadron Ops brand assets live in `artifacts/pilot-dashboard/public/brand/`:
+- `hawkeye-logo.png` — 1024×1024 master logo (source for icons).
+- `hawkeye-logo.svg` — vector logo.
+- `hawkeye-wordmark.png` / `.svg` — wordmark.
+- `emblem.png` — RJAF emblem (286×326).
+- `wings.png` — pilot wings graphic.
+
+Windows installer/EXE icon: `artifacts/pilot-dashboard/build/icon.ico` — multi-resolution (16/24/32/48/64/128/256), generated from `hawkeye-logo.png` via ImageMagick. Referenced in `electron-builder.json` as `win.icon`, `nsis.installerIcon`, `nsis.uninstallerIcon`, and `nsis.installerHeaderIcon`. Regenerate with:
+```
+magick public/brand/hawkeye-logo.png -background none \
+  \( -clone 0 -resize 16x16 \) \( -clone 0 -resize 24x24 \) \
+  \( -clone 0 -resize 32x32 \) \( -clone 0 -resize 48x48 \) \
+  \( -clone 0 -resize 64x64 \) \( -clone 0 -resize 128x128 \) \
+  \( -clone 0 -resize 256x256 \) -delete 0 build/icon.ico
+```
+
 # User Preferences
 
 - **Communication Style:** All updates and changes should be clearly documented and explained.
