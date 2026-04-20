@@ -116,10 +116,56 @@ export default function AdminSecurity() {
   const [pwCurrent, setPwCurrent] = useState("");
   const [pwNew, setPwNew] = useState("");
   const [pwConfirm, setPwConfirm] = useState("");
+  const [pwTotp, setPwTotp] = useState("");
   const [pwBusy, setPwBusy] = useState(false);
   const [pwErr, setPwErr] = useState<string | null>(null);
   const [pwOk, setPwOk] = useState(false);
-  const pwServerManaged = backendMode === "supabase";
+  const [pwVisible, setPwVisible] = useState(false);
+  // Supabase mode no longer blocks the change-password form — it routes
+  // through the super-admin-2fa edge function, which updates the hash in
+  // super_admin_credentials so every PC picks it up on next login. We
+  // still track the mode so the UI can require a 6-digit TOTP only when
+  // the backend actually enforces it.
+  const pwRequiresTotp = backendMode === "supabase";
+
+  // Cryptographically-strong password generator. Uses window.crypto so
+  // the random bytes are uniform, and guarantees the result contains at
+  // least one character from each class (upper, lower, digit, symbol) so
+  // it satisfies every reasonable password policy out of the box.
+  const generatePassword = (length = 20): string => {
+    const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";   // no I or O
+    const lower = "abcdefghijkmnopqrstuvwxyz";   // no l
+    const digit = "23456789";                    // no 0 or 1
+    const symbol = "!@#$%^&*_-+=?";
+    const all = upper + lower + digit + symbol;
+    const pickFrom = (set: string) => {
+      const buf = new Uint32Array(1);
+      crypto.getRandomValues(buf);
+      return set[buf[0] % set.length];
+    };
+    const out = [
+      pickFrom(upper), pickFrom(lower), pickFrom(digit), pickFrom(symbol),
+    ];
+    for (let i = out.length; i < length; i++) out.push(pickFrom(all));
+    // Fisher–Yates shuffle with crypto randomness so the mandatory-class
+    // characters aren't always in the first four positions.
+    for (let i = out.length - 1; i > 0; i--) {
+      const buf = new Uint32Array(1);
+      crypto.getRandomValues(buf);
+      const j = buf[0] % (i + 1);
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out.join("");
+  };
+  const applyGeneratedPassword = async () => {
+    const pw = generatePassword(20);
+    setPwNew(pw);
+    setPwConfirm(pw);
+    setPwVisible(true);
+    setPwErr(null);
+    setPwOk(false);
+    try { await navigator.clipboard.writeText(pw); } catch { /* clipboard may be blocked */ }
+  };
 
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
@@ -190,18 +236,22 @@ export default function AdminSecurity() {
     setPwOk(false);
     if (pwNew.length < 8) { setPwErr(t("pwTooShort")); return; }
     if (pwNew !== pwConfirm) { setPwErr(t("pwMismatch")); return; }
+    if (pwRequiresTotp && !/^\d{6}$/.test(pwTotp.trim())) { setPwErr(t("pwBadTotp")); return; }
     setPwBusy(true);
-    const res = await changeSuperAdminPassword(pwCurrent, pwNew);
+    const res = await changeSuperAdminPassword(pwCurrent, pwNew, pwTotp.trim());
     setPwBusy(false);
     if (!res.ok) {
       if (res.error === "bad_current") setPwErr(t("pwBadCurrent"));
       else if (res.error === "too_short") setPwErr(t("pwTooShort"));
       else if (res.error === "same") setPwErr(t("pwSame"));
+      else if (res.error === "bad_totp" || res.error === "bad") setPwErr(t("pwBadTotp"));
+      else if (res.error === "locked") setPwErr(t("regenerateLocked"));
       else if (res.error === "server_managed") setPwErr(t("pwServerManaged"));
       else setPwErr(t("pwGenericError"));
       return;
     }
-    setPwCurrent(""); setPwNew(""); setPwConfirm("");
+    setPwCurrent(""); setPwNew(""); setPwConfirm(""); setPwTotp("");
+    setPwVisible(false);
     setPwOk(true);
     window.setTimeout(() => setPwOk(false), 4000);
   };
@@ -289,54 +339,92 @@ export default function AdminSecurity() {
         </CardHeader>
         <CardContent>
           <p className="text-xs text-muted-foreground mb-3">{t("changePasswordBlurb")}</p>
-          {pwServerManaged ? (
-            <div className="rounded-md border border-amber-600/40 bg-amber-500/10 p-3 text-xs text-amber-200">
-              {t("pwServerManaged")}
+          {pwRequiresTotp && (
+            <div className="rounded-md border border-sky-600/40 bg-sky-500/10 p-2 text-[11px] text-sky-200 mb-3">
+              {t("pwSyncedAcrossPCs")}
             </div>
-          ) : (
-            <form onSubmit={submitPassword} className="space-y-3 max-w-md">
-              <div>
-                <label className="text-xs text-muted-foreground">{t("currentPassword")}</label>
-                <Input
-                  type="password"
-                  autoComplete="current-password"
-                  value={pwCurrent}
-                  onChange={e => { setPwCurrent(e.target.value); setPwErr(null); setPwOk(false); }}
-                  data-testid="input-admin-password-current"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">{t("newPassword")}</label>
-                <Input
-                  type="password"
-                  autoComplete="new-password"
-                  value={pwNew}
-                  onChange={e => { setPwNew(e.target.value); setPwErr(null); setPwOk(false); }}
-                  data-testid="input-admin-password-new"
-                />
-                <p className="text-[11px] text-muted-foreground mt-1">{t("pwMinHint")}</p>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">{t("confirmPassword")}</label>
-                <Input
-                  type="password"
-                  autoComplete="new-password"
-                  value={pwConfirm}
-                  onChange={e => { setPwConfirm(e.target.value); setPwErr(null); setPwOk(false); }}
-                  data-testid="input-admin-password-confirm"
-                />
-              </div>
-              {pwErr && <p className="text-xs text-destructive" data-testid="text-admin-password-error">{pwErr}</p>}
-              {pwOk && <p className="text-xs text-emerald-400" data-testid="text-admin-password-ok">✔ {t("pwUpdated")}</p>}
-              <Button type="submit" disabled={pwBusy || !pwCurrent || !pwNew || !pwConfirm} data-testid="button-admin-password-submit">
-                {pwBusy ? t("saving") : t("updatePassword")}
-              </Button>
-            </form>
           )}
+          <form onSubmit={submitPassword} className="space-y-3 max-w-md">
+            <div>
+              <label className="text-xs text-muted-foreground">{t("currentPassword")}</label>
+              <Input
+                type="password"
+                autoComplete="current-password"
+                value={pwCurrent}
+                onChange={e => { setPwCurrent(e.target.value); setPwErr(null); setPwOk(false); }}
+                data-testid="input-admin-password-current"
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-muted-foreground">{t("newPassword")}</label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={applyGeneratedPassword}
+                    className="text-[11px] px-2 py-0.5 rounded border border-border hover:bg-accent inline-flex items-center gap-1"
+                    data-testid="button-admin-password-generate"
+                  >
+                    <RefreshCw className="h-3 w-3" /> {t("pwGenerate")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPwVisible(v => !v)}
+                    className="text-[11px] px-2 py-0.5 rounded border border-border hover:bg-accent"
+                    data-testid="button-admin-password-toggle-visibility"
+                  >
+                    {pwVisible ? t("pwHide") : t("pwShow")}
+                  </button>
+                </div>
+              </div>
+              <Input
+                type={pwVisible ? "text" : "password"}
+                autoComplete="new-password"
+                value={pwNew}
+                onChange={e => { setPwNew(e.target.value); setPwErr(null); setPwOk(false); }}
+                data-testid="input-admin-password-new"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">{t("pwMinHint")}</p>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">{t("confirmPassword")}</label>
+              <Input
+                type={pwVisible ? "text" : "password"}
+                autoComplete="new-password"
+                value={pwConfirm}
+                onChange={e => { setPwConfirm(e.target.value); setPwErr(null); setPwOk(false); }}
+                data-testid="input-admin-password-confirm"
+              />
+            </div>
+            {pwRequiresTotp && (
+              <div>
+                <label className="text-xs text-muted-foreground">{t("pwTotpLabel")}</label>
+                <Input
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  placeholder="000000"
+                  value={pwTotp}
+                  onChange={e => { setPwTotp(e.target.value.replace(/\D/g, "").slice(0, 6)); setPwErr(null); setPwOk(false); }}
+                  data-testid="input-admin-password-totp"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">{t("pwTotpHint")}</p>
+              </div>
+            )}
+            {pwErr && <p className="text-xs text-destructive" data-testid="text-admin-password-error">{pwErr}</p>}
+            {pwOk && <p className="text-xs text-emerald-400" data-testid="text-admin-password-ok">✔ {t("pwUpdated")}</p>}
+            <Button
+              type="submit"
+              disabled={pwBusy || !pwCurrent || !pwNew || !pwConfirm || (pwRequiresTotp && pwTotp.length !== 6)}
+              data-testid="button-admin-password-submit"
+            >
+              {pwBusy ? t("saving") : t("updatePassword")}
+            </Button>
+          </form>
         </CardContent>
       </Card>
 
-      {!pwServerManaged && (
+      {!pwRequiresTotp && (
         <Card className="border-destructive/40">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
