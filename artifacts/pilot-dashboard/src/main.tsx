@@ -7,18 +7,33 @@ import { startOutboxWorker } from "./lib/offlineQueue";
 // if the bundle errors during evaluation. Without this the user sees a
 // pure black window and has no way to know what went wrong.
 function showFatal(err: unknown): void {
-  const root = document.getElementById("root");
+  const target = document.getElementById("root") ?? document.body;
   const msg = err instanceof Error ? `${err.name}: ${err.message}\n\n${err.stack ?? ""}` : String(err);
-  const html = `
-    <div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0a1226;color:#e6c97a;font-family:Inter,system-ui,sans-serif;padding:32px;text-align:center;">
-      <div style="max-width:760px;">
-        <div style="font-size:14px;letter-spacing:0.32em;text-transform:uppercase;color:#e6c97a;opacity:0.85;margin-bottom:16px;">Hawk Eye — startup error</div>
-        <div style="font-size:13px;line-height:1.6;color:#e6e6e6;background:rgba(255,255,255,0.04);border:1px solid rgba(230,201,122,0.25);border-radius:8px;padding:18px;text-align:left;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;max-height:60vh;overflow:auto;">${msg.replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c] as string))}</div>
-        <div style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:rgba(255,255,255,0.5);margin-top:18px;">Press Ctrl+Shift+I for DevTools · Send this screen to Super Admin</div>
-      </div>
-    </div>`;
-  if (root) root.innerHTML = html;
-  else document.body.innerHTML = html;
+
+  const overlay = document.createElement("div");
+  overlay.style.cssText = "position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0a1226;color:#e6c97a;font-family:Inter,system-ui,sans-serif;padding:32px;text-align:center;";
+
+  const inner = document.createElement("div");
+  inner.style.cssText = "max-width:760px;";
+
+  const title = document.createElement("div");
+  title.style.cssText = "font-size:14px;letter-spacing:0.32em;text-transform:uppercase;color:#e6c97a;opacity:0.85;margin-bottom:16px;";
+  title.textContent = "Hawk Eye — startup error";
+
+  const pre = document.createElement("div");
+  pre.style.cssText = "font-size:13px;line-height:1.6;color:#e6e6e6;background:rgba(255,255,255,0.04);border:1px solid rgba(230,201,122,0.25);border-radius:8px;padding:18px;text-align:left;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;max-height:60vh;overflow:auto;";
+  pre.textContent = msg;
+
+  const hint = document.createElement("div");
+  hint.style.cssText = "font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:rgba(255,255,255,0.5);margin-top:18px;";
+  hint.textContent = "Press Ctrl+Shift+I for DevTools · Send this screen to Super Admin";
+
+  inner.appendChild(title);
+  inner.appendChild(pre);
+  inner.appendChild(hint);
+  overlay.appendChild(inner);
+
+  target.replaceChildren(overlay);
 }
 
 // Discrete bottom-right toast for post-mount runtime errors that aren't
