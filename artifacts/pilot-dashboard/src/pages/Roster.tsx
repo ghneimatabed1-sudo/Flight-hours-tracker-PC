@@ -249,18 +249,18 @@ interface LastFlown { day: string; night: string; nvg: string; irt: string; medi
 function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pilot; onClose: () => void; onSave: (p: Pilot) => void; saving: boolean; isNew?: boolean }) {
   const { t } = useI18n();
   const [p, setP] = useState<Pilot>(pilot);
-  const win = getCurrencyWindow();
+  const currencyWin = getCurrencyWindow();
 
   // lastFlown is the UI state — what the operator types. On save we convert
   // to expiry dates (lastFlown + window) before passing to onSave, so the
   // rest of the system (auto-bump, Currency page, Reminders) is unchanged.
   const [lastFlown, setLastFlown] = useState<LastFlown>(() => ({
-    day:     computeLastFlown(pilot.expiry.day,     win.day),
-    night:   computeLastFlown(pilot.expiry.night,   win.night),
-    nvg:     computeLastFlown(pilot.expiry.nvg,     win.nvg),
-    irt:     computeLastFlown(pilot.expiry.irt,     win.instrument),
-    medical: computeLastFlown(pilot.expiry.medical, win.medical),
-    sim:     computeLastFlown(pilot.expiry.sim,     win.day),
+    day:     computeLastFlown(pilot.expiry.day,     currencyWin.day),
+    night:   computeLastFlown(pilot.expiry.night,   currencyWin.night),
+    nvg:     computeLastFlown(pilot.expiry.nvg,     currencyWin.nvg),
+    irt:     computeLastFlown(pilot.expiry.irt,     currencyWin.instrument),
+    medical: computeLastFlown(pilot.expiry.medical, currencyWin.medical),
+    sim:     computeLastFlown(pilot.expiry.sim,     currencyWin.day),
   }));
 
   // Functional updater — without this, rapid keystrokes can read a stale `p`
@@ -274,12 +274,12 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
     e.preventDefault();
     // Convert last-flown dates → expiry dates using the configured windows.
     const expiry = {
-      day:     computeExpiry(lastFlown.day,     win.day),
-      night:   computeExpiry(lastFlown.night,   win.night),
-      nvg:     computeExpiry(lastFlown.nvg,     win.nvg),
-      irt:     computeExpiry(lastFlown.irt,     win.instrument),
-      medical: computeExpiry(lastFlown.medical, win.medical),
-      sim:     computeExpiry(lastFlown.sim,     win.day),
+      day:     computeExpiry(lastFlown.day,     currencyWin.day),
+      night:   computeExpiry(lastFlown.night,   currencyWin.night),
+      nvg:     computeExpiry(lastFlown.nvg,     currencyWin.nvg),
+      irt:     computeExpiry(lastFlown.irt,     currencyWin.instrument),
+      medical: computeExpiry(lastFlown.medical, currencyWin.medical),
+      sim:     computeExpiry(lastFlown.sim,     currencyWin.day),
     };
     onSave({ ...p, expiry });
   };
@@ -349,16 +349,16 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
               <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Last Currency Flown</div>
               <div className="text-[11px] text-muted-foreground mt-1">
                 Enter the <strong>date the check/flight was last performed</strong>. The expiry is calculated automatically
-                using the currency windows configured in Settings (Day: {win.day}d · Night: {win.night}d · NVG: {win.nvg}d · IRT: {win.instrument}d · Medical: {win.medical}d).
+                using the currency windows configured in Settings (Day: {currencyWin.day}d · Night: {currencyWin.night}d · NVG: {currencyWin.nvg}d · IRT: {currencyWin.instrument}d · Medical: {currencyWin.medical}d).
               </div>
             </div>
             {([ 
-              { label: "Last Day flown",     k: "day"     as const, days: win.day        },
-              { label: "Last Night flown",   k: "night"   as const, days: win.night      },
-              { label: "Last NVG flown",     k: "nvg"     as const, days: win.nvg        },
-              { label: "Last IRT",           k: "irt"     as const, days: win.instrument },
-              { label: "Last Medical",       k: "medical" as const, days: win.medical    },
-              { label: "Last Sim",           k: "sim"     as const, days: win.day        },
+              { label: "Last Day flown",     k: "day"     as const, days: currencyWin.day        },
+              { label: "Last Night flown",   k: "night"   as const, days: currencyWin.night      },
+              { label: "Last NVG flown",     k: "nvg"     as const, days: currencyWin.nvg        },
+              { label: "Last IRT",           k: "irt"     as const, days: currencyWin.instrument },
+              { label: "Last Medical",       k: "medical" as const, days: currencyWin.medical    },
+              { label: "Last Sim",           k: "sim"     as const, days: currencyWin.day        },
             ] as { label: string; k: keyof LastFlown; days: number }[]).map(({ label, k, days }) => {
               const expiry = computeExpiry(lastFlown[k], days);
               return (
