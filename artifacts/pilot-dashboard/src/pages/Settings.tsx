@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import {
@@ -11,6 +11,122 @@ import {
 import { useCurrencyWindow, DEFAULT_CURRENCY_WINDOW } from "@/lib/currency-settings";
 import { usePilots, useAllLinkedDevices, useRevokePilotDevices } from "@/lib/squadron-data";
 import { Smartphone, ShieldOff, Loader2 } from "lucide-react";
+
+// In-app auto-updater UI. The Electron main process already polls the
+// public Releases repo at startup and downloads new builds in the
+// background; this section just exposes a manual "Check now" button and
+// surfaces real-time progress so the user can see what's happening
+// instead of staring at a dead button. When the download finishes,
+// "Restart & install" appears so they don't have to fully quit the app.
+type UpdState =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "available"; version: string }
+  | { kind: "none"; version?: string }
+  | { kind: "progress"; percent: number; transferred: number; total: number }
+  | { kind: "downloaded"; version: string }
+  | { kind: "error"; message: string };
+
+type ElectronBridge = {
+  appVersion: () => Promise<string>;
+  isPackaged?: () => Promise<boolean>;
+  checkForUpdates?: () => Promise<{ ok: boolean; version?: string | null; reason?: string }>;
+  installUpdateNow?: () => Promise<boolean>;
+  onUpdateEvent?: (cb: (e: UpdState) => void) => () => void;
+};
+function getBridge(): ElectronBridge | null {
+  return (window as unknown as { rjafElectron?: ElectronBridge }).rjafElectron ?? null;
+}
+
+function fmtMB(bytes: number) { return (bytes / (1024 * 1024)).toFixed(1) + " MB"; }
+
+function AutoUpdateSection() {
+  const bridge = getBridge();
+  const [version, setVersion] = useState<string>("");
+  const [packaged, setPackaged] = useState<boolean>(false);
+  const [state, setState] = useState<UpdState>({ kind: "idle" });
+
+  useEffect(() => {
+    if (!bridge) return;
+    bridge.appVersion().then(setVersion).catch(() => {});
+    bridge.isPackaged?.().then(p => setPackaged(!!p)).catch(() => {});
+    const off = bridge.onUpdateEvent?.((e) => setState(e));
+    return () => { off?.(); };
+  }, [bridge]);
+
+  const onCheck = useCallback(async () => {
+    if (!bridge?.checkForUpdates) return;
+    setState({ kind: "checking" });
+    const r = await bridge.checkForUpdates();
+    if (!r.ok && r.reason) setState({ kind: "error", message: r.reason });
+  }, [bridge]);
+  const onInstall = useCallback(async () => {
+    await bridge?.installUpdateNow?.();
+  }, [bridge]);
+
+  const checking = state.kind === "checking";
+  const downloading = state.kind === "progress";
+  const ready = state.kind === "downloaded";
+
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-semibold">Auto-Update</div>
+      <p className="text-xs text-muted-foreground">
+        When a new version is released, the desktop app downloads it in the
+        background and installs it on next restart. Currently on
+        {" "}<span className="font-mono">v{version || "?"}</span>.
+        {!packaged && bridge ? " (Updates only run in the installed build, not in dev.)" : ""}
+        {!bridge ? " (Updates only run in the installed desktop app.)" : ""}
+      </p>
+
+      {state.kind === "available" && (
+        <p className="text-xs text-amber-400">Update v{state.version} found — downloading…</p>
+      )}
+      {state.kind === "none" && (
+        <p className="text-xs text-emerald-400">You're on the latest version.</p>
+      )}
+      {downloading && (
+        <div className="space-y-1">
+          <div className="h-2 w-full bg-secondary rounded overflow-hidden border border-border">
+            <div className="h-full bg-primary transition-all" style={{ width: `${Math.min(100, Math.max(0, state.percent)).toFixed(1)}%` }} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {state.percent.toFixed(0)}% — {fmtMB(state.transferred)} of {fmtMB(state.total)}
+          </p>
+        </div>
+      )}
+      {ready && (
+        <p className="text-xs text-emerald-400">
+          Update v{state.version} downloaded and ready to install.
+        </p>
+      )}
+      {state.kind === "error" && (
+        <p className="text-xs text-destructive break-all">Update error: {state.message}</p>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={onCheck}
+          disabled={!bridge || !packaged || checking || downloading}
+          className="px-3 py-1.5 rounded-md text-sm bg-secondary border border-border disabled:opacity-50 inline-flex items-center gap-2"
+          data-testid="btn-check-updates"
+        >
+          {checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          {checking ? "Checking…" : downloading ? "Downloading…" : "Check for updates"}
+        </button>
+        {ready && (
+          <button
+            onClick={onInstall}
+            className="px-3 py-1.5 rounded-md text-sm bg-primary text-primary-foreground"
+            data-testid="btn-install-update"
+          >
+            Restart & install now
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // Per-user inactivity auto-logout picker. Each operator who signs in on
 // this PC has their own stored preference (keyed by user.id), so Ops can
@@ -248,9 +364,7 @@ export default function Settings() {
           <hr className="border-border" />
           <InactivityTimeoutSection />
           <hr className="border-border" />
-          <div className="text-sm font-semibold">Auto-Update</div>
-          <p className="text-xs text-muted-foreground">When a new version is released, the desktop app updates itself silently. Currently on v1.0.0.</p>
-          <button className="px-3 py-1.5 rounded-md text-sm bg-secondary border border-border">Check for updates</button>
+          <AutoUpdateSection />
         </Card>
         <Card className="lg:col-span-2 space-y-3">
           <form onSubmit={saveCurrencyWindow} className="space-y-3">

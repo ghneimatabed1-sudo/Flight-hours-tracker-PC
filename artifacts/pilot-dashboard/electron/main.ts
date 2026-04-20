@@ -189,6 +189,22 @@ app.whenReady().then(() => {
   if (!isDev) {
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
+
+    // Pipe every update lifecycle event to the renderer so the Settings
+    // page can show real progress instead of guessing. Renderer subscribes
+    // via `rjafElectron.onUpdateEvent(cb)`.
+    const send = (channel: string, payload?: unknown) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) w.webContents.send(channel, payload);
+      }
+    };
+    autoUpdater.on("checking-for-update", () => send("rjaf:update", { kind: "checking" }));
+    autoUpdater.on("update-available", (info) => send("rjaf:update", { kind: "available", version: info.version }));
+    autoUpdater.on("update-not-available", (info) => send("rjaf:update", { kind: "none", version: info.version }));
+    autoUpdater.on("download-progress", (p) => send("rjaf:update", { kind: "progress", percent: p.percent, transferred: p.transferred, total: p.total, bytesPerSecond: p.bytesPerSecond }));
+    autoUpdater.on("update-downloaded", (info) => send("rjaf:update", { kind: "downloaded", version: info.version }));
+    autoUpdater.on("error", (err) => send("rjaf:update", { kind: "error", message: err?.message ?? String(err) }));
+
     autoUpdater.checkForUpdatesAndNotify().catch((err: Error) => {
       // eslint-disable-next-line no-console
       console.warn("Update check failed:", err.message);
@@ -212,6 +228,23 @@ ipcMain.handle("rjaf:offlineQueuePath", () => {
   return dir;
 });
 ipcMain.handle("rjaf:isPackaged", () => app.isPackaged);
+
+// Manual update controls. Renderer-driven so the user has a button instead
+// of waiting for the silent startup poll.
+ipcMain.handle("rjaf:checkForUpdates", async () => {
+  if (isDev) return { ok: false, reason: "dev-mode" };
+  try {
+    const r = await autoUpdater.checkForUpdates();
+    return { ok: true, version: r?.updateInfo?.version ?? null };
+  } catch (err) {
+    return { ok: false, reason: (err as Error)?.message ?? String(err) };
+  }
+});
+ipcMain.handle("rjaf:installUpdateNow", () => {
+  // Quits all windows, runs the NSIS installer, relaunches the new build.
+  setImmediate(() => autoUpdater.quitAndInstall(true, true));
+  return true;
+});
 
 // ── Backup file-system bridge ───────────────────────────────────────────
 // Lets the renderer ask the user to pick a folder, and write the encrypted
