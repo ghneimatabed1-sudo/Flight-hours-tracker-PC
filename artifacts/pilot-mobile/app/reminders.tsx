@@ -35,6 +35,7 @@ import {
 const CURRENCY_LIST: { key: CurrencyKey; tk: string }[] = [
   { key: "day", tk: "currency_day" },
   { key: "night", tk: "currency_night" },
+  { key: "nvg", tk: "currency_nvg" },
   { key: "irt", tk: "currency_irt" },
   { key: "medical", tk: "currency_medical" },
 ];
