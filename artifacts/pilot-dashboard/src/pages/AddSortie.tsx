@@ -522,10 +522,10 @@ export default function AddSortie() {
           {/* Row 1: flight info */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             <Mini label="Date" type="date" value={form.date} onChange={v => set("date", v)} />
-            <MiniSelect label="Air Craft Type" value={form.acType} onChange={v => set("acType", v)} opts={["UH-60M", "UH-60L", "UH-60AIL", "AS332"]} />
-            <Mini label="Air Craft No." value={form.acNumber} onChange={v => set("acNumber", v)} placeholder="e.g. 832" />
+            <MiniSelect label="A/C Type" value={form.acType} onChange={v => set("acType", v)} opts={["UH-60M", "UH-60L", "UH-60AIL", "AS332"]} />
+            <Mini label="A/C No" value={form.acNumber} onChange={v => set("acNumber", v)} placeholder="e.g. 832" />
             <MiniSelect label="Sortie Type" value={form.sortieType} onChange={v => set("sortieType", v)} opts={SORTIE_TYPES} />
-            <Mini label="Approx. Duration of Flight (hrs)" type="number" step="0.1" value={form.time} onChange={v => set("time", v)} placeholder="0.0" />
+            <Mini label="Time (hrs)" type="number" step="0.1" value={form.time} onChange={v => set("time", v)} placeholder="0.0" />
             <Mini label="Dual (hrs)" type="number" step="0.1" value={form.dualHours} onChange={v => set("dualHours", v)} placeholder="0.0" />
           </div>
 
@@ -543,7 +543,7 @@ export default function AddSortie() {
               and captain flag. The two seats are fully independent. */}
           <div className="grid lg:grid-cols-2 gap-3">
             <SeatPanel
-              label="Captain Of Aircraft And Pilot"
+              label="Pilot"
               testIdPrefix="pilot"
               seat={form.pilot}
               opts={pilotOpts}
@@ -552,7 +552,7 @@ export default function AddSortie() {
               mySquadronId={mySquadronId}
             />
             <SeatPanel
-              label="Crew"
+              label="Co-Pilot"
               testIdPrefix="copilot"
               seat={form.coPilot}
               opts={pilotOpts}
@@ -642,10 +642,10 @@ export default function AddSortie() {
             </label>
             {form.instrumentFlight && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <Mini label="Actual IF — SIM (hrs)"   type="number" step="0.1" value={form.ifSim} onChange={v => set("ifSim", v)} placeholder="0.0" />
-                <Mini label="Actual IF — ACT (hrs)" type="number" step="0.1" value={form.ifAct} onChange={v => set("ifAct", v)} placeholder="0.0" />
-                <Mini label="IF Approaches — ILS" type="number" step="1" value={form.ils} onChange={v => set("ils", v)} placeholder="0" />
-                <Mini label="IF Approaches — VOR" type="number" step="1" value={form.vor} onChange={v => set("vor", v)} placeholder="0" />
+                <Mini label="SIM (hrs)"   type="number" step="0.1" value={form.ifSim} onChange={v => set("ifSim", v)} placeholder="0.0" />
+                <Mini label="Actual (hrs)" type="number" step="0.1" value={form.ifAct} onChange={v => set("ifAct", v)} placeholder="0.0" />
+                <Mini label="ILS approaches" type="number" step="1" value={form.ils} onChange={v => set("ils", v)} placeholder="0" />
+                <Mini label="VOR approaches" type="number" step="1" value={form.vor} onChange={v => set("vor", v)} placeholder="0" />
               </div>
             )}
           </div>
@@ -653,7 +653,7 @@ export default function AddSortie() {
           {/* Remarks */}
           <div>
             <label className="block">
-              <span className="text-[11px] text-muted-foreground">Duty Carried out And Reason for not</span>
+              <span className="text-[11px] text-muted-foreground">Remarks</span>
               <textarea
                 value={form.remarks}
                 onChange={e => set("remarks", e.target.value)}

@@ -68,15 +68,6 @@ export default function SortieLog() {
   // S/B, N/F, Sign) render as "—" until we capture them; the calculation
   // side is untouched.
   const DASH = "—";
-  const initialsOf = (fullName: string) => {
-    if (!fullName) return "";
-    return fullName
-      .split(/\s+/)
-      .filter(Boolean)
-      .map(w => w.charAt(0).toUpperCase())
-      .slice(0, 3)
-      .join(".");
-  };
   // "Captain Of Aircraft And Pilot" — whichever seat carries the captain
   // flag; fall back to the 1st-seat pilot when neither flag is set (older
   // records). Shows both names separated when captain is the 2nd seat.
@@ -212,8 +203,6 @@ export default function SortieLog() {
                 <Th center rowSpan={2}>CREW</Th>
                 <Th center rowSpan={2}>Duty Or<br/>Practice Order</Th>
                 <Th center colSpan={2}>Approximate</Th>
-                <Th center rowSpan={2}>Initials of Flight<br/>Commander of Flight</Th>
-                <Th center rowSpan={2}>Initials of<br/>Captain</Th>
                 <Th center colSpan={2}>Time</Th>
                 <Th center colSpan={3}>Actual Instrument Fly</Th>
                 <Th center colSpan={2}>IF Approaches</Th>
@@ -255,7 +244,6 @@ export default function SortieLog() {
                 const canEdit = frozen.canEdit(s.date);
                 const locked = isFrozen && !canEdit;
                 const captain = captainPilot(s);
-                const captainInit = initialsOf(captain);
                 return (
                 <tr key={s.id} className={`border-t border-border row-hover ${locked ? "opacity-90" : ""}`} data-testid={`row-sortie-${s.id}`}>
                   <Td mono center>{idx + 1}</Td>
@@ -273,8 +261,6 @@ export default function SortieLog() {
                   <Td>{dutyOrder(s)}</Td>
                   <Td mono center>{DASH}</Td>
                   <Td mono center>{durationOf(s)}</Td>
-                  <Td mono center>{DASH}</Td>
-                  <Td mono center>{captainInit || DASH}</Td>
                   <Td mono center>{DASH}</Td>
                   <Td mono center>{DASH}</Td>
                   <Td mono center>{ifAir(s)}</Td>
