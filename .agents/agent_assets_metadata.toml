@@ -36,6 +36,12 @@ uri = "file://exports/hawkeye-pdf/images/network_nodes.png"
 type = "image"
 title = "golden nodes network dark"
 
+[[generated]]
+id = "HLHf5KWonz2vgrlIn5vxj"
+uri = "file://exports/hawkeye-pdf/images/cover_hero_blackhawk.png"
+type = "image"
+title = "black hawk cover"
+
 [[outputs]]
 id = "0P_4p5zo8yEKCfhCMIbHS"
 uri = "file://attached_assets/briefing/RJAF_Squadron_Ops_Briefing.pdf"
@@ -52,4 +58,4 @@ title = "RJAF Squadron Ops — Command Briefing (editable Markdown source)"
 id = "J9zaqEThqnYdZwCWCjL7b"
 uri = "file://exports/hawkeye-pdf/HawkEye-Ecosystem.pdf"
 type = "pdf"
-title = "Hawk Eye — Command Briefing (compressed)"
+title = "Hawk Eye — Command Briefing (v1.0.49, Black Hawk cover)"

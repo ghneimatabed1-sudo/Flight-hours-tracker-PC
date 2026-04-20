@@ -86,12 +86,23 @@ function bottomBar(doc) {
   doc.restore();
 }
 
-function sectionTitle(doc, x, y, eyebrow, title) {
+// `width` constrains how wide the big 26pt title may grow before wrapping.
+// Pages with a side image pass a narrower width so the title can never
+// spill under the image. Defaults to the full text column.  Returns the
+// y-coordinate below the gold underline so callers can lay content out
+// relative to the end of the title block.
+function sectionTitle(doc, x, y, eyebrow, title, width = PAGE_W - x - 48) {
   doc.fillColor(GOLD).fontSize(9).font("Helvetica-Bold")
-     .text(eyebrow.toUpperCase(), x, y, { characterSpacing: 3, lineBreak: false });
-  doc.fillColor(INK_HI).fontSize(26).font("Helvetica-Bold")
-     .text(title, x, y + 16, { lineBreak: false });
-  doc.moveTo(x, y + 54).lineTo(x + 54, y + 54).lineWidth(2).strokeColor(GOLD).stroke();
+     .text(eyebrow.toUpperCase(), x, y, { characterSpacing: 3, width, lineBreak: false });
+  // Measure the wrapped title so the gold underline never cuts through
+  // the second line.  heightOfString honours the same width we pass to
+  // text(), and adding 12pt of breathing room matches the original design.
+  doc.fillColor(INK_HI).fontSize(26).font("Helvetica-Bold");
+  const titleH = doc.heightOfString(title, { width });
+  doc.text(title, x, y + 16, { width });
+  const rule = y + 16 + titleH + 10;
+  doc.moveTo(x, rule).lineTo(x + 54, rule).lineWidth(2).strokeColor(GOLD).stroke();
+  return rule;
 }
 
 function body(doc, x, y, w, text, opts = {}) {
@@ -222,17 +233,19 @@ function pageCover(doc) {
   doc.fillColor(INK_DIM).fontSize(9).font("Helvetica")
      .text("Prepared for Command Review", 48, PAGE_H - 40, { lineBreak: false });
   doc.fillColor(INK_DIM).fontSize(9)
-     .text("Version 1.0.48  ·  April 2026", PAGE_W - 240, PAGE_H - 40,
+     .text("Version 1.0.49  ·  April 2026", PAGE_W - 240, PAGE_H - 40,
            { width: 200, align: "right" });
 }
 
 function pageWhatIs(doc) {
   bg(doc, NAVY);
   topBar(doc, "Overview", 2);
-  sectionTitle(doc, 48, 100, "What is Hawk Eye?",
-               "A single nerve centre for the squadron.");
+  // Width is capped at 380 so the long 26pt title wraps within its own
+  // column instead of sliding under the logbook photo on the right.
+  const ruleY = sectionTitle(doc, 48, 100, "What is Hawk Eye?",
+               "A single nerve centre for the squadron.", 380);
 
-  body(doc, 48, 180, 360,
+  body(doc, 48, ruleY + 24, 360,
     "Hawk Eye replaces paper logbooks, spreadsheets, WhatsApp group chats " +
     "and scattered clipboards with one living system that every pilot and " +
     "every commander can trust.\n\n" +
@@ -272,15 +285,18 @@ function pageWhatIs(doc) {
 function pageEcosystem(doc) {
   bg(doc, NAVY);
   topBar(doc, "Ecosystem", 3);
+  // Title width widened to 430 so "How the pieces fit together." fits on
+  // one line — its right edge at x≈430 clears the image column (x=440).
   sectionTitle(doc, 48, 100, "Three doors, one room",
-               "How the pieces fit together.");
+               "How the pieces fit together.", 430);
 
+  // Image starts below the title block with clear margin.
   if (fs.existsSync(hero("ecosystem_diagram"))) {
     doc.save();
-    doc.roundedRect(340, 150, 454, 300, 10).clip();
-    doc.image(hero("ecosystem_diagram"), 340, 150, { width: 454, height: 300 });
+    doc.roundedRect(440, 172, 354, 278, 10).clip();
+    doc.image(hero("ecosystem_diagram"), 440, 172, { width: 354, height: 278 });
     doc.restore();
-    doc.roundedRect(340, 150, 454, 300, 10).lineWidth(0.8).strokeColor(GOLD_DIM).stroke();
+    doc.roundedRect(440, 172, 354, 278, 10).lineWidth(0.8).strokeColor(GOLD_DIM).stroke();
   }
 
   const boxes = [
@@ -300,20 +316,20 @@ function pageEcosystem(doc) {
       i: iconCloud,
     },
   ];
-  let cy = 160;
+  let cy = 180;
   for (const b of boxes) {
-    card(doc, 48, cy, 280, 90, b.t, b.d, b.i);
-    cy += 104;
+    card(doc, 48, cy, 380, 88, b.t, b.d, b.i);
+    cy += 96;
   }
 
   // Bottom callout
-  doc.roundedRect(48, 480, 746, 48, 8).fill(NAVY_SOFT);
-  doc.roundedRect(48, 480, 746, 48, 8).lineWidth(0.7).strokeColor(GOLD_DIM).stroke();
+  doc.roundedRect(48, 484, 746, 48, 8).fill(NAVY_SOFT);
+  doc.roundedRect(48, 484, 746, 48, 8).lineWidth(0.7).strokeColor(GOLD_DIM).stroke();
   doc.fillColor(GOLD).fontSize(10).font("Helvetica-Bold")
-     .text("THE KEY IDEA", 64, 492, { characterSpacing: 3, lineBreak: false });
-  doc.fillColor(INK_HI).fontSize(11).font("Helvetica")
+     .text("THE KEY IDEA", 64, 496, { characterSpacing: 3, lineBreak: false });
+  doc.fillColor(INK_HI).fontSize(10.5).font("Helvetica")
      .text("A number entered on any pilot's phone appears on every authorised commander's screen within seconds — and vice versa.",
-           150, 493, { width: 630 });
+           150, 497, { width: 630 });
   bottomBar(doc);
 }
 
@@ -321,7 +337,7 @@ function pageDashboard(doc) {
   bg(doc, NAVY);
   topBar(doc, "PC Dashboard", 4);
   sectionTitle(doc, 48, 100, "For commanders",
-               "The Hawk Eye dashboard.");
+               "The Hawk Eye dashboard.", 360);
 
   // Feature list left
   const feats = [
@@ -362,15 +378,18 @@ function pageDashboard(doc) {
 function pageMobile(doc) {
   bg(doc, NAVY);
   topBar(doc, "Pilot App", 5);
-  sectionTitle(doc, 48, 100, "For pilots",
-               "The logbook in every pilot's pocket.");
+  const ruleY = sectionTitle(doc, 48, 100, "For pilots",
+               "The logbook in every pilot's pocket.", 360);
 
+  // Image dropped below the title block so the wrapped title can't clip
+  // the top edge of the photo on its longer second line.
+  const imgTop = Math.max(172, ruleY + 10);
   if (fs.existsSync(hero("squadron_lineup"))) {
     doc.save();
-    doc.roundedRect(430, 100, 364, 380, 10).clip();
-    doc.image(hero("squadron_lineup"), 430, 100, { width: 364, height: 380 });
+    doc.roundedRect(430, imgTop, 364, 480 - imgTop, 10).clip();
+    doc.image(hero("squadron_lineup"), 430, imgTop, { width: 364, height: 480 - imgTop });
     doc.restore();
-    doc.roundedRect(430, 100, 364, 380, 10).lineWidth(0.8).strokeColor(GOLD_DIM).stroke();
+    doc.roundedRect(430, imgTop, 364, 480 - imgTop, 10).lineWidth(0.8).strokeColor(GOLD_DIM).stroke();
   }
 
   const feats = [
@@ -383,7 +402,7 @@ function pageMobile(doc) {
     ["Works in English & Arabic —",      "full right-to-left layout."],
     ["Android & iOS —",                  "the same login, the same data, either device."],
   ];
-  bulletList(doc, 48, 180, 360, feats, { size: 10.5 });
+  bulletList(doc, 48, ruleY + 24, 360, feats, { size: 10.5 });
 
   bottomBar(doc);
 }
@@ -392,7 +411,7 @@ function pageStayInSync(doc) {
   bg(doc, NAVY);
   topBar(doc, "In Sync", 6);
   sectionTitle(doc, 48, 100, "Everything stays in sync",
-               "How information moves between commands.");
+               "How information moves between commands.", 740);
 
   body(doc, 48, 180, 740,
     "Flights are rarely private to one squadron. Guest pilots visit, wing " +
@@ -423,7 +442,7 @@ function pageAlerts(doc) {
   bg(doc, NAVY);
   topBar(doc, "Alerts", 7);
   sectionTitle(doc, 48, 100, "When it matters, you hear it",
-               "Per-PC alerts with sound & pop-up.");
+               "Per-PC alerts with sound & pop-up.", 360);
 
   if (fs.existsSync(hero("network_nodes"))) {
     doc.save();
@@ -463,7 +482,7 @@ function pageSecurity(doc) {
   bg(doc, NAVY);
   topBar(doc, "Security & Privacy", 8);
   sectionTitle(doc, 48, 100, "Built for trust",
-               "Security & privacy, in plain language.");
+               "Security & privacy, in plain language.", 430);
 
   if (fs.existsSync(hero("security_envelope"))) {
     doc.save();
@@ -598,7 +617,7 @@ function pageClosing(doc) {
      .text("Royal Jordanian Air Force  ·  Squadron Operations",
            0, PAGE_H - 108, { width: PAGE_W, align: "center" });
   doc.fillColor(INK_DIM).fontSize(9).font("Helvetica-Oblique")
-     .text("Prepared for command review  ·  Version 1.0.48  ·  April 2026",
+     .text("Prepared for command review  ·  Version 1.0.49  ·  April 2026",
            0, PAGE_H - 88, { width: PAGE_W, align: "center" });
 }
 
