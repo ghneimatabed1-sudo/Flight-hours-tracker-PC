@@ -34,6 +34,37 @@ const DEFAULT_ADMIN_PASSWORD_HASH = "e25d97cfa9c1ef91c61b0f84a92a19fcbaa490ebde6
 // password without knowing the current one. The plaintext is held by the
 // system owner off-device; only this SHA-256 hash ships in the binary.
 const MASTER_RECOVERY_HASH = "c9d4a017bbd57ee911131a6d1054a2bc4ff1c642e99656b7b381f9265211b6bc";
+// Inactivity auto-logout preference. Per-user-id key so every operator who
+// logs in on this PC can pick their own idle timeout (the commander's PC
+// can have a 30-min timeout while the Ops duty PC stays open for 8 hours).
+// Value in minutes. 0 disables auto-logout entirely. Default 120 (2 h).
+const INACTIVITY_KEY_PREFIX = "rjaf.inactivityMin.";
+export type InactivityMinutes = 0 | 15 | 30 | 60 | 120 | 240 | 480;
+export const INACTIVITY_OPTIONS: InactivityMinutes[] = [0, 15, 30, 60, 120, 240, 480];
+function readInactivityMinutes(userId: string | undefined): InactivityMinutes {
+  if (!userId) return 120;
+  const raw = localStorage.getItem(INACTIVITY_KEY_PREFIX + userId);
+  const n = raw == null ? NaN : Number(raw);
+  if (INACTIVITY_OPTIONS.includes(n as InactivityMinutes)) return n as InactivityMinutes;
+  return 120;
+}
+function writeInactivityMinutes(userId: string | undefined, value: InactivityMinutes): void {
+  if (!userId) return;
+  localStorage.setItem(INACTIVITY_KEY_PREFIX + userId, String(value));
+  // Notify any open AuthProvider so the running idle watcher picks up
+  // the new pref immediately without requiring a relogin / page refresh.
+  inactivityListeners.forEach(fn => { try { fn(); } catch { /* ignore */ } });
+}
+// Tiny in-process pub/sub so Settings.tsx can tell the AuthProvider in
+// the same tab that the inactivity pref just changed (localStorage's
+// native `storage` event only fires across tabs, not within the tab
+// that wrote the value).
+const inactivityListeners = new Set<() => void>();
+function subscribeInactivityChange(fn: () => void): () => void {
+  inactivityListeners.add(fn);
+  return () => { inactivityListeners.delete(fn); };
+}
+
 // Per-PC role lock chosen by the Super Admin on the Security page. When set,
 // the login screen hides every role except the locked one, and login() /
 // activateLicense() refuse to authenticate any user whose role doesn't match.
@@ -1055,7 +1086,92 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPcDeviceName: applyPcDeviceName,
   }), [state, pending, adminTotpEnrolled, pendingRecoveryCodes, adminRecoveryCodesRemaining, pcRoleLock, pcDeviceName]);
 
+  // ── Inactivity auto-logout ──────────────────────────────────────
+  // Watches user activity (mousemove / keydown / pointerdown / scroll /
+  // touchstart) and signs the operator out after N minutes of no input.
+  // N is read from localStorage per-user-id (INACTIVITY_KEY_PREFIX) so
+  // every operator can set their own comfort level from the Settings
+  // page. 0 = disabled (stay signed in until explicit logout). We also
+  // pause the timer when the tab is hidden so minimising doesn't
+  // pre-emptively log the user out before the real idle period elapses.
+  const currentUserId = state.user?.id;
+  // `prefVersion` is bumped whenever the Settings page writes a new
+  // inactivity value, which re-runs this effect and re-arms the timer
+  // with the new timeout (including 0 = disabled). Without this, picking
+  // a new value wouldn't take effect until the operator signed back in.
+  const [inactivityPrefVersion, setInactivityPrefVersion] = useState(0);
+  useEffect(() => {
+    const unsub = subscribeInactivityChange(() => setInactivityPrefVersion(v => v + 1));
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    const mins = readInactivityMinutes(currentUserId);
+    if (!mins) return; // 0 = disabled → no watcher attached.
+    const timeoutMs = mins * 60 * 1000;
+
+    let timer: number | undefined;
+    let lastActivityAt = Date.now();
+    const fire = () => {
+      if (supabase) supabase.auth.signOut().catch(() => {});
+      localStorage.removeItem("rjaf.user");
+      setPending(null);
+      setPendingRecoveryCodes(null);
+      pendingLoginUserRef.current = null;
+      setState(s => ({ ...s, user: null }));
+    };
+    const clearTimer = () => {
+      if (timer !== undefined) { window.clearTimeout(timer); timer = undefined; }
+    };
+    const arm = () => {
+      clearTimer();
+      timer = window.setTimeout(fire, timeoutMs);
+    };
+    const onActivity = () => {
+      lastActivityAt = Date.now();
+      // Only re-arm while the tab is actually visible so a hidden tab
+      // doesn't eat through the idle budget while the operator is away.
+      if (document.visibilityState === "visible") arm();
+    };
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        // Returning to a visible tab: if the real wall-clock gap since
+        // the last user input already exceeded the timeout, fire now;
+        // otherwise just re-arm for the remaining budget.
+        const elapsed = Date.now() - lastActivityAt;
+        if (elapsed >= timeoutMs) { fire(); return; }
+        clearTimer();
+        timer = window.setTimeout(fire, timeoutMs - elapsed);
+      } else {
+        // Tab hidden → pause the timer. Wall-clock enforcement resumes
+        // on the next `visible` transition via `onVis`.
+        clearTimer();
+      }
+    };
+    const events: Array<keyof DocumentEventMap> = [
+      "mousemove", "keydown", "pointerdown", "scroll", "touchstart",
+    ];
+    for (const ev of events) document.addEventListener(ev, onActivity, { passive: true });
+    document.addEventListener("visibilitychange", onVis);
+    if (document.visibilityState === "visible") arm();
+    return () => {
+      clearTimer();
+      for (const ev of events) document.removeEventListener(ev, onActivity);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [currentUserId, inactivityPrefVersion]);
+
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+// Read / write helpers exposed for the Settings page so the UI doesn't
+// need to know about the localStorage key naming convention.
+export function getInactivityMinutes(userId: string | undefined): InactivityMinutes {
+  return readInactivityMinutes(userId);
+}
+export function setInactivityMinutes(userId: string | undefined, value: InactivityMinutes): void {
+  writeInactivityMinutes(userId, value);
 }
 
 export function useAuth() {

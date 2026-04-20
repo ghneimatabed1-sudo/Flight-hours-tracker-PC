@@ -256,6 +256,26 @@ export async function autoRegisterPushOnLaunch(): Promise<void> {
   }
 }
 
+// ── Sync indicator ────────────────────────────────────────────────────────
+// Ping the Supabase `ping_pilot_sync` RPC so the Ops PC Roster can show
+// this pilot as "recently seen" (green dot within 24 h). Called:
+//   * on cold launch (right after autoRegisterPushOnLaunch),
+//   * whenever the app returns to the foreground (AppState 'active'),
+//   * every N hours on an interval timer while the app is open (N = the
+//     pilot's autoSyncHours pref, 3 h by default).
+// Any failure is swallowed — this is a best-effort heartbeat, never a
+// blocker for the user. Returns true on success so the caller can tell
+// the user "Synced just now" after a manual tap of "Sync now".
+export async function pingSync(): Promise<boolean> {
+  if (!supabaseConfigured || !supabase) return false;
+  try {
+    const { error } = await supabase.rpc("ping_pilot_sync");
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 // Normalise a per-currency threshold list: dedupe, drop nonsense, sort
 // descending so the most-distant reminder shows first.
 export function normaliseThresholds(values: number[]): number[] {

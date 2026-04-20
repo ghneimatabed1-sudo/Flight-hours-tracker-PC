@@ -9,7 +9,9 @@ import React, {
 } from "react";
 
 import { demoSnapshot, DEMO_LINK_CODE, DEMO_MILITARY_NUMBER } from "./mockData";
-import { autoRegisterPushOnLaunch } from "./notifications";
+import { autoRegisterPushOnLaunch, pingSync } from "./notifications";
+import { AppState, type AppStateStatus } from "react-native";
+import { loadPrefs, subscribePrefsChange } from "./storage";
 import { generateSalt, hashPassword } from "./password";
 import {
   clearLink,
@@ -159,6 +161,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           // pilot_reminder_prefs and the notify-alert / notify-notam
           // edge functions would skip their device entirely.
           void autoRegisterPushOnLaunch();
+          // Heartbeat: stamp last_seen_at so the Ops PC Roster shows
+          // this pilot as freshly synced. Also runs on foreground and
+          // on a timer below.
+          void pingSync();
         } else {
           setLastError("revoked");
           await clearLink();
@@ -188,6 +194,84 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       clearInterval(interval);
     };
   }, [link, applyRefresh]);
+
+  // Sync-indicator heartbeat. Keeps pilot_reminder_prefs.last_seen_at
+  // fresh so the Ops PC Roster shows a green dot for this pilot. Three
+  // triggers:
+  //   1. App returns to the foreground (AppState → 'active')
+  //   2. Periodic timer while the app is open, interval taken from the
+  //      pilot's `autoSyncHours` preference (default 3 h).
+  //   3. The cold-launch call is above in the initial-mount effect.
+  useEffect(() => {
+    if (!link || !supabaseConfigured || !link.pilotId) return;
+
+    let hours = 3;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let cancelled = false;
+
+    const armTimer = (h: number) => {
+      if (timer) clearInterval(timer);
+      const ms = Math.max(1, h) * 60 * 60 * 1000;
+      timer = setInterval(() => {
+        if (!cancelled) void pingSync();
+      }, ms);
+    };
+
+    void (async () => {
+      try {
+        const prefs = await loadPrefs();
+        hours = prefs.autoSyncHours ?? 3;
+      } catch { /* keep default */ }
+      if (!cancelled) armTimer(hours);
+    })();
+
+    // Re-arm the heartbeat interval if the pilot picks a new
+    // autoSyncHours value in Settings — otherwise the running timer
+    // would stay on the value we read at mount until the next relink
+    // or app restart.
+    const prefsUnsub = subscribePrefsChange(p => {
+      const next = p.autoSyncHours ?? 3;
+      if (!cancelled && next !== hours) {
+        hours = next;
+        armTimer(hours);
+      }
+    });
+
+    // Track when the app last went to background so we can enforce the
+    // pilot's inactivity-lock preference. When the pilot backgrounds the
+    // app, stash `Date.now()`. When they bring it back, if more than
+    // `inactivityMinutes` have elapsed (and the pref is > 0), force the
+    // app back to the lock screen. 0 disables, which is the fleet-default
+    // for pilots who prefer a "tap-in, no lock" workflow.
+    let backgroundedAt: number | null = null;
+    const sub = AppState.addEventListener("change", (s: AppStateStatus) => {
+      if (s === "active") {
+        void pingSync();
+        const since = backgroundedAt;
+        backgroundedAt = null;
+        if (since != null) {
+          void (async () => {
+            try {
+              const prefs = await loadPrefs();
+              const mins = prefs.inactivityMinutes ?? 0;
+              if (mins > 0 && Date.now() - since > mins * 60 * 1000) {
+                setUnlocked(false);
+              }
+            } catch { /* ignore — leave session unlocked */ }
+          })();
+        }
+      } else if (s === "background" || s === "inactive") {
+        if (backgroundedAt == null) backgroundedAt = Date.now();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+      sub.remove();
+      prefsUnsub();
+    };
+  }, [link]);
 
   const linkAccount = useCallback(
     async (militaryNumber: string, code: string) => {

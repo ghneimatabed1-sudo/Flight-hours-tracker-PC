@@ -129,3 +129,21 @@ Ops-only `/monthly-report` page renders ORFG RCN Forms 1, 2, 3, 4 and the Arabic
 - Auto-open DevTools (v1.0.30) — **removed in v1.0.33**.
 
 **v1.0.33** — clean release. DevTools no longer auto-open. Lock screen + idle timeout fully active. Brand polished.
+
+# v1.0.50 (PC) / v1.0.5 (mobile) — Sync Indicator + Inactivity Auto-Logout
+
+**Roster sync indicator.** New migration `0018_sync_indicator_fix.sql` (supersedes 0017) adds `pilot_reminder_prefs.last_seen_at` plus two RPCs:
+- `ping_pilot_sync()` — resolves `squadron_id` from `pilots.auth_user_id = auth.uid()` and upserts `last_seen_at`. Rejects forged/unbound pilot_id claims.
+- `list_pilot_sync_status()` — **scope-enforced**: pilot mobile callers get their own row only; ops/command callers get every pilot in their squadron (left-joined so pilots with no prefs row still show as "no phone linked"). Never crosses squadrons.
+
+Mobile (`lib/notifications.ts` `pingSync()`) calls the RPC on cold launch, every `AppState → active` foreground, and on a timer driven by the pilot's `autoSyncHours` pref (1/3/6/12h, default 3h). The timer re-arms automatically when Settings writes a new value via `subscribePrefsChange` in `storage.ts`.
+
+PC Roster column shows a coloured dot per pilot with a "Last sync: N min ago" tooltip — 🟢 ≤24h, 🟡 >24h, ⚫ no phone. `usePilotSyncStatus` (inline in `pages/Roster.tsx`) refetches every 60s via React Query.
+
+**Inactivity auto-logout.** Per-user preference (localStorage key `rjaf.inactivityMin.<userId>`, options 0/15/30/60/120/240/480 min, default 120; 0 disables). Settings page has an `InactivityTimeoutSection` picker. `auth.tsx` runs a useEffect idle watcher on `mousemove/keydown/pointerdown/scroll/touchstart`, pauses cleanly on tab-hidden (using wall-clock accounting on return to visible), and re-arms instantly when the Settings picker writes a new value (via an in-process `inactivityListeners` pub/sub — the browser's native `storage` event only fires across tabs).
+
+**Mobile inactivity lock.** When the app goes to `background`/`inactive` we stash `Date.now()`; on return to `active`, if elapsed > `prefs.inactivityMinutes * 60_000` (and the pref is > 0) we call `setUnlocked(false)` so the pilot lands on the lock screen on re-open.
+
+**Deployed:** Migration 0018 via Supabase Management API (HTTP 201). Both apps compile clean (`tsc --noEmit` passes).
+
+**Still pending (next build):** Commander accounts → Supabase table + RLS + login RPCs (currently localStorage-only in `src/lib/commander-store.ts`); remove `DEFAULT_ADMIN_PASSWORD_HASH` + `MASTER_RECOVERY_HASH` from production PC build; trigger PC v1.0.50 + mobile v1.0.5 Windows/EAS builds.

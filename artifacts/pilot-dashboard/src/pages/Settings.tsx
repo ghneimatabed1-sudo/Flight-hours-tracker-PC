@@ -1,10 +1,61 @@
 import { useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { useAuth } from "@/lib/auth";
+import {
+  useAuth,
+  getInactivityMinutes,
+  setInactivityMinutes,
+  INACTIVITY_OPTIONS,
+  type InactivityMinutes,
+} from "@/lib/auth";
 import { useCurrencyWindow, DEFAULT_CURRENCY_WINDOW } from "@/lib/currency-settings";
 import { usePilots, useAllLinkedDevices, useRevokePilotDevices } from "@/lib/squadron-data";
 import { Smartphone, ShieldOff, Loader2 } from "lucide-react";
+
+// Per-user inactivity auto-logout picker. Each operator who signs in on
+// this PC has their own stored preference (keyed by user.id), so Ops can
+// set 4 h while a commander keeps it at 30 m without stepping on each
+// other. 0 = disabled. The auth provider reads this on login and arms
+// the idle watcher.
+function InactivityTimeoutSection() {
+  const { user } = useAuth();
+  const [mins, setMins] = useState<InactivityMinutes>(() => getInactivityMinutes(user?.id));
+  const label = (m: InactivityMinutes) =>
+    m === 0 ? "Off" : m < 60 ? `${m} min` : `${m / 60} h`;
+  const onPick = (m: InactivityMinutes) => {
+    setInactivityMinutes(user?.id, m);
+    setMins(m);
+  };
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-semibold">Auto sign-out when idle</div>
+      <p className="text-xs text-muted-foreground">
+        If this PC is left untouched for the selected time, you'll be signed out
+        automatically. Pick "Off" to stay signed in until you sign out manually.
+        This setting is per-user.
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {INACTIVITY_OPTIONS.map(m => {
+          const active = mins === m;
+          return (
+            <button
+              key={m}
+              onClick={() => onPick(m)}
+              data-testid={`inactivity-${m}`}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium border ${
+                active
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-secondary text-foreground border-border hover:bg-secondary/70"
+              }`}
+            >
+              {label(m)}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function MobileDevicesCard() {
   const { user } = useAuth();
@@ -194,6 +245,8 @@ export default function Settings() {
           <div className="text-xs text-muted-foreground">PC fingerprint (locked):</div>
           <div className="font-mono text-xs break-all bg-secondary p-2 rounded border border-border">{fingerprint}</div>
           <button onClick={releaseLicense} className="px-3 py-1.5 rounded-md text-sm bg-destructive/20 text-destructive border border-destructive/40">Release license</button>
+          <hr className="border-border" />
+          <InactivityTimeoutSection />
           <hr className="border-border" />
           <div className="text-sm font-semibold">Auto-Update</div>
           <p className="text-xs text-muted-foreground">When a new version is released, the desktop app updates itself silently. Currently on v1.0.0.</p>
