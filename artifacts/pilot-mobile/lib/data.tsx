@@ -9,6 +9,7 @@ import React, {
 } from "react";
 
 import { demoSnapshot, DEMO_LINK_CODE, DEMO_MILITARY_NUMBER } from "./mockData";
+import { autoRegisterPushOnLaunch } from "./notifications";
 import { generateSalt, hashPassword } from "./password";
 import {
   clearLink,
@@ -152,6 +153,12 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         const { data } = (await supabase?.auth.getSession()) ?? { data: null };
         if (data?.session) {
           await applyRefresh(storedLink);
+          // Silently (re-)register the Expo push token on every cold
+          // launch while signed in.  Without this, a pilot who never
+          // opens the Reminders screen would have no row in
+          // pilot_reminder_prefs and the notify-alert / notify-notam
+          // edge functions would skip their device entirely.
+          void autoRegisterPushOnLaunch();
         } else {
           setLastError("revoked");
           await clearLink();

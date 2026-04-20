@@ -1106,10 +1106,20 @@ export function useCreateNotam() {
         saveMockNotams();
         return row;
       }
-      const { error } = await supabase!.from("notams").insert({
+      const { data, error } = await supabase!.from("notams").insert({
         notam_no: id, posted_on: date, body: text, priority,
-      });
+      }).select("id").single();
       if (error) throw error;
+      const newId = String(data?.id ?? "");
+      // Fire-and-forget push notification to every pilot in this squadron
+      // whose phone has reminders enabled. Mirrors the notify-alert leg
+      // in useCreateAlert: silent-fail so the NOTAM stays saved even if
+      // Expo is momentarily unavailable.
+      if (newId) {
+        void supabase!.functions
+          .invoke("notify-notam", { body: { notamId: newId } })
+          .catch((err) => console.warn("[notify-notam]", err));
+      }
       return { id, date, text, priority };
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notams"] }),

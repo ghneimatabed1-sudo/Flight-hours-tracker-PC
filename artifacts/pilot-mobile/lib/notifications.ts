@@ -213,6 +213,49 @@ export async function saveReminderPrefs(prefs: ReminderPrefs): Promise<boolean> 
   return localOk;
 }
 
+// Auto-register push on cold launch.  Called right after the mobile app
+// has verified its Supabase session.  If the device already has a valid
+// token on the server we do nothing; otherwise we silently request OS
+// permission, grab the Expo push token and persist it with
+// push_enabled=true so alerts and NOTAMs land on this phone without the
+// pilot ever having to open the Reminders screen.  A silent failure
+// (permission denied, EAS id missing, etc.) is swallowed — the pilot can
+// still enable it manually from the Reminders tab.
+export async function autoRegisterPushOnLaunch(): Promise<void> {
+  if (Platform.OS === "web") return;
+  if (!supabaseConfigured || !supabase) return;
+  try {
+    const current = await loadReminderPrefs();
+    // Already registered: refresh the token in case it rotated, but only
+    // if we can do so without prompting (permission already granted).
+    if (current.pushEnabled && current.expoPushToken) {
+      const perm = await Notifications.getPermissionsAsync();
+      if (perm.status !== "granted") return;
+      const r = await registerForPushNotifications(resolveProjectId());
+      if (r.ok && r.token && r.token !== current.expoPushToken) {
+        await saveReminderPrefs({
+          ...current,
+          expoPushToken: r.token,
+          platform: Platform.OS,
+        });
+      }
+      return;
+    }
+    // Not yet registered.  Request permission (OS remembers the answer —
+    // a denied user is NOT re-prompted on every launch).
+    const r = await registerForPushNotifications(resolveProjectId());
+    if (!r.ok || !r.token) return;
+    await saveReminderPrefs({
+      thresholds:    current.thresholds,
+      pushEnabled:   true,
+      expoPushToken: r.token,
+      platform:      Platform.OS,
+    });
+  } catch {
+    // Best-effort — never block app launch because of push registration.
+  }
+}
+
 // Normalise a per-currency threshold list: dedupe, drop nonsense, sort
 // descending so the most-distant reminder shows first.
 export function normaliseThresholds(values: number[]): number[] {
