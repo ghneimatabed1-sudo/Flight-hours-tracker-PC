@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { canUseMessages } from "@/lib/cross-pc";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
+import { IncomingAlertWatcher } from "@/components/IncomingAlertWatcher";
 
 type Item = { p: string; k: TKey; I: typeof LayoutDashboard };
 const ITEMS: readonly Item[] = [
@@ -199,6 +200,11 @@ export default function Layout({ children }: { children: ReactNode }) {
         </header>
         <main className="flex-1 overflow-y-auto p-5">{children}</main>
       </div>
+      {/* Cross-PC alert watcher: chimes + toasts + desktop notifications
+          when a message, schedule share, or pending approval arrives that
+          targets THIS PC. Mounted inside Layout so it only runs on the
+          authenticated shell (never on the login screen). */}
+      <IncomingAlertWatcher />
     </div>
   );
 }
