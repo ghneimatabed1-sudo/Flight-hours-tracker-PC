@@ -479,13 +479,24 @@ html, body, #root {
   .print-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 12px; }
   .print-header h1 { font-size: 16px; font-weight: 700; margin: 0; }
   .print-header .meta { font-size: 10.5px; color: #333; text-align: end; }
-  tr { page-break-inside: avoid; }
 
-  /* Hide app chrome on every printout — sidebar, topbar, scroll padding.
-     Without this the browser captures the whole window and the printable
-     content gets pushed off the page. */
-  aside, header { display: none !important; }
-  main { padding: 0 !important; margin: 0 !important; overflow: visible !important; }
-  .min-h-screen { min-height: 0 !important; }
-  body * { box-shadow: none !important; }
+  /* Avoid orphan rows / split tables across pages. */
+  tr, .avoid-break { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+
+  /* Pages that prefer portrait layout opt in. */
+  .print-portrait { page-break-before: always; }
+  @page :first { margin-top: 12mm; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+   Radix UI workaround: when a <Select> closes inside a <Dialog> and the
+   dialog re-renders new conditional fields at the same time, Radix can
+   leave inline `pointer-events: none` on the body, freezing every input
+   on the page for 30–60 seconds. The Setup dialog (License Keys page)
+   triggers this every time the operator picks a role and new commander/
+   squadron fields appear. Force pointer-events back on regardless of
+   what Radix sets inline. Outside-click detection still works because
+   Radix listens at the document level, not via body pointer-events.
+   ───────────────────────────────────────────────────────────────────── */
+body { pointer-events: auto !important; }
