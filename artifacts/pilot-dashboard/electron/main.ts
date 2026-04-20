@@ -137,10 +137,6 @@ function createWindow() {
   if (isDev) {
     mainWindow.loadURL("http://localhost:5173/");
   } else {
-    // DIAGNOSTIC v1.0.30: open DevTools immediately so any console
-    // error is visible to the operator. Remove once v1.0.30 has
-    // confirmed which renderer error was happening.
-    try { mainWindow.webContents.openDevTools({ mode: "detach" }); } catch { /* ignore */ }
     const indexPath = path.join(__dirname, "..", "dist", "public", "index.html");
     if (!fs.existsSync(indexPath)) {
       logErr("missing-index", `index.html not found at ${indexPath}`);

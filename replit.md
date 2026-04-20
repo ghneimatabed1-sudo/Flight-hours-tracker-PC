@@ -111,3 +111,21 @@ Ops-only `/monthly-report` page renders ORFG RCN Forms 1, 2, 3, 4 and the Arabic
 - **Add Sortie auto-fill:** When the ops officer picks a pilot or co-pilot, a read-only `PilotAutoFill` line appears under the dropdown showing the pilot's call sign, flight name, military number, Arabic name and qualification badges from the roster — so the officer can confirm they picked the right person without leaving the form.
 - **Help page:** Now covers every major area — Sortie Logging, Roster/Pilots/Rankings, Currency & Expirations, Schedule/Duty/Risk, NOTAMs/Routes/Units, PDF Exports & Archives, Monthly Report, Users/Audit/Ops Team, Settings/License/Updates and the existing Pilot Mobile App + Support sections. EN + AR strings.
 - **Build:** dashboard-windows-installer.yml triggered on main commit `57be433` after wiping prior runs + artifacts.
+
+# v1.0.26–1.0.32 — Lock Screen + The Black Screen Saga
+
+**v1.0.26** shipped Task #83 (manual Lock screen, 30-min idle auto sign-out, pilot ID badge with QR/photo). Immediately introduced a black-screen-on-launch regression on Windows. Six builds (1.0.27 → 1.0.32) were spent isolating the cause — final fix in **v1.0.32**.
+
+**Root cause:** Vite/Rollup minifier left six lucide-react icons (`Inbox`, `Mail`, `Share2`, `UserPlus`, `Users2`, `FileBarChart`) un-renamed in the production bundle while never binding them to the import — they appeared as bare global identifiers (`I:Inbox`) in the menu array, throwing `ReferenceError: Inbox is not defined` the moment the renderer mounted Layout.tsx. Because Layout wraps every signed-in route, the entire app crashed to a blank window.
+
+**Fix:** Alias the affected icons at import (`import { Inbox as InboxIcon, ... } from "lucide-react"`) and use the `*Icon` names everywhere. This forces the bundler to bind the import properly. Verified by grepping the built `dist/public/assets/index-*.js` for `I:Inbox|Mail|Share2|...` — no matches.
+
+**Lesson — lucide-react bundler gotcha:** When adding a new lucide-react icon whose name collides with a possible global or HTML element name (`Inbox`, `Mail`, `Image`, `Link`, etc.), always alias it as `Foo as FooIcon` at import time. The minifier's name-mangler can intermittently skip these, leaving an undefined global in the bundle.
+
+**Diagnostics added during the bisect (kept as safety nets):**
+- Inline pre-bundle error trap in `index.html` paints any uncaught error or unhandled promise rejection to the screen if the React bundle never mounts (8s timeout). Removed from index.html in v1.0.33 cleanup if no longer needed — currently still present.
+- `safeParse` wrapper in `src/lib/auth.tsx` for all `JSON.parse` of localStorage values (defensive, kept).
+- `sandbox: false` + `webSecurity: false` on the Electron BrowserWindow (legitimate for an offline desktop app loading file:// — kept).
+- Auto-open DevTools (v1.0.30) — **removed in v1.0.33**.
+
+**v1.0.33** — clean release. DevTools no longer auto-open. Lock screen + idle timeout fully active. Brand polished.
