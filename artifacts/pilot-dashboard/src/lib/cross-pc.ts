@@ -597,7 +597,14 @@ export function useDecidePending() {
 // always knows where the sheet currently sits.
 const SCHEDULE_SHARE_KEY = "rjaf.xpc.schedule";
 
-export type ScheduleTier = "squadron" | "wing" | "base";
+// The tier stored on a schedule share row as it travels up (squadron →
+// wing → base) or laterally (squadron ↔ flight). "flight" was added in
+// v1.0.45 so a Flight Commander can compose and forward a sortie
+// schedule to their parent Squadron Commander, and a Squadron Commander
+// can publish a daily programme DOWN to one of their Flight Commanders
+// for visibility / return-for-edit. The DB check constraint on
+// xpc_schedule_shares.current_tier is widened to match.
+export type ScheduleTier = "flight" | "squadron" | "wing" | "base";
 export type ScheduleStatus = "draft" | "submitted" | "reviewed" | "approved" | "rejected" | "held" | "edited";
 
 export interface ScheduleRow {
@@ -916,11 +923,17 @@ export function useDecideSchedule() {
         cur.currentTier = "squadron";
         push("edited", input.note ?? "edits returned to originator");
       } else if (input.action === "forward") {
-        // Squadron → Wing → Base, never skip a tier.
+        // Upward chain: Squadron → Wing → Base (no skipping).
+        // Lateral chain: Flight ↔ Squadron (either end may forward back
+        // to the other). Base is terminal.
         if (cur.currentTier === "wing") {
           cur.currentTier = "base";
         } else if (cur.currentTier === "squadron") {
           cur.currentTier = "wing";
+        } else if (cur.currentTier === "flight") {
+          // A flight-tier share forwards back to its originating
+          // squadron for action.
+          cur.currentTier = "squadron";
         } else {
           throw new Error("Already at base — nowhere to forward.");
         }
