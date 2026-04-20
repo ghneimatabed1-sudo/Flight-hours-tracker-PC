@@ -14,6 +14,8 @@ import { createCommander, deleteCommander, listCommanders, resetCommanderPasswor
 import type { CommanderScope } from "@/lib/types";
 import { fmtDate, fmtDateTime } from "@/lib/format";
 import { KeyRound, Copy, Check, User as UserIcon, Wrench, Lock, Shuffle } from "lucide-react";
+import { useRegisteredPCs } from "@/lib/cross-pc";
+import { Checkbox } from "@/components/ui/checkbox";
 
 function genKey(code: string): string {
   const rnd = Array.from({ length: 16 }, () => Math.floor(Math.random() * 36).toString(36).toUpperCase()).join("");
@@ -30,6 +32,11 @@ export default function LicenseKeys() {
   const { t, lang } = useI18n();
   const auth = useAuth();
   const [keys, setKeys] = useState<LicenseKey[]>(() => listLicenseKeys());
+  // Live list of every PC that has registered into the cross-PC ecosystem.
+  // We filter to squadron-tier entries when populating the setup-time
+  // pickers so commanders are only ever bound to real ops squadron PCs.
+  const registeredPcs = useRegisteredPCs();
+  const opsSquadronPcs = registeredPcs.data.filter(p => p.tier === "squadron");
 
   // Setup-dialog roles. We keep five UI choices but collapse the three
   // commander tiers into the same underlying PcRoleLock value ("commander"),
@@ -39,6 +46,8 @@ export default function LicenseKeys() {
     | "ops"
     | "flight_commander"
     | "squadron_commander"
+    | "wing_commander"
+    | "base_commander"
     | "hq_commander"
     | "super_admin";
   const [setupOpen, setSetupOpen] = useState(false);
@@ -46,6 +55,14 @@ export default function LicenseKeys() {
   const [setupSqnName, setSetupSqnName] = useState("");
   const [setupSqnNumber, setSetupSqnNumber] = useState("");
   const [setupSqnBase, setSetupSqnBase] = useState("");
+  // For squadron/flight commander setup: the registered ops squadron PC this
+  // commander is bound to. Empty string means "type squadron details
+  // manually" (the fallback for when the ops PC has not yet activated).
+  const [setupLinkedPcId, setSetupLinkedPcId] = useState<string>("");
+  // For wing/base commander setup: the list of registered ops squadron PCs
+  // this commander will monitor. Stored on the commander record as
+  // squadronIds so RLS / pickers can scope reads.
+  const [setupMonitoredPcIds, setSetupMonitoredPcIds] = useState<string[]>([]);
   const [setupCommanderName, setSetupCommanderName] = useState("");
   const [setupDeviceName, setSetupDeviceName] = useState("");
   const [setupOpsUsername, setSetupOpsUsername] = useState("");
@@ -99,7 +116,56 @@ export default function LicenseKeys() {
       setChangeOpen(false);
       // Force a clean restart so AuthProvider reads the wiped state and
       // the operator lands back at the Sign-In / Activation screen.
-      setTimeout(() => { window.location.reload(); }, 200);
+      setTimeout(() => { forceSignOutAndReload(); }, 200);
+    }
+  }
+
+  // Hard sign-out + reload. Used by every "Reopen App Now" button so the
+  // app actually drops the current super-admin session and presents the
+  // sign-in screen for the newly-assigned role, instead of returning to
+  // the same logged-in dashboard. Wipes auth identity + auth-related
+  // session state, then reloads.
+  function forceSignOutAndReload() {
+    // 1) Drop the in-memory user immediately so even if the reload is
+    //    delayed (Electron file:// can take a beat), no super-admin UI
+    //    keeps painting in the background.
+    try { auth.logout(); } catch { /* swallow */ }
+    // 2) Wipe every auth-bearing key from localStorage. Earlier versions
+    //    only removed `rjaf.user` — but `rjaf.fails`, `rjaf.lockUntil`,
+    //    any cached Supabase session token under `sb-*-auth-token`, and
+    //    the 2FA TOTP pending state could survive a reload and instantly
+    //    re-hydrate the super admin session, defeating the sign-out.
+    try {
+      localStorage.removeItem("rjaf.user");
+      localStorage.removeItem("rjaf.fails");
+      localStorage.removeItem("rjaf.lockUntil");
+      localStorage.removeItem("rjaf.totpPending");
+      // Supabase v2 stores its auth token under sb-<project>-auth-token.
+      // Clear every variant so the next launch can't auto-restore the
+      // super admin's Supabase session.
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith("sb-") && k.endsWith("-auth-token")) {
+          localStorage.removeItem(k);
+        }
+      }
+      sessionStorage.clear();
+    } catch { /* ignore */ }
+    // 3) Hash-routing aware: under file:// (Electron) and the dev server
+    //    alike, wouter matches against `location.hash`. Set both the path
+    //    and the hash to "/" so we land on Login (rendered when no user
+    //    is in storage) rather than re-hydrating the previous route.
+    try { window.location.hash = "#/"; } catch { /* ignore */ }
+    // 4) Hard reload. window.location.reload() is normally enough, but
+    //    in Electron file:// mode a recently-mutated hash sometimes makes
+    //    Chromium skip the reload. Replace the URL outright as a belt-
+    //    and-suspenders fallback so the renderer is GUARANTEED to remount.
+    try {
+      const base = window.location.href.split("#")[0];
+      window.location.replace(base + "#/");
+    } catch {
+      window.location.reload();
     }
   }
 
@@ -191,6 +257,8 @@ export default function LicenseKeys() {
   function roleScope(r: SetupRoleUI): CommanderScope | undefined {
     if (r === "flight_commander") return "flight";
     if (r === "squadron_commander") return "squadron";
+    if (r === "wing_commander") return "wing";
+    if (r === "base_commander") return "base";
     if (r === "hq_commander") return "hq";
     return undefined;
   }
@@ -198,6 +266,8 @@ export default function LicenseKeys() {
     if (r === "ops") return lang === "ar" ? "طيار عمليات" : "Ops Pilot";
     if (r === "flight_commander") return lang === "ar" ? "قائد طيران" : "Flight Commander";
     if (r === "squadron_commander") return lang === "ar" ? "قائد سرب" : "Squadron Commander";
+    if (r === "wing_commander") return lang === "ar" ? "قائد جناح" : "Wing Commander";
+    if (r === "base_commander") return lang === "ar" ? "قائد قاعدة" : "Base Commander";
     if (r === "hq_commander") return lang === "ar" ? "قائد القيادة" : "HQ Commander";
     return lang === "ar" ? "مدير عام" : "Super Admin";
   }
@@ -205,6 +275,8 @@ export default function LicenseKeys() {
     if (r === "ops") return lang === "ar" ? "مثال: pilot.alkhatib" : "e.g. pilot.alkhatib";
     if (r === "flight_commander") return lang === "ar" ? "مثال: flt.alali" : "e.g. flt.alali";
     if (r === "squadron_commander") return lang === "ar" ? "مثال: sqn.alali" : "e.g. sqn.alali";
+    if (r === "wing_commander") return lang === "ar" ? "مثال: wing.alali" : "e.g. wing.alali";
+    if (r === "base_commander") return lang === "ar" ? "مثال: base.alali" : "e.g. base.alali";
     return lang === "ar" ? "مثال: hq.alali" : "e.g. hq.alali";
   }
 
@@ -217,7 +289,7 @@ export default function LicenseKeys() {
     // If the active license carried a Super-Admin-assigned role, force the
     // setup dialog to that role; the operator can't widen their own tier.
     const assigned = localStorage.getItem("rjaf.assignedRole") as SetupRoleUI | null;
-    setSetupRole(assigned && ["ops","flight_commander","squadron_commander","hq_commander","super_admin"].includes(assigned) ? assigned : "ops");
+    setSetupRole(assigned && ["ops","flight_commander","squadron_commander","wing_commander","base_commander","hq_commander","super_admin"].includes(assigned) ? assigned : "ops");
     setSetupSqnName(auth.squadron?.name ?? "");
     setSetupSqnNumber(auth.squadron?.number ?? "");
     setSetupSqnBase(auth.squadron?.base ?? "");
@@ -225,6 +297,8 @@ export default function LicenseKeys() {
     setSetupDeviceName(auth.pcDeviceName ?? "");
     setSetupOpsUsername("");
     setSetupAccountPassword("");
+    setSetupLinkedPcId("");
+    setSetupMonitoredPcIds([]);
   }
   // True when the current license-key record assigned a role from the admin
   // page. We use this to disable the role selector inside the Setup dialog.
@@ -260,6 +334,22 @@ export default function LicenseKeys() {
         setSetupErr(lang === "ar" ? "أدخل اسم القائد." : "Enter the commander's name.");
         return;
       }
+      // Squadron / flight commander must be bound to a registered ops PC
+      // (chosen from the picker). Without this, cross-PC reads have no
+      // squadron id to filter by and the commander would see nothing.
+      if ((setupRole === "squadron_commander" || setupRole === "flight_commander") && !setupLinkedPcId) {
+        setSetupErr(lang === "ar"
+          ? "اختر جهاز سرب العمليات المرتبط بهذا القائد."
+          : "Pick the ops squadron PC this commander is linked to.");
+        return;
+      }
+      // Wing / base commander must monitor at least one ops squadron PC.
+      if ((setupRole === "wing_commander" || setupRole === "base_commander") && setupMonitoredPcIds.length === 0) {
+        setSetupErr(lang === "ar"
+          ? "اختر سرباً واحداً على الأقل لمراقبته."
+          : "Pick at least one squadron PC to monitor.");
+        return;
+      }
 
       // Block setup until the per-PC fingerprint has actually resolved —
       // otherwise the auto-activated license gets bound to "FP-PENDING" and
@@ -286,12 +376,30 @@ export default function LicenseKeys() {
         const chosen = setupAccountPassword.trim();
         const initialPassword = chosen || generateInitialPassword();
 
+        // Squadron-monitoring scope for this commander, decided at setup time:
+        //   • squadron / flight commander → 1 ops squadron PC (the one whose
+        //     id was picked from the registry, or empty if the admin chose
+        //     manual squadron entry — the local squadron lock still binds
+        //     them to that squadron).
+        //   • wing / base commander → all the squadron PCs the admin
+        //     ticked. RLS reads & cross-PC pickers honour this list.
+        //   • hq commander → every known squadron (handled by registering
+        //     all squadron ids automatically).
+        //   • ops → empty (ops only sees its own squadron).
+        const monitoredSquadronIds: string[] =
+          setupRole === "wing_commander" || setupRole === "base_commander"
+            ? [...setupMonitoredPcIds]
+            : (setupRole === "squadron_commander" || setupRole === "flight_commander")
+              ? (setupLinkedPcId ? [setupLinkedPcId] : [])
+              : setupRole === "hq_commander"
+                ? squadrons.map(s => s.id)
+                : [];
         const create = await createCommander({
           username: accountUsername,
           displayName: commanderName || accountUsername,
           role: roleAccountKind(setupRole),
           scope: roleScope(setupRole),
-          squadronIds: [],
+          squadronIds: monitoredSquadronIds,
         });
         if (!create.ok || !create.record) {
           if (create.error === "duplicate_username") {
@@ -326,8 +434,10 @@ export default function LicenseKeys() {
         // Failing this step does NOT abort setup — local sign-in still
         // works; only cross-PC data sync is degraded.
         if (supabaseConfigured && setupRole !== "ops" && roleAccountKind(setupRole) === "commander") {
-          const tierForSb: "hq" | "squadron" | "flight" =
+          const tierForSb: "hq" | "base" | "wing" | "squadron" | "flight" =
             setupRole === "hq_commander" ? "hq"
+            : setupRole === "base_commander" ? "base"
+            : setupRole === "wing_commander" ? "wing"
             : setupRole === "flight_commander" ? "flight"
             : "squadron";
           try {
@@ -420,11 +530,21 @@ export default function LicenseKeys() {
       // without expanding the PcRoleLock enum.
       const tier =
         setupRole === "hq_commander" ? "hq" :
+        setupRole === "base_commander" ? "base" :
+        setupRole === "wing_commander" ? "wing" :
         setupRole === "squadron_commander" ? "squadron" :
         setupRole === "flight_commander" ? "flight" : "";
       if (tier) localStorage.setItem("rjaf.commanderTier", tier);
       else localStorage.removeItem("rjaf.commanderTier");
       if (commanderName) localStorage.setItem("rjaf.commanderName", commanderName);
+      // Persist the EXACT role the operator picked as the authoritative
+      // role label for this PC. Every label-rendering code path (sidebar
+      // tier badge, dashboard header, audit log) reads `rjaf.assignedRole`
+      // — so without writing it here the sign-in after Reopen could show
+      // a stale label left over from the original install license (e.g.
+      // operator picks "Squadron Commander" but the PC still shows "HQ
+      // Commander" because the seed install key was minted as hq).
+      localStorage.setItem("rjaf.assignedRole", setupRole);
       auth.setPcDeviceName(setupDeviceName.trim());
       auth.setPcRoleLock(roleToLock(setupRole));
 
@@ -468,7 +588,7 @@ export default function LicenseKeys() {
   // Super Admin chooses this here; the field operator can't override it
   // during Setup. Defaults to "ops" (the most common case — squadron
   // operations PC).
-  const [genRole, setGenRole] = useState<"ops" | "flight_commander" | "squadron_commander" | "hq_commander">("ops");
+  const [genRole, setGenRole] = useState<"ops" | "flight_commander" | "squadron_commander" | "wing_commander" | "base_commander" | "hq_commander">("ops");
   // Authorized squadrons for commander tiers. Empty for ops (the PC's own
   // squadron is implicit) and HQ (sees all). For Flight/Squadron Commander
   // PCs, the Super Admin ticks exactly which squadrons that commander is
@@ -583,10 +703,12 @@ export default function LicenseKeys() {
   // mirrors the change into the registry record so the PC's history stays
   // consistent. Only visible when this PC is licensed as a commander tier.
   const assignedRoleHere = (typeof window !== "undefined" ? localStorage.getItem("rjaf.assignedRole") : null) as
-    | "ops" | "flight_commander" | "squadron_commander" | "hq_commander" | "super_admin" | null;
+    | "ops" | "flight_commander" | "squadron_commander" | "wing_commander" | "base_commander" | "hq_commander" | "super_admin" | null;
   const showLiveAuthEditor =
     assignedRoleHere === "squadron_commander" ||
     assignedRoleHere === "flight_commander" ||
+    assignedRoleHere === "wing_commander" ||
+    assignedRoleHere === "base_commander" ||
     assignedRoleHere === "hq_commander";
   const [liveAuth, setLiveAuth] = useState<string[]>(() => {
     try { const raw = localStorage.getItem("rjaf.authorizedSquadronIds"); return raw ? JSON.parse(raw) : []; }
@@ -764,6 +886,8 @@ export default function LicenseKeys() {
                     <SelectItem value="ops">{lang === "ar" ? "طيار عمليات" : "Ops Pilot"}</SelectItem>
                     <SelectItem value="flight_commander">{lang === "ar" ? "قائد طيران" : "Flight Commander"}</SelectItem>
                     <SelectItem value="squadron_commander">{lang === "ar" ? "قائد سرب" : "Squadron Commander"}</SelectItem>
+                    <SelectItem value="wing_commander">{lang === "ar" ? "قائد جناح" : "Wing Commander"}</SelectItem>
+                    <SelectItem value="base_commander">{lang === "ar" ? "قائد قاعدة" : "Base Commander"}</SelectItem>
                     <SelectItem value="hq_commander">{lang === "ar" ? "قائد القيادة" : "Head Quarter Commander"}</SelectItem>
                   </SelectContent>
                 </Select>
@@ -809,6 +933,15 @@ export default function LicenseKeys() {
                   {lang === "ar"
                     ? "قائد القيادة يرى كل الأسراب تلقائيًا — لا حاجة لاختيار."
                     : "HQ Commander sees every squadron automatically — no selection needed."}
+                </p>
+              )}
+              {(genRole === "wing_commander" || genRole === "base_commander") && (
+                <p className="text-[11px] text-muted-foreground border border-border rounded p-2">
+                  {lang === "ar"
+                    ? "يرى كل الأسراب التابعة للجناح/القاعدة تلقائيًا — لا حاجة لاختيار."
+                    : (genRole === "wing_commander"
+                        ? "Wing Commander sees every squadron in the wing automatically — no selection needed."
+                        : "Base Commander sees every squadron at the base automatically — no selection needed.")}
                 </p>
               )}
               <div className="space-y-2">
@@ -990,6 +1123,8 @@ export default function LicenseKeys() {
                     <SelectItem value="ops">{lang === "ar" ? "طيار عمليات (Ops)" : "Ops Pilot"}</SelectItem>
                     <SelectItem value="flight_commander">{lang === "ar" ? "قائد طيران" : "Flight Commander"}</SelectItem>
                     <SelectItem value="squadron_commander">{lang === "ar" ? "قائد سرب" : "Squadron Commander"}</SelectItem>
+                    <SelectItem value="wing_commander">{lang === "ar" ? "قائد جناح" : "Wing Commander"}</SelectItem>
+                    <SelectItem value="base_commander">{lang === "ar" ? "قائد قاعدة" : "Base Commander"}</SelectItem>
                     <SelectItem value="hq_commander">{lang === "ar" ? "قائد القيادة" : "Head Quarter Commander"}</SelectItem>
                     <SelectItem value="super_admin">{lang === "ar" ? "مدير عام" : "Super Admin"}</SelectItem>
                   </SelectContent>
@@ -1012,7 +1147,7 @@ export default function LicenseKeys() {
                 </p>
               </div>
 
-              {(setupRole === "squadron_commander" || setupRole === "flight_commander" || setupRole === "hq_commander") && (
+              {(setupRole === "squadron_commander" || setupRole === "flight_commander" || setupRole === "wing_commander" || setupRole === "base_commander" || setupRole === "hq_commander") && (
                 <div className="space-y-1">
                   <label className="text-sm font-medium">
                     {lang === "ar" ? "اسم القائد" : "Commander name"}
@@ -1027,6 +1162,110 @@ export default function LicenseKeys() {
                     className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
                     data-testid="input-setup-commander-name"
                   />
+                </div>
+              )}
+
+              {/* Pick the ops squadron PC this commander is bound to.
+                  Squadron + flight commanders are bound to exactly ONE ops PC
+                  (their squadron); wing + base commanders may monitor any
+                  number of ops PCs in the ecosystem. The list is sourced
+                  from the live cross-PC registry — i.e. only ops PCs that
+                  have already been set up appear here. If none have, the
+                  admin can still proceed and the binding can be filled in
+                  later from this same dialog after the ops PC activates. */}
+              {(setupRole === "squadron_commander" || setupRole === "flight_commander") && (
+                <div className="space-y-1.5 rounded-md border border-emerald-300/40 bg-emerald-50/60 dark:bg-emerald-950/20 p-3">
+                  <label className="text-sm font-medium text-emerald-900 dark:text-emerald-200">
+                    {lang === "ar" ? "جهاز سرب العمليات المرتبط" : "Linked ops squadron PC"}
+                    <span className="text-red-500 ms-1">*</span>
+                  </label>
+                  {opsSquadronPcs.length === 0 ? (
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                      {lang === "ar"
+                        ? "لا توجد أجهزة سرب عمليات مسجلة بعد. أعدّ جهاز سرب العمليات أولاً ثم أعد فتح هذه النافذة."
+                        : "No ops squadron PCs are registered yet. Set up the ops squadron PC first, then re-open this dialog."}
+                    </p>
+                  ) : (
+                    <Select
+                      value={setupLinkedPcId}
+                      onValueChange={(v) => {
+                        setSetupLinkedPcId(v);
+                        const pc = opsSquadronPcs.find(p => p.id === v);
+                        if (pc) {
+                          setSetupSqnName(pc.squadronName);
+                          if (pc.base) setSetupSqnBase(pc.base);
+                        }
+                      }}
+                    >
+                      <SelectTrigger data-testid="select-setup-linked-pc">
+                        <SelectValue placeholder={lang === "ar" ? "اختر سرباً" : "Choose a squadron"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {opsSquadronPcs.map(pc => (
+                          <SelectItem key={pc.id} value={pc.id} data-testid={`option-linked-pc-${pc.id}`}>
+                            {pc.squadronName}{pc.base ? ` — ${pc.base}` : ""}{pc.online ? " ●" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <p className="text-[10px] text-emerald-900/70 dark:text-emerald-200/70">
+                    {lang === "ar"
+                      ? "هذا القائد سيرى بيانات هذا السرب فقط."
+                      : "This commander will only see data from the squadron picked here."}
+                  </p>
+                </div>
+              )}
+
+              {(setupRole === "wing_commander" || setupRole === "base_commander") && (
+                <div className="space-y-2 rounded-md border border-indigo-300/40 bg-indigo-50/60 dark:bg-indigo-950/20 p-3">
+                  <label className="text-sm font-medium text-indigo-900 dark:text-indigo-200">
+                    {lang === "ar" ? "أجهزة أسراب العمليات التي يراقبها" : "Ops squadron PCs to monitor"}
+                    <span className="text-red-500 ms-1">*</span>
+                  </label>
+                  {opsSquadronPcs.length === 0 ? (
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                      {lang === "ar"
+                        ? "لا توجد أجهزة سرب عمليات مسجلة بعد. أعدّ أجهزة أسراب العمليات أولاً، ثم أعد فتح هذه النافذة لتحديد الأسراب التي يراقبها هذا القائد."
+                        : "No ops squadron PCs are registered yet. Set up the ops squadron PCs first, then re-open this dialog to tick the squadrons this commander will monitor."}
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pe-1">
+                      {opsSquadronPcs.map(pc => {
+                        const checked = setupMonitoredPcIds.includes(pc.id);
+                        return (
+                          <label
+                            key={pc.id}
+                            className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-indigo-100/40 dark:hover:bg-indigo-900/20 cursor-pointer"
+                            data-testid={`row-monitored-pc-${pc.id}`}
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(v) => {
+                                setSetupMonitoredPcIds(prev =>
+                                  v ? Array.from(new Set([...prev, pc.id]))
+                                    : prev.filter(x => x !== pc.id),
+                                );
+                              }}
+                              data-testid={`checkbox-monitored-pc-${pc.id}`}
+                            />
+                            <span className="text-sm flex-1">
+                              {pc.squadronName}
+                              {pc.base ? <span className="text-muted-foreground"> — {pc.base}</span> : null}
+                            </span>
+                            {pc.online && (
+                              <span className="text-[10px] text-emerald-600 dark:text-emerald-400">●</span>
+                            )}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-indigo-900/70 dark:text-indigo-200/70">
+                    {lang === "ar"
+                      ? `محدد: ${setupMonitoredPcIds.length} من ${opsSquadronPcs.length}`
+                      : `Selected: ${setupMonitoredPcIds.length} of ${opsSquadronPcs.length}`}
+                  </p>
                 </div>
               )}
 
@@ -1236,10 +1475,10 @@ export default function LicenseKeys() {
             {setupOk ? (
               <Button
                 onClick={() => {
-                  // Hard-reload so the new role lock and account take effect.
-                  // In Electron this restarts the renderer with the new auth
-                  // context; in the browser it bypasses any stale React state.
-                  window.location.reload();
+                  // Force sign-out + reload so the super admin session is
+                  // dropped and the newly-assigned operator lands at the
+                  // sign-in screen (not back at the super admin dashboard).
+                  forceSignOutAndReload();
                 }}
                 data-testid="button-setup-reopen"
                 className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
@@ -1333,7 +1572,7 @@ export default function LicenseKeys() {
               </div>
             )}
             <Button
-              onClick={() => window.location.reload()}
+              onClick={forceSignOutAndReload}
               className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-6 text-base"
               data-testid="button-overlay-reopen"
             >
