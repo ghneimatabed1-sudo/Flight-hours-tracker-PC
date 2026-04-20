@@ -146,7 +146,16 @@ interface AuthCtx extends AuthState {
   // password's SHA-256 hash is stored in localStorage under ADMIN_PASSWORD_HASH_KEY
   // and takes effect immediately. In Supabase mode the hash lives server-side
   // and this call returns { ok: false, error: "server_managed" }.
-  changeSuperAdminPassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>;
+  // Changes the super-admin password.
+  // Supabase mode: requires a current 6-digit TOTP code as well. The new
+  // hash is written to super_admin_credentials by the edge function and
+  // becomes the live password on every PC immediately (next login).
+  // Demo mode: totpCode is ignored and the new hash is stored locally.
+  changeSuperAdminPassword: (
+    currentPassword: string,
+    newPassword: string,
+    totpCode?: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
   // First-run setup: write the initial Super Admin password hash on this
   // specific PC. Only succeeds when no hash has been provisioned yet —
   // calling it once a hash exists returns { ok: false, error: "already_set" }
@@ -839,18 +848,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await recordAuditEvent({ type: "admin.password.master_reset.ok", actor: "master-recovery", detail: {} });
       return { ok: true };
     },
-    changeSuperAdminPassword: async (currentPassword, newPassword) => {
+    changeSuperAdminPassword: async (currentPassword, newPassword, totpCode) => {
       const u = state.user;
       if (!u || u.role !== "super_admin") return { ok: false, error: "unauthorized" };
       const np = (newPassword ?? "").trim();
       if (np.length < 8) return { ok: false, error: "too_short" };
       if (np === (currentPassword ?? "").trim()) return { ok: false, error: "same" };
 
-      if (supabaseConfigured) {
-        // Server-managed password. A future edge-function action could accept
-        // (current, new) and rotate the hash server-side; until that ships the
-        // super admin must rotate SUPER_ADMIN_PASSWORD_HASH in env vars.
-        return { ok: false, error: "server_managed" };
+      if (supabaseConfigured && supabase) {
+        // v1.0.46: password rotation is now supported in Supabase mode. The
+        // super admin proves possession of the CURRENT password (via the
+        // start-action challenge token) AND the enrolled TOTP authenticator,
+        // then the edge function writes a new SHA-256 hash to
+        // super_admin_credentials. Every other PC picks up the new value on
+        // its next sign-in — no redeploy, no env-var edit, no CLI.
+        const tc = (totpCode ?? "").trim();
+        if (!/^\d{6}$/.test(tc)) return { ok: false, error: "bad_totp" };
+        try {
+          const start = await supabase.functions.invoke("super-admin-2fa", {
+            body: { action: "start", username: u.username, password: currentPassword },
+          });
+          if (start.error || !start.data?.ok) {
+            const reason = start.data?.error ?? "server_error";
+            if (reason === "unauthorized") return { ok: false, error: "bad_current" };
+            return { ok: false, error: reason };
+          }
+          const token = String(start.data.token ?? "");
+          const change = await supabase.functions.invoke("super-admin-2fa", {
+            body: {
+              action: "change-password",
+              username: u.username,
+              token,
+              code: tc,
+              newPassword: np,
+            },
+          });
+          if (change.error || !change.data?.ok) {
+            const reason = change.data?.error ?? "server_error";
+            if (reason === "bad") return { ok: false, error: "bad_totp" };
+            if (reason === "locked") return { ok: false, error: "locked" };
+            if (reason === "same") return { ok: false, error: "same" };
+            if (reason === "bad_input") return { ok: false, error: "bad_input" };
+            return { ok: false, error: reason };
+          }
+          await recordAuditEvent({ type: "admin.password.change.ok", actor: u.username, detail: { via: "edge-function" } });
+          return { ok: true };
+        } catch (e: unknown) {
+          return { ok: false, error: e instanceof Error ? e.message : "server_error" };
+        }
       }
 
       // Demo / standalone mode: verify the current password against the PC's
