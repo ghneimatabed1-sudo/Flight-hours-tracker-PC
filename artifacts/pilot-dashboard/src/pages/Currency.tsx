@@ -3,7 +3,7 @@ import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots } from "@/lib/squadron-data";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, ArrowUp, ArrowDown } from "lucide-react";
 import type { CurrencyKey } from "@/lib/mock";
 
 // Single matrix view for the squadron ops officer. Shows every active
@@ -83,6 +83,15 @@ export default function Currency() {
   const [hiddenPilots, setHiddenPilots] = useState<Set<string>>(() => loadHiddenPilots());
   const [hiddenCols, setHiddenCols]     = useState<Set<CurrencyKey>>(() => loadHiddenCols());
   const [showHiddenPilots, setShowHiddenPilots] = useState(false);
+  // Sort: `key` is either a CurrencyKey (sort by that column's expiry) or
+  // "worst" (default, sort by each pilot's nearest-expiring currency).
+  // `dir` "asc" = oldest-expiry / most-overdue first, "desc" = newest first.
+  const [sortKey, setSortKey] = useState<CurrencyKey | "worst">("worst");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const cycleSort = (k: CurrencyKey | "worst") => {
+    if (sortKey !== k) { setSortKey(k); setSortDir("asc"); return; }
+    setSortDir(d => d === "asc" ? "desc" : "asc");
+  };
 
   useEffect(() => { saveHiddenPilots(hiddenPilots); }, [hiddenPilots]);
   useEffect(() => { saveHiddenCols(hiddenCols);     }, [hiddenCols]);
@@ -118,7 +127,25 @@ export default function Currency() {
       const worstDays = live.length ? Math.min(...live.map(c => c.s.days)) : Number.POSITIVE_INFINITY;
       return { p, cells, worstDays, pilotHidden: hiddenPilots.has(p.id) };
     })
-    .sort((a, b) => Number(a.pilotHidden) - Number(b.pilotHidden) || a.worstDays - b.worstDays);
+    .sort((a, b) => {
+      // Hidden rows always at the bottom regardless of direction.
+      const h = Number(a.pilotHidden) - Number(b.pilotHidden);
+      if (h !== 0) return h;
+      // Resolve the "days until expiry" value the user picked to sort by.
+      // Empty / NA cells are pushed to the END (treated as +Infinity) in
+      // both directions so they never crowd the actionable rows.
+      const valFor = (r: typeof a): number => {
+        if (sortKey === "worst") return r.worstDays;
+        const cell = r.cells.find(c => c.col.k === sortKey);
+        if (!cell || cell.na || cell.s.empty) return Number.POSITIVE_INFINITY;
+        return cell.s.days;
+      };
+      const av = valFor(a), bv = valFor(b);
+      // Push +Infinity to the bottom in both directions.
+      if (av === Number.POSITIVE_INFINITY && bv !== Number.POSITIVE_INFINITY) return 1;
+      if (bv === Number.POSITIVE_INFINITY && av !== Number.POSITIVE_INFINITY) return -1;
+      return sortDir === "asc" ? av - bv : bv - av;
+    });
 
   return (
     <div>
@@ -165,9 +192,33 @@ export default function Currency() {
           <table className="w-full text-sm">
             <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 text-left">{t("name")}</th>
+                <th className="px-3 py-2 text-left">
+                  <button
+                    onClick={() => cycleSort("worst")}
+                    className="inline-flex items-center gap-1 hover:text-foreground"
+                    title="Sort by each pilot's nearest-expiring currency"
+                    data-testid="sort-name"
+                  >
+                    {t("name")}
+                    {sortKey === "worst" && (sortDir === "asc"
+                      ? <ArrowUp className="h-3 w-3" />
+                      : <ArrowDown className="h-3 w-3" />)}
+                  </button>
+                </th>
                 {visibleCols.map(c => (
-                  <th key={c.k} className="px-3 py-2 text-left whitespace-nowrap">{c.label}</th>
+                  <th key={c.k} className="px-3 py-2 text-left whitespace-nowrap">
+                    <button
+                      onClick={() => cycleSort(c.k)}
+                      className="inline-flex items-center gap-1 hover:text-foreground"
+                      title={`Sort by ${c.label} expiry — click again to flip direction`}
+                      data-testid={`sort-${c.k}`}
+                    >
+                      {c.label}
+                      {sortKey === c.k && (sortDir === "asc"
+                        ? <ArrowUp className="h-3 w-3" />
+                        : <ArrowDown className="h-3 w-3" />)}
+                    </button>
+                  </th>
                 ))}
                 <th className="px-3 py-2 text-right w-10"></th>
               </tr>
