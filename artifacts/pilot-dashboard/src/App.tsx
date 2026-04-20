@@ -204,12 +204,9 @@ const IDLE_LOGOUT_MS = 30 * 60 * 1000;
 function Shell() {
   const { licensed, configured, user, logout } = useAuth();
 
-  // DIAGNOSTIC v1.0.31: idle timeout temporarily disabled to confirm
-  // whether task #83 (lock screen + idle sign-out) is the cause of the
-  // black-screen-on-launch regression. Will be re-enabled once root
-  // cause is confirmed.
-  void useIdleTimeout; void IDLE_LOGOUT_MS; void logout;
-  // useIdleTimeout(IDLE_LOGOUT_MS, () => { if (user) logout(); }, !!user);
+  useIdleTimeout(IDLE_LOGOUT_MS, () => {
+    if (user) logout();
+  }, !!user);
 
   if (!user) return <LoginGate />;
 
