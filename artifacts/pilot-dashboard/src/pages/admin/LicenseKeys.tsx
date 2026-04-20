@@ -362,6 +362,25 @@ export default function LicenseKeys() {
         return;
       }
 
+      // ──────────────────────────────────────────────────────────────────
+      // Pre-flight duration validation. The Ops branch and the commander
+      // branch each call resolveSetupExpiry independently later — but the
+      // commander branch USED TO call it AFTER already writing
+      // rjaf.assignedRole + pcRoleLock + pcDeviceName. If the operator
+      // typed a bad duration, the device was left half-locked into the
+      // new role despite setup reporting failure, and they couldn't
+      // recover without admin intervention. We now validate up-front so
+      // no persistent state is touched if the duration is invalid.
+      // ──────────────────────────────────────────────────────────────────
+      if (setupRole !== "super_admin") {
+        const probeIssued = new Date().toISOString().slice(0, 10);
+        const probeExpiry = resolveSetupExpiry(probeIssued);
+        if (!probeExpiry.valid) {
+          setSetupErr(lang === "ar" ? "أدخل مدة صحيحة." : "Enter a valid duration.");
+          return;
+        }
+      }
+
       // CRITICAL ORDER OF OPERATIONS for setup:
       //   1. Create the local user account (so the pilot/commander can sign in
       //      after restart). Without this step the PC ends up role-locked but
