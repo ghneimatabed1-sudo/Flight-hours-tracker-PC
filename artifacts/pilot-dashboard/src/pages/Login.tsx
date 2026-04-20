@@ -68,12 +68,12 @@ export default function LoginGate() {
   // while the lock is already showing, while a 2FA prompt is open, or
   // while the recovery codes are being displayed (those flows are
   // sensitive — we don't want to dismiss them by triggering a screensaver).
-  const [locked, setLocked] = useState(false);
-  useIdleTimeout(
-    LOGIN_AUTO_LOCK_MS,
-    () => setLocked(true),
-    !locked && !pendingAdmin && !pendingRecoveryCodes,
-  );
+  // DIAGNOSTIC v1.0.31: lock screen + login auto-lock disabled to bisect
+  // task #83 as the cause of the black-screen-on-launch regression.
+  void useIdleTimeout; void LOGIN_AUTO_LOCK_MS; void LockScreen; void Lock;
+  const [locked, setLocked] = useState(false); void setLocked;
+  // useIdleTimeout(LOGIN_AUTO_LOCK_MS, () => setLocked(true),
+  //   !locked && !pendingAdmin && !pendingRecoveryCodes);
 
   const lockedRemaining = lockedUntil ? Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000)) : 0;
 
@@ -405,6 +405,39 @@ export default function LoginGate() {
                 ? <div className="text-xs text-amber-400">{t("lockedOut")} ({lockedRemaining}s)</div>
                 : err && <div className="text-xs text-destructive">{err}</div>}
               <button data-testid="button-signin" disabled={lockedRemaining > 0} className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 disabled:opacity-50">{t("signIn")}</button>
+              {/* Dev-only escape hatch: when running in the in-browser preview
+                  (no Supabase backend, hostname is replit.dev / localhost) the
+                  2FA secret + lockout live in localStorage. If the operator
+                  enters the wrong TOTP a few times they get locked out for 5
+                  min with no way to recover without DevTools — which is awful
+                  for iterating on the UI. This button only renders in that
+                  exact preview context, never in shipped Electron builds or
+                  any deployed Supabase environment. */}
+              {(() => {
+                const h = typeof window !== "undefined" ? window.location.hostname : "";
+                const isDevPreview =
+                  h.endsWith(".replit.dev") || h.endsWith(".repl.co") || h === "localhost" || h === "127.0.0.1";
+                if (!isDevPreview) return null;
+                return (
+                  <button
+                    type="button"
+                    data-testid="button-dev-reset-2fa"
+                    onClick={() => {
+                      try {
+                        localStorage.removeItem("rjaf.lockUntil");
+                        localStorage.removeItem("rjaf.failedAttempts");
+                        localStorage.removeItem("rjaf.adminTotp.secret");
+                        localStorage.removeItem("rjaf.adminTotp.recoveryCodes");
+                        localStorage.removeItem("rjaf.adminTotp.recoveryUsed");
+                      } catch {}
+                      window.location.reload();
+                    }}
+                    className="w-full text-[10px] text-muted-foreground/70 hover:text-amber-400 underline underline-offset-2"
+                  >
+                    Reset lockout & 2FA enrollment (dev preview only)
+                  </button>
+                );
+              })()}
               {u.trim().toLowerCase() !== "admin" && (
                 <button
                   type="button"
@@ -422,9 +455,6 @@ export default function LoginGate() {
                     : t("superAdminAccess")}
                 </button>
               )}
-              <div className="text-[11px] text-muted-foreground text-center pt-1">
-                {t("loginHelp")}
-              </div>
               {hqMode && !licensed && (
                 <button type="button" onClick={() => setHqMode(false)} className="w-full text-[11px] text-muted-foreground hover:text-foreground underline">
                   ← {t("licenseTitle")}
