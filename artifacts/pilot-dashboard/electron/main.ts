@@ -65,11 +65,33 @@ function createWindow() {
 
   // Reveal the window only once the renderer paints its first frame so
   // operators don't see a flash of empty chrome before full-screen kicks in.
-  mainWindow.once("ready-to-show", () => {
-    mainWindow?.maximize();
-    mainWindow?.show();
-    mainWindow?.focus();
-  });
+  // SAFETY NET: if `ready-to-show` doesn't fire within 4 seconds (slow
+  // network blocking on Google Fonts, renderer hang, etc.), force-show
+  // the window anyway so operators are never staring at an invisible
+  // process that's only visible in Task Manager.
+  let shown = false;
+  const showOnce = (reason: string) => {
+    if (shown || !mainWindow) return;
+    shown = true;
+    try {
+      mainWindow.maximize();
+      mainWindow.show();
+      mainWindow.focus();
+    } catch (e) {
+      logErr("show-failed", `${reason}: ${(e as Error).message}`);
+    }
+  };
+  mainWindow.once("ready-to-show", () => showOnce("ready-to-show"));
+  setTimeout(() => {
+    if (!shown) {
+      logErr(
+        "ready-to-show-timeout",
+        "Renderer did not signal ready within 4s — forcing window visible. Open DevTools (Ctrl+Shift+I) for details.",
+      );
+      showOnce("timeout");
+      try { mainWindow?.webContents.openDevTools({ mode: "detach" }); } catch { /* ignore */ }
+    }
+  }, 4000);
 
   // ── Diagnostics so we never ship another silent blue-screen ─────────
   // If the renderer fails to load (bad path, missing asset, ESM blocked
