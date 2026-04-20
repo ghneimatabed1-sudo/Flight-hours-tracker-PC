@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
-import { ShieldCheck, Languages, KeyRound, Smartphone, Phone, Mail } from "lucide-react";
+import { useIdleTimeout } from "@/lib/use-idle-timeout";
+import LockScreen from "@/components/LockScreen";
+import { ShieldCheck, Languages, KeyRound, Smartphone, Phone, Mail, Lock } from "lucide-react";
 import QRCode from "qrcode";
+
+// 1 hour of no input on the login page → auto lock. Tuned generously so
+// real operators briefly stepping away to grab a coffee don't get locked,
+// but a PC left unattended overnight always ends up on the screensaver.
+const LOGIN_AUTO_LOCK_MS = 60 * 60 * 1000;
 
 export default function LoginGate() {
   const {
@@ -55,6 +62,18 @@ export default function LoginGate() {
   useEffect(() => {
     setHqMode(pcRoleLock !== "ops");
   }, [pcRoleLock]);
+
+  // Lock screen — manual ("Lock screen" button bottom-left) or automatic
+  // after LOGIN_AUTO_LOCK_MS of no input. The idle timer is suppressed
+  // while the lock is already showing, while a 2FA prompt is open, or
+  // while the recovery codes are being displayed (those flows are
+  // sensitive — we don't want to dismiss them by triggering a screensaver).
+  const [locked, setLocked] = useState(false);
+  useIdleTimeout(
+    LOGIN_AUTO_LOCK_MS,
+    () => setLocked(true),
+    !locked && !pendingAdmin && !pendingRecoveryCodes,
+  );
 
   const lockedRemaining = lockedUntil ? Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000)) : 0;
 
@@ -144,6 +163,10 @@ export default function LoginGate() {
 
   const showLogin = hqMode || (licensed && configured && !user);
 
+  if (locked) {
+    return <LockScreen onUnlock={() => setLocked(false)} />;
+  }
+
   return (
     // Scrollable shell: outer pins to viewport height and owns the scrollbar,
     // inner `min-h-full` flex grows to content so short forms stay centered
@@ -160,6 +183,25 @@ export default function LoginGate() {
           {lang === "en" ? t("arabic") : t("english")}
         </button>
       </div>
+
+      {/* Manual lock-screen trigger. Sits opposite the language switcher,
+          bottom-left, deliberately understated so it never competes with
+          the sign-in form. Hidden during 2FA / recovery flows so a stray
+          click can't trash an in-progress sensitive action. */}
+      {!pendingAdmin && !pendingRecoveryCodes && (
+        <div className="fixed bottom-4 left-4 rtl:right-4 rtl:left-auto z-50">
+          <button
+            type="button"
+            data-testid="button-lock-screen"
+            onClick={() => setLocked(true)}
+            title={t("lockScreen")}
+            className="text-xs px-3 py-1.5 rounded-md border border-border/70 bg-background/40 backdrop-blur hover:bg-secondary hover:border-amber-500/40 inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Lock className="h-3.5 w-3.5" />
+            {t("lockScreen")}
+          </button>
+        </div>
+      )}
 
       <div className="w-full max-w-md">
         <div className="flex flex-col items-center mb-6">

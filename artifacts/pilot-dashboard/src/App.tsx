@@ -33,6 +33,7 @@ import { UndoToast } from "@/components/UndoToast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { I18nProvider } from "@/lib/i18n";
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { useIdleTimeout } from "@/lib/use-idle-timeout";
 import Layout from "@/components/Layout";
 import OpeningAnimation from "@/components/OpeningAnimation";
 import { HQLayout } from "@/components/HQLayout";
@@ -194,8 +195,18 @@ function CommanderRoutes() {
   );
 }
 
+// 30 minutes of no input → automatic sign-out. Applies to every signed-in
+// role (super admin, commander, ops). The hook is gated on `enabled` so it
+// only runs while a user is actually signed in — no point arming a timer
+// when the login gate is showing.
+const IDLE_LOGOUT_MS = 30 * 60 * 1000;
+
 function Shell() {
-  const { licensed, configured, user } = useAuth();
+  const { licensed, configured, user, logout } = useAuth();
+
+  useIdleTimeout(IDLE_LOGOUT_MS, () => {
+    if (user) logout();
+  }, !!user);
 
   if (!user) return <LoginGate />;
 

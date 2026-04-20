@@ -303,6 +303,54 @@ html, body, #root {
 .lift { transition: transform .18s ease, border-color .18s ease, background-color .18s ease; }
 .lift:hover { transform: translateY(-1px); border-color: hsl(42 90% 55% / .35); }
 
+/* ─── Lock screen ─────────────────────────────────────────────────────── */
+/* Soft animated radial vignette — drifts very slowly to add depth without
+   ever being distracting. Tuned to ~30s cycle so the eye never tracks it. */
+@keyframes lock-vignette-drift {
+  0%   { background-position: 30% 35%; }
+  50%  { background-position: 70% 65%; }
+  100% { background-position: 30% 35%; }
+}
+.lock-vignette {
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 40%,
+      hsl(42 90% 55% / .08) 0%,
+      transparent 60%),
+    radial-gradient(ellipse 90% 70% at 50% 100%,
+      hsl(220 60% 30% / .25) 0%,
+      transparent 70%);
+  background-size: 200% 200%, 100% 100%;
+  animation: lock-vignette-drift 30s ease-in-out infinite;
+}
+/* Faint diagonal sheen sweeping across the top — gives the lock an
+   "alive" feel similar to high-end OS lock screens. */
+@keyframes lock-sheen-sweep {
+  0%   { transform: translateX(-30%); opacity: 0; }
+  10%  { opacity: .9; }
+  90%  { opacity: .9; }
+  100% { transform: translateX(130%); opacity: 0; }
+}
+.lock-sheen {
+  background: linear-gradient(115deg,
+    transparent 0%,
+    hsl(42 90% 65% / .04) 45%,
+    hsl(42 90% 75% / .08) 50%,
+    hsl(42 90% 65% / .04) 55%,
+    transparent 100%);
+  animation: lock-sheen-sweep 14s ease-in-out infinite;
+  animation-delay: 2s;
+}
+/* Slow logo "breathing" — 4% scale + slight glow pulse. */
+@keyframes lock-breathe {
+  0%, 100% { transform: scale(1);    filter: drop-shadow(0 0 24px rgba(212,175,55,.30)); }
+  50%      { transform: scale(1.04); filter: drop-shadow(0 0 38px rgba(212,175,55,.55)); }
+}
+.lock-breathe { animation: lock-breathe 6s ease-in-out infinite; }
+/* Time digits get a faint amber ink glow for that "command center" feel. */
+.lock-time {
+  text-shadow: 0 0 22px hsl(42 90% 60% / .25), 0 1px 0 hsl(42 90% 35% / .15);
+}
+
 /* Inline progress meter */
 .meter { height: 4px; border-radius: 999px; background: hsl(220 25% 16%); overflow: hidden; }
 .meter > i { display: block; height: 100%; background: linear-gradient(90deg, #f5d57a, #d4a528); border-radius: 999px; }
