@@ -127,12 +127,13 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setLink(storedLink);
       setSnapshot(storedSnap);
       setLock(storedLock);
-      // Pre-unlock if this device has been trusted on a prior launch.
-      // Records written before the `trusted` flag existed are treated as
-      // trusted too (undefined → true) so upgraders don't get locked out
-      // of their own device after an app update.
+      // Always require the password on cold launch when one is set.
+      // The trusted-bit auto-unlock was removed — pilots explicitly asked
+      // for "Enter your password" every time the app is opened from cold.
+      // Once unlocked this session, it stays unlocked until the app is
+      // killed or the pilot signs out from Settings.
       if (storedLock) {
-        setUnlocked(storedLock.trusted !== false);
+        setUnlocked(false);
       }
       setReady(true);
 
@@ -194,8 +195,17 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           linkedAt: new Date().toISOString(),
           squadronId: r.squadronId,
         };
+        // Always wipe any previously stored password on a successful new
+        // pairing so the pilot goes through the clean "create a password"
+        // flow on the next screen (/setup-lock mode=initial). Without this
+        // a pilot re-linking (after a key revoke, reinstall, or device
+        // hand-off) would see the "change password" form and be stuck
+        // because they don't know the old password.
+        await clearLock();
         await saveLink(linkRec);
         await saveSnapshot(r.snapshot);
+        setLock(null);
+        setUnlocked(false);
         setLink(linkRec);
         setSnapshot(r.snapshot);
         return { ok: true };
@@ -215,8 +225,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         pilotId: demoSnapshot.profile.id,
         linkedAt: new Date().toISOString(),
       };
+      await clearLock();
       await saveLink(linkRec);
       await saveSnapshot(demoSnapshot);
+      setLock(null);
+      setUnlocked(false);
       setLink(linkRec);
       setSnapshot(demoSnapshot);
       return { ok: true };
