@@ -31,8 +31,42 @@
 alter table pilot_devices
   add column if not exists user_id uuid references auth.users(id) on delete cascade;
 
+-- token_hash was the original primary key (opaque-token model). Postgres
+-- won't let us drop NOT NULL on a PK column, so demote it: drop the PK,
+-- keep the column for legacy callers as a partial unique index, and let
+-- the row be identified by either token_hash OR user_id.
+do $$
+begin
+  if exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.pilot_devices'::regclass
+      and contype = 'p'
+  ) then
+    alter table pilot_devices drop constraint pilot_devices_pkey;
+  end if;
+end$$;
+
 alter table pilot_devices
   alter column token_hash drop not null;
+
+-- Surrogate PK so PostgREST etc. always have a stable row identifier.
+alter table pilot_devices
+  add column if not exists id uuid not null default gen_random_uuid();
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.pilot_devices'::regclass
+      and contype = 'p'
+  ) then
+    alter table pilot_devices add primary key (id);
+  end if;
+end$$;
+
+create unique index if not exists pilot_devices_token_hash_uniq
+  on pilot_devices(token_hash)
+  where token_hash is not null;
 
 create unique index if not exists pilot_devices_user_id_uniq
   on pilot_devices(user_id)
