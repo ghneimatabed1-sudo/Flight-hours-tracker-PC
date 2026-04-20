@@ -86,7 +86,5 @@ externalPort = 8099
 [userenv]
 
 [userenv.shared]
-VITE_SUPABASE_URL = "https://fxlqmigioerimyrbszcz.supabase.co"
-VITE_SUPABASE_ANON_KEY = "sb_publishable_lr9t-dkdhPiZ2ML3Bm2mDw_quTW1FIL"
-EXPO_PUBLIC_SUPABASE_URL = "postgresql://postgres:[YOUR-PASSWORD]@db.fxlqmigioerimyrbszcz.supabase.co:5432/postgres"
-EXPO_PUBLIC_SUPABASE_ANON_KEY = "supabase login supabase init supabase link --project-ref fxlqmigioerimyrbszcz"
+VITE_SUPABASE_URL = "https://nklrdhfsbevckovqqkah.supabase.co"
+EXPO_PUBLIC_SUPABASE_URL = "https://nklrdhfsbevckovqqkah.supabase.co"
