@@ -1,7 +1,8 @@
 import { useI18n } from "@/lib/i18n";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plane, Users, AlertTriangle, KeyRound, Printer } from "lucide-react";
-import { squadrons, pilots, licenseKeys } from "@/lib/mockData";
+import { pilots, licenseKeys } from "@/lib/mockData";
+import { useSquadrons } from "@/lib/squadron-store";
 import { pilotWorstStatus } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { useAuth } from "@/lib/auth";
 export default function AdminOverview() {
   const { t, lang } = useI18n();
   const { user } = useAuth();
+  const squadrons = useSquadrons();
   const enabledSquadrons = squadrons.filter(s => s.enabled);
   const expired = pilots.filter(p => { const s = pilotWorstStatus(p); return s === "expired" || s === "critical"; }).length;
   const warning = pilots.filter(p => { const s = pilotWorstStatus(p); return s === "warning" || s === "expiringSoon"; }).length;

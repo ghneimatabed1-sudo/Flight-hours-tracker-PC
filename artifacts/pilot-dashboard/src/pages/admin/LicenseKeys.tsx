@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { squadrons } from "@/lib/mockData";
+import { useSquadrons } from "@/lib/squadron-store";
 import type { LicenseKey, LicenseDuration } from "@/lib/types";
 import { addDuration, addDays } from "@/lib/types";
 import { listLicenseKeys, registerLicenseKey, updateLicenseKey, removeLicenseKey } from "@/lib/license-registry";
@@ -31,6 +31,7 @@ const CUSTOM_DURATION = "__custom__";
 export default function LicenseKeys() {
   const { t, lang } = useI18n();
   const auth = useAuth();
+  const squadrons = useSquadrons();
   const [keys, setKeys] = useState<LicenseKey[]>(() => listLicenseKeys());
   // Live list of every PC that has registered into the cross-PC ecosystem.
   // We filter to squadron-tier entries when populating the setup-time

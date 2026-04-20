@@ -3,7 +3,8 @@ import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { squadrons, pilots } from "@/lib/mockData";
+import { pilots } from "@/lib/mockData";
+import { useSquadrons } from "@/lib/squadron-store";
 import { pilotWorstStatus } from "@/lib/format";
 import { ChevronRight, Eye, Plane, Users, AlertTriangle, Clock, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button";
 export default function CommanderOverview() {
   const { t, lang, dir } = useI18n();
   const { user } = useAuth();
+  const squadrons = useSquadrons();
   if (!user) return null;
 
   const myIds = new Set(user.squadronIds);

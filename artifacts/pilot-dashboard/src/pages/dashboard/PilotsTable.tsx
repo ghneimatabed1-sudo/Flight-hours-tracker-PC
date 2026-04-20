@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { CurrencyCell, StatusBadge } from "@/components/StatusBadge";
-import { pilots, squadrons } from "@/lib/mockData";
+import { pilots } from "@/lib/mockData";
+import { useSquadrons } from "@/lib/squadron-store";
 import { pilotWorstStatus, pilotWorstDate, fmtDate } from "@/lib/format";
 import type { CurrencyStatus, Pilot } from "@/lib/types";
 import { Search, ArrowUpDown, ChevronLeft, Download, Printer, FileSpreadsheet } from "lucide-react";
@@ -17,6 +18,7 @@ type SortKey = keyof Pick<Pilot, "callSign" | "fullName" | "monthlyHours" | "gra
 export default function PilotsTable() {
   const { t, lang, dir } = useI18n();
   const { user } = useAuth();
+  const squadrons = useSquadrons();
   const [, params] = useRoute("/dashboard/squadron/:id");
   const focusedSqnId = params?.id;
 

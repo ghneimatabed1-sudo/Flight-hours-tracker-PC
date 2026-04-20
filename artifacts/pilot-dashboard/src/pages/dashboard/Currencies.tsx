@@ -7,10 +7,28 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
-import { pilots, squadrons } from "@/lib/mockData";
+import { pilots } from "@/lib/mockData";
+import { useSquadrons } from "@/lib/squadron-store";
 import { currencyStatus, fmtDate } from "@/lib/format";
 import type { CurrencyStatus, Pilot } from "@/lib/types";
-import { Search, ArrowUpDown, Download, Printer, FileSpreadsheet, Gauge } from "lucide-react";
+import { Search, ArrowUpDown, Download, Printer, FileSpreadsheet, Gauge, Eye, EyeOff } from "lucide-react";
+
+// Per-PC hide-pilot store, mirrored exactly with the ops Currency page so
+// that on a dual-purpose PC (commander + ops both signed in over time) the
+// "Hide" decisions stay consistent. Local-only — never propagates between
+// PCs because each station owns its own roll-up view.
+const HIDE_KEY = "rjaf.currency.hiddenPilots";
+function loadHidden(): Set<string> {
+  try {
+    const raw = localStorage.getItem(HIDE_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw) as unknown;
+    return new Set(Array.isArray(arr) ? (arr as string[]) : []);
+  } catch { return new Set(); }
+}
+function saveHidden(s: Set<string>) {
+  localStorage.setItem(HIDE_KEY, JSON.stringify(Array.from(s)));
+}
 
 type SortKey = "callSign" | "fullName" | "squadron" | "day" | "nvg" | "irt" | "medical" | "worst";
 
@@ -43,6 +61,7 @@ function pilotWorst(p: Pilot): { status: CurrencyStatus; date: string } {
 export default function Currencies() {
   const { t, lang } = useI18n();
   const { user } = useAuth();
+  const squadrons = useSquadrons();
 
   const [q, setQ] = useState("");
   const [sqnFilter, setSqnFilter] = useState<string>("__all");
