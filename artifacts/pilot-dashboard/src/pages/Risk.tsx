@@ -23,20 +23,6 @@ import { Printer, RotateCcw } from "lucide-react";
  */
 
 const STORAGE_KEY = "rjaf.riskAssessment.v1";
-const DEFAULTS_KEY = "rjaf.riskAssessment.defaults.v1";
-
-interface RiskDefaults { rank: string; signName: string; }
-function loadRiskDefaults(): RiskDefaults {
-  try {
-    const raw = localStorage.getItem(DEFAULTS_KEY);
-    if (!raw) return { rank: "", signName: "" };
-    const p = JSON.parse(raw);
-    return { rank: String(p.rank ?? ""), signName: String(p.signName ?? "") };
-  } catch { return { rank: "", signName: "" }; }
-}
-function saveRiskDefaults(d: RiskDefaults) {
-  localStorage.setItem(DEFAULTS_KEY, JSON.stringify(d));
-}
 
 // ---------------------- Section data (mirrors paper form) -----------------
 
@@ -303,22 +289,12 @@ export default function Risk() {
   const pilots = usePilots();
 
   const [form, setForm] = useState<FormState>(() => {
-    const defaults = loadRiskDefaults();
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = { ...EMPTY, ...JSON.parse(raw) } as FormState;
-        // Apply rank/signName defaults only when the form was reset/blank.
-        if (!parsed.rank) parsed.rank = defaults.rank;
-        if (!parsed.signName) parsed.signName = defaults.signName;
-        return parsed;
-      }
+      if (raw) return { ...EMPTY, ...JSON.parse(raw) } as FormState;
     } catch { /* swallow */ }
-    return { ...EMPTY, rank: defaults.rank, signName: defaults.signName };
+    return EMPTY;
   });
-  const [defaults, setDefaults] = useState<RiskDefaults>(() => loadRiskDefaults());
-  const [showDefaults, setShowDefaults] = useState(false);
-  const [defaultsSavedFlash, setDefaultsSavedFlash] = useState(false);
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(form)); } catch { /* swallow */ }
@@ -379,22 +355,8 @@ export default function Risk() {
 
   function reset() {
     if (window.confirm("Clear the entire risk assessment form?")) {
-      const d = loadRiskDefaults();
-      setForm({ ...EMPTY, date: new Date().toISOString().slice(0, 10), rank: d.rank, signName: d.signName });
+      setForm({ ...EMPTY, date: new Date().toISOString().slice(0, 10) });
     }
-  }
-
-  function applyDefaults() {
-    saveRiskDefaults(defaults);
-    // Also fill the live form's rank/signName when blank, so the operator
-    // immediately sees the new defaults reflected without a manual reset.
-    setForm(prev => ({
-      ...prev,
-      rank: prev.rank || defaults.rank,
-      signName: prev.signName || defaults.signName,
-    }));
-    setDefaultsSavedFlash(true);
-    setTimeout(() => setDefaultsSavedFlash(false), 1400);
   }
 
   // Section 9 toggle helper
@@ -411,9 +373,6 @@ export default function Risk() {
         subtitle="Rotary-Wing Risk Assessment Matrix"
         actions={
           <div className="flex gap-2 print:hidden">
-            <Button variant="outline" onClick={() => setShowDefaults(v => !v)} data-testid="button-risk-defaults">
-              Default Settings
-            </Button>
             <Button variant="outline" onClick={reset} data-testid="button-risk-reset">
               <RotateCcw className="h-4 w-4 mr-1" /> Reset
             </Button>
@@ -423,42 +382,6 @@ export default function Risk() {
           </div>
         }
       />
-
-      {showDefaults && (
-        <Card className="print:hidden border-amber-500/40">
-          <div className="text-sm font-semibold mb-2">Default Settings</div>
-          <div className="text-xs text-muted-foreground mb-3">
-            Set the default Rank and Name that auto-fill the signature block on every new risk assessment.
-            These are stored on this PC only.
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs">Default RANK</Label>
-              <Input
-                value={defaults.rank}
-                onChange={e => setDefaults(d => ({ ...d, rank: e.target.value }))}
-                placeholder="e.g. CAPT"
-                data-testid="input-risk-default-rank"
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Default NAME</Label>
-              <Input
-                value={defaults.signName}
-                onChange={e => setDefaults(d => ({ ...d, signName: e.target.value }))}
-                placeholder="e.g. Abedalqader Ghunmat"
-                data-testid="input-risk-default-name"
-              />
-            </div>
-          </div>
-          <div className="mt-3 flex items-center gap-2">
-            <Button size="sm" onClick={applyDefaults} data-testid="button-risk-defaults-save">
-              Save defaults
-            </Button>
-            {defaultsSavedFlash && <span className="text-xs text-emerald-500 font-medium">Saved ✓</span>}
-          </div>
-        </Card>
-      )}
 
       {/* HEADER — crew, mission, date */}
       <Card>

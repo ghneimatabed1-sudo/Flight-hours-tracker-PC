@@ -249,27 +249,10 @@ interface LastFlown { day: string; night: string; nvg: string; irt: string; medi
 function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pilot; onClose: () => void; onSave: (p: Pilot) => void; saving: boolean; isNew?: boolean }) {
   const { t } = useI18n();
   const [p, setP] = useState<Pilot>(pilot);
-  const win = getCurrencyWindow();
-
-  // lastFlown is the UI state — what the operator types. On save we convert
-  // to expiry dates (lastFlown + window) before passing to onSave, so the
-  // rest of the system (auto-bump, Currency page, Reminders) is unchanged.
-  const [lastFlown, setLastFlown] = useState<LastFlown>(() => ({
-    day:     computeLastFlown(pilot.expiry.day,     win.day),
-    night:   computeLastFlown(pilot.expiry.night,   win.night),
-    nvg:     computeLastFlown(pilot.expiry.nvg,     win.nvg),
-    irt:     computeLastFlown(pilot.expiry.irt,     win.instrument),
-    medical: computeLastFlown(pilot.expiry.medical, win.medical),
-    sim:     computeLastFlown(pilot.expiry.sim,     win.day),
-  }));
-
   // Functional updater — without this, rapid keystrokes can read a stale `p`
   // closure when React batches updates inside Electron's renderer, making
   // the field appear "frozen" after the first character. Reported by ops.
   const set = <K extends keyof Pilot>(k: K, v: Pilot[K]) => setP(prev => ({ ...prev, [k]: v }));
-
-  const setLF = (k: keyof LastFlown, v: string) => setLastFlown(prev => ({ ...prev, [k]: v }));
-
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     // Convert last-flown dates → expiry dates using the configured windows.

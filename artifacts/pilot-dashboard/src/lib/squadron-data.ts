@@ -362,57 +362,37 @@ function rowToSortie(r: Record<string, unknown>): Sortie {
   };
 }
 
-// Derive the 9-bucket schema (Day/Night/NVG × 1st PLT/2nd PLT/Dual) from a
-// single flight time + per-seat statuses. Both seats are routed independently:
-// the same flight `time` lands in BOTH the pilot-seat's bucket AND the
-// co-pilot-seat's bucket so a (1st × Dual) sortie correctly records both
-// flying time and dual-instruction time. computePilotTotals reads the flat
-// fields back per-pilot via the seat-status fields so neither pilot is
-// double-credited at totals time. NVG NEVER bleeds into night buckets.
-export type SeatStatus = "1st" | "2nd" | "Dual";
-
+// Derive the legacy day1/day2/night1/night2/dayDual/nightDual/nvg buckets
+// from the new simple-mode inputs (single Time + condition + per-seat
+// position + dual flag). Keeping the legacy fields populated means existing
+// monthly reports, archives, and the mobile app totals work unchanged.
 export function deriveSortieBuckets(input: {
   time: number;
   condition: "Day" | "Night" | "NVG";
-  pilotStatus: SeatStatus;
-  coPilotStatus: SeatStatus;
+  pilotPosition: "1st" | "2nd";
+  dual: boolean;
 }): {
   day1: number; day2: number; dayDual: number;
   night1: number; night2: number; nightDual: number;
-  nvg: number; nvg1: number; nvg2: number; nvgDual: number;
-  actual: number;
+  nvg: number; actual: number;
 } {
   const t = Number.isFinite(input.time) ? Math.max(0, input.time) : 0;
-  const out = {
-    day1: 0, day2: 0, dayDual: 0,
-    night1: 0, night2: 0, nightDual: 0,
-    nvg: 0, nvg1: 0, nvg2: 0, nvgDual: 0,
-    actual: t,
-  };
+  const out = { day1: 0, day2: 0, dayDual: 0, night1: 0, night2: 0, nightDual: 0, nvg: 0, actual: t };
   if (t <= 0) return out;
-  const route = (status: SeatStatus) => {
-    if (input.condition === "Day") {
-      if (status === "Dual") out.dayDual += t;
-      else if (status === "1st") out.day1 += t;
-      else out.day2 += t;
-    } else if (input.condition === "Night") {
-      if (status === "Dual") out.nightDual += t;
-      else if (status === "1st") out.night1 += t;
-      else out.night2 += t;
-    } else {
-      // NVG: route into NVG sub-bucket. The combined `nvg` field stays the
-      // single-seat amount (T) — NOT 2T — so legacy readers that sum `nvg`
-      // per pilot don't over-credit. The 9-bucket nvg1/nvg2/nvgDual carry
-      // the per-seat detail.
-      if (status === "Dual") out.nvgDual += t;
-      else if (status === "1st") out.nvg1 += t;
-      else out.nvg2 += t;
-    }
-  };
-  route(input.pilotStatus);
-  route(input.coPilotStatus);
-  // Combined `nvg` field = single flight duration for legacy readers.
-  if (input.condition === "NVG") out.nvg = t;
+  if (input.condition === "Day") {
+    if (input.dual) out.dayDual = t;
+    else if (input.pilotPosition === "1st") out.day1 = t;
+    else out.day2 = t;
+  } else if (input.condition === "Night") {
+    if (input.dual) out.nightDual = t;
+    else if (input.pilotPosition === "1st") out.night1 = t;
+    else out.night2 = t;
+  } else {
+    // NVG goes ONLY to the NVG bucket — NEVER also to night1/night2/nightDual.
+    // This mirrors the old mobile rule and prevents NVG hours being
+    // double-counted in pilot Night totals.
+    out.nvg = t;
+  }
   return out;
 }
 
@@ -577,8 +557,6 @@ export function useCreateSortie() {
           time: s.time, dual: s.dual,
           pilotPosition: s.pilotPosition,
           coPilotPosition: s.coPilotPosition,
-          pilotSeatStatus: s.pilotSeatStatus,
-          coPilotSeatStatus: s.coPilotSeatStatus,
           pilotIsCaptain: s.pilotIsCaptain,
           coPilotIsCaptain: s.coPilotIsCaptain,
           msnDuty: s.msnDuty,
@@ -688,8 +666,6 @@ export function useUpdateSortie() {
           time: s.time, dual: s.dual,
           pilotPosition: s.pilotPosition,
           coPilotPosition: s.coPilotPosition,
-          pilotSeatStatus: s.pilotSeatStatus,
-          coPilotSeatStatus: s.coPilotSeatStatus,
           pilotIsCaptain: s.pilotIsCaptain,
           coPilotIsCaptain: s.coPilotIsCaptain,
           msnDuty: s.msnDuty,

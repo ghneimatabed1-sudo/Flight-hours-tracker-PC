@@ -19,8 +19,6 @@ export default function Archives() {
 
   const fmtPeriod = (p: string) => {
     if (p.length === 4) return p;
-    // MM-YYYY (DD-MM-YYYY without the day for monthly archives) — keeps
-    // archive labels in the same family as every other date in the app.
     const [y, m] = p.split("-");
     void lang;
     return `${m}-${y}`;

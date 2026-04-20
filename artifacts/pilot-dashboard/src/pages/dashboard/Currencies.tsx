@@ -10,24 +10,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { pilots, squadrons } from "@/lib/mockData";
 import { currencyStatus, fmtDate } from "@/lib/format";
 import type { CurrencyStatus, Pilot } from "@/lib/types";
-import { Search, ArrowUpDown, Download, Printer, FileSpreadsheet, Gauge, Eye, EyeOff } from "lucide-react";
-
-// Per-PC hide-pilot store, mirrored exactly with the ops Currency page so
-// that on a dual-purpose PC (commander + ops both signed in over time) the
-// "Hide" decisions stay consistent. Local-only — never propagates between
-// PCs because each station owns its own roll-up view.
-const HIDE_KEY = "rjaf.currency.hiddenPilots";
-function loadHidden(): Set<string> {
-  try {
-    const raw = localStorage.getItem(HIDE_KEY);
-    if (!raw) return new Set();
-    const arr = JSON.parse(raw) as unknown;
-    return new Set(Array.isArray(arr) ? (arr as string[]) : []);
-  } catch { return new Set(); }
-}
-function saveHidden(s: Set<string>) {
-  localStorage.setItem(HIDE_KEY, JSON.stringify(Array.from(s)));
-}
+import { Search, ArrowUpDown, Download, Printer, FileSpreadsheet, Gauge } from "lucide-react";
 
 type SortKey = "callSign" | "fullName" | "squadron" | "day" | "nvg" | "irt" | "medical" | "worst";
 

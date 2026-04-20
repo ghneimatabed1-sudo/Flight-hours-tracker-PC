@@ -77,7 +77,7 @@ export interface LicenseKey {
   // present, the activating PC is locked to this role (the operator can't
   // pick a different one in the Setup dialog). Values mirror SetupRoleUI in
   // LicenseKeys.tsx.
-  assignedRole?: "ops" | "flight_commander" | "squadron_commander" | "wing_commander" | "base_commander" | "hq_commander" | "super_admin";
+  assignedRole?: "ops" | "flight_commander" | "squadron_commander" | "hq_commander" | "super_admin";
   // Optional: squadron IDs this commander PC is allowed to monitor. Only
   // meaningful for commander tiers (flight/squadron). HQ commanders implicitly
   // see every squadron; ops PCs only ever see their own. The Super Admin sets

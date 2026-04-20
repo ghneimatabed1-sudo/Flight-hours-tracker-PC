@@ -259,29 +259,14 @@ Deno.serve(async (req) => {
     consumed_at: new Date().toISOString(),
   }).eq("id", codeRow.id);
 
-  // Record (or refresh) the device link. Note: pilot_devices.user_id is a
-  // column added in migration 0016 — earlier deployments of this function
-  // lost the insert because the column did not exist, leaving the dashboard
-  // stuck on "NOT LINKED / Never". The unique index is on user_id, and we
-  // also clear revoked_at so a previously-revoked phone re-linking with a
-  // new code is reactivated atomically.
-  const nowIso = new Date().toISOString();
-  const { error: deviceErr } = await admin.from("pilot_devices").upsert(
+  await admin.from("pilot_devices").upsert(
     {
       pilot_id: pilot.id,
-      squadron_id: codeRow.squadron_id,
       user_id: userId,
-      linked_at: nowIso,
-      last_seen_at: nowIso,
-      revoked_at: null,
+      linked_at: new Date().toISOString(),
     },
     { onConflict: "user_id" },
   );
-  if (deviceErr) {
-    // Don't fail the link for the user — they have a working session — but
-    // log so ops can see why the dashboard might still show NOT LINKED.
-    console.log("[link] pilot_devices upsert error:", deviceErr.message);
-  }
 
   return reply({
     ok: true,

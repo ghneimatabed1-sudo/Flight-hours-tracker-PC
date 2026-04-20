@@ -7,18 +7,11 @@ import {
   useCreateSortie,
   useUpdateSortie,
   useDeleteSortie,
-  useRestoreSortie,
   deriveSortieBuckets,
 } from "@/lib/squadron-data";
 import { useToast } from "@/hooks/use-toast";
-import type { Pilot, Sortie } from "@/lib/mock";
-import { SortieDiffDialog } from "@/components/SortieDiffDialog";
-import { showUndo } from "@/lib/undo-store";
-import { Plane, Pencil, Trash2, X, UserPlus, User, Lock, Unlock } from "lucide-react";
-import { useRegisteredPCs, useSubmitPending } from "@/lib/cross-pc";
-import { useAuth } from "@/lib/auth";
-import type { ExternalPilotRef } from "@/lib/mock";
-import { useFrozenAccess } from "@/lib/monthly-close";
+import type { Sortie } from "@/lib/mock";
+import { Plane, Pencil, Trash2, X } from "lucide-react";
 
 // Simple Add Sortie form — mirrors the legacy mobile app's logic:
 //   • One Position toggle: which seat is in 1st PLT (the other = 2nd PLT)
@@ -40,38 +33,22 @@ const SORTIE_TYPES = [
 ];
 
 type Condition = "Day" | "Night";
-// Each seat carries its own status — Pilot can be 1st PLT while Co-Pilot is
-// in Dual instruction, etc. Captain flag is also per-seat: a Pilot logged as
-// 2nd PLT can still claim CAP hours if he holds the captain qualification on
-// the airframe. This matches the April 2026 ops rebuild where the old
-// "single firstSeat toggle + single captain checkbox" was found to mis-credit
-// hours whenever the two seats had different statuses (e.g. dual eval).
-type SeatStatus = "1st" | "2nd" | "Dual";
-
-interface SeatState {
-  id: string;
-  status: SeatStatus;
-  captain: boolean;
-  // External (guest) pilot details. When `external` is set, the seat is
-  // a guest from another squadron — `id` is left blank and the seat's
-  // hours don't credit a local roster pilot. If the guest's home squadron
-  // is in the cross-PC registry, `homePcId` carries that PC's id so the
-  // submit handler can route a pending entry to that squadron.
-  external?: ExternalPilotRef & { homePcId?: string; militaryNumber?: string };
-}
+type FirstSeat = "pilot" | "coPilot";
 
 interface FormState {
   id: string | null;
   date: string;
   acType: string;
   acNumber: string;
-  pilot: SeatState;
-  coPilot: SeatState;
+  pilot: string;
+  coPilot: string;
+  firstSeat: FirstSeat;        // who is in 1st PLT
+  countsAsCaptain: boolean;    // applies to 1st PLT only
   sortieType: string;
   sortieTypeOther: string;
   msnDuty: string;
   condition: Condition;
-  nvg: boolean;                // valid only when Night — fully separate from Night currency
+  nvg: boolean;                // valid only when Night
   time: string;
   dualHours: string;
   // Instrument Flight section
@@ -83,15 +60,15 @@ interface FormState {
   remarks: string;
 }
 
-const blankSeat = (): SeatState => ({ id: "", status: "1st", captain: false });
-
 const blankForm = (): FormState => ({
   id: null,
   date: new Date().toISOString().slice(0, 10),
   acType: "UH-60M",
   acNumber: "",
-  pilot: { ...blankSeat(), status: "1st" },
-  coPilot: { ...blankSeat(), status: "2nd" },
+  pilot: "",
+  coPilot: "",
+  firstSeat: "pilot",
+  countsAsCaptain: false,
   sortieType: "TRG DAY",
   sortieTypeOther: "",
   msnDuty: "",
@@ -118,35 +95,20 @@ export default function AddSortie() {
 
   const [form, setForm] = useState<FormState>(blankForm);
   const [confirmDel, setConfirmDel] = useState<Sortie | null>(null);
-  // Pending edit waiting for the change-summary dialog. We capture both
-  // the original record (for the diff + undo snapshot) and the proposed
-  // new payload (already fully bucketed) so the dialog can render the
-  // diff and the confirm handler can fire the mutation directly.
-  const [pendingEdit, setPendingEdit] = useState<{ before: Sortie; after: Sortie } | null>(null);
-  const auth = useAuth();
-  const frozen = useFrozenAccess();
-  const lockedMessage =
-    "Hours older than 12 months are frozen. Ask the super admin to authorize this PC from the Super Admin page.";
-  const restore = useRestoreSortie();
-  const mySquadronId = auth.squadron?.name ?? "";
-  const { data: registeredPCs = [] } = useRegisteredPCs();
-  const submitPending = useSubmitPending();
 
   // Seed pilot/co-pilot defaults once roster loads.
   useEffect(() => {
-    if (!form.pilot.id && PILOTS[0]) {
+    if (!form.pilot && PILOTS[0]) {
       setForm(f => ({
         ...f,
-        pilot: { ...f.pilot, id: PILOTS[0].id },
-        coPilot: { ...f.coPilot, id: PILOTS[1]?.id ?? PILOTS[0].id },
+        pilot: PILOTS[0].id,
+        coPilot: PILOTS[1]?.id ?? PILOTS[0].id,
       }));
     }
-  }, [PILOTS, form.pilot.id]);
+  }, [PILOTS, form.pilot]);
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm(f => ({ ...f, [k]: v }));
-  const setSeat = (which: "pilot" | "coPilot", patch: Partial<SeatState>) =>
-    setForm(f => ({ ...f, [which]: { ...f[which], ...patch } }));
 
   const pilotOpts = useMemo(
     () => PILOTS.map(p => ({ value: p.id, label: `${p.rank} ${p.name}` })),
@@ -187,81 +149,48 @@ export default function AddSortie() {
       toast({ title: "Hours required", description: "Enter Time and/or Dual hours.", variant: "destructive" });
       return;
     }
-    if (
-      !form.pilot.external &&
-      !form.coPilot.external &&
-      form.pilot.id === form.coPilot.id &&
-      form.pilot.id
-    ) {
+    if (form.pilot === form.coPilot && form.pilot) {
       toast({ title: "Pilot and Co-Pilot are the same", variant: "destructive" });
-      return;
-    }
-    if (form.pilot.external && !form.pilot.external.name.trim()) {
-      toast({ title: "Guest pilot name required", variant: "destructive" });
-      return;
-    }
-    if (form.coPilot.external && !form.coPilot.external.name.trim()) {
-      toast({ title: "Guest co-pilot name required", variant: "destructive" });
-      return;
-    }
-    // Require the visiting pilot's military number on guest seats so the
-    // home-squadron matcher can credit the correct person. Without it the
-    // downstream flow falls back to risky name-only matching, which can
-    // mis-credit hours when two pilots share a similar name.
-    if (form.pilot.external && !(form.pilot.external.militaryNumber ?? "").trim()) {
-      toast({
-        title: "Guest pilot military number required",
-        description: "Ask the visiting pilot for their military number so credit goes to the right person.",
-        variant: "destructive",
-      });
-      return;
-    }
-    if (form.coPilot.external && !(form.coPilot.external.militaryNumber ?? "").trim()) {
-      toast({
-        title: "Guest co-pilot military number required",
-        description: "Ask the visiting pilot for their military number so credit goes to the right person.",
-        variant: "destructive",
-      });
       return;
     }
 
     // The condition that drives bucketing: NVG overrides Night when checked.
-    // Day/Night/NVG are independent currencies — the auto-bump in
-    // squadron-data.ts only refreshes the matching expiry, never both.
     const cond: "Day" | "Night" | "NVG" =
       form.condition === "Day" ? "Day" : form.nvg ? "NVG" : "Night";
 
-    // Per-seat status: each pilot independently flagged as 1st PLT, 2nd PLT,
-    // or Dual. The sortie-level pilotPosition/coPilotPosition fields keep the
-    // raw selection so reports can break down credit by seat. The legacy
-    // "1st"/"2nd" enum is preserved by mapping Dual → "1st" on the canonical
-    // pilotPosition (the seat that owns the captain flag), while the actual
-    // dual flag controls bucket routing below.
-    const pilotPosition: "1st" | "2nd" = form.pilot.status === "2nd" ? "2nd" : "1st";
-    const coPilotPosition: "1st" | "2nd" = form.coPilot.status === "1st" ? "1st" : "2nd";
+    // Pilot in 1st PLT seat?  → pilotPosition / coPilotPosition derive
+    const pilotPosition: "1st" | "2nd" = form.firstSeat === "pilot" ? "1st" : "2nd";
+    const coPilotPosition: "1st" | "2nd" = form.firstSeat === "coPilot" ? "1st" : "2nd";
 
-    // Captain credit is per-seat — a 2nd PLT can still hold CAP if qualified.
-    const pilotIsCaptain = !!form.pilot.captain;
-    const coPilotIsCaptain = !!form.coPilot.captain;
+    // Captain only applies to whichever seat is in 1st PLT.
+    const pilotIsCaptain = form.firstSeat === "pilot" && form.countsAsCaptain;
+    const coPilotIsCaptain = form.firstSeat === "coPilot" && form.countsAsCaptain;
 
-    // Bucket routing: the sortie-level Dual marker fires whenever EITHER seat
-    // is in Dual status. Hours are split into a non-dual portion (`time`)
-    // attributed to whichever seat is "1st" and a dual portion attributed to
-    // the dual buckets — so a (Pilot=1st PLT, Co-Pilot=Dual) sortie correctly
-    // accumulates flight + dual instruction hours on the same record.
-    const eitherDual = form.pilot.status === "Dual" || form.coPilot.status === "Dual";
-    // Single seat-aware routing pass — both seats' statuses route the same
-    // flight time into their respective bucket. The legacy "extra dual hours"
-    // input is folded into the dual bucket via a second pass with both seats
-    // forced to Dual (covers the case where a sortie logged additional dual
-    // instruction time beyond the primary block).
-    const totalTime = time + dual;
-    const merged = deriveSortieBuckets({
-      time: totalTime,
+    // Total hours that count toward this seat (flight + independent dual).
+    const totalForBuckets = time + dual;
+
+    const buckets = deriveSortieBuckets({
+      time: totalForBuckets - dual, // non-dual portion
       condition: cond,
-      pilotStatus: form.pilot.status,
-      coPilotStatus: form.coPilot.status,
+      pilotPosition,
+      dual: false,
     });
+    // Dual portion routed to dual buckets in the same condition
+    const dualBuckets = deriveSortieBuckets({
+      time: dual,
+      condition: cond,
+      pilotPosition,
+      dual: true,
+    });
+    const merged = {
+      day1: buckets.day1 + dualBuckets.day1,
+      day2: buckets.day2 + dualBuckets.day2,
+      dayDual: buckets.dayDual + dualBuckets.dayDual,
+      night1: buckets.night1 + dualBuckets.night1,
+      night2: buckets.night2 + dualBuckets.night2,
+      nightDual: buckets.nightDual + dualBuckets.nightDual,
+      nvg: buckets.nvg + dualBuckets.nvg,
+    };
 
     const sortieType = form.sortieType === "Other…"
       ? form.sortieTypeOther.trim() || "OTHER"
@@ -273,14 +202,8 @@ export default function AddSortie() {
       date: form.date,
       acType: form.acType,
       acNumber: form.acNumber.trim(),
-      pilotId: form.pilot.external ? "" : form.pilot.id,
-      coPilotId: form.coPilot.external ? "" : form.coPilot.id,
-      pilotExternal: form.pilot.external
-        ? { name: form.pilot.external.name.trim(), squadron: form.pilot.external.squadron.trim() }
-        : undefined,
-      coPilotExternal: form.coPilot.external
-        ? { name: form.coPilot.external.name.trim(), squadron: form.coPilot.external.squadron.trim() }
-        : undefined,
+      pilotId: form.pilot,
+      coPilotId: form.coPilot,
       sortieType,
       name: form.msnDuty.trim() || sortieType,
       condition: cond,
@@ -288,17 +211,12 @@ export default function AddSortie() {
       day1: merged.day1, day2: merged.day2, dayDual: merged.dayDual,
       night1: merged.night1, night2: merged.night2, nightDual: merged.nightDual,
       nvg: merged.nvg,
-      nvg1: merged.nvg1 || undefined,
-      nvg2: merged.nvg2 || undefined,
-      nvgDual: merged.nvgDual || undefined,
       sim: ifSim, // legacy `sim` = IF SIM hours
       actual: time + dual,
       time: time + dual,
-      dual: dual > 0 || eitherDual,
+      dual: dual > 0,
       pilotPosition,
       coPilotPosition,
-      pilotSeatStatus: form.pilot.status,
-      coPilotSeatStatus: form.coPilot.status,
       pilotIsCaptain,
       coPilotIsCaptain,
       msnDuty: form.msnDuty.trim() || undefined,
@@ -308,120 +226,45 @@ export default function AddSortie() {
       ils: form.instrumentFlight ? (parseInt(form.ils || "0") || 0) : undefined,
       vor: form.instrumentFlight ? (parseInt(form.vor || "0") || 0) : undefined,
     };
-    // Edits go through the change-summary dialog first. The dialog shows
-    // the operator a side-by-side diff and, after they confirm, fires the
-    // actual mutation + registers a 30-second undo. New entries skip the
-    // diff (nothing to compare against) and commit directly.
-    if (form.id) {
-      const original = SORTIES.find(x => x.id === form.id);
-      if (original) {
-        setPendingEdit({ before: original, after: { ...payload, id: form.id } as Sortie });
-        return;
-      }
-    }
     try {
-      let savedId: string | null = form.id;
       if (form.id) {
-        await update.mutateAsync({ sortie: { ...payload, id: form.id } as Sortie, actor: auth.user?.username });
+        await update.mutateAsync({ sortie: { ...payload, id: form.id } as Sortie });
         toast({ title: "Sortie updated" });
       } else {
-        const created = await create.mutateAsync(payload);
-        savedId = (created as Sortie | undefined)?.id ?? null;
+        await create.mutateAsync(payload);
         toast({ title: "Sortie added" });
       }
-      // Cross-PC: when a guest seat carries a `homePcId`, push a pending
-      // entry to that squadron's queue. Their ops officer reviews it on the
-      // Pending Approvals page; on accept it cascades through their
-      // useCreateSortie pipeline and bumps totals/currencies/captain hours.
-      const seatsForPending: { which: "pilot" | "coPilot"; seat: typeof form.pilot }[] = [];
-      if (form.pilot.external?.homePcId) seatsForPending.push({ which: "pilot", seat: form.pilot });
-      if (form.coPilot.external?.homePcId) seatsForPending.push({ which: "coPilot", seat: form.coPilot });
-      for (const { which, seat: s } of seatsForPending) {
-        if (!s.external?.homePcId) continue;
-        try {
-          await submitPending.mutateAsync({
-            hostingSquadronId: mySquadronId,
-            hostingSquadronName: mySquadronId,
-            homeSquadronId: s.external.homePcId,
-            homeSquadronName: s.external.squadron,
-            guestPilotName: s.external.name,
-            guestPilotMilitaryNumber: s.external.militaryNumber,
-            guestSeat: which,
-            submittedBy: auth.user?.username ?? mySquadronId,
-            sortie: payload,
-          });
-        } catch {
-          toast({ title: "Pending entry not sent", description: `Could not reach ${s.external.squadron}.`, variant: "destructive" });
-        }
-      }
-      if (seatsForPending.length > 0) {
-        toast({ title: `Sent to ${seatsForPending.length} squadron${seatsForPending.length > 1 ? "s" : ""} for approval` });
-      }
       resetForm();
-    } catch (err) {
-      // The frozen-records gate throws `month_frozen` when this PC isn't
-      // authorized to write into a date older than 12 months. Surface that
-      // as a friendly message so the operator knows what to ask for.
-      if (err instanceof Error && err.message === "month_frozen") {
-        toast({ title: "Frozen records", description: lockedMessage, variant: "destructive" });
-      }
-      /* other errors surfaced by global error toast */
+    } catch {
+      /* surfaced by global error toast */
     }
   };
 
   const loadForEdit = (s: Sortie) => {
     const cond: Condition = s.condition === "Day" ? "Day" : "Night";
     const nvg = s.condition === "NVG";
-    // Prefer the authoritative seat-status fields written by the rebuilt
-    // Add Sortie page. Only fall back to legacy reconstruction (pilotPosition
-    // / coPilotPosition + dual flag) for historical records that pre-date
-    // the per-seat schema. The legacy fallback can't tell which seat was the
-    // instructor, so it marks the 2nd PLT seat as Dual by default — the ops
-    // officer can flip it before re-saving.
-    const pilotStatus: SeatStatus = s.pilotSeatStatus
-      ?? (s.dual
-        ? (s.pilotPosition === "2nd" ? "Dual" : "1st")
-        : (s.pilotPosition === "2nd" ? "2nd" : "1st"));
-    const coPilotStatus: SeatStatus = s.coPilotSeatStatus
-      ?? (s.dual
-        ? (s.coPilotPosition === "1st" ? "1st" : "Dual")
-        : (s.coPilotPosition === "1st" ? "1st" : "2nd"));
-    // For seat-aware records the single `time` field is the authoritative
-    // flight duration; treat it as non-dual unless the legacy schema split
-    // it across `time` + dual hours.
-    const seatAware = !!(s.pilotSeatStatus || s.coPilotSeatStatus);
-    const dualHours = seatAware ? 0 : (s.dual ? (s.dayDual + s.nightDual + (s.nvgDual ?? 0)) : 0);
-    const nonDualHours = seatAware
-      ? ((s.time ?? s.actual) || 0)
-      : (((s.time ?? s.actual) || 0) - dualHours);
+    const firstSeat: FirstSeat = s.pilotPosition === "1st" || !s.coPilotPosition
+      ? "pilot"
+      : s.coPilotPosition === "1st" ? "coPilot" : "pilot";
+    const countsAsCaptain = firstSeat === "pilot"
+      ? !!s.pilotIsCaptain
+      : !!s.coPilotIsCaptain;
     setForm({
       id: s.id,
       date: s.date,
       acType: s.acType || "UH-60M",
       acNumber: s.acNumber || "",
-      pilot: {
-        id: s.pilotId,
-        status: pilotStatus,
-        captain: !!s.pilotIsCaptain,
-        external: s.pilotExternal
-          ? { ...s.pilotExternal, homePcId: registeredPCs.find(p => p.squadronName === s.pilotExternal!.squadron)?.id }
-          : undefined,
-      },
-      coPilot: {
-        id: s.coPilotId,
-        status: coPilotStatus,
-        captain: !!s.coPilotIsCaptain,
-        external: s.coPilotExternal
-          ? { ...s.coPilotExternal, homePcId: registeredPCs.find(p => p.squadronName === s.coPilotExternal!.squadron)?.id }
-          : undefined,
-      },
+      pilot: s.pilotId,
+      coPilot: s.coPilotId,
+      firstSeat,
+      countsAsCaptain,
       sortieType: SORTIE_TYPES.includes(s.sortieType) ? s.sortieType : "Other…",
       sortieTypeOther: SORTIE_TYPES.includes(s.sortieType) ? "" : s.sortieType,
       msnDuty: s.msnDuty ?? s.name ?? "",
       condition: cond,
       nvg,
-      time: nonDualHours > 0 ? String(nonDualHours) : "",
-      dualHours: dualHours > 0 ? String(dualHours) : "",
+      time: String(((s.time ?? s.actual) || 0) - (s.dual ? (s.dayDual + s.nightDual) : 0) || ""),
+      dualHours: s.dual ? String((s.dayDual + s.nightDual) || "") : "",
       instrumentFlight: !!s.instrumentFlight,
       ifSim: s.ifSim != null ? String(s.ifSim) : "",
       ifAct: s.ifAct != null ? String(s.ifAct) : "",
@@ -432,79 +275,14 @@ export default function AddSortie() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // Snapshot the pilots that a sortie touches so an undo can restore both
-  // their totals and their currency expiries (which only ever move forward
-  // through applyCurrencyRefresh).
-  const snapshotAffectedPilots = (s: Sortie): Pilot[] => {
-    const ids = [s.pilotId, s.coPilotId].filter(Boolean);
-    return ids
-      .map(id => PILOTS.find(p => p.id === id))
-      .filter((p): p is Pilot => !!p)
-      .map(p => structuredClone(p));
-  };
-
-  const registerSortieUndo = (snapshot: { sortie: Sortie; pilots: Pilot[] }, label: string) => {
-    showUndo({
-      message: label,
-      undo: async () => {
-        try {
-          await restore.mutateAsync({
-            sortie: snapshot.sortie,
-            pilots: snapshot.pilots,
-            actor: auth.user?.username,
-            reason: "undo",
-          });
-          toast({ title: "Action undone" });
-        } catch {
-          toast({ title: "Undo failed", variant: "destructive" });
-        }
-      },
-    });
-  };
-
-  const confirmEdit = async () => {
-    if (!pendingEdit) return;
-    const { before, after } = pendingEdit;
-    const pilotsBefore = snapshotAffectedPilots(before);
-    try {
-      await update.mutateAsync({ sortie: after, actor: auth.user?.username });
-      registerSortieUndo({ sortie: before, pilots: pilotsBefore }, "Sortie edited.");
-      setPendingEdit(null);
-      resetForm();
-    } catch {
-      /* surfaced by global error toast */
-    }
-  };
-
   const doDelete = async () => {
     if (!confirmDel) return;
-    const snapshotSortie = confirmDel;
-    const pilotsBefore = snapshotAffectedPilots(snapshotSortie);
     try {
-      await del.mutateAsync({ id: snapshotSortie.id, date: snapshotSortie.date, actor: auth.user?.username });
-      registerSortieUndo({ sortie: snapshotSortie, pilots: pilotsBefore }, "Sortie deleted.");
+      await del.mutateAsync({ id: confirmDel.id });
+      toast({ title: "Sortie deleted" });
     } finally {
       setConfirmDel(null);
     }
-  };
-
-  // Frozen-window gating for the Recent Sorties list. When a row's date is
-  // older than 12 months and this PC isn't on the super admin's authorized
-  // list, edit/delete are disabled with a tooltip pointing the operator to
-  // the Super Admin page.
-  const tryEdit = (s: Sortie) => {
-    if (!frozen.canEdit(s.date)) {
-      toast({ title: "Frozen records", description: lockedMessage, variant: "destructive" });
-      return;
-    }
-    loadForEdit(s);
-  };
-  const tryDelete = (s: Sortie) => {
-    if (!frozen.canEdit(s.date)) {
-      toast({ title: "Frozen records", description: lockedMessage, variant: "destructive" });
-      return;
-    }
-    setConfirmDel(s);
   };
 
   const seatLabel = (id: string, ext?: { name: string }) => {
@@ -515,7 +293,7 @@ export default function AddSortie() {
 
   return (
     <div>
-      <PageHead title={t("nav_addsortie")} subtitle="New flight entry" />
+      <PageHead title={t("nav_addsortie")} subtitle="New flight entry · auto-syncs to Supabase" />
 
       <Card className="mb-4">
         <form onSubmit={submit} className="space-y-3" data-testid="form-add-sortie">
@@ -539,27 +317,78 @@ export default function AddSortie() {
             <Mini label="MSN / Duty (optional)" value={form.msnDuty} onChange={v => set("msnDuty", v)} placeholder="Mission name / duty" />
           )}
 
-          {/* Crew row — each seat carries its own pilot, status (1st/2nd/Dual)
-              and captain flag. The two seats are fully independent. */}
+          {/* Crew row — single seat selector chooses who's in 1st PLT */}
           <div className="grid lg:grid-cols-2 gap-3">
-            <SeatPanel
-              label="Pilot"
-              testIdPrefix="pilot"
-              seat={form.pilot}
-              opts={pilotOpts}
-              onChange={patch => setSeat("pilot", patch)}
-              registeredPCs={registeredPCs}
-              mySquadronId={mySquadronId}
-            />
-            <SeatPanel
-              label="Co-Pilot"
-              testIdPrefix="copilot"
-              seat={form.coPilot}
-              opts={pilotOpts}
-              onChange={patch => setSeat("coPilot", patch)}
-              registeredPCs={registeredPCs}
-              mySquadronId={mySquadronId}
-            />
+            <div className="border border-border rounded-md p-2 bg-secondary/20">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Pilot</div>
+              <select
+                className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
+                value={form.pilot}
+                onChange={e => set("pilot", e.target.value)}
+                data-testid="select-pilot"
+              >
+                {pilotOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div className="border border-border rounded-md p-2 bg-secondary/20">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Co-Pilot</div>
+              <select
+                className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
+                value={form.coPilot}
+                onChange={e => set("coPilot", e.target.value)}
+                data-testid="select-copilot"
+              >
+                {pilotOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Position + Captain row */}
+          <div className="border border-border rounded-md p-3 bg-amber-500/5">
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Position (Who is 1st PLT)</div>
+                <div className="flex gap-2" data-testid="position-selector">
+                  <button
+                    type="button"
+                    onClick={() => set("firstSeat", "pilot")}
+                    data-testid="button-position-pilot"
+                    className={`flex-1 px-3 py-2 rounded-md text-xs font-semibold border transition-colors ${
+                      form.firstSeat === "pilot"
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-secondary border-border hover:bg-secondary/80"
+                    }`}
+                  >Pilot is 1st PLT</button>
+                  <button
+                    type="button"
+                    onClick={() => set("firstSeat", "coPilot")}
+                    data-testid="button-position-copilot"
+                    className={`flex-1 px-3 py-2 rounded-md text-xs font-semibold border transition-colors ${
+                      form.firstSeat === "coPilot"
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-secondary border-border hover:bg-secondary/80"
+                    }`}
+                  >Co-Pilot is 1st PLT</button>
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Captain Hours (CAP)</div>
+                <label className="inline-flex items-center gap-2 cursor-pointer select-none px-3 py-2 rounded-md bg-secondary border border-border text-xs" data-testid="toggle-captain">
+                  <input
+                    type="checkbox"
+                    checked={form.countsAsCaptain}
+                    onChange={e => set("countsAsCaptain", e.target.checked)}
+                    className="h-4 w-4 accent-amber-400"
+                  />
+                  <span className="font-semibold text-amber-300">
+                    Count 1st PLT as Captain
+                  </span>
+                </label>
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  Only credited if the 1st PLT is qualified as captain on this aircraft.
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Condition row */}
@@ -696,18 +525,9 @@ export default function AddSortie() {
               {todaySorties.map(s => {
                 const time = s.time ?? s.actual ?? (s.day1 + s.day2 + s.dayDual + s.night1 + s.night2 + s.nightDual + (s.nvg || 0));
                 const dn = s.condition === "NVG" ? "NVG" : s.condition === "Night" ? "N" : "D";
-                const isFrozen = frozen.isFrozen(s.date);
-                const canEdit = frozen.canEdit(s.date);
-                const locked = isFrozen && !canEdit;
                 return (
-                  <tr key={s.id} className={`border-b border-border/50 hover:bg-secondary/30 ${form.id === s.id ? "bg-primary/10" : ""} ${locked ? "opacity-90" : ""}`} data-testid={`sortie-row-${s.id}`}>
-                    <td className="py-1.5 pr-2">
-                      <span className="inline-flex items-center gap-1">
-                        {s.date}
-                        {locked && <Lock className="h-3 w-3 text-muted-foreground" aria-label="Frozen (older than 12 months)" />}
-                        {isFrozen && canEdit && <Unlock className="h-3 w-3 text-amber-300" aria-label="Frozen — this PC is authorized to edit" />}
-                      </span>
-                    </td>
+                  <tr key={s.id} className={`border-b border-border/50 hover:bg-secondary/30 ${form.id === s.id ? "bg-primary/10" : ""}`} data-testid={`sortie-row-${s.id}`}>
+                    <td className="py-1.5 pr-2">{s.date}</td>
                     <td className="pr-2">{s.acType} {s.acNumber}</td>
                     <td className="pr-2">{seatLabel(s.pilotId, s.pilotExternal)}{s.pilotIsCaptain ? <span className="ml-1 text-[9px] text-amber-300">CAPT</span> : null}</td>
                     <td className="pr-2">{seatLabel(s.coPilotId, s.coPilotExternal)}{s.coPilotIsCaptain ? <span className="ml-1 text-[9px] text-amber-300">CAPT</span> : null}</td>
@@ -717,24 +537,10 @@ export default function AddSortie() {
                     <td className="pr-2">{s.instrumentFlight ? "✓" : ""}</td>
                     <td className="pr-2 text-right">{Number(time || 0).toFixed(1)}</td>
                     <td className="pr-2 text-right whitespace-nowrap">
-                      <button
-                        onClick={() => tryEdit(s)}
-                        disabled={locked}
-                        title={locked ? lockedMessage : "Edit"}
-                        aria-disabled={locked}
-                        className={`px-1.5 py-0.5 rounded border text-[10px] inline-flex items-center gap-0.5 mr-1 ${locked ? "border-border bg-secondary opacity-40 cursor-not-allowed" : "border-border bg-secondary"}`}
-                        data-testid={`button-edit-${s.id}`}
-                      >
+                      <button onClick={() => loadForEdit(s)} className="px-1.5 py-0.5 rounded border border-border bg-secondary text-[10px] inline-flex items-center gap-0.5 mr-1" data-testid={`button-edit-${s.id}`}>
                         <Pencil className="h-3 w-3" /> Edit
                       </button>
-                      <button
-                        onClick={() => tryDelete(s)}
-                        disabled={locked}
-                        title={locked ? lockedMessage : "Delete"}
-                        aria-disabled={locked}
-                        className={`px-1.5 py-0.5 rounded border text-[10px] inline-flex items-center gap-0.5 ${locked ? "border-rose-400/40 bg-rose-500/10 text-rose-200 opacity-40 cursor-not-allowed" : "border-rose-400/40 bg-rose-500/10 text-rose-200"}`}
-                        data-testid={`button-delete-${s.id}`}
-                      >
+                      <button onClick={() => setConfirmDel(s)} className="px-1.5 py-0.5 rounded border border-rose-400/40 bg-rose-500/10 text-rose-200 text-[10px] inline-flex items-center gap-0.5" data-testid={`button-delete-${s.id}`}>
                         <Trash2 className="h-3 w-3" /> Del
                       </button>
                     </td>
@@ -756,32 +562,18 @@ export default function AddSortie() {
       </Card>
 
       {confirmDel && (
-        <SortieDiffDialog
-          mode="delete"
-          before={confirmDel}
-          onCancel={() => setConfirmDel(null)}
-          onConfirm={doDelete}
-          busy={del.isPending}
-          pilotName={(id) => {
-            const p = pilotById(id);
-            return p ? `${p.rank} ${p.name}` : id;
-          }}
-        />
-      )}
-
-      {pendingEdit && (
-        <SortieDiffDialog
-          mode="edit"
-          before={pendingEdit.before}
-          after={pendingEdit.after}
-          onCancel={() => setPendingEdit(null)}
-          onConfirm={confirmEdit}
-          busy={update.isPending}
-          pilotName={(id) => {
-            const p = pilotById(id);
-            return p ? `${p.rank} ${p.name}` : id;
-          }}
-        />
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setConfirmDel(null)}>
+          <div className="bg-card border border-border rounded-lg p-4 max-w-md w-full" onClick={e => e.stopPropagation()} data-testid="dialog-confirm-delete">
+            <div className="font-semibold mb-1">Delete this sortie?</div>
+            <div className="text-xs text-muted-foreground mb-3">
+              {confirmDel.date} · {confirmDel.acType} {confirmDel.acNumber} · {confirmDel.sortieType}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setConfirmDel(null)} className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs">Cancel</button>
+              <button onClick={doDelete} className="px-3 py-1.5 rounded-md bg-rose-600 text-white text-xs font-semibold" data-testid="button-confirm-delete">Delete</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -810,157 +602,6 @@ function Mini({ label, value, onChange, type = "text", placeholder, step }: Mini
         className="w-full mt-0.5 px-2 py-1.5 rounded-md bg-input border border-border text-xs font-mono"
       />
     </label>
-  );
-}
-
-interface SeatPanelProps {
-  label: string;
-  testIdPrefix: string;
-  seat: SeatState;
-  opts: { value: string; label: string }[];
-  onChange: (patch: Partial<SeatState>) => void;
-  registeredPCs: { id: string; squadronName: string; online: boolean; tier: import("@/lib/cross-pc").PcTier }[];
-  mySquadronId: string;
-}
-
-// Independent per-seat panel: pilot picker + status (1st PLT / 2nd PLT /
-// Dual) + Captain checkbox. Each seat is fully independent — both seats can
-// be 1st PLT (rare but legal on multi-instructor evals), both can be Dual
-// during conversion training, etc. Captain credit is per-seat too.
-function SeatPanel({ label, testIdPrefix, seat, opts, onChange, registeredPCs, mySquadronId }: SeatPanelProps) {
-  const guest = !!seat.external;
-  const setGuest = (on: boolean) => {
-    if (on) onChange({ id: "", external: { name: "", squadron: "" } });
-    else onChange({ external: undefined });
-  };
-  const statuses: { v: SeatStatus; label: string; cls: string }[] = [
-    { v: "1st", label: "1st PLT", cls: "bg-primary text-primary-foreground border-primary" },
-    { v: "2nd", label: "2nd PLT", cls: "bg-sky-500/20 border-sky-400 text-sky-200" },
-    { v: "Dual", label: "Dual", cls: "bg-violet-500/20 border-violet-400 text-violet-200" },
-  ];
-  return (
-    <div className="border border-border rounded-md p-2.5 bg-secondary/20 space-y-2" data-testid={`seat-${testIdPrefix}`}>
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
-        <button
-          type="button"
-          onClick={() => setGuest(!guest)}
-          data-testid={`button-guest-${testIdPrefix}`}
-          className={`px-2 py-0.5 rounded text-[10px] font-semibold border inline-flex items-center gap-1 ${
-            guest
-              ? "bg-emerald-500/20 border-emerald-400 text-emerald-200"
-              : "bg-secondary border-border text-muted-foreground hover:bg-secondary/80"
-          }`}
-          title="Toggle guest pilot from another squadron"
-        >
-          {guest ? <UserPlus className="h-3 w-3" /> : <User className="h-3 w-3" />}
-          {guest ? "Guest" : "Roster"}
-        </button>
-      </div>
-      {guest ? (
-        <div className="space-y-1.5">
-          {/* Squadron picker first — registered PCs are listed in the
-              dropdown so accepted entries can be routed back to that
-              squadron's app. The free-text option (or unrecognised value)
-              becomes a manual-entry record that doesn't auto-route. */}
-          <select
-            className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
-            value={(() => {
-              const match = registeredPCs.find(p => p.squadronName === seat.external?.squadron && p.id !== mySquadronId && p.tier === "squadron");
-              return match ? match.id : "__manual";
-            })()}
-            onChange={e => {
-              const v = e.target.value;
-              if (v === "__manual") onChange({ external: { ...(seat.external ?? { name: "" }), squadron: "", homePcId: undefined } });
-              else {
-                const pc = registeredPCs.find(p => p.id === v);
-                onChange({ external: { ...(seat.external ?? { name: "" }), squadron: pc?.squadronName ?? "", homePcId: pc?.id } });
-              }
-            }}
-            data-testid={`select-guest-pc-${testIdPrefix}`}
-          >
-            <option value="__manual">— Manual entry (squadron not registered) —</option>
-            {/* Only squadron-tier PCs make sense as "home squadron" — wing/base/HQ
-                entries do not own pilot rosters and cannot review guest sorties. */}
-            {registeredPCs.filter(p => p.id !== mySquadronId && p.tier === "squadron").map(p => (
-              <option key={p.id} value={p.id}>{p.squadronName} {p.online ? "● online" : "○ offline"}</option>
-            ))}
-          </select>
-          {(() => {
-            const match = registeredPCs.find(p => p.squadronName === seat.external?.squadron && p.id !== mySquadronId);
-            if (match) return null;
-            return (
-              <input
-                type="text"
-                value={seat.external?.squadron ?? ""}
-                onChange={e => onChange({ external: { ...(seat.external ?? { name: "" }), squadron: e.target.value } })}
-                placeholder="Squadron name (e.g. 7 Sqn)"
-                className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
-                data-testid={`input-guest-squadron-${testIdPrefix}`}
-              />
-            );
-          })()}
-          <input
-            type="text"
-            value={seat.external?.name ?? ""}
-            onChange={e => onChange({ external: { ...(seat.external ?? { squadron: "" }), name: e.target.value } })}
-            placeholder="Pilot name (rank + name)"
-            className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
-            data-testid={`input-guest-name-${testIdPrefix}`}
-          />
-          <div className="space-y-0.5">
-            <input
-              type="text"
-              required
-              aria-required="true"
-              value={seat.external?.militaryNumber ?? ""}
-              onChange={e => onChange({ external: { ...(seat.external ?? { name: "", squadron: "" }), militaryNumber: e.target.value } })}
-              placeholder="Military number (required) *"
-              className={`w-full px-2 py-1.5 rounded-md bg-input border text-xs font-mono ${
-                (seat.external?.militaryNumber ?? "").trim()
-                  ? "border-border"
-                  : "border-amber-500/60"
-              }`}
-              data-testid={`input-guest-mil-${testIdPrefix}`}
-            />
-            <p className="text-[10px] text-muted-foreground leading-tight">
-              Ask the visiting pilot for their military number so credit goes to the right person.
-            </p>
-          </div>
-        </div>
-      ) : (
-        <select
-          className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
-          value={seat.id}
-          onChange={e => onChange({ id: e.target.value })}
-          data-testid={`select-${testIdPrefix}`}
-        >
-          {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-      )}
-      <div className="flex flex-wrap gap-1.5" data-testid={`status-${testIdPrefix}`}>
-        {statuses.map(s => (
-          <button
-            key={s.v}
-            type="button"
-            onClick={() => onChange({ status: s.v })}
-            data-testid={`button-status-${testIdPrefix}-${s.v.toLowerCase()}`}
-            className={`flex-1 px-2 py-1.5 rounded-md text-[11px] font-semibold border transition-colors ${
-              seat.status === s.v ? s.cls : "bg-secondary border-border text-muted-foreground hover:bg-secondary/80"
-            }`}
-          >{s.label}</button>
-        ))}
-      </div>
-      <label className="inline-flex items-center gap-2 cursor-pointer select-none px-2 py-1.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-[11px] w-full" data-testid={`toggle-captain-${testIdPrefix}`}>
-        <input
-          type="checkbox"
-          checked={seat.captain}
-          onChange={e => onChange({ captain: e.target.checked })}
-          className="h-3.5 w-3.5 accent-amber-400"
-        />
-        <span className="font-semibold text-amber-300">Count as Captain (CAP)</span>
-      </label>
-    </div>
   );
 }
 

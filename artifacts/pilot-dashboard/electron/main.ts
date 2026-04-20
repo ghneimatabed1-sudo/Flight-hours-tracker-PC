@@ -63,14 +63,6 @@ function createWindow() {
 
   Menu.setApplicationMenu(null);
 
-  // Reveal the window only once the renderer paints its first frame so
-  // operators don't see a flash of empty chrome before full-screen kicks in.
-  mainWindow.once("ready-to-show", () => {
-    mainWindow?.maximize();
-    mainWindow?.show();
-    mainWindow?.focus();
-  });
-
   // ── Diagnostics so we never ship another silent blue-screen ─────────
   // If the renderer fails to load (bad path, missing asset, ESM blocked
   // under file://) or crashes, write a log under userData and pop a
@@ -82,7 +74,7 @@ function createWindow() {
     if (!isDev) {
       try { mainWindow?.webContents.openDevTools({ mode: "detach" }); } catch { /* ignore */ }
       dialog.showErrorBox(
-        "Hawk Eye — startup error",
+        "RJAF Squadron Ops — startup error",
         `${label}\n\n${detail}\n\nA log was written to:\n${logFile}\n\n` +
         `Please send this file to the Super Admin.`,
       );

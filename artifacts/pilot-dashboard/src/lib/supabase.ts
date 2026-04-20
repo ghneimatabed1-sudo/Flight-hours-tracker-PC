@@ -84,7 +84,7 @@ export interface ProvisionCommanderArgs {
   username: string;
   displayName?: string;
   role?: "ops" | "commander" | "deputy";
-  tier?: "hq" | "base" | "wing" | "squadron" | "flight" | "ops" | "deputy";
+  tier?: "hq" | "squadron" | "flight" | "ops" | "deputy";
   squadronNumber?: string;
   squadronName?: string;
   squadronBase?: string;

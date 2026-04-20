@@ -146,12 +146,15 @@ export default function Settings() {
   };
   const saveCurrencyWindow = (e: React.FormEvent) => {
     e.preventDefault();
+    const d = parseInt(curDay, 10);
+    const n = parseInt(curNvg, 10);
+    const i = parseInt(curIrt, 10);
+    const m = parseInt(curMed, 10);
     setCurWindow({
-      day: parseOr(curDay, DEFAULT_CURRENCY_WINDOW.day),
-      night: parseOr(curNight, DEFAULT_CURRENCY_WINDOW.night),
-      nvg: parseOr(curNvg, DEFAULT_CURRENCY_WINDOW.nvg),
-      instrument: parseOr(curIrt, DEFAULT_CURRENCY_WINDOW.instrument),
-      medical: parseOr(curMed, DEFAULT_CURRENCY_WINDOW.medical),
+      day: Number.isFinite(d) && d > 0 ? d : DEFAULT_CURRENCY_WINDOW.day,
+      nvg: Number.isFinite(n) && n > 0 ? n : DEFAULT_CURRENCY_WINDOW.nvg,
+      instrument: Number.isFinite(i) && i > 0 ? i : DEFAULT_CURRENCY_WINDOW.instrument,
+      medical: Number.isFinite(m) && m > 0 ? m : DEFAULT_CURRENCY_WINDOW.medical,
     });
     setCurSaved(true);
     setTimeout(() => setCurSaved(false), 1500);
@@ -203,7 +206,7 @@ export default function Settings() {
           <form onSubmit={saveCurrencyWindow} className="space-y-3">
             <div className="text-sm font-semibold">{t("currencyWindowTitle")}</div>
             <p className="text-xs text-muted-foreground">{t("currencyWindowBlurb")}</p>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 max-w-3xl">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-2xl">
               <label className="block">
                 <span className="text-xs text-muted-foreground">{t("dayCurrencyDays")}</span>
                 <div className="flex items-center gap-2 mt-1">
@@ -287,7 +290,6 @@ export default function Settings() {
               <span className="text-[11px] text-muted-foreground ms-auto">
                 {t("currentWindow")}:
                 {" "}Day <span className="font-mono">{curWindow.day}d</span>
-                {" · "}Night <span className="font-mono">{curWindow.night}d</span>
                 {" · "}NVG <span className="font-mono">{curWindow.nvg}d</span>
                 {" · "}IRT <span className="font-mono">{curWindow.instrument}d</span>
                 {" · "}Med <span className="font-mono">{curWindow.medical}d</span>

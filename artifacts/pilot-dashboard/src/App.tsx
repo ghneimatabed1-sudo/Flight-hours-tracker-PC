@@ -185,10 +185,6 @@ function CommanderRoutes() {
       <Route path="/dashboard/simulator" component={Simulator} />
       <Route path="/dashboard/flights" component={FlightRecords} />
       <Route path="/dashboard/flight-program" component={FlightProgram} />
-      <Route path="/dashboard/unavailable" component={CommanderUnavailableGate} />
-      <Route path="/dashboard/sticky" component={StickyNotes} />
-      <Route path="/dashboard/schedule-chain" component={ScheduleChain} />
-      <Route path="/dashboard/messages" component={Messages} />
       {/* See SquadronOpsRoutes catch-all: redirect home rather than 404. */}
       <Route><Redirect to="/dashboard" /></Route>
     </Switch>

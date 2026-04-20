@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
 
 env:
-  EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
-  EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+  EXPO_PUBLIC_SUPABASE_URL: "https://nklrdhfsbevckovqqkah.supabase.co"
+  EXPO_PUBLIC_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rbHJkaGZzYmV2Y2tvdnFxa2FoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MTMwNjMsImV4cCI6MjA5MjA4OTA2M30.LrCdsefKUQNIM-qWTsH5J78jXvVHINdqQ5oj9SjuD5s"
 
 jobs:
   # ─────────────────────────────────────────────────────────────

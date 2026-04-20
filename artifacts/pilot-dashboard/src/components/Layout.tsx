@@ -6,7 +6,7 @@ import {
   LayoutDashboard, ListChecks, PlusCircle, Users, BadgeCheck, AlertOctagon,
   Trophy, CalendarRange, PalmtreeIcon, UserX, Calendar, ClipboardList,
   ShieldAlert, FileText, Megaphone, Map, Tags, FileDown, UserCog, Settings,
-  Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle, Archive, Bell, UserPlus, Users2, FileBarChart, Inbox, Mail, Share2,
+  Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle, Archive, Bell, UserPlus, Users2, FileBarChart,
 } from "lucide-react";
 import { canUseMessages } from "@/lib/cross-pc";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
@@ -100,25 +100,15 @@ export default function Layout({ children }: { children: ReactNode }) {
               // Only the lead ops pilot manages the assigned ops sub-accounts.
               return user?.role === "ops";
             }
+            if (p === "/ops-team") {
+              // Only the lead ops pilot manages the assigned ops sub-accounts.
+              return user?.role === "ops";
+            }
             if (p === "/monthly-report") {
               // Monthly Report (ORFG RCN Forms 1-4 + Arabic roster) is owned
               // by the squadron ops officer.
               return user?.role === "ops";
             }
-            // Cross-PC features are gated by role+scope. Messages excludes
-            // Flight Cmdr and Ops Pilot deputies; Schedule Sharing excludes
-            // Ops Pilot deputies but lets Flight Cmdrs participate. Pending
-            // Approvals belongs to the squadron ops officer specifically —
-            // it cascades into the local calc engine on accept.
-            if (p === "/messages") return canUseMessages(user?.role, undefined);
-            if (p === "/schedule-chain") {
-              // Sharing Schedule label hidden from the operations pilot's
-              // sidebar at the operator's request — the route remains
-              // mounted so commanders / sub-account flows that link in
-              // directly keep working.
-              return user?.role !== "ops";
-            }
-            if (p === "/pending") return user?.role === "ops" || user?.role === "super_admin";
             return true;
           }).map(({ p, k, I }) => {
             const active = loc === p || (p !== "/" && loc.startsWith(p));

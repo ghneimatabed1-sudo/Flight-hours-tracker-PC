@@ -90,10 +90,10 @@ export function lastCompletedPeriod(now: Date = new Date()): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 }
 
-export function periodLabel(period: string, _lang: "en"|"ar" = "en"): string {
-  // MM-YYYY in line with the squadron-wide DD-MM-YYYY standard.
-  const [y, m] = period.split("-");
-  return `${m}-${y}`;
+export function periodLabel(period: string, lang: "en"|"ar" = "en"): string {
+  const [y, m] = period.split("-").map(Number);
+  const d = new Date(y, m - 1, 1);
+  return d.toLocaleDateString(lang === "ar" ? "ar-EG" : "en-US", { year: "numeric", month: "long" });
 }
 
 export function missionBucket(s: Sortie): MissionBucket {

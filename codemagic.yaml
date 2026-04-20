@@ -17,15 +17,12 @@ workflows:
         PACKAGE_NAME: "com.rjaf.pilotlogbook"
         # Supabase config baked into the JS bundle. The anon key is
         # public-by-design (only opens read access guarded by RLS) so
-        # the squadron's actual data is protected by per-pilot JWTs
-        # minted by the link-pilot-device edge function. Without these
-        # the mobile app falls back to "Offline mode" and can never link.
-        #
-        # Store the actual values in Codemagic → Teams → Environment groups
-        # under a group named "supabase" and add it to each workflow's
-        # environment.groups list. Never hardcode them here.
-        EXPO_PUBLIC_SUPABASE_URL: $EXPO_PUBLIC_SUPABASE_URL
-        EXPO_PUBLIC_SUPABASE_ANON_KEY: $EXPO_PUBLIC_SUPABASE_ANON_KEY
+        # storing it in source is acceptable; the squadron's actual
+        # data is protected by per-pilot JWTs minted by the
+        # link-pilot-device edge function. Without these the mobile
+        # app falls back to "Offline mode" and can never link.
+        EXPO_PUBLIC_SUPABASE_URL: "https://nklrdhfsbevckovqqkah.supabase.co"
+        EXPO_PUBLIC_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rbHJkaGZzYmV2Y2tvdnFxa2FoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MTMwNjMsImV4cCI6MjA5MjA4OTA2M30.LrCdsefKUQNIM-qWTsH5J78jXvVHINdqQ5oj9SjuD5s"
     scripts:
       - name: Install pnpm
         script: |
@@ -67,9 +64,8 @@ workflows:
         # into the JS bundle at build time, so they must be present in
         # the build environment — without them the IPA boots straight
         # into permanent "Offline mode" on every device.
-        # Values come from the "supabase" Codemagic environment group.
-        EXPO_PUBLIC_SUPABASE_URL: $EXPO_PUBLIC_SUPABASE_URL
-        EXPO_PUBLIC_SUPABASE_ANON_KEY: $EXPO_PUBLIC_SUPABASE_ANON_KEY
+        EXPO_PUBLIC_SUPABASE_URL: "https://nklrdhfsbevckovqqkah.supabase.co"
+        EXPO_PUBLIC_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rbHJkaGZzYmV2Y2tvdnFxa2FoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MTMwNjMsImV4cCI6MjA5MjA4OTA2M30.LrCdsefKUQNIM-qWTsH5J78jXvVHINdqQ5oj9SjuD5s"
     scripts:
       - name: Install pnpm
         script: |
