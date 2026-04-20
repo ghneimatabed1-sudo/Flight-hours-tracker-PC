@@ -3,8 +3,7 @@ import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { pilots } from "@/lib/mockData";
-import { useSquadrons } from "@/lib/squadron-store";
+import { useDashPilots, useDashSquadrons } from "@/lib/dash-pilots";
 import { currencyStatus, fmtDate } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { CurrencyStatus } from "@/lib/types";
@@ -13,7 +12,8 @@ import { AlertTriangle, Printer } from "lucide-react";
 export default function Alerts() {
   const { t, lang } = useI18n();
   const { user } = useAuth();
-  const squadrons = useSquadrons();
+  const squadrons = useDashSquadrons();
+  const pilots = useDashPilots();
   if (!user) return null;
   const myIds = new Set(user.squadronIds);
 
