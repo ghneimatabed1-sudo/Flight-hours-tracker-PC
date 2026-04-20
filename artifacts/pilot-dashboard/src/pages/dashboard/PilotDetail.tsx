@@ -4,7 +4,8 @@ import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { pilots, squadrons } from "@/lib/mockData";
+import { pilots } from "@/lib/mockData";
+import { useSquadrons } from "@/lib/squadron-store";
 import { pilotWorstStatus, pilotWorstDate, currencyStatus, fmtDate } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ChevronLeft, Eye, Plane, Calendar, Award, Printer, Sun, Moon, Cpu, Gauge, Star } from "lucide-react";
@@ -12,6 +13,7 @@ import { ChevronLeft, Eye, Plane, Calendar, Award, Printer, Sun, Moon, Cpu, Gaug
 export default function PilotDetail() {
   const { t, lang, dir } = useI18n();
   const { user } = useAuth();
+  const squadrons = useSquadrons();
   const [, params] = useRoute("/dashboard/pilot/:id");
   const id = params?.id;
   const pilot = pilots.find(p => p.id === id);

@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
-import { pilots, squadrons } from "@/lib/mockData";
+import { pilots } from "@/lib/mockData";
+import { useSquadrons } from "@/lib/squadron-store";
 import { currencyStatus, fmtDate } from "@/lib/format";
 import type { CurrencyStatus, Pilot } from "@/lib/types";
 import { Search, ArrowUpDown, Download, Printer, FileSpreadsheet, Gauge, Eye, EyeOff } from "lucide-react";
@@ -60,6 +61,7 @@ function pilotWorst(p: Pilot): { status: CurrencyStatus; date: string } {
 export default function Currencies() {
   const { t, lang } = useI18n();
   const { user } = useAuth();
+  const squadrons = useSquadrons();
 
   const [q, setQ] = useState("");
   const [sqnFilter, setSqnFilter] = useState<string>("__all");

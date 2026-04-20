@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { squadrons } from "@/lib/mockData";
+import { useSquadrons } from "@/lib/squadron-store";
 import {
   listCommanders,
   createCommander,
@@ -38,6 +38,7 @@ function tierToRoleScope(tier: Tier): { role: AccountRole; scope?: CommanderScop
 
 export default function Commanders() {
   const { t, lang } = useI18n();
+  const squadrons = useSquadrons();
   const [list, setList] = useState<CommanderRecord[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
