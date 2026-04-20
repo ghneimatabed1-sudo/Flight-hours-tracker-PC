@@ -127,13 +127,21 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setLink(storedLink);
       setSnapshot(storedSnap);
       setLock(storedLock);
-      // Always require the password on cold launch when one is set.
-      // The trusted-bit auto-unlock was removed — pilots explicitly asked
-      // for "Enter your password" every time the app is opened from cold.
-      // Once unlocked this session, it stays unlocked until the app is
-      // killed or the pilot signs out from Settings.
+      // Honor the `trusted` flag on the lock record. After the pilot has
+      // set up the password the first time — or after any successful
+      // unlock — the lock record is saved with `trusted: true`, which
+      // means subsequent cold launches skip the password screen and go
+      // straight to the app. The lock screen only re-appears after an
+      // explicit Sign Out from Settings (which flips `trusted: false`)
+      // or after the pilot changes their password.
+      //
+      // Older lock records written before this flag existed have no
+      // `trusted` field and are treated as trusted (same as they
+      // behaved historically), so this change does not force an
+      // existing pilot base to re-type a password on the next update.
       if (storedLock) {
-        setUnlocked(false);
+        const isTrusted = storedLock.trusted !== false;
+        setUnlocked(isTrusted);
       }
       setReady(true);
 
