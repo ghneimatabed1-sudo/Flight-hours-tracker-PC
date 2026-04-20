@@ -277,11 +277,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch { /* localStorage unavailable — fail open, server checks still apply */ }
   }
+  // Safe JSON parse — prior versions of this app may have written invalid
+  // JSON to localStorage (or "undefined" as a string). An unguarded
+  // JSON.parse here throws synchronously inside the useState initializer,
+  // which prevents AuthProvider — and therefore the entire app — from
+  // mounting. Symptom: blank black window with the process running but no
+  // visible UI. Always defensively try/catch and remove the bad key so the
+  // user isn't trapped on a dead screen forever.
+  const safeParse = <T,>(key: string, fallback: T): T => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw == null || raw === "" || raw === "undefined") return fallback;
+      return JSON.parse(raw) as T;
+    } catch {
+      try { localStorage.removeItem(key); } catch { /* noop */ }
+      return fallback;
+    }
+  };
   const [state, setState] = useState<AuthState>(() => ({
     licensed: localStorage.getItem("rjaf.licensed") === "1",
     configured: !!localStorage.getItem("rjaf.squadron"),
-    user: JSON.parse(localStorage.getItem("rjaf.user") || "null"),
-    squadron: JSON.parse(localStorage.getItem("rjaf.squadron") || "null"),
+    user: safeParse<AuthState["user"]>("rjaf.user", null),
+    squadron: safeParse<AuthState["squadron"]>("rjaf.squadron", null),
     fingerprint: localStorage.getItem("rjaf.fp") || "FP-PENDING",
     failedAttempts: Number(localStorage.getItem("rjaf.fails") || 0),
     lockedUntil: Number(localStorage.getItem("rjaf.lockUntil") || 0) || null,
