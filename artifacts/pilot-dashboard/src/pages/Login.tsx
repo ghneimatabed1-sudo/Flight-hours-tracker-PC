@@ -50,6 +50,18 @@ export default function LoginGate() {
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [recoveryCopied, setRecoveryCopied] = useState(false);
 
+  // Single in-flight flag for every async submit on this screen (license
+  // activation, sign-in, 2FA / recovery verify, first-run provision). All
+  // three hit Supabase edge functions over the public internet and can take
+  // 10–30 s when the link is slow. Without a visible busy state the inputs
+  // stay enabled with no spinner — operators have reported the page feeling
+  // "frozen" because the cursor stops blinking inside the field while the
+  // browser is busy with the fetch and they have no idea anything is
+  // happening. Gating the form on `busy` disables the inputs, swaps the
+  // button label to a "Verifying…" message, and prevents the duplicate
+  // submits that were turning a slow network into a 60 s+ stall.
+  const [busy, setBusy] = useState(false);
+
   // First-screen policy:
   //   - Fresh install (no PC role lock yet) → Super Admin login. The very
   //     first action on any new PC is the Super Admin signing in to assign
@@ -90,9 +102,15 @@ export default function LoginGate() {
 
   const submitLicense = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (busy) return;
     setLicError(null);
-    const r = await activateLicense(licenseKey, licUsername);
-    if (!r.ok) setLicError(r.error || "Invalid");
+    setBusy(true);
+    try {
+      const r = await activateLicense(licenseKey, licUsername);
+      if (!r.ok) setLicError(r.error || "Invalid");
+    } finally {
+      setBusy(false);
+    }
   };
   const submitSetup = (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,24 +118,37 @@ export default function LoginGate() {
   };
   const submitLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (busy) return;
     setErr(null);
-    const r = await login(u, p);
-    if (!r.ok && !r.requires2fa) {
-      if (r.error === "admin_not_provisioned") {
-        setSetupMode(true);
-        setSetupPw1(""); setSetupPw2(""); setSetupErr(null); setSetupOk(false);
-        return;
+    setBusy(true);
+    try {
+      const r = await login(u, p);
+      if (!r.ok && !r.requires2fa) {
+        if (r.error === "admin_not_provisioned") {
+          setSetupMode(true);
+          setSetupPw1(""); setSetupPw2(""); setSetupErr(null); setSetupOk(false);
+          return;
+        }
+        if (r.error === "role_locked") { setErr(t("roleLockMismatch")); return; }
+        setErr(r.error === "locked" ? t("lockedOut") : t("badCreds"));
       }
-      if (r.error === "role_locked") { setErr(t("roleLockMismatch")); return; }
-      setErr(r.error === "locked" ? t("lockedOut") : t("badCreds"));
+    } finally {
+      setBusy(false);
     }
   };
   const submitProvision = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (busy) return;
     setSetupErr(null);
     if (setupPw1.length < 8) { setSetupErr(t("pwTooShort")); return; }
     if (setupPw1 !== setupPw2) { setSetupErr(t("pwMismatch")); return; }
-    const r = await provisionSuperAdmin(setupPw1);
+    setBusy(true);
+    let r: Awaited<ReturnType<typeof provisionSuperAdmin>>;
+    try {
+      r = await provisionSuperAdmin(setupPw1);
+    } finally {
+      setBusy(false);
+    }
     if (!r.ok) {
       setSetupErr(r.error === "too_short" ? t("pwTooShort") : t("badCreds"));
       return;
@@ -131,10 +162,16 @@ export default function LoginGate() {
   };
   const submitTotp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (busy) return;
     setCodeErr(null);
-    const r = await verifyAdminTotp(code);
-    if (!r.ok) {
-      setCodeErr(r.error === "locked" ? t("lockedOut") : t("twoFactorBad"));
+    setBusy(true);
+    try {
+      const r = await verifyAdminTotp(code);
+      if (!r.ok) {
+        setCodeErr(r.error === "locked" ? t("lockedOut") : t("twoFactorBad"));
+      }
+    } finally {
+      setBusy(false);
     }
   };
   const copyRecoveryCodes = async () => {
@@ -297,11 +334,13 @@ export default function LoginGate() {
                     data-testid="input-recovery-code"
                     autoComplete="one-time-code"
                     autoCapitalize="characters"
+                    autoFocus
                     spellCheck={false}
                     maxLength={9}
                     value={code}
+                    disabled={busy}
                     onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-Z2-7-]/g, "").slice(0, 9))}
-                    className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-center font-mono text-base tracking-[0.3em] uppercase"
+                    className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-center font-mono text-base tracking-[0.3em] uppercase disabled:opacity-60"
                     placeholder="XXXX-XXXX"
                   />
                 ) : (
@@ -310,11 +349,13 @@ export default function LoginGate() {
                     data-testid="input-totp"
                     inputMode="numeric"
                     autoComplete="one-time-code"
+                    autoFocus
                     pattern="[0-9]{6}"
                     maxLength={6}
                     value={code}
+                    disabled={busy}
                     onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                    className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-center font-mono text-lg tracking-[0.4em]"
+                    className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-center font-mono text-lg tracking-[0.4em] disabled:opacity-60"
                     placeholder="000000"
                   />
                 )}
@@ -326,6 +367,7 @@ export default function LoginGate() {
                 type="submit"
                 data-testid="button-verify-totp"
                 disabled={
+                  busy ||
                   lockedRemaining > 0 ||
                   (recoveryMode
                     ? code.replace(/-/g, "").length !== 8
@@ -333,9 +375,11 @@ export default function LoginGate() {
                 }
                 className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 disabled:opacity-50"
               >
-                {pendingAdmin.mode === "enroll"
-                  ? t("twoFactorEnrollBtn")
-                  : recoveryMode ? t("recoveryVerifyBtn") : t("twoFactorVerifyBtn")}
+                {busy
+                  ? t("verifying")
+                  : pendingAdmin.mode === "enroll"
+                    ? t("twoFactorEnrollBtn")
+                    : recoveryMode ? t("recoveryVerifyBtn") : t("twoFactorVerifyBtn")}
               </button>
               {pendingAdmin.mode === "verify" && (
                 <button
@@ -362,18 +406,18 @@ export default function LoginGate() {
                 {t("firstRunTitle")}
               </div>
               <p className="text-xs text-muted-foreground">{t("firstRunHint")}</p>
-              <Field label={t("newPassword")} value={setupPw1} onChange={setSetupPw1} type="password" />
-              <Field label={t("confirmPassword")} value={setupPw2} onChange={setSetupPw2} type="password" />
+              <Field label={t("newPassword")} value={setupPw1} onChange={setSetupPw1} type="password" autoFocus disabled={busy} />
+              <Field label={t("confirmPassword")} value={setupPw2} onChange={setSetupPw2} type="password" disabled={busy} />
               {setupOk
                 ? <div className="text-xs text-emerald-400">{t("pwSet")}</div>
                 : setupErr && <div className="text-xs text-destructive">{setupErr}</div>}
               <button
                 type="submit"
                 data-testid="button-provision-admin"
-                disabled={setupOk}
+                disabled={busy || setupOk}
                 className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 disabled:opacity-50"
               >
-                {t("provision")}
+                {busy ? t("verifying") : t("provision")}
               </button>
               <button
                 type="button"
@@ -399,12 +443,12 @@ export default function LoginGate() {
                   <span className="font-medium">{pcDeviceName}</span>
                 </div>
               )}
-              <Field label={t("username")} value={u} onChange={setU} />
-              <Field label={t("password")} value={p} onChange={setP} type="password" />
+              <Field label={t("username")} value={u} onChange={setU} autoFocus={!u} disabled={busy} />
+              <Field label={t("password")} value={p} onChange={setP} type="password" autoFocus={!!u && !p} disabled={busy} />
               {lockedRemaining > 0
                 ? <div className="text-xs text-amber-400">{t("lockedOut")} ({lockedRemaining}s)</div>
                 : err && <div className="text-xs text-destructive">{err}</div>}
-              <button data-testid="button-signin" disabled={lockedRemaining > 0} className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 disabled:opacity-50">{t("signIn")}</button>
+              <button data-testid="button-signin" disabled={busy || lockedRemaining > 0} className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 disabled:opacity-50">{busy ? t("verifying") : t("signIn")}</button>
               {/* Dev-only escape hatch: when running in the in-browser preview
                   (no Supabase backend, hostname is replit.dev / localhost) the
                   2FA secret + lockout live in localStorage. If the operator
@@ -475,7 +519,9 @@ export default function LoginGate() {
                   data-testid="input-license-username"
                   value={licUsername}
                   onChange={e => setLicUsername(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm"
+                  autoFocus={!licUsername}
+                  disabled={busy}
+                  className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm disabled:opacity-60"
                   placeholder={t("operatorUsernamePh")}
                   autoComplete="username"
                 />
@@ -487,7 +533,9 @@ export default function LoginGate() {
                   data-testid="input-license-key"
                   value={licenseKey}
                   onChange={e => setLicenseKey(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border font-mono text-sm tracking-wider"
+                  autoFocus={!!licUsername && !licenseKey}
+                  disabled={busy}
+                  className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border font-mono text-sm tracking-wider disabled:opacity-60"
                   placeholder="EE-XXX-XXXX-XXXX-XXXX-XXXX"
                 />
               </div>
@@ -496,7 +544,7 @@ export default function LoginGate() {
               </div>
               <div className="text-[11px] font-mono text-muted-foreground break-all">FP: {fingerprint}</div>
               {licError && <div className="text-xs text-destructive">{licError}</div>}
-              <button className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90">{t("activate")}</button>
+              <button disabled={busy} className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 disabled:opacity-50">{busy ? t("verifying") : t("activate")}</button>
               {pcRoleLock !== "ops" && (
                 <button type="button" onClick={() => setHqMode(true)} className="w-full text-xs text-amber-400 hover:text-amber-300 pt-1">
                   {t("superAdminPanel")} / {t("commanderDashboard")} →
@@ -578,14 +626,31 @@ export default function LoginGate() {
   );
 }
 
-function Field({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (v: string) => void; type?: string }) {
+function Field({
+  label, value, onChange, type = "text", autoFocus = false, disabled = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  autoFocus?: boolean;
+  disabled?: boolean;
+}) {
   const id = `f-${label.replace(/\s+/g, "-").toLowerCase()}`;
   const dt = label.toLowerCase().includes("user") ? "input-username" : label.toLowerCase().includes("pass") ? "input-password" : undefined;
   return (
     <div>
       <label htmlFor={id} className="text-xs text-muted-foreground">{label}</label>
-      <input id={id} data-testid={dt} type={type} value={value} onChange={e => onChange(e.target.value)}
-        className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm" />
+      <input
+        id={id}
+        data-testid={dt}
+        type={type}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        autoFocus={autoFocus}
+        disabled={disabled}
+        className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm disabled:opacity-60"
+      />
     </div>
   );
 }
