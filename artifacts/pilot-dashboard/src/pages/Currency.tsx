@@ -54,15 +54,21 @@ export default function Currency() {
     });
   };
 
+  // Action list only — surfaces pilots whose currency for the selected tab
+  // is already EXPIRED (days < 0) or about to expire within the next 10 days
+  // (0 ≤ days < 10). Pilots flagged "not applicable" for this currency
+  // (`hiddenCurrencies`) are excluded entirely because they have nothing to
+  // renew. Per-PC manually hidden pilots are excluded unless "Show hidden"
+  // is toggled. Earliest expiry first (most negative = most overdue first).
   const rows = PILOTS
     .filter(p => showHidden || !hiddenPilots.has(p.id))
     .map(p => ({ p, hidden: p.hiddenCurrencies?.includes(tab) ?? false, pilotHidden: hiddenPilots.has(p.id), s: statusOf(p.expiry[tab]) }))
-    // Sort hidden rows to the bottom so the active currency list stays clean.
-    .sort((a, b) => Number(a.hidden) - Number(b.hidden) || a.s.days - b.s.days);
+    .filter(({ hidden, p, s }) => !hidden && p.expiry[tab] && s.days < 10)
+    .sort((a, b) => a.s.days - b.s.days);
 
   return (
     <div>
-      <PageHead title={t("nav_currency")} subtitle="Each date is when the currency EXPIRES (not when the check was performed). Sorted by expiry · color-coded." actions={
+      <PageHead title={t("nav_currency")} subtitle="Pilots whose selected currency is EXPIRED or expires within 10 days. Date shown is when the currency expires. Earliest first." actions={
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowHidden(v => !v)}
