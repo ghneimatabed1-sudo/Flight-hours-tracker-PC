@@ -35,15 +35,10 @@ export type AlertsTtlDays = 0 | 1 | 3 | 7 | 30;
 // timer is really only useful for pilots who leave the app open.
 export type AutoSyncHours = 1 | 3 | 6 | 12;
 
-// Inactivity auto-logout in minutes. 0 disables it (stay signed in until
-// the pilot explicitly signs out). 120 min (2h) is the default.
-export type InactivityMinutes = 0 | 15 | 30 | 60 | 120 | 240 | 480;
-
 export interface UserPrefs {
   language: "en" | "ar";
   alertsTtlDays?: AlertsTtlDays;
   autoSyncHours?: AutoSyncHours;
-  inactivityMinutes?: InactivityMinutes;
 }
 
 // SecureStore is unavailable on web; fall back to AsyncStorage so the demo

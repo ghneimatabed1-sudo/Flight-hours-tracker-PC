@@ -237,32 +237,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // Track when the app last went to background so we can enforce the
-    // pilot's inactivity-lock preference. When the pilot backgrounds the
-    // app, stash `Date.now()`. When they bring it back, if more than
-    // `inactivityMinutes` have elapsed (and the pref is > 0), force the
-    // app back to the lock screen. 0 disables, which is the fleet-default
-    // for pilots who prefer a "tap-in, no lock" workflow.
-    let backgroundedAt: number | null = null;
+    // Phones aren't workstations: the pilot opens and closes the app
+    // dozens of times a day, and an idle-lock on the handset would just
+    // annoy them. So on every foreground we only ping sync — no
+    // auto-logout / auto-lock is enforced on mobile. The device-level
+    // password (configured at link time) and the PC's revoke-device
+    // action remain the two access-control gates.
     const sub = AppState.addEventListener("change", (s: AppStateStatus) => {
-      if (s === "active") {
-        void pingSync();
-        const since = backgroundedAt;
-        backgroundedAt = null;
-        if (since != null) {
-          void (async () => {
-            try {
-              const prefs = await loadPrefs();
-              const mins = prefs.inactivityMinutes ?? 0;
-              if (mins > 0 && Date.now() - since > mins * 60 * 1000) {
-                setUnlocked(false);
-              }
-            } catch { /* ignore — leave session unlocked */ }
-          })();
-        }
-      } else if (s === "background" || s === "inactive") {
-        if (backgroundedAt == null) backgroundedAt = Date.now();
-      }
+      if (s === "active") void pingSync();
     });
 
     return () => {

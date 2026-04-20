@@ -22,7 +22,6 @@ import {
   savePrefs,
   type AlertsTtlDays,
   type AutoSyncHours,
-  type InactivityMinutes,
 } from "@/lib/storage";
 import { pingSync } from "@/lib/notifications";
 
@@ -162,7 +161,6 @@ export default function SettingsScreen() {
 
   const [alertsTtl, setAlertsTtl] = React.useState<AlertsTtlDays>(7);
   const [autoSyncHrs, setAutoSyncHrs] = React.useState<AutoSyncHours>(3);
-  const [inactivityMin, setInactivityMin] = React.useState<InactivityMinutes>(120);
   const [syncStatus, setSyncStatus] = React.useState<string>("");
   React.useEffect(() => {
     let cancelled = false;
@@ -170,7 +168,6 @@ export default function SettingsScreen() {
       if (cancelled) return;
       setAlertsTtl(p.alertsTtlDays ?? 7);
       setAutoSyncHrs(p.autoSyncHours ?? 3);
-      setInactivityMin(p.inactivityMinutes ?? 120);
     });
     return () => {
       cancelled = true;
@@ -185,11 +182,6 @@ export default function SettingsScreen() {
     setAutoSyncHrs(next);
     const current = await loadPrefs();
     await savePrefs({ ...current, autoSyncHours: next });
-  };
-  const updateInactivity = async (next: InactivityMinutes) => {
-    setInactivityMin(next);
-    const current = await loadPrefs();
-    await savePrefs({ ...current, inactivityMinutes: next });
   };
   const manualSync = async () => {
     setSyncStatus("Syncing…");
@@ -430,60 +422,6 @@ export default function SettingsScreen() {
           </Text>
         </View>
       </Pressable>
-
-      {/* ── Inactivity auto-logout (mobile) ───────────────────
-          If the phone is idle this long, the app locks itself and the
-          pilot has to re-type their device password on return. 0 = off. */}
-      <Text
-        style={[
-          styles.section,
-          { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" },
-        ]}
-      >
-        AUTO-LOGOUT WHEN IDLE
-      </Text>
-      <View
-        style={[
-          styles.ttlGrid,
-          { backgroundColor: colors.card, borderColor: colors.border },
-        ]}
-      >
-        {([
-          { k: 0 as InactivityMinutes, label: "Off" },
-          { k: 30 as InactivityMinutes, label: "30m" },
-          { k: 60 as InactivityMinutes, label: "1h" },
-          { k: 120 as InactivityMinutes, label: "2h" },
-          { k: 240 as InactivityMinutes, label: "4h" },
-          { k: 480 as InactivityMinutes, label: "8h" },
-        ]).map((opt) => {
-          const active = inactivityMin === opt.k;
-          return (
-            <Pressable
-              key={opt.k}
-              onPress={() => void updateInactivity(opt.k)}
-              style={({ pressed }) => [
-                styles.ttlBtn,
-                {
-                  backgroundColor: active ? colors.primary : "transparent",
-                  borderColor: active ? colors.primary : colors.border,
-                  opacity: pressed ? 0.85 : 1,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.ttlBtnText,
-                  {
-                    color: active ? colors.primaryForeground : colors.foreground,
-                  },
-                ]}
-              >
-                {opt.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
 
       <Text
         style={[
