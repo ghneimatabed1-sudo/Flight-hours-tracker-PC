@@ -2,10 +2,11 @@ import type { CurrencyStatus } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 import { statusClass, currencyStatus, fmtDDMM, fmtDDMMYYYY } from "@/lib/format";
 
-function statusLabelKey(s: CurrencyStatus): "current" | "warning" | "expiringSoon" | "expired" {
+function statusLabelKey(s: CurrencyStatus): "current" | "notSet" | "warning" | "expiringSoon" | "expired" {
   if (s === "expired") return "expired";
   if (s === "critical" || s === "expiringSoon") return "expiringSoon";
   if (s === "warning") return "warning";
+  if (s === "unset") return "notSet";
   return "current";
 }
 
@@ -18,7 +19,7 @@ function fmtShort(date: string, _lang: string): string {
 export function StatusBadge({ status, date }: { status: CurrencyStatus; date?: string | null }) {
   const { t, lang } = useI18n();
   const label = t(statusLabelKey(status));
-  const showDate = !!date && status !== "current";
+  const showDate = !!date && status !== "current" && status !== "unset";
   return (
     <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium tabular-nums ${statusClass(status)}`}>
       {label}

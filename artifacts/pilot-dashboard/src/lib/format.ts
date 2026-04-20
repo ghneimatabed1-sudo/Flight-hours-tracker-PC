@@ -1,7 +1,13 @@
 import type { CurrencyStatus, Pilot } from "./types";
 
 export function currencyStatus(dateStr: string): CurrencyStatus {
+  // A missing or unparseable date means the commander has never entered a
+  // currency for this discipline. Treat it as a distinct "not set" state so
+  // the UI shows a neutral grey badge instead of falsely reporting the
+  // pilot as current.
+  if (!dateStr || !dateStr.trim()) return "unset";
   const target = new Date(dateStr).getTime();
+  if (!Number.isFinite(target)) return "unset";
   const now = Date.now();
   const diffDays = Math.floor((target - now) / 86400000);
   if (diffDays < 0) return "expired";
@@ -14,6 +20,7 @@ export function currencyStatus(dateStr: string): CurrencyStatus {
 export function statusClass(s: CurrencyStatus): string {
   if (s === "expired" || s === "critical") return "currency-expired";
   if (s === "warning" || s === "expiringSoon") return "currency-warning";
+  if (s === "unset") return "currency-unset";
   return "currency-current";
 }
 
@@ -25,12 +32,15 @@ export function isYellowStatus(s: CurrencyStatus): boolean {
   return s === "warning" || s === "expiringSoon";
 }
 
+// "unset" sits just above "current" so a pilot with one blank field is
+// surfaced above a fully-current pilot, but below any real warning/expiry.
 const rank: Record<CurrencyStatus, number> = {
   current: 0,
-  warning: 1,
-  expiringSoon: 2,
-  critical: 3,
-  expired: 4,
+  unset: 1,
+  warning: 2,
+  expiringSoon: 3,
+  critical: 4,
+  expired: 5,
 };
 
 export function pilotWorstStatus(p: Pilot): CurrencyStatus {
@@ -56,7 +66,10 @@ export function pilotWorstDate(p: Pilot): string | null {
   for (const e of entries) {
     if (!best || rank[e.status] > rank[best.status]) best = e;
   }
-  return best && best.status !== "current" ? best.date : null;
+  // Only surface a date for real expiry states — "current" has no
+  // interesting date, and "unset" has no date at all.
+  if (!best || best.status === "current" || best.status === "unset") return null;
+  return best.date;
 }
 
 // ─── Date formatting ─────────────────────────────────────────────

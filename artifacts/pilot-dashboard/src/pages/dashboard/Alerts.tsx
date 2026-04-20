@@ -31,7 +31,10 @@ export default function Alerts() {
     ];
     for (const [type, date] of checks) {
       const s = currencyStatus(date);
-      if (s !== "current") {
+      // "unset" fields aren't alerts — they just mean the commander hasn't
+      // entered that discipline's date yet. Only real expiries/warnings
+      // belong on this page.
+      if (s !== "current" && s !== "unset") {
         items.push({
           pilotId: p.id,
           pilot: lang === "ar" ? p.fullNameAr : p.fullName,
@@ -41,7 +44,7 @@ export default function Alerts() {
       }
     }
   }
-  const rank: Record<CurrencyStatus, number> = { current: 0, warning: 1, expiringSoon: 2, critical: 3, expired: 4 };
+  const rank: Record<CurrencyStatus, number> = { current: 0, unset: 1, warning: 2, expiringSoon: 3, critical: 4, expired: 5 };
   items.sort((a, b) => {
     if (a.status !== b.status) return rank[b.status] - rank[a.status];
     return new Date(a.date).getTime() - new Date(b.date).getTime();

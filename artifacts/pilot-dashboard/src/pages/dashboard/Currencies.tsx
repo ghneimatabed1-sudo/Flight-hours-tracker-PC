@@ -32,7 +32,7 @@ function saveHidden(s: Set<string>) {
 type SortKey = "callSign" | "fullName" | "squadron" | "day" | "nvg" | "irt" | "medical" | "worst";
 
 function rankStatus(s: CurrencyStatus): number {
-  return { current: 0, warning: 1, expiringSoon: 2, critical: 3, expired: 4 }[s];
+  return { current: 0, unset: 1, warning: 2, expiringSoon: 3, critical: 4, expired: 5 }[s];
 }
 
 function pilotDate(p: Pilot, k: SortKey): string {
@@ -125,6 +125,7 @@ export default function Currencies() {
     if (s === "expired") return t("expired");
     if (s === "critical" || s === "expiringSoon") return t("expiringSoon");
     if (s === "warning") return t("warning");
+    if (s === "unset") return t("notSet");
     return t("current");
   }
 
