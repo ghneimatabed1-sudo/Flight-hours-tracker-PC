@@ -86,18 +86,29 @@ export default function LockScreen({ onUnlock }: { onUnlock: () => void }) {
       <div className="lock-sheen absolute inset-x-0 top-0 h-1/2 pointer-events-none" />
 
       <div className="relative h-full w-full flex flex-col items-center justify-center px-6">
+        {/* Big centerpiece is the Hawk Eye disc logo (the product mark for
+            this PC application). The RJAF service emblem moves down beside
+            the wordmark as the institutional credit. */}
         <img
-          src="brand/emblem.png"
+          src="brand/hawkeye-logo.svg"
           alt=""
           aria-hidden="true"
           className="h-32 w-32 object-contain mb-5 lock-breathe drop-shadow-[0_0_28px_rgba(212,175,55,0.35)]"
         />
-        <img
-          src="brand/hawkeye-wordmark.svg"
-          alt=""
-          aria-hidden="true"
-          className="h-12 max-w-[80vw] object-contain opacity-95"
-        />
+        <div className="flex items-center gap-3 max-w-[80vw] opacity-95">
+          <img
+            src="brand/emblem.png"
+            alt=""
+            aria-hidden="true"
+            className="h-16 w-16 object-contain shrink-0 drop-shadow-[0_0_14px_rgba(212,175,55,0.25)]"
+          />
+          <span
+            className="gold-grad font-bold tracking-[0.32em] text-3xl md:text-4xl select-none"
+            style={{ fontFamily: "Inter, 'Segoe UI', system-ui, sans-serif" }}
+          >
+            HAWK EYE
+          </span>
+        </div>
 
         <div className="mt-12 flex flex-col items-center select-none">
           <div className="text-7xl md:text-8xl font-light tracking-[0.08em] text-foreground tabular-nums lock-time">
