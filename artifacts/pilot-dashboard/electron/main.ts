@@ -189,6 +189,11 @@ app.whenReady().then(() => {
   if (!isDev) {
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
+    // Skip GitHub pre-releases. CI publishes every build as a pre-release
+    // for manual testing; only when the user flips a release to "Latest"
+    // on GitHub does it reach installed apps.
+    autoUpdater.allowPrerelease = false;
+    autoUpdater.channel = "latest";
 
     // Pipe every update lifecycle event to the renderer so the Settings
     // page can show real progress instead of guessing. Renderer subscribes

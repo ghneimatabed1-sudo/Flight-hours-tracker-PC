@@ -37,7 +37,8 @@
       "provider": "github",
       "owner": "ghneimatabed1-sudo",
       "repo": "Flight-hours-tracker-Releases",
-      "releaseType": "release"
+      "releaseType": "prerelease",
+      "vPrefixedTagName": true
     }
   ]
 }
