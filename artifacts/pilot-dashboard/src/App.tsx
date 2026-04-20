@@ -302,29 +302,37 @@ function ArchiveBootstrap() {
 }
 
 function App() {
+  // The OUTER ErrorBoundary catches crashes in any provider (QueryClient,
+  // I18n, Auth, Tooltip) — without it a provider crash silently unmounts
+  // the entire app and the user sees only the dark-navy body bg ("blue
+  // empty screen"). The INNER ErrorBoundary (around the router) catches
+  // page-level render crashes and resets on hashchange so navigating to
+  // a different page recovers without a reload.
   return (
-    <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-        <AuthProvider>
-          <TooltipProvider>
-            <ErrorBoundary>
-              {isElectron() ? (
-                <WouterRouter hook={useHashLocation}>
-                  <Shell />
-                </WouterRouter>
-              ) : (
-                <WouterRouter>
-                  <Shell />
-                </WouterRouter>
-              )}
-            </ErrorBoundary>
-            <Toaster />
-            <OpeningAnimation />
-            <UndoToast />
-          </TooltipProvider>
-        </AuthProvider>
-      </I18nProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider>
+          <AuthProvider>
+            <TooltipProvider>
+              <ErrorBoundary>
+                {isElectron() ? (
+                  <WouterRouter hook={useHashLocation}>
+                    <Shell />
+                  </WouterRouter>
+                ) : (
+                  <WouterRouter>
+                    <Shell />
+                  </WouterRouter>
+                )}
+              </ErrorBoundary>
+              <Toaster />
+              <OpeningAnimation />
+              <UndoToast />
+            </TooltipProvider>
+          </AuthProvider>
+        </I18nProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 
