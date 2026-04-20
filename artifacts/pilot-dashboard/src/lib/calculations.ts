@@ -35,6 +35,8 @@ export interface PilotTotals {
   // never folded into Night.
   h1: HalfYearBreakdown;
   h2: HalfYearBreakdown;
+  h1Hours: number;
+  h2Hours: number;
   yearHours: number; // Day + Night across both halves of this year.
 }
 
@@ -42,17 +44,6 @@ function emptyHalf(): HalfYearBreakdown {
   return { day: 0, night: 0, nvg: 0, sim: 0, captain: 0, total: 0, sorties: 0 };
 }
 
-function roundHalf(h: HalfYearBreakdown): HalfYearBreakdown {
-  return {
-    day: +h.day.toFixed(1),
-    night: +h.night.toFixed(1),
-    nvg: +h.nvg.toFixed(1),
-    sim: +h.sim.toFixed(1),
-    captain: +h.captain.toFixed(1),
-    total: +(h.day + h.night).toFixed(1),
-    sorties: h.sorties,
-  };
-}
 
 function n(v: unknown): number {
   const x = typeof v === "number" ? v : Number(v ?? 0);
@@ -105,14 +96,19 @@ export function computePilotTotals(pilot: Pilot, allSorties: Sortie[]): PilotTot
         mDay += c.day; mNight += c.night; mNvg += c.nvg; mSim += c.sim; mCap += cap;
         mCount += 1;
       }
+      // Half-year bucketing uses only the current calendar year so the
+      // commander never sees last year's flights counted in "this year's"
+      // halves. Mirrors artifacts/pilot-mobile/lib/calculations.ts so both
+      // apps report identical H1/H2 numbers.
       if (y === yyyy) {
-        const half = m <= 5 ? h1 : h2;
-        half.day += c.day;
-        half.night += c.night;
-        half.nvg += c.nvg;
-        half.sim += c.sim;
-        half.captain += cap;
-        half.sorties += 1;
+        const bucket = m <= 5 ? h1 : h2;
+        bucket.day += c.day;
+        bucket.night += c.night;
+        bucket.nvg += c.nvg;
+        bucket.sim += c.sim;
+        bucket.captain += cap;
+        bucket.total += c.day + c.night;
+        bucket.sorties += 1;
       }
     }
   }
@@ -139,9 +135,11 @@ export function computePilotTotals(pilot: Pilot, allSorties: Sortie[]): PilotTot
     totalCaptain: +totalCaptain.toFixed(1),
     grandTotal: +(totalDay + totalNight + totalNvg + totalSim).toFixed(1),
     sortiesThisMonth: mCount,
-    h1: roundHalf(h1),
-    h2: roundHalf(h2),
-    yearHours: +(h1.day + h1.night + h2.day + h2.night).toFixed(1),
+    h1,
+    h2,
+    h1Hours: h1.total,
+    h2Hours: h2.total,
+    yearHours: h1.total + h2.total,
   };
 }
 
