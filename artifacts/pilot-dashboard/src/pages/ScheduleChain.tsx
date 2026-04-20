@@ -53,14 +53,18 @@ export default function ScheduleChain() {
   const { user, squadron } = useAuth();
   const { toast } = useToast();
   const allowed = canUseScheduleChain(user?.role, user?.scope);
-  const myTier: "squadron" | "wing" | "base" =
-    user?.scope === "wing" ? "wing"
+  // v1.0.45: "flight" is now a first-class schedule-chain tier so a
+  // Flight Commander PC can compose & submit a sortie schedule to the
+  // parent Squadron, and receive shares back from the Squadron.
+  const myTier: "flight" | "squadron" | "wing" | "base" =
+    user?.scope === "flight" ? "flight"
+    : user?.scope === "wing" ? "wing"
     : user?.scope === "base" ? "base"
     : "squadron";
   // Canonical PC id from registerLocalPC. Squadron tier uses the squadron
-  // name; commander tiers use a tier-prefixed id (WING:..., BASE:...) so
-  // the chain reader (incoming filter) sees what the upstream writer
-  // (forward target) addressed.
+  // name; commander tiers use a tier-prefixed id (FLIGHT:..., WING:...,
+  // BASE:...) so the chain reader (incoming filter) sees what the
+  // upstream writer (forward target) addressed.
   const canonicalId = getLocalPcId();
   const fallbackId = myTier === "squadron"
     ? (squadron?.name ?? user?.username ?? "")
@@ -90,10 +94,13 @@ export default function ScheduleChain() {
   // Save & return ships the revised program back to the originator.
   const [editBuffer, setEditBuffer] = useState<Record<string, ScheduleProgram>>({});
 
-  // Squadron tier may only forward up to a Wing PC. Wing tier may only
-  // forward to a Base PC. Base tier terminates the chain — no skipping
-  // allowed (a squadron PC cannot go straight to Base, and a wing PC
-  // cannot bypass to HQ via this UI).
+  // Chain targets:
+  //   Squadron tier → may compose to Wing (up-chain) OR to Flight
+  //                    (down-chain, so a Flight Cmdr sees tomorrow's
+  //                    programme in their inbox and can return edits).
+  //   Wing tier     → forwards approved programmes to Base.
+  //   Flight tier   → composes and submits back to Squadron.
+  //   Base tier     → terminal.
   const wingPCs = useMemo(
     () => registry.data.filter(p => !p.isSelf && p.tier === "wing"),
     [registry.data],
@@ -102,14 +109,22 @@ export default function ScheduleChain() {
     () => registry.data.filter(p => !p.isSelf && p.tier === "base"),
     [registry.data],
   );
-  // Wing/Base want at-a-glance visibility of which downstream squadron
-  // PCs are currently registered, so they know which units may send
-  // schedule shares. Squadron tier is the unit producing the schedule;
-  // the registry id for that tier is the squadron's name.
+  const flightPCs = useMemo(
+    () => registry.data.filter(p => !p.isSelf && p.tier === "flight"),
+    [registry.data],
+  );
   const squadronPCs = useMemo(
     () => registry.data.filter(p => !p.isSelf && p.tier === "squadron"),
     [registry.data],
   );
+  // Which PCs may this tier address on the composer? Squadron composers
+  // see both Wing (up-chain) and Flight (down-chain). Flight composers
+  // see Squadron PCs.
+  const composeTargets = useMemo(() => {
+    if (myTier === "flight") return squadronPCs;
+    if (myTier === "squadron") return [...wingPCs, ...flightPCs];
+    return [];
+  }, [myTier, squadronPCs, wingPCs, flightPCs]);
 
   if (!allowed) {
     return (
@@ -130,9 +145,13 @@ export default function ScheduleChain() {
 
   const submitDraft = async () => {
     const target = registry.data.find(p => p.id === submitTo);
-    if (!target) { toast({ title: "Pick a Wing PC", variant: "destructive" }); return; }
+    if (!target) { toast({ title: "Pick a recipient PC", variant: "destructive" }); return; }
     const valid = draftRows.filter(r => r.ac.trim() || r.mission.trim());
     if (valid.length === 0) { toast({ title: "Add at least one row", variant: "destructive" }); return; }
+    // IMPORTANT: pass the chosen target's actual tier so the recipient's
+    // inbox filter (incoming where current_tier === their tier) lights up
+    // the share. Previously this defaulted to "wing", which hid
+    // squadron→flight shares from Flight Commanders.
     await submit.mutateAsync({
       date: draftDate,
       originSquadronId: myPcId ?? "self",
@@ -140,6 +159,7 @@ export default function ScheduleChain() {
       rows: valid,
       targetPcId: target.id,
       targetPcName: target.squadronName,
+      targetTier: target.tier as "flight" | "squadron" | "wing" | "base",
       submittedBy: user?.username ?? "ops",
     });
     toast({ title: `Schedule sent to ${target.squadronName}` });
@@ -154,11 +174,13 @@ export default function ScheduleChain() {
     <div>
       <PageHead
         title="Flight Schedule Sharing"
-        subtitle={`Chain: Squadron → Wing → Base · this PC: ${myPcName} (${myTier})`}
+        subtitle={`Chain: Flight ↔ Squadron → Wing → Base · this PC: ${myPcName} (${myTier})`}
       />
 
-      {/* Compose new schedule (squadron tier only) */}
-      {myTier === "squadron" && (
+      {/* Compose new schedule — available to Squadron and Flight tiers.
+          Squadron composers pick a Wing PC (up-chain) or a Flight PC
+          (down-chain). Flight composers pick a Squadron PC. */}
+      {(myTier === "squadron" || myTier === "flight") && (
         <Card className="mb-3">
           <div className="text-sm font-semibold mb-2">Compose & submit</div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
@@ -167,12 +189,22 @@ export default function ScheduleChain() {
               <input type="date" value={draftDate} onChange={e => setDraftDate(e.target.value)} className="w-full mt-1 px-3 py-1.5 rounded-md bg-input border border-border text-sm" data-testid="input-draft-date" />
             </div>
             <div className="sm:col-span-2">
-              <label className="text-[11px] text-muted-foreground">Send to (Wing PC)</label>
+              <label className="text-[11px] text-muted-foreground">
+                {myTier === "flight"
+                  ? "Send to (Squadron PC)"
+                  : "Send to (Wing or Flight PC)"}
+              </label>
               <select value={submitTo} onChange={e => setSubmitTo(e.target.value)} className="w-full mt-1 px-3 py-1.5 rounded-md bg-input border border-border text-sm" data-testid="select-target">
-                <option value="">— pick a registered Wing PC —</option>
-                {wingPCs.map(p => (
+                <option value="">
+                  {myTier === "flight"
+                    ? "— pick a registered Squadron PC —"
+                    : "— pick a registered Wing or Flight PC —"}
+                </option>
+                {composeTargets.map(p => (
                   <option key={p.id} value={p.id}>
-                    {p.squadronName}{p.wing ? ` · ${p.wing}` : ""}{p.online ? " · online" : " · offline"}
+                    {p.squadronName}
+                    {p.tier === "flight" ? " · flight" : p.tier === "wing" && p.wing ? ` · ${p.wing}` : ""}
+                    {p.online ? " · online" : " · offline"}
                   </option>
                 ))}
               </select>
@@ -206,7 +238,7 @@ export default function ScheduleChain() {
               <Plus className="h-3 w-3" /> Add row
             </button>
             <button onClick={submitDraft} disabled={submit.isPending} className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50" data-testid="button-submit-schedule">
-              <Send className="h-3 w-3" /> Submit to Wing
+              <Send className="h-3 w-3" /> {myTier === "flight" ? "Submit to Squadron" : "Submit"}
             </button>
           </div>
         </Card>
