@@ -165,6 +165,12 @@ interface LoginResult {
   requires2fa?: "enroll" | "verify";
 }
 interface AuthCtx extends AuthState {
+  // Set when the launch-time Supabase silent-auth attempt fails for a
+  // non-admin account. The login screen surfaces this as a banner so the
+  // operator gets a clear "please sign in again" path instead of a stuck
+  // dashboard. Cleared on successful login or when the user dismisses it.
+  silentAuthError: string | null;
+  clearSilentAuthError: () => void;
   activateLicense: (key: string, username: string) => Promise<{ ok: boolean; error?: string }>;
   configureSquadron: (cfg: SquadronConfig) => void;
   login: (username: string, password: string) => Promise<LoginResult>;
@@ -240,6 +246,7 @@ declare global {
       isPackaged?: () => Promise<boolean>;
       pickBackupFolder?: () => Promise<string | null>;
       writeBackupFile?: (folder: string, filename: string, content: string) => Promise<string>;
+      logRendererError?: (label: string, detail: string) => Promise<boolean>;
     };
   }
 }
@@ -403,6 +410,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void recordAuditEvent({ type: "pc.devicename.updated", actor: "admin", detail: { set: !!clean } });
   };
 
+  // Set when the launch-time Supabase silent sign-in attempt fails. Drives
+  // a banner on the Login screen so the operator gets a clear path back in.
+  const [silentAuthError, setSilentAuthError] = useState<string | null>(null);
+  const clearSilentAuthError = () => setSilentAuthError(null);
+
   useEffect(() => {
     let cancelled = false;
     makeFingerprint().then(fp => {
@@ -411,8 +423,76 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
+  // ── Launch-time Supabase silent sign-in guard ──────────────────────────
+  // If we hydrated `state.user` from localStorage but Supabase has no live
+  // session (refresh token expired, network was down at launch, the
+  // server rotated keys, etc.), every operational read/write will be
+  // silently filtered by RLS and the dashboard renders a stuck/empty
+  // screen with no error. We try one re-sign-in using the cached creds;
+  // if that also fails we clear the local user so LoginGate shows, set
+  // silentAuthError so the user sees a clear "please sign in again"
+  // banner, and append the failure to the renderer-error.log so support
+  // can tell silent-auth failure apart from a fresh launch.
+  // Skipped for super_admin (no Supabase round-trip), for the demo path
+  // (no Supabase configured), and when no user is hydrated at all.
+  useEffect(() => {
+    if (!supabaseConfigured || !supabase) return;
+    if (!state.user) return;
+    if (state.user.role === "super_admin") return;
+    let cancelled = false;
+    void (async () => {
+      const username = state.user!.username;
+      const logFailure = (reason: string) => {
+        const detail = `user=${username} reason=${reason}`;
+        try { window.rjafElectron?.logRendererError?.("silent-auth-failed", detail); } catch { /* best effort */ }
+        // eslint-disable-next-line no-console
+        console.warn("[silent-auth-failed]", detail);
+        try {
+          void recordAuditEvent({
+            type: "auth.silent.failed",
+            actor: username,
+            detail: { reason },
+          });
+        } catch { /* best effort */ }
+      };
+      const forceSignOut = (reason: string) => {
+        if (cancelled) return;
+        try { void supabase!.auth.signOut(); } catch { /* ignore */ }
+        try { localStorage.removeItem("rjaf.user"); } catch { /* ignore */ }
+        setSilentAuthError(
+          "Your session expired and could not be refreshed. Please sign in again.",
+        );
+        setState(s => ({ ...s, user: null }));
+        logFailure(reason);
+      };
+      try {
+        const { data, error } = await supabase!.auth.getSession();
+        if (cancelled) return;
+        if (error) { forceSignOut(`getSession:${error.message}`); return; }
+        if (data?.session) return; // happy path — silent restore worked
+        const creds = getSupabaseCreds(username);
+        if (!creds) { forceSignOut("no_cached_creds"); return; }
+        const { error: sbErr } = await supabase!.auth.signInWithPassword({
+          email: creds.email,
+          password: creds.password,
+        });
+        if (cancelled) return;
+        if (sbErr) { forceSignOut(`signin:${sbErr.message}`); return; }
+        // Re-sign-in succeeded — nothing else to do.
+      } catch (err) {
+        if (cancelled) return;
+        forceSignOut(`threw:${(err as Error)?.message ?? String(err)}`);
+      }
+    })();
+    return () => { cancelled = true; };
+    // Intentionally only runs when the hydrated user identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.user?.username]);
+
   const value = useMemo<AuthCtx>(() => ({
     ...state,
+    silentAuthError,
+    clearSilentAuthError,
     backendMode: supabaseConfigured ? "supabase" : "demo",
     activateLicense: async (key, username) => {
       const k = key.trim().toUpperCase();
@@ -635,6 +715,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem("rjaf.fails");
         localStorage.removeItem("rjaf.lockUntil");
         await recordAuditEvent({ type: "login.ok", actor: username, detail: { role: verified.role } });
+        setSilentAuthError(null);
         setState(s => ({ ...s, user: verified, failedAttempts: 0, lockedUntil: null }));
         return { ok: true };
       }
@@ -661,6 +742,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem("rjaf.fails");
         localStorage.removeItem("rjaf.lockUntil");
         await recordAuditEvent({ type: "login.ok", actor: username });
+        setSilentAuthError(null);
         setState(s => ({ ...s, user, failedAttempts: 0, lockedUntil: null }));
         return { ok: true };
       }
@@ -1084,7 +1166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPcRoleLock: applyPcRoleLock,
     pcDeviceName,
     setPcDeviceName: applyPcDeviceName,
-  }), [state, pending, adminTotpEnrolled, pendingRecoveryCodes, adminRecoveryCodesRemaining, pcRoleLock, pcDeviceName]);
+  }), [state, pending, adminTotpEnrolled, pendingRecoveryCodes, adminRecoveryCodesRemaining, pcRoleLock, pcDeviceName, silentAuthError]);
 
   // ── Inactivity auto-logout ──────────────────────────────────────
   // Watches user activity (mousemove / keydown / pointerdown / scroll /

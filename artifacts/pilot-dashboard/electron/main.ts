@@ -234,6 +234,26 @@ ipcMain.handle("rjaf:offlineQueuePath", () => {
 });
 ipcMain.handle("rjaf:isPackaged", () => app.isPackaged);
 
+// Renderer-side errors (e.g. Supabase silent auth failure on launch) are
+// piped here so the main process appends them to the same renderer-error.log
+// file the startup-error handlers above use. Support reads that single file
+// when triaging "I clicked the icon and nothing happened" reports.
+ipcMain.handle(
+  "rjaf:logRendererError",
+  (_evt, label: string, detail: string) => {
+    try {
+      const logFile = path.join(app.getPath("userData"), "renderer-error.log");
+      const safeLabel = String(label ?? "renderer").slice(0, 64);
+      const safeDetail = String(detail ?? "").slice(0, 4096);
+      const line = `[${new Date().toISOString()}] ${safeLabel}: ${safeDetail}\n`;
+      fs.appendFileSync(logFile, line);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+);
+
 // Manual update controls. Renderer-driven so the user has a button instead
 // of waiting for the silent startup poll.
 ipcMain.handle("rjaf:checkForUpdates", async () => {

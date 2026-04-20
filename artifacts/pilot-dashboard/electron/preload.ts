@@ -21,6 +21,11 @@ const api = {
   checkForUpdates: (): Promise<{ ok: boolean; version?: string | null; reason?: string }> =>
     ipcRenderer.invoke("rjaf:checkForUpdates"),
   installUpdateNow: (): Promise<boolean> => ipcRenderer.invoke("rjaf:installUpdateNow"),
+  // Append a single line to the packaged app's renderer-error.log. Used by
+  // the renderer to surface non-fatal failures (e.g. Supabase silent auth
+  // failing on launch) to support without a full crash dialog.
+  logRendererError: (label: string, detail: string): Promise<boolean> =>
+    ipcRenderer.invoke("rjaf:logRendererError", label, detail),
   onUpdateEvent: (cb: (e: UpdateEvent) => void): (() => void) => {
     const listener = (_: unknown, payload: UpdateEvent) => cb(payload);
     ipcRenderer.on("rjaf:update", listener);

@@ -16,7 +16,7 @@ export default function LoginGate() {
     licensed, configured, activateLicense, configureSquadron, login, fingerprint,
     lockedUntil, user, pendingAdmin, verifyAdminTotp, cancelAdminTotp,
     pendingRecoveryCodes, ackRecoveryCodes, provisionSuperAdmin, pcRoleLock,
-    pcDeviceName,
+    pcDeviceName, silentAuthError, clearSilentAuthError,
   } = useAuth();
   const { t, lang, setLang } = useI18n();
 
@@ -214,6 +214,25 @@ export default function LoginGate() {
     // symmetrically with no scroll path.
     <div className="h-screen overflow-y-auto brand-bg">
     <div className="min-h-full flex items-center justify-center p-6">
+      {silentAuthError && (
+        <div
+          role="alert"
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-xl w-[min(36rem,calc(100%-2rem))] rounded-md border border-amber-500/60 bg-amber-500/10 text-amber-100 px-4 py-3 shadow-lg flex items-start gap-3"
+        >
+          <ShieldCheck className="h-4 w-4 mt-0.5 flex-none" />
+          <div className="text-sm leading-snug flex-1">
+            <div className="font-medium">Sign-in expired</div>
+            <div className="opacity-90">{silentAuthError}</div>
+          </div>
+          <button
+            type="button"
+            onClick={clearSilentAuthError}
+            className="text-xs px-2 py-1 rounded border border-amber-500/60 hover:bg-amber-500/20"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <div className="absolute top-4 right-4 rtl:left-4 rtl:right-auto">
         <button onClick={() => setLang(lang === "en" ? "ar" : "en")} className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-secondary inline-flex items-center gap-1.5">
           <Languages className="h-3.5 w-3.5" />
