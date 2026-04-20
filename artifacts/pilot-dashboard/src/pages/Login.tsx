@@ -68,12 +68,12 @@ export default function LoginGate() {
   // while the lock is already showing, while a 2FA prompt is open, or
   // while the recovery codes are being displayed (those flows are
   // sensitive — we don't want to dismiss them by triggering a screensaver).
-  // DIAGNOSTIC v1.0.31: lock screen + login auto-lock disabled to bisect
-  // task #83 as the cause of the black-screen-on-launch regression.
-  void useIdleTimeout; void LOGIN_AUTO_LOCK_MS; void LockScreen; void Lock;
-  const [locked, setLocked] = useState(false); void setLocked;
-  // useIdleTimeout(LOGIN_AUTO_LOCK_MS, () => setLocked(true),
-  //   !locked && !pendingAdmin && !pendingRecoveryCodes);
+  const [locked, setLocked] = useState(false);
+  useIdleTimeout(
+    LOGIN_AUTO_LOCK_MS,
+    () => setLocked(true),
+    !locked && !pendingAdmin && !pendingRecoveryCodes,
+  );
 
   const lockedRemaining = lockedUntil ? Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000)) : 0;
 
