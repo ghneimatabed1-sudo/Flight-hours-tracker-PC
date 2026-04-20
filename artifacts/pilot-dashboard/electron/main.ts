@@ -45,13 +45,9 @@ function createWindow() {
     height: 900,
     minWidth: 1100,
     minHeight: 720,
-    // Launch maximized (NOT fullscreen) so operators get the whole
-    // dashboard on any monitor while keeping the standard title bar
-    // controls — minimize, maximize/restore and close — visible.
-    show: false,
     backgroundColor: "#0a1226",
-    title: "Hawk Eye",
-    icon: path.join(__dirname, "..", "public", "brand", "hawkeye-logo.png"),
+    title: "RJAF Squadron Ops",
+    icon: path.join(__dirname, "..", "public", "brand", "emblem.png"),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),

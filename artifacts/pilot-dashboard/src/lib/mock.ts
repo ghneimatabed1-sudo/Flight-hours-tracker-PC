@@ -41,10 +41,6 @@ export interface Pilot {
   expiry: {
     day: string;
     night: string;
-    // NVG currency is fully independent of Night per RJAF SOP — never folded
-    // into Night. A Night sortie bumps `night` only; an NVG sortie bumps
-    // `nvg` only. Either one alone is NOT enough to keep the other current.
-    nvg: string;
     irt: string;
     medical: string;
     sim: string;
@@ -53,7 +49,7 @@ export interface Pilot {
   // (e.g. a pilot who only flies NVG and has no night currency to track).
   // Hidden currencies render as "N/A" everywhere and are excluded from
   // expired/warning counts and alerts.
-  hiddenCurrencies?: ("day" | "night" | "nvg" | "irt" | "medical" | "sim")[];
+  hiddenCurrencies?: ("day" | "night" | "irt" | "medical" | "sim")[];
   available: boolean;
   imported?: boolean;
   importedAt?: string;
@@ -65,7 +61,7 @@ export interface Pilot {
   lastSimDate?: string;
 }
 
-export type CurrencyKey = "day" | "night" | "nvg" | "irt" | "medical" | "sim";
+export type CurrencyKey = "day" | "night" | "irt" | "medical" | "sim";
 
 export function isCurrencyHidden(p: Pick<Pilot, "hiddenCurrencies">, k: CurrencyKey): boolean {
   return Array.isArray(p.hiddenCurrencies) && p.hiddenCurrencies.includes(k);
@@ -100,13 +96,6 @@ export interface Sortie {
   night2: number;
   nightDual: number;
   nvg: number;
-  // NVG sub-buckets per the 9-bucket schema (Day/Night/NVG × 1st/2nd/Dual).
-  // Optional for backward compatibility — when omitted, all NVG hours sit in
-  // the legacy single `nvg` field. New entries written by the rebuilt Add
-  // Sortie page populate these so monthly reports can break NVG down by seat.
-  nvg1?: number;
-  nvg2?: number;
-  nvgDual?: number;
   sim: number;
   actual: number;
   // Primary flight condition selected by the ops officer. Independent from

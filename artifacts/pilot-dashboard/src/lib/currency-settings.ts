@@ -1,17 +1,12 @@
 // Per-squadron currency window overrides. The ops officer can change the
-// refresh window for each of the five currencies (Day, Night, NVG,
-// Instrument, Medical) so the auto-bump on sortie save matches local SOP.
-// Stored in localStorage so it survives reloads on the same desktop client.
-//
-// CRITICAL: Night and NVG are FULLY INDEPENDENT — flying a Night sortie
-// never refreshes NVG and vice versa. Each has its own window setting and
-// its own expiry date on each pilot.
+// refresh window (default 60 days) for Day and NVG/Night currencies so the
+// auto-bump on sortie save matches local SOP. Stored in localStorage so it
+// survives reloads on the same desktop client.
 
 import { useEffect, useState } from "react";
 
 export interface CurrencyWindow {
   day: number;
-  night: number;
   nvg: number;
   instrument: number;
   medical: number;
@@ -37,7 +32,7 @@ function clamp(n: number, fallback: number): number {
 
 export function getCurrencyWindow(): CurrencyWindow {
   try {
-    const raw = localStorage.getItem(LS_KEY) ?? localStorage.getItem(LEGACY_KEY);
+    const raw = localStorage.getItem(LS_KEY);
     if (!raw) return { ...DEFAULT_CURRENCY_WINDOW };
     const p = JSON.parse(raw) as Partial<CurrencyWindow>;
     return {

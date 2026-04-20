@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
@@ -68,16 +68,6 @@ export default function Currencies() {
   const [statusFilter, setStatusFilter] = useState<"all" | "current" | "warning" | "expired">("all");
   const [sortKey, setSortKey] = useState<SortKey>("worst");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [hiddenPilots, setHiddenPilots] = useState<Set<string>>(() => loadHidden());
-  const [showHidden, setShowHidden] = useState(false);
-  useEffect(() => { saveHidden(hiddenPilots); }, [hiddenPilots]);
-  const togglePilot = (id: string) => {
-    setHiddenPilots(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
 
   if (!user) return null;
   const myIds = new Set(user.squadronIds ?? []);
@@ -86,7 +76,6 @@ export default function Currencies() {
 
   const list = useMemo(() => {
     let l = pilots.filter(p => myIds.has(p.squadronId));
-    if (!showHidden) l = l.filter(p => !hiddenPilots.has(p.id));
     if (sqnFilter !== "__all") l = l.filter(p => p.squadronId === sqnFilter);
     if (statusFilter !== "all") {
       l = l.filter(p => {
@@ -114,7 +103,7 @@ export default function Currencies() {
       return sortDir === "asc" ? cmp : -cmp;
     });
     return l;
-  }, [q, sqnFilter, statusFilter, sortKey, sortDir, myIds, hiddenPilots, showHidden]);
+  }, [q, sqnFilter, statusFilter, sortKey, sortDir, myIds]);
 
   function setSort(k: SortKey) {
     if (sortKey === k) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -218,15 +207,6 @@ export default function Currencies() {
         </h2>
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted-foreground">{list.length} {t("pilots")}</span>
-          <Button
-            size="sm"
-            variant={showHidden ? "default" : "outline"}
-            onClick={() => setShowHidden(v => !v)}
-            data-testid="button-show-hidden"
-          >
-            {showHidden ? <EyeOff className="h-3.5 w-3.5 me-1.5" /> : <Eye className="h-3.5 w-3.5 me-1.5" />}
-            {showHidden ? "Showing hidden" : `Hidden (${hiddenPilots.size})`}
-          </Button>
           {canExport && (
             <div className="flex items-center gap-2">
               <Button size="sm" variant="outline" onClick={exportCsv} data-testid="button-export-csv">
@@ -300,9 +280,8 @@ export default function Currencies() {
                 {list.map(p => {
                   const sqn = squadrons.find(s => s.id === p.squadronId);
                   const worst = pilotWorst(p);
-                  const pilotHidden = hiddenPilots.has(p.id);
                   return (
-                    <tr key={p.id} className={`border-b border-border/60 hover:bg-accent/30 ${pilotHidden ? "opacity-50" : ""}`} data-testid={`row-currency-${p.id}`}>
+                    <tr key={p.id} className="border-b border-border/60 hover:bg-accent/30" data-testid={`row-currency-${p.id}`}>
                       <td className="py-2 px-3 font-mono text-xs">{p.callSign}</td>
                       <td className="py-2 px-3 whitespace-nowrap font-medium">{lang === "ar" ? p.fullNameAr : p.fullName}</td>
                       <td className="py-2 px-3 text-xs">{sqn ? (lang === "ar" ? sqn.nameAr : sqn.code) : ""}</td>
@@ -312,19 +291,9 @@ export default function Currencies() {
                       <td className="py-2 px-3"><StatusBadge status={currencyStatus(p.medicalCurrencyDate)} date={p.medicalCurrencyDate} /></td>
                       <td className="py-2 px-3"><StatusBadge status={worst.status} date={worst.date || undefined} /></td>
                       <td className="py-2 px-3 text-end no-print">
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            onClick={() => togglePilot(p.id)}
-                            className="p-1 rounded hover:bg-secondary text-muted-foreground"
-                            title={pilotHidden ? "Show on this PC" : "Hide from this PC"}
-                            data-testid={`button-hide-pilot-${p.id}`}
-                          >
-                            {pilotHidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-                          </button>
-                          <Link href={`/dashboard/pilot/${p.id}`}>
-                            <Button size="sm" variant="outline" data-testid={`button-view-currency-${p.id}`}>{t("viewDetails")}</Button>
-                          </Link>
-                        </div>
+                        <Link href={`/dashboard/pilot/${p.id}`}>
+                          <Button size="sm" variant="outline" data-testid={`button-view-currency-${p.id}`}>{t("viewDetails")}</Button>
+                        </Link>
                       </td>
                     </tr>
                   );
