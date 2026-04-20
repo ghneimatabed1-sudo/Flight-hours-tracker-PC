@@ -71,11 +71,13 @@ const B32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const pwFails = new Map<string, { count: number; firstAt: number; lockedUntil: number }>();
 
 interface Body {
-  action?: "start" | "verify" | "regenerate";
+  action?: "start" | "verify" | "regenerate" | "change-password";
   username?: string;
   password?: string;
   token?: string;
   code?: string;
+  // `change-password` only:
+  newPassword?: string;
 }
 
 const RECOVERY_CODE_COUNT = 10;
@@ -253,6 +255,38 @@ Deno.serve(async (req: Request) => {
 
   const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
 
+  // Resolve the authoritative super-admin password hash.
+  //
+  // Until v1.0.46 this was read straight from the SUPER_ADMIN_PASSWORD_HASH
+  // secret, which meant rotating the password required CLI/Dashboard access
+  // and applied only after the function re-deployed. In practice the admin
+  // also had to remember to update every PC individually, which defeats the
+  // whole point of a server-managed credential.
+  //
+  // v1.0.46: the live hash is stored in public.super_admin_credentials
+  // (RLS-locked; only this function's service_role context can read or
+  // write it). On first call the table is bootstrapped from the env-var
+  // hash, preserving the currently deployed password. From then on a call
+  // to action="change-password" rotates the hash atomically and every PC
+  // picks up the new value on its very next login — no redeploy required.
+  async function resolveCurrentHash(): Promise<string> {
+    const { data: cred } = await admin
+      .from("super_admin_credentials")
+      .select("password_hash")
+      .eq("username", username)
+      .maybeSingle();
+    if (cred?.password_hash) return String(cred.password_hash).toLowerCase();
+    // First-call bootstrap: seed the row from the env var so subsequent
+    // calls can read it from the DB and later rotate it in place.
+    await admin.from("super_admin_credentials").insert({
+      username,
+      password_hash: expectedHash,
+      updated_by: "bootstrap",
+    }).then(() => {}, () => {});
+    return expectedHash;
+  }
+  const currentHash = await resolveCurrentHash();
+
   if (action === "start") {
     const password = body.password ?? "";
     if (!password) return reply({ ok: false, error: "missing_fields" }, 400);
@@ -265,9 +299,9 @@ Deno.serve(async (req: Request) => {
       return reply({ ok: false, error: "locked", lockedUntil: fail.lockedUntil }, 429);
     }
 
-    // Constant-time password check.
+    // Constant-time password check against the live (DB-backed) hash.
     const providedHash = (await sha256Hex(password)).toLowerCase();
-    if (!timingSafeEq(providedHash, expectedHash)) {
+    if (!timingSafeEq(providedHash, currentHash)) {
       const cur = (fail && now - fail.firstAt < PW_FAIL_WINDOW_MS)
         ? fail
         : { count: 0, firstAt: now, lockedUntil: 0 };
@@ -585,6 +619,83 @@ Deno.serve(async (req: Request) => {
     }).then(() => {}, () => {});
 
     return reply({ ok: true, recoveryCodes });
+  }
+
+  if (action === "change-password") {
+    // Rotate the super-admin password to a new value. Caller must prove
+    // possession of BOTH factors:
+    //   1) the signed challenge token from a recent "start" call (proves
+    //      they knew the CURRENT password within the last 5 minutes), and
+    //   2) a current 6-digit TOTP code from the enrolled authenticator.
+    // On success the new SHA-256 hash is written to super_admin_credentials
+    // and every PC will accept it the next time it calls "start".
+    const token = body.token ?? "";
+    const rawCode = (body.code ?? "").trim();
+    const newPassword = (body.newPassword ?? "").trim();
+    if (!token || !/^\d{6}$/.test(rawCode) || newPassword.length < 8) {
+      return reply({ ok: false, error: "bad_input" }, 400);
+    }
+    if (!(await verifyToken(challengeSecret, username, token))) {
+      return reply({ ok: false, error: "unauthorized" }, 401);
+    }
+
+    const { data: row } = await admin
+      .from("super_admin_2fa")
+      .select("*")
+      .eq("username", username)
+      .maybeSingle();
+    if (!row || !row.enrolled_at) return reply({ ok: false, error: "not_enrolled" }, 404);
+
+    const lockedNow = row.locked_until && new Date(row.locked_until).getTime() > Date.now();
+    if (lockedNow) return reply({ ok: false, error: "locked" }, 423);
+
+    const totpOk = await verifyTotp(row.secret_b32, rawCode);
+    if (!totpOk) {
+      const fails = (row.failed_attempts ?? 0) + 1;
+      const lockUntil = fails >= LOCKOUT_THRESHOLD
+        ? new Date(Date.now() + LOCKOUT_MS).toISOString()
+        : null;
+      await admin.from("super_admin_2fa").update({
+        failed_attempts: fails,
+        locked_until: lockUntil,
+        updated_at: new Date().toISOString(),
+      }).eq("username", username);
+      await admin.from("audit_log").insert({
+        squadron_id: null, type: "super_admin.2fa.failed", actor: username,
+        detail: { fails, mode: "totp", op: "change-password" },
+      }).then(() => {}, () => {});
+      return reply({ ok: false, error: lockUntil ? "locked" : "bad", fails });
+    }
+
+    const newHash = (await sha256Hex(newPassword)).toLowerCase();
+    if (timingSafeEq(newHash, currentHash)) {
+      return reply({ ok: false, error: "same" }, 400);
+    }
+
+    // Upsert to handle the (rare) case where the row was never bootstrapped.
+    const { error: upErr } = await admin
+      .from("super_admin_credentials")
+      .upsert({
+        username,
+        password_hash: newHash,
+        updated_at: new Date().toISOString(),
+        updated_by: username,
+      }, { onConflict: "username" });
+    if (upErr) return reply({ ok: false, error: "store_failed", detail: upErr.message }, 500);
+
+    await admin.from("super_admin_2fa").update({
+      failed_attempts: 0,
+      locked_until: null,
+      updated_at: new Date().toISOString(),
+    }).eq("username", username);
+    await admin.from("audit_log").insert({
+      squadron_id: null,
+      type: "admin.password.change.ok",
+      actor: username,
+      detail: { via: "edge-function" },
+    }).then(() => {}, () => {});
+
+    return reply({ ok: true });
   }
 
   return reply({ ok: false, error: "unknown_action" }, 400);
