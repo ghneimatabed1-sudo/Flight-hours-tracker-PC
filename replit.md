@@ -73,7 +73,12 @@ The system is built as a pnpm workspace monorepo.
 - **Supabase:** Used for database (PostgreSQL), authentication (planned), and Edge Functions (for `validate-license`).
 - **React Query:** For data fetching and state management in the web application.
 - **`xlsx` package:** For XLSX export functionality.
-- **CodeMagic:** CI/CD for the `pilot-mobile` Expo application.
+- **Mobile Builds (unsigned IPA + APK):** GitHub Actions workflow `.github/workflows/mobile-unsigned-builds.yml` builds both platforms with zero Apple credentials or EAS account required.
+  - **Method:** `expo prebuild` generates native projects → iOS uses `xcodebuild` with `CODE_SIGNING_ALLOWED=NO` → packaged into `PilotLogbook-unsigned.ipa` → downloadable from GitHub Actions artifacts. Android uses `gradlew assembleRelease`.
+  - **Trigger:** Go to GitHub repo → Actions → "Hawk Eye — Unsigned Mobile Builds" → Run workflow (select branch `replit-latest`). OR trigger via API: `POST /repos/ghneimatabed1-sudo/Flight-hours-tracker-PC/actions/workflows/mobile-unsigned-builds.yml/dispatches` with `{"ref":"replit-latest"}` using `$GITHUB_PERSONAL_ACCESS_TOKEN`.
+  - **Artifacts:** `HawkEye-ios-unsigned` (IPA, sideload via Sideloadly/AltStore) and `HawkEye-android` (APK, direct install). Available under the completed Actions run → Artifacts section.
+  - **IMPORTANT:** Always use this method when the user asks for a new IPA or APK build. Never use EAS managed builds (requires paid Apple Developer account). Never use Codemagic (user ran out of billing).
+  - Supabase env vars (`EXPO_PUBLIC_SUPABASE_URL` + `EXPO_PUBLIC_SUPABASE_ANON_KEY`) are baked in the workflow file directly so the app connects to the live backend.
 - **Authenticator Apps:** (e.g., Google Authenticator, Authy, 1Password) for Super Admin TOTP.
 # v1.0.5 — Monthly Report
 
