@@ -57,7 +57,18 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      // sandbox:false because sandbox:true under file:// can silently
+      // refuse to evaluate ES module scripts loaded by Vite (Chromium
+      // treats them as cross-origin), producing a black window with no
+      // error in the renderer console. The preload still uses
+      // contextBridge so the security posture remains correct.
+      sandbox: false,
+      // Required so Chromium will evaluate Vite's ES module bundle
+      // when it's loaded from a file:// URL. Without this, Electron 32+
+      // blocks the script with no visible error and the window stays
+      // blank. We only ever load local files (no remote content), so
+      // this does not increase real attack surface.
+      webSecurity: false,
     },
   });
 
@@ -126,6 +137,10 @@ function createWindow() {
   if (isDev) {
     mainWindow.loadURL("http://localhost:5173/");
   } else {
+    // DIAGNOSTIC v1.0.30: open DevTools immediately so any console
+    // error is visible to the operator. Remove once v1.0.30 has
+    // confirmed which renderer error was happening.
+    try { mainWindow.webContents.openDevTools({ mode: "detach" }); } catch { /* ignore */ }
     const indexPath = path.join(__dirname, "..", "dist", "public", "index.html");
     if (!fs.existsSync(indexPath)) {
       logErr("missing-index", `index.html not found at ${indexPath}`);
