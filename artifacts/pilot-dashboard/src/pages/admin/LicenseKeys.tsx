@@ -126,18 +126,47 @@ export default function LicenseKeys() {
   // the same logged-in dashboard. Wipes auth identity + auth-related
   // session state, then reloads.
   function forceSignOutAndReload() {
+    // 1) Drop the in-memory user immediately so even if the reload is
+    //    delayed (Electron file:// can take a beat), no super-admin UI
+    //    keeps painting in the background.
+    try { auth.logout(); } catch { /* swallow */ }
+    // 2) Wipe every auth-bearing key from localStorage. Earlier versions
+    //    only removed `rjaf.user` — but `rjaf.fails`, `rjaf.lockUntil`,
+    //    any cached Supabase session token under `sb-*-auth-token`, and
+    //    the 2FA TOTP pending state could survive a reload and instantly
+    //    re-hydrate the super admin session, defeating the sign-out.
     try {
       localStorage.removeItem("rjaf.user");
       localStorage.removeItem("rjaf.fails");
       localStorage.removeItem("rjaf.lockUntil");
+      localStorage.removeItem("rjaf.totpPending");
+      // Supabase v2 stores its auth token under sb-<project>-auth-token.
+      // Clear every variant so the next launch can't auto-restore the
+      // super admin's Supabase session.
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith("sb-") && k.endsWith("-auth-token")) {
+          localStorage.removeItem(k);
+        }
+      }
       sessionStorage.clear();
     } catch { /* ignore */ }
-    // Hash-routing aware: under file:// (Electron) and the dev server alike,
-    // wouter matches against `location.hash`. Setting both the path and the
-    // hash to "/" guarantees we land on Login (which is rendered when no
-    // user is in storage) rather than re-hydrating the previous route.
+    // 3) Hash-routing aware: under file:// (Electron) and the dev server
+    //    alike, wouter matches against `location.hash`. Set both the path
+    //    and the hash to "/" so we land on Login (rendered when no user
+    //    is in storage) rather than re-hydrating the previous route.
     try { window.location.hash = "#/"; } catch { /* ignore */ }
-    window.location.reload();
+    // 4) Hard reload. window.location.reload() is normally enough, but
+    //    in Electron file:// mode a recently-mutated hash sometimes makes
+    //    Chromium skip the reload. Replace the URL outright as a belt-
+    //    and-suspenders fallback so the renderer is GUARANTEED to remount.
+    try {
+      const base = window.location.href.split("#")[0];
+      window.location.replace(base + "#/");
+    } catch {
+      window.location.reload();
+    }
   }
 
   // Local accounts list (commanders + ops) shown inside the Setup dialog so
@@ -508,6 +537,14 @@ export default function LicenseKeys() {
       if (tier) localStorage.setItem("rjaf.commanderTier", tier);
       else localStorage.removeItem("rjaf.commanderTier");
       if (commanderName) localStorage.setItem("rjaf.commanderName", commanderName);
+      // Persist the EXACT role the operator picked as the authoritative
+      // role label for this PC. Every label-rendering code path (sidebar
+      // tier badge, dashboard header, audit log) reads `rjaf.assignedRole`
+      // — so without writing it here the sign-in after Reopen could show
+      // a stale label left over from the original install license (e.g.
+      // operator picks "Squadron Commander" but the PC still shows "HQ
+      // Commander" because the seed install key was minted as hq).
+      localStorage.setItem("rjaf.assignedRole", setupRole);
       auth.setPcDeviceName(setupDeviceName.trim());
       auth.setPcRoleLock(roleToLock(setupRole));
 
