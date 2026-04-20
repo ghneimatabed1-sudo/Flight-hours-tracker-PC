@@ -147,10 +147,41 @@ function createWindow() {
     });
   }
 
+  // ── Navigation hardening ────────────────────────────────────────────
+  // Defence-in-depth on top of the renderer-side CSP. The renderer must
+  // never navigate the BrowserWindow itself away from our local
+  // file:// bundle, and external links should only open in the user's
+  // real browser when they are explicitly safe schemes.
+  const SAFE_OPEN_SCHEMES = new Set(["https:", "http:", "mailto:"]);
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    try {
+      const u = new URL(url);
+      if (SAFE_OPEN_SCHEMES.has(u.protocol)) shell.openExternal(url);
+    } catch { /* malformed URL — refuse silently */ }
     return { action: "deny" };
   });
+  // Block ALL in-window navigation away from the local bundle. The
+  // dashboard is a single-page app — every legitimate navigation is a
+  // hash change, never a full page load. If anything tries to navigate
+  // the window itself (clicked anchor, JS redirect, devtools) we refuse.
+  mainWindow.webContents.on("will-navigate", ((evt: { preventDefault: () => void }, url: string) => {
+    try {
+      const u = new URL(url);
+      // Allow same-origin file:// (our own bundle) and the dev server
+      // when running unpackaged. Everything else is blocked + opened
+      // externally if it's a safe scheme.
+      if (u.protocol === "file:") return;
+      if (isDev && u.origin === "http://localhost:5173") return;
+      evt.preventDefault();
+      if (SAFE_OPEN_SCHEMES.has(u.protocol)) shell.openExternal(url);
+    } catch {
+      evt.preventDefault();
+    }
+  }) as never);
+  // Block attaching new webviews — we don't use them anywhere.
+  mainWindow.webContents.on("will-attach-webview", ((evt: { preventDefault: () => void }) => {
+    evt.preventDefault();
+  }) as never);
 }
 
 app.whenReady().then(() => {
