@@ -173,6 +173,7 @@ const EN: Dict = {
   reminders_summary: "{n} reminder(s) set.",
   reminders_footnote:
     "Reminders fire once per expiry date. Tap a notification to jump to your Currency screen.",
+  reminders_done: "Done",
   reminders_perm_title: "Notifications disabled",
   reminders_perm_body:
     "Allow notifications in your phone's settings to receive currency reminders.",
@@ -354,6 +355,7 @@ const AR: Dict = {
   reminders_summary: "{n} تذكير(ات).",
   reminders_footnote:
     "يُرسل كل تذكير مرة واحدة لكل تاريخ انتهاء. اضغط الإشعار للانتقال إلى شاشة الصلاحيات.",
+  reminders_done: "تم",
   reminders_perm_title: "الإشعارات معطلة",
   reminders_perm_body:
     "اسمح بالإشعارات من إعدادات الجهاز لتلقي تذكيرات الصلاحيات.",

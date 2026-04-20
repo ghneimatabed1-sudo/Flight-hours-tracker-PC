@@ -35,6 +35,7 @@ import {
 const CURRENCY_LIST: { key: CurrencyKey; tk: string }[] = [
   { key: "day", tk: "currency_day" },
   { key: "night", tk: "currency_night" },
+  { key: "nvg", tk: "currency_nvg" },
   { key: "irt", tk: "currency_irt" },
   { key: "medical", tk: "currency_medical" },
 ];
@@ -176,7 +177,14 @@ export default function RemindersScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <View style={[styles.header, { paddingTop: topPad }]}>
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => {
+            // When the pilot lands here straight after creating their
+            // password (first-run flow) the navigation stack is empty, so
+            // router.back() is a no-op. Fall back to replacing with the
+            // tabs root so the header arrow always leaves the screen.
+            if (router.canGoBack()) router.back();
+            else router.replace("/(tabs)" as never);
+          }}
           hitSlop={12}
           style={({ pressed }) => [
             styles.headerBtn,
@@ -433,6 +441,29 @@ export default function RemindersScreen() {
         >
           {t("reminders_footnote")}
         </Text>
+
+        <Pressable
+          onPress={() => {
+            if (router.canGoBack()) router.back();
+            else router.replace("/(tabs)" as never);
+          }}
+          style={({ pressed }) => [
+            styles.doneBtn,
+            {
+              backgroundColor: colors.primary,
+              opacity: pressed ? 0.8 : 1,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.doneBtnText,
+              { color: colors.primaryForeground },
+            ]}
+          >
+            {t("reminders_done")}
+          </Text>
+        </Pressable>
       </ScrollView>
     </View>
   );
@@ -551,5 +582,17 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     lineHeight: 16,
     marginTop: 8,
+  },
+  doneBtn: {
+    marginTop: 14,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  doneBtnText: {
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.4,
   },
 });

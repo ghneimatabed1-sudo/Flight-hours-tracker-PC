@@ -22,7 +22,7 @@ export function resolveProjectId(): string | undefined {
   return process.env.EXPO_PUBLIC_EAS_PROJECT_ID || undefined;
 }
 
-export type CurrencyKey = "day" | "night" | "irt" | "medical" | "sim";
+export type CurrencyKey = "day" | "night" | "nvg" | "irt" | "medical" | "sim";
 
 export type ReminderThresholds = Partial<Record<CurrencyKey, number[]>>;
 
@@ -194,15 +194,18 @@ export async function saveReminderPrefs(prefs: ReminderPrefs): Promise<boolean> 
 
   // Best-effort Supabase sync (silent on failure — migrations may be pending).
   if (supabaseConfigured && supabase) {
-    supabase
-      .rpc("save_pilot_reminder_prefs", {
-        p_thresholds:       prefs.thresholds,
-        p_push_enabled:     prefs.pushEnabled,
-        p_expo_push_token:  prefs.expoPushToken,
-        p_platform:         prefs.platform,
-      })
-      .then(() => {})
-      .catch(() => {});
+    void (async () => {
+      try {
+        await supabase.rpc("save_pilot_reminder_prefs", {
+          p_thresholds:       prefs.thresholds,
+          p_push_enabled:     prefs.pushEnabled,
+          p_expo_push_token:  prefs.expoPushToken,
+          p_platform:         prefs.platform,
+        });
+      } catch {
+        // Migrations may not be applied yet — local save already succeeded.
+      }
+    })();
   }
 
   // Return true as long as local save worked — the user sees no error even
