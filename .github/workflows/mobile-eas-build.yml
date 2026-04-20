@@ -1,38 +1,48 @@
 name: Build Mobile (IPA + APK)
 
-# Produces an unsigned IPA (simulator + iPhone device preview) and a
-# signed APK for the RJAF Pilot Logbook via Expo Application Services.
+# Builds IPA (real device) + APK via Expo Application Services cloud.
+# Artifacts are uploaded to this workflow run AND available at expo.dev.
 #
-# Requires repo secret EXPO_TOKEN (https://expo.dev/accounts/[you]/settings/access-tokens).
-# The EAS project is created automatically on first run.
-#
-# Triggers:
-#   - manual (workflow_dispatch) — pick profile (preview | production)
-#   - push of a v* tag          — production builds
+# ─── ONE-TIME SETUP ───────────────────────────────────────────────────────────
+# 1. Go to https://expo.dev/accounts/[you]/settings/access-tokens
+#    and create a token.
+# 2. Add it to this repo:
+#    GitHub repo → Settings → Secrets → Actions → New secret
+#    Name:  EXPO_TOKEN
+#    Value: <your token>
+# 3. For iOS IPA on a real device you also need Apple credentials.
+#    Run this ONCE from your own computer (inside artifacts/pilot-mobile):
+#      npx eas-cli credentials --platform ios
+#    Follow the prompts — EAS stores the cert securely in the cloud.
+# ──────────────────────────────────────────────────────────────────────────────
+
 on:
   workflow_dispatch:
     inputs:
       profile:
-        description: "EAS build profile"
+        description: "Build profile (internal = real IPA+APK, preview = simulator+APK)"
         required: true
-        default: "preview"
+        default: "internal"
         type: choice
-        options: [preview, production]
-  push:
-    tags:
-      - "v*"
+        options:
+          - internal
+          - preview
+          - production
 
 jobs:
-  eas-build:
+  # ── Android APK ─────────────────────────────────────────────────────────────
+  build-android:
+    name: Android APK
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: artifacts/pilot-mobile
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node 20
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -42,20 +52,102 @@ jobs:
         with:
           version: 9
 
-      - name: Setup Expo / EAS CLI
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile=false
+        working-directory: .
+
+      - name: Setup EAS CLI
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Install workspace deps
+      - name: Build Android APK
+        id: build
+        run: |
+          PROFILE="${{ inputs.profile || 'internal' }}"
+          echo "Building Android APK with profile: $PROFILE"
+          BUILD_URL=$(eas build \
+            --platform android \
+            --profile "$PROFILE" \
+            --non-interactive \
+            --wait \
+            --json 2>/dev/null | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{ try{ const a=JSON.parse(d); const url=Array.isArray(a)?a[0]?.artifacts?.buildUrl:a?.artifacts?.buildUrl; console.log(url||''); }catch(e){ console.log(''); } })" || true)
+          echo "build_url=$BUILD_URL" >> $GITHUB_OUTPUT
+          echo "### Android APK Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "**Download URL:** $BUILD_URL" >> $GITHUB_STEP_SUMMARY
+          echo "**Also check:** https://expo.dev" >> $GITHUB_STEP_SUMMARY
+
+      - name: Download APK artifact
+        if: steps.build.outputs.build_url != ''
+        run: |
+          curl -L -o HawkEye.apk "${{ steps.build.outputs.build_url }}" || true
+
+      - name: Upload APK to GitHub
+        if: steps.build.outputs.build_url != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: HawkEye-android-${{ inputs.profile || 'internal' }}
+          path: artifacts/pilot-mobile/HawkEye.apk
+          retention-days: 30
+
+  # ── iOS IPA ─────────────────────────────────────────────────────────────────
+  build-ios:
+    name: iOS IPA
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: artifacts/pilot-mobile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile=false
         working-directory: .
 
-      # APK (Android) + IPA (iOS simulator build is unsigned; device build
-      # needs an Apple Developer cert — use the "production" profile for that).
-      - name: Build Android APK
-        run: eas build --platform android --profile ${{ inputs.profile || 'preview' }} --non-interactive --no-wait
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Build iOS IPA
-        run: eas build --platform ios --profile ${{ inputs.profile || 'preview' }} --non-interactive --no-wait
+        id: build
+        run: |
+          PROFILE="${{ inputs.profile || 'internal' }}"
+          echo "Building iOS IPA with profile: $PROFILE"
+          BUILD_URL=$(eas build \
+            --platform ios \
+            --profile "$PROFILE" \
+            --non-interactive \
+            --wait \
+            --json 2>/dev/null | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{ try{ const a=JSON.parse(d); const url=Array.isArray(a)?a[0]?.artifacts?.buildUrl:a?.artifacts?.buildUrl; console.log(url||''); }catch(e){ console.log(''); } })" || true)
+          echo "build_url=$BUILD_URL" >> $GITHUB_OUTPUT
+          echo "### iOS IPA Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "**Download URL:** $BUILD_URL" >> $GITHUB_STEP_SUMMARY
+          echo "**Also check:** https://expo.dev" >> $GITHUB_STEP_SUMMARY
+
+      - name: Download IPA artifact
+        if: steps.build.outputs.build_url != ''
+        run: |
+          curl -L -o HawkEye.ipa "${{ steps.build.outputs.build_url }}" || true
+
+      - name: Upload IPA to GitHub
+        if: steps.build.outputs.build_url != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: HawkEye-ios-${{ inputs.profile || 'internal' }}
+          path: artifacts/pilot-mobile/HawkEye.ipa
+          retention-days: 30
