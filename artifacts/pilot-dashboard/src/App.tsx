@@ -185,6 +185,10 @@ function CommanderRoutes() {
       <Route path="/dashboard/simulator" component={Simulator} />
       <Route path="/dashboard/flights" component={FlightRecords} />
       <Route path="/dashboard/flight-program" component={FlightProgram} />
+      <Route path="/dashboard/unavailable" component={CommanderUnavailableGate} />
+      <Route path="/dashboard/sticky" component={StickyNotes} />
+      <Route path="/dashboard/schedule-chain" component={ScheduleChain} />
+      <Route path="/dashboard/messages" component={Messages} />
       {/* See SquadronOpsRoutes catch-all: redirect home rather than 404. */}
       <Route><Redirect to="/dashboard" /></Route>
     </Switch>
@@ -200,9 +204,12 @@ const IDLE_LOGOUT_MS = 30 * 60 * 1000;
 function Shell() {
   const { licensed, configured, user, logout } = useAuth();
 
-  useIdleTimeout(IDLE_LOGOUT_MS, () => {
-    if (user) logout();
-  }, !!user);
+  // DIAGNOSTIC v1.0.31: idle timeout temporarily disabled to confirm
+  // whether task #83 (lock screen + idle sign-out) is the cause of the
+  // black-screen-on-launch regression. Will be re-enabled once root
+  // cause is confirmed.
+  void useIdleTimeout; void IDLE_LOGOUT_MS; void logout;
+  // useIdleTimeout(IDLE_LOGOUT_MS, () => { if (user) logout(); }, !!user);
 
   if (!user) return <LoginGate />;
 
