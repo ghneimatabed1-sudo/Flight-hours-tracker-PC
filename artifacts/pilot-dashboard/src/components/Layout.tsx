@@ -6,7 +6,23 @@ import {
   LayoutDashboard, ListChecks, PlusCircle, Users, BadgeCheck, AlertOctagon,
   Trophy, CalendarRange, PalmtreeIcon, UserX, Calendar, ClipboardList,
   ShieldAlert, FileText, Megaphone, Map, Tags, FileDown, UserCog, Settings,
-  Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle, Archive, Bell, UserPlus, Users2, FileBarChart,
+  Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle,
+  Archive, Bell,
+  // These five icons MUST be aliased (not imported under their original
+  // names). Vite/Rollup's name-mangling step in production builds leaves
+  // certain lucide-react identifiers — Inbox, Mail, Share2, UserPlus,
+  // Users2, FileBarChart — un-renamed in the output, which then references
+  // a global that doesn't exist at runtime → "ReferenceError: Inbox is
+  // not defined" and the entire renderer fails to mount (black screen).
+  // Aliasing forces the minifier to bind the import to the local name
+  // properly. DO NOT REVERT to the bare import without verifying the
+  // built bundle no longer contains the literal names.
+  UserPlus as UserPlusIcon,
+  Users2 as Users2Icon,
+  FileBarChart as FileBarChartIcon,
+  Inbox as InboxIcon,
+  Mail as MailIcon,
+  Share2 as Share2Icon,
 } from "lucide-react";
 import { canUseMessages } from "@/lib/cross-pc";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
@@ -16,10 +32,10 @@ const ITEMS: readonly Item[] = [
   { p: "/", k: "nav_dashboard", I: LayoutDashboard },
   { p: "/sortie-log", k: "nav_sortielog", I: ListChecks },
   { p: "/sortie-add", k: "nav_addsortie", I: PlusCircle },
-  { p: "/pending", k: "nav_pending" as TKey, I: Inbox },
-  { p: "/external-pilots", k: "nav_externalpilots", I: UserPlus },
-  { p: "/schedule-chain", k: "nav_schedule_chain" as TKey, I: Share2 },
-  { p: "/messages", k: "nav_messages" as TKey, I: Mail },
+  { p: "/pending", k: "nav_pending" as TKey, I: InboxIcon },
+  { p: "/external-pilots", k: "nav_externalpilots", I: UserPlusIcon },
+  { p: "/schedule-chain", k: "nav_schedule_chain" as TKey, I: Share2Icon },
+  { p: "/messages", k: "nav_messages" as TKey, I: MailIcon },
   { p: "/roster", k: "nav_roster", I: Users },
   { p: "/currency", k: "nav_currency", I: BadgeCheck },
   { p: "/expired", k: "nav_expired", I: AlertOctagon },
@@ -41,8 +57,8 @@ const ITEMS: readonly Item[] = [
   { p: "/audit", k: "nav_audit", I: History },
   { p: "/import", k: "nav_import", I: Upload },
   { p: "/archives", k: "nav_archives", I: Archive },
-  { p: "/ops-team", k: "nav_opsteam", I: Users2 },
-  { p: "/monthly-report", k: "nav_monthly_report", I: FileBarChart },
+  { p: "/ops-team", k: "nav_opsteam", I: Users2Icon },
+  { p: "/monthly-report", k: "nav_monthly_report", I: FileBarChartIcon },
   { p: "/help", k: "nav_help", I: HelpCircle },
   { p: "/settings", k: "nav_settings", I: Settings },
 ] as const;
@@ -100,15 +116,25 @@ export default function Layout({ children }: { children: ReactNode }) {
               // Only the lead ops pilot manages the assigned ops sub-accounts.
               return user?.role === "ops";
             }
-            if (p === "/ops-team") {
-              // Only the lead ops pilot manages the assigned ops sub-accounts.
-              return user?.role === "ops";
-            }
             if (p === "/monthly-report") {
               // Monthly Report (ORFG RCN Forms 1-4 + Arabic roster) is owned
               // by the squadron ops officer.
               return user?.role === "ops";
             }
+            // Cross-PC features are gated by role+scope. Messages excludes
+            // Flight Cmdr and Ops Pilot deputies; Schedule Sharing excludes
+            // Ops Pilot deputies but lets Flight Cmdrs participate. Pending
+            // Approvals belongs to the squadron ops officer specifically —
+            // it cascades into the local calc engine on accept.
+            if (p === "/messages") return canUseMessages(user?.role, undefined);
+            if (p === "/schedule-chain") {
+              // Sharing Schedule label hidden from the operations pilot's
+              // sidebar at the operator's request — the route remains
+              // mounted so commanders / sub-account flows that link in
+              // directly keep working.
+              return user?.role !== "ops";
+            }
+            if (p === "/pending") return user?.role === "ops" || user?.role === "super_admin";
             return true;
           }).map(({ p, k, I }) => {
             const active = loc === p || (p !== "/" && loc.startsWith(p));
