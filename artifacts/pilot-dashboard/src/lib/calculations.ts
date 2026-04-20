@@ -5,6 +5,16 @@
 // only when the pilot was P1 on the sortie.
 import type { Pilot, Sortie } from "./mock";
 
+export interface HalfYearBreakdown {
+  day: number;
+  night: number;
+  nvg: number;
+  sim: number;
+  captain: number;
+  total: number;
+  sorties: number;
+}
+
 export interface PilotTotals {
   monthDay: number;
   monthNight: number;
@@ -19,6 +29,29 @@ export interface PilotTotals {
   totalCaptain: number;
   grandTotal: number;
   sortiesThisMonth: number;
+  // Half-cycle breakdown for the current calendar year. Excludes opening
+  // balance — only counts sorties flown this year so the squadron commander
+  // can see training load by half at a glance. NVG is its own column,
+  // never folded into Night.
+  h1: HalfYearBreakdown;
+  h2: HalfYearBreakdown;
+  yearHours: number; // Day + Night across both halves of this year.
+}
+
+function emptyHalf(): HalfYearBreakdown {
+  return { day: 0, night: 0, nvg: 0, sim: 0, captain: 0, total: 0, sorties: 0 };
+}
+
+function roundHalf(h: HalfYearBreakdown): HalfYearBreakdown {
+  return {
+    day: +h.day.toFixed(1),
+    night: +h.night.toFixed(1),
+    nvg: +h.nvg.toFixed(1),
+    sim: +h.sim.toFixed(1),
+    captain: +h.captain.toFixed(1),
+    total: +(h.day + h.night).toFixed(1),
+    sorties: h.sorties,
+  };
 }
 
 function n(v: unknown): number {
@@ -45,13 +78,15 @@ export function computePilotTotals(pilot: Pilot, allSorties: Sortie[]): PilotTot
 
   let mDay = 0, mNight = 0, mNvg = 0, mSim = 0, mCap = 0, mCount = 0;
   let aDay = 0, aNight = 0, aNvg = 0, aSim = 0, aCap = 0;
+  const h1 = emptyHalf();
+  const h2 = emptyHalf();
 
   for (const s of allSorties) {
     const isP1 = s.pilotId === pilot.id;
     const isP2 = s.coPilotId === pilot.id;
     if (!isP1 && !isP2) continue;
 
-    const c = sortieCategories(s, isP1);
+    const c = sortieCategories(s);
     // Captain credit prefers explicit per-seat flag (set by the rebuilt
     // Add Sortie page where each seat carries its own captain flag).
     // Falls back to the legacy assumption that P1 = captain for very old
@@ -69,6 +104,15 @@ export function computePilotTotals(pilot: Pilot, allSorties: Sortie[]): PilotTot
       if (y === yyyy && m === mm) {
         mDay += c.day; mNight += c.night; mNvg += c.nvg; mSim += c.sim; mCap += cap;
         mCount += 1;
+      }
+      if (y === yyyy) {
+        const half = m <= 5 ? h1 : h2;
+        half.day += c.day;
+        half.night += c.night;
+        half.nvg += c.nvg;
+        half.sim += c.sim;
+        half.captain += cap;
+        half.sorties += 1;
       }
     }
   }
@@ -95,6 +139,9 @@ export function computePilotTotals(pilot: Pilot, allSorties: Sortie[]): PilotTot
     totalCaptain: +totalCaptain.toFixed(1),
     grandTotal: +(totalDay + totalNight + totalNvg + totalSim).toFixed(1),
     sortiesThisMonth: mCount,
+    h1: roundHalf(h1),
+    h2: roundHalf(h2),
+    yearHours: +(h1.day + h1.night + h2.day + h2.night).toFixed(1),
   };
 }
 
