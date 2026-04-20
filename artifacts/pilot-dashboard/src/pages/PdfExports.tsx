@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import DateInput from "@/components/DateInput";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
@@ -289,11 +290,11 @@ export default function PdfExports() {
 
         <div className="flex items-center gap-2">
           <span className="text-muted-foreground">{lang === "ar" ? "النطاق" : "Range"}:</span>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)}
+          <DateInput value={from} onChange={setFrom}
             className="text-xs px-2 py-1 rounded-md border border-border bg-background"
             data-testid="input-pdf-from" />
           <span className="text-muted-foreground">→</span>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)}
+          <DateInput value={to} onChange={setTo}
             className="text-xs px-2 py-1 rounded-md border border-border bg-background"
             data-testid="input-pdf-to" />
         </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import DateInput from "@/components/DateInput";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots, useUnavailable, useCreateUnavailable, useDeleteUnavailable, type UnavailEntry } from "@/lib/squadron-data";
@@ -92,8 +93,8 @@ export default function Unavailable() {
               </select>
             </label>
             <div className="grid grid-cols-2 gap-2">
-              <label className="text-xs"><span className="text-muted-foreground">From</span><input type="date" value={from} onChange={e=>setFrom(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm font-mono" /></label>
-              <label className="text-xs"><span className="text-muted-foreground">To</span><input type="date" value={to} onChange={e=>setTo(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm font-mono" /></label>
+              <label className="text-xs"><span className="text-muted-foreground">From</span><DateInput value={from} onChange={setFrom} className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm font-mono" /></label>
+              <label className="text-xs"><span className="text-muted-foreground">To</span><DateInput value={to} onChange={setTo} className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm font-mono" /></label>
             </div>
             <label className="block text-xs"><span className="text-muted-foreground">Reason</span>
               <input value={reason} onChange={e=>setReason(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm" />

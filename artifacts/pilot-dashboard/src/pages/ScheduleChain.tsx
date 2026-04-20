@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import DateInput from "@/components/DateInput";
 import { Card, PageHead } from "@/components/Layout";
 import { useAuth } from "@/lib/auth";
 import {
@@ -186,7 +187,7 @@ export default function ScheduleChain() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
             <div>
               <label className="text-[11px] text-muted-foreground">Date</label>
-              <input type="date" value={draftDate} onChange={e => setDraftDate(e.target.value)} className="w-full mt-1 px-3 py-1.5 rounded-md bg-input border border-border text-sm" data-testid="input-draft-date" />
+              <DateInput value={draftDate} onChange={setDraftDate} className="w-full mt-1 px-3 py-1.5 rounded-md bg-input border border-border text-sm" data-testid="input-draft-date" />
             </div>
             <div className="sm:col-span-2">
               <label className="text-[11px] text-muted-foreground">

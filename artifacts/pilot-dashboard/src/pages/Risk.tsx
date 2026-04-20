@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import DateInput from "@/components/DateInput";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots } from "@/lib/squadron-data";
@@ -496,7 +497,7 @@ export default function Risk() {
           </div>
           <div>
             <Label className="text-xs">DATE</Label>
-            <Input type="date" value={form.date} onChange={e => up("date", e.target.value)} data-testid="input-risk-date" />
+            <DateInput value={form.date} onChange={(v) => up("date", v)} data-testid="input-risk-date" className="px-3 py-2 rounded-md bg-input border border-border text-sm" />
           </div>
         </div>
         {/* Datalist used by all pilot-name inputs */}

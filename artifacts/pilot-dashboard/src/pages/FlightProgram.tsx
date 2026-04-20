@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import DateInput from "@/components/DateInput";
 import { useI18n } from "@/lib/i18n";
 import { usePilots } from "@/lib/squadron-data";
 import { useAuth } from "@/lib/auth";
@@ -246,10 +247,9 @@ export default function FlightProgram() {
     <div className="space-y-3" dir={dir}>
       {/* Toolbar — hidden on print. Date + mode + Save + Print + Submit + Defaults. */}
       <div className="no-print flex items-center gap-2 flex-wrap">
-        <input
-          type="date"
+        <DateInput
           value={date}
-          onChange={(e) => setDate(e.target.value || todayIso)}
+          onChange={(v) => setDate(v || todayIso)}
           className="px-2 py-1.5 rounded-md bg-input border border-border text-sm tabular-nums"
           data-testid="input-fp-date"
         />

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import DateInput from "@/components/DateInput";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -322,10 +323,9 @@ export default function FlightRecords() {
               >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <input
-                type="date"
+              <DateInput
                 value={date}
-                onChange={(e) => setDate(e.target.value || todayIso)}
+                onChange={(v) => setDate(v || todayIso)}
                 className="px-2 py-1.5 rounded-md bg-input border border-border text-sm tabular-nums"
                 data-testid="input-flight-date"
               />

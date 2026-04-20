@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import DateInput from "@/components/DateInput";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots, useSorties, useUpdateSortie, useDeleteSortie, useRestoreSortie } from "@/lib/squadron-data";
@@ -390,7 +391,7 @@ function SortieEditDialog({ sortie, pilots, busy, onCancel, onSave }: SortieEdit
           className="p-4 space-y-3"
         >
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <L label={t("date")}><input type="date" value={form.date} onChange={e => set("date", e.target.value)} className={I} data-testid="input-edit-date" /></L>
+            <L label={t("date")}><DateInput value={form.date} onChange={(v) => set("date", v)} className={I} data-testid="input-edit-date" /></L>
             <L label={t("acType")}>
               <select value={form.acType} onChange={e => set("acType", e.target.value)} className={I}>
                 {["UH-60M", "UH-60L", "UH-60AIL", "AS332"].map(o => <option key={o}>{o}</option>)}

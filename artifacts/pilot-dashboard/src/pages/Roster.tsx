@@ -1,4 +1,5 @@
 import { useState } from "react";
+import DateInput from "@/components/DateInput";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots, useUpdatePilot, useCreatePilot, useDeletePilot, type Pilot } from "@/lib/squadron-data";
@@ -427,10 +428,9 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
               return (
                 <label key={k} className="block text-xs" data-testid={`field-currency-${k}`}>
                   <span className="text-muted-foreground">{label}</span>
-                  <input
-                    type="date"
+                  <DateInput
                     value={lastFlown[k]}
-                    onChange={e => setLF(k, e.target.value)}
+                    onChange={(v) => setLF(k, v)}
                     data-testid={`input-lastFlown-${k}`}
                     className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm"
                   />
@@ -448,10 +448,9 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
           <div className="grid grid-cols-3 gap-3 pt-2 border-t border-border">
             <label className="block text-xs col-span-3 sm:col-span-1">
               <span className="text-muted-foreground">{t("lastSimDate")}</span>
-              <input
-                type="date"
+              <DateInput
                 value={p.lastSimDate || ""}
-                onChange={e => set("lastSimDate", e.target.value)}
+                onChange={(v) => set("lastSimDate", v)}
                 data-testid="input-lastSimDate"
                 className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm font-mono"
               />

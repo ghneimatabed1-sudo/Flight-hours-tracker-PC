@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import DateInput from "@/components/DateInput";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import {
@@ -798,6 +799,18 @@ type MiniProps = {
   step?: string;
 };
 function Mini({ label, value, onChange, type = "text", placeholder, step }: MiniProps) {
+  if (type === "date") {
+    return (
+      <label className="block">
+        <span className="text-[11px] text-muted-foreground">{label}</span>
+        <DateInput
+          value={value}
+          onChange={onChange}
+          className="w-full mt-0.5 px-2 py-1.5 rounded-md bg-input border border-border text-xs font-mono"
+        />
+      </label>
+    );
+  }
   return (
     <label className="block">
       <span className="text-[11px] text-muted-foreground">{label}</span>

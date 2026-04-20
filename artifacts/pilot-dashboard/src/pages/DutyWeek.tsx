@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import DateInput from "@/components/DateInput";
 import { Card, PageHead } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
@@ -251,10 +252,9 @@ export default function DutyWeek() {
 
       <div className="flex flex-wrap items-center gap-2 mb-3 print:hidden">
         <label className="text-sm font-medium">تاريخ البداية:</label>
-        <input
-          type="date"
+        <DateInput
           value={start}
-          onChange={e => setStart(e.target.value)}
+          onChange={setStart}
           className="px-2 py-1 rounded border border-border bg-input text-sm"
           data-testid="input-duty-start"
         />

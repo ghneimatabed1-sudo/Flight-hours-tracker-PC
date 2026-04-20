@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import DateInput from "@/components/DateInput";
 import { Archive, Download, FolderArchive, FileJson, Pencil, Plus, Trash2, Save, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { PageHead } from "@/components/Layout";
@@ -225,8 +226,8 @@ function ArchiveEditor({ period, onClose }: { period: string; onClose: () => voi
                   <tbody>
                     {sorties.map(s => (
                       <tr key={s.id} className="border-b border-border/50" data-testid={`row-archive-sortie-${s.id}`}>
-                        <td className="p-1"><input type="date" value={s.date}
-                          onChange={e => updateSortie(s.id, { date: e.target.value })}
+                        <td className="p-1"><DateInput value={s.date}
+                          onChange={(v) => updateSortie(s.id, { date: v })}
                           className="bg-background border border-border rounded px-1 py-0.5 w-32"
                           data-testid={`input-archive-sortie-date-${s.id}`} /></td>
                         <td className="p-1"><select value={s.pilotId}
