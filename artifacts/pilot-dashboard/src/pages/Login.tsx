@@ -425,8 +425,8 @@ export default function LoginGate() {
                 {t("firstRunTitle")}
               </div>
               <p className="text-xs text-muted-foreground">{t("firstRunHint")}</p>
-              <Field label={t("newPassword")} value={setupPw1} onChange={setSetupPw1} type="password" autoFocus disabled={busy} />
-              <Field label={t("confirmPassword")} value={setupPw2} onChange={setSetupPw2} type="password" disabled={busy} />
+              <Field label={t("newPassword")} value={setupPw1} onChange={setSetupPw1} type="password" autoFocus />
+              <Field label={t("confirmPassword")} value={setupPw2} onChange={setSetupPw2} type="password" />
               {setupOk
                 ? <div className="text-xs text-emerald-400">{t("pwSet")}</div>
                 : setupErr && <div className="text-xs text-destructive">{setupErr}</div>}
@@ -462,8 +462,8 @@ export default function LoginGate() {
                   <span className="font-medium">{pcDeviceName}</span>
                 </div>
               )}
-              <Field label={t("username")} value={u} onChange={setU} autoFocus={!u} disabled={busy} />
-              <Field label={t("password")} value={p} onChange={setP} type="password" autoFocus={!!u && !p} disabled={busy} />
+              <Field label={t("username")} value={u} onChange={setU} autoFocus={!u} />
+              <Field label={t("password")} value={p} onChange={setP} type="password" autoFocus={!!u && !p} />
               {lockedRemaining > 0
                 ? <div className="text-xs text-amber-400">{t("lockedOut")} ({lockedRemaining}s)</div>
                 : err && <div className="text-xs text-destructive">{err}</div>}
@@ -539,8 +539,7 @@ export default function LoginGate() {
                   value={licUsername}
                   onChange={e => setLicUsername(e.target.value)}
                   autoFocus={!licUsername}
-                  disabled={busy}
-                  className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm disabled:opacity-60"
+                  className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm"
                   placeholder={t("operatorUsernamePh")}
                   autoComplete="username"
                 />
@@ -553,8 +552,7 @@ export default function LoginGate() {
                   value={licenseKey}
                   onChange={e => setLicenseKey(e.target.value)}
                   autoFocus={!!licUsername && !licenseKey}
-                  disabled={busy}
-                  className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border font-mono text-sm tracking-wider disabled:opacity-60"
+                  className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border font-mono text-sm tracking-wider"
                   placeholder="EE-XXX-XXXX-XXXX-XXXX-XXXX"
                 />
               </div>
