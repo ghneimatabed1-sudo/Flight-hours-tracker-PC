@@ -362,6 +362,8 @@ html, body, #root {
 .dark .currency-warning { background-color: rgb(113 63 18 / 0.4); color: rgb(254 240 138); }
 .currency-expired { background-color: rgb(254 202 202); color: rgb(127 29 29); }
 .dark .currency-expired { background-color: rgb(127 29 29 / 0.4); color: rgb(254 202 202); }
+.currency-unset { background-color: rgb(226 232 240); color: rgb(71 85 105); }
+.dark .currency-unset { background-color: rgb(71 85 105 / 0.4); color: rgb(203 213 225); }
 
 /* ─── Print stylesheet ──────────────────────────────────────────────
    Single source of truth for every printable surface in the app.
@@ -469,6 +471,7 @@ html, body, #root {
   /* Currency badges keep their colour-coding on paper so commanders
      can scan red/yellow at a glance. */
   .currency-current,
+  .currency-unset,
   .currency-warning,
   .currency-expired {
     -webkit-print-color-adjust: exact !important;

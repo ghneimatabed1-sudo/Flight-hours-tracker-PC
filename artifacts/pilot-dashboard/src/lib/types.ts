@@ -125,4 +125,4 @@ export interface AuditEntry {
   ip: string;
 }
 
-export type CurrencyStatus = "current" | "warning" | "expiringSoon" | "critical" | "expired";
+export type CurrencyStatus = "current" | "unset" | "warning" | "expiringSoon" | "critical" | "expired";

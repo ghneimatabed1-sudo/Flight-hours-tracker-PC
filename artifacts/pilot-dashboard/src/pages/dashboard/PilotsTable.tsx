@@ -77,6 +77,7 @@ export default function PilotsTable() {
     if (s === "expired") return t("expired");
     if (s === "critical" || s === "expiringSoon") return t("expiringSoon");
     if (s === "warning") return t("warning");
+    if (s === "unset") return t("notSet");
     return t("current");
   }
 
