@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 /**
  * Routing strategy:
@@ -306,15 +307,17 @@ function App() {
       <I18nProvider>
         <AuthProvider>
           <TooltipProvider>
-            {isElectron() ? (
-              <WouterRouter hook={useHashLocation}>
-                <Shell />
-              </WouterRouter>
-            ) : (
-              <WouterRouter>
-                <Shell />
-              </WouterRouter>
-            )}
+            <ErrorBoundary>
+              {isElectron() ? (
+                <WouterRouter hook={useHashLocation}>
+                  <Shell />
+                </WouterRouter>
+              ) : (
+                <WouterRouter>
+                  <Shell />
+                </WouterRouter>
+              )}
+            </ErrorBoundary>
             <Toaster />
             <OpeningAnimation />
             <UndoToast />
