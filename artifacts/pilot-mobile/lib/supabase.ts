@@ -378,6 +378,18 @@ export async function fetchPilotSnapshotRemote(
 
   if (sortiesErr) return { ok: false, error: classifyError(sortiesErr.message) };
 
+  // Heartbeat: tell the dashboard this device just synced. The RPC also
+  // backfills a pilot_devices row for phones that linked before migration
+  // 0016 (when the original insert was silently dropped). We deliberately
+  // ignore errors — the snapshot fetch already succeeded, and a missing or
+  // older RPC simply means the dashboard will keep showing the previous
+  // "last sync" time.
+  try {
+    await supabase.rpc("pilot_heartbeat");
+  } catch {
+    /* non-fatal */
+  }
+
   return {
     ok: true,
     snapshot: rowsToSnapshot(
