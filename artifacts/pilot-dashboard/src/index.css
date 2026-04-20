@@ -488,3 +488,15 @@ html, body, #root {
   .print-portrait { page-break-before: always; }
   @page :first { margin-top: 12mm; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+   Radix UI workaround: when a <Select> closes inside a <Dialog> and the
+   dialog re-renders new conditional fields at the same time, Radix can
+   leave inline `pointer-events: none` on the body, freezing every input
+   on the page for 30–60 seconds. The Setup dialog (License Keys page)
+   triggers this every time the operator picks a role and new commander/
+   squadron fields appear. Force pointer-events back on regardless of
+   what Radix sets inline. Outside-click detection still works because
+   Radix listens at the document level, not via body pointer-events.
+   ───────────────────────────────────────────────────────────────────── */
+body { pointer-events: auto !important; }
