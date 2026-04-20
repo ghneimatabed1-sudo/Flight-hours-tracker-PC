@@ -41,6 +41,10 @@ export interface Pilot {
   expiry: {
     day: string;
     night: string;
+    // NVG is a fully independent currency from Night per RJAF SOP — flying
+    // a Night sortie never refreshes NVG and vice versa. Tracked as its
+    // own date and surfaced as a separate column on the ops Currency view.
+    nvg: string;
     irt: string;
     medical: string;
     sim: string;
@@ -49,7 +53,7 @@ export interface Pilot {
   // (e.g. a pilot who only flies NVG and has no night currency to track).
   // Hidden currencies render as "N/A" everywhere and are excluded from
   // expired/warning counts and alerts.
-  hiddenCurrencies?: ("day" | "night" | "irt" | "medical" | "sim")[];
+  hiddenCurrencies?: ("day" | "night" | "nvg" | "irt" | "medical" | "sim")[];
   available: boolean;
   imported?: boolean;
   importedAt?: string;
@@ -61,7 +65,7 @@ export interface Pilot {
   lastSimDate?: string;
 }
 
-export type CurrencyKey = "day" | "night" | "irt" | "medical" | "sim";
+export type CurrencyKey = "day" | "night" | "nvg" | "irt" | "medical" | "sim";
 
 export function isCurrencyHidden(p: Pick<Pilot, "hiddenCurrencies">, k: CurrencyKey): boolean {
   return Array.isArray(p.hiddenCurrencies) && p.hiddenCurrencies.includes(k);
