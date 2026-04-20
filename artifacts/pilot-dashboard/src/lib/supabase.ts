@@ -151,6 +151,45 @@ export function getSupabaseCreds(username: string): SupabaseCreds | null {
   return map[username.trim().toLowerCase()] ?? null;
 }
 
+// Re-provision Supabase credentials for a user whose locally-cached
+// password has gone out of sync with the server (e.g. password rotated
+// server-side, or local cache cleared and never restored). Calls the
+// provision-commander edge function which is idempotent: it either
+// creates the auth user or rotates its password, and returns the new
+// password the client must persist. After a successful re-sync this
+// helper also signs the browser into Supabase so the very next write
+// carries a valid JWT — no extra round-trip from the caller.
+export async function resyncSupabaseCreds(
+  username: string,
+  role: "ops" | "commander" = "ops",
+  squadron?: { number?: string; name?: string; base?: string },
+): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: false, error: "supabase_not_configured" };
+  try {
+    const prov = await provisionCommanderRemote({
+      username,
+      displayName: username,
+      role,
+      tier: role === "ops" ? "ops" : "squadron",
+      squadronNumber: squadron?.number ?? "",
+      squadronName: squadron?.name ?? "",
+      squadronBase: squadron?.base ?? "",
+    });
+    if (!prov.ok || !prov.supabaseEmail || !prov.supabasePassword) {
+      return { ok: false, error: prov.error ?? "no_creds_returned" };
+    }
+    storeSupabaseCreds(username, prov.supabaseEmail, prov.supabasePassword);
+    const { error: sbErr } = await supabase.auth.signInWithPassword({
+      email: prov.supabaseEmail,
+      password: prov.supabasePassword,
+    });
+    if (sbErr) return { ok: false, error: sbErr.message };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export function clearSupabaseCreds(username: string): void {
   const map = readCredsMap();
   delete map[username.trim().toLowerCase()];

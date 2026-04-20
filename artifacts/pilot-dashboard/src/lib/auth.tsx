@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
-import { supabase, supabaseConfigured, validateLicenseRemote, recordAuditEvent, getSupabaseCreds } from "./supabase";
+import { supabase, supabaseConfigured, validateLicenseRemote, recordAuditEvent, getSupabaseCreds, resyncSupabaseCreds } from "./supabase";
 import { lookupLicenseKey } from "./license-registry";
 import { SUPER_ADMIN } from "./mockData";
 import { findCommanderByUsername, verifyCommanderPassword } from "./commander-store";
@@ -471,14 +471,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (error) { forceSignOut(`getSession:${error.message}`); return; }
         if (data?.session) return; // happy path — silent restore worked
         const creds = getSupabaseCreds(username);
-        if (!creds) { forceSignOut("no_cached_creds"); return; }
-        const { error: sbErr } = await supabase!.auth.signInWithPassword({
-          email: creds.email,
-          password: creds.password,
-        });
-        if (cancelled) return;
-        if (sbErr) { forceSignOut(`signin:${sbErr.message}`); return; }
-        // Re-sign-in succeeded — nothing else to do.
+        let signedIn = false; let lastErr = "no_cached_creds";
+        if (creds) {
+          const { error: sbErr } = await supabase!.auth.signInWithPassword({
+            email: creds.email,
+            password: creds.password,
+          });
+          if (cancelled) return;
+          if (!sbErr) signedIn = true;
+          else lastErr = sbErr.message;
+        }
+        if (!signedIn) {
+          // Cached creds either missing or stale. Re-provision via the
+          // server (rotates the password and returns the new one) and
+          // try once more before giving up. This covers the case where
+          // the user has signed in successfully on another PC since,
+          // or where a Super Admin reset their auth user.
+          const role = state.user?.role === "ops" ? "ops" : "commander";
+          const sqn = state.squadron ? { number: state.squadron.number, name: state.squadron.name, base: state.squadron.base } : undefined;
+          const resync = await resyncSupabaseCreds(username, role, sqn);
+          if (cancelled) return;
+          if (resync.ok) {
+            signedIn = true;
+            await recordAuditEvent({ type: "supabase.creds.resynced", actor: username, detail: { trigger: "startup" } });
+          } else {
+            lastErr = resync.error ?? lastErr;
+          }
+        }
+        if (!signedIn) { forceSignOut(`signin:${lastErr}`); return; }
       } catch (err) {
         if (cancelled) return;
         forceSignOut(`threw:${(err as Error)?.message ?? String(err)}`);
@@ -693,21 +713,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // sync between PCs. The Supabase password is random and stored
         // locally at provision time; it is NOT the user-typed password.
         if (supabaseConfigured && supabase) {
+          // Try to obtain a Supabase JWT. If the locally cached password
+          // is stale (server-side rotation, cleared cache, etc.) the
+          // signin returns invalid_credentials. The legacy code swallowed
+          // this and let login proceed — the user appeared signed in but
+          // every write failed with RLS 42501 because the browser had no
+          // JWT. Now we self-heal: re-provision creds via the
+          // provision-commander edge function (which rotates the password
+          // and returns the fresh one), persist them, and retry. Only if
+          // BOTH paths fail do we surface the error and refuse the login.
           const creds = getSupabaseCreds(u);
+          let sbOk = false; let lastErr: string | null = null;
           if (creds) {
             try {
               const { error: sbErr } = await supabase.auth.signInWithPassword({
                 email: creds.email,
                 password: creds.password,
               });
-              if (sbErr) {
-                console.warn("[supabase-signin]", sbErr.message);
-              }
+              if (!sbErr) { sbOk = true; }
+              else { lastErr = sbErr.message; console.warn("[supabase-signin]", sbErr.message); }
             } catch (err) {
+              lastErr = err instanceof Error ? err.message : String(err);
               console.warn("[supabase-signin] threw", err);
             }
           } else {
+            lastErr = "no_cached_creds";
             console.warn("[supabase-signin] no cached creds for", u);
+          }
+          if (!sbOk) {
+            const sqn = state.squadron ? { number: state.squadron.number, name: state.squadron.name, base: state.squadron.base } : undefined;
+            const resync = await resyncSupabaseCreds(u, hqUser.role === "ops" ? "ops" : "commander", sqn);
+            if (resync.ok) {
+              sbOk = true;
+              await recordAuditEvent({ type: "supabase.creds.resynced", actor: u, detail: { trigger: "login" } });
+            } else {
+              lastErr = resync.error ?? lastErr;
+              console.warn("[supabase-resync] failed", resync.error);
+            }
+          }
+          if (!sbOk) {
+            // Surface the failure loudly. We refuse to mark login as
+            // successful because the dashboard would be silently read-only.
+            const msg = `Cannot reach data server (${lastErr ?? "unknown"}). Check internet connection and try again, or contact your Super Admin.`;
+            setSilentAuthError(msg);
+            await recordAuditEvent({ type: "login.supabase.unreachable", actor: username, detail: { reason: lastErr } });
+            return { ok: false, error: msg };
           }
         }
 
