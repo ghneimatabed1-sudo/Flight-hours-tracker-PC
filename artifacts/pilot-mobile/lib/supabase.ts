@@ -342,6 +342,36 @@ export async function fetchPilotSnapshotRemote(
   if (pilotErr) return { ok: false, error: classifyError(pilotErr.message) };
   if (!pilotRow) return { ok: false, error: "revoked" };
 
+  // Device-revocation gate. Ops can revoke a phone via the dashboard,
+  // which sets pilot_devices.revoked_at. The pilot's JWT remains
+  // technically valid until expiry, so the snapshot fetch above can
+  // still succeed — without this guard the revoked phone keeps working
+  // off the cached snapshot. Here we explicitly require at least one
+  // active (non-revoked) device row for this pilot. If none, we tell
+  // the data layer to wipe link / lock / snapshot and force the pilot
+  // back to /link, where the now-burned codes will block re-entry.
+  //
+  // Defensive: if the SELECT itself fails (RLS misconfig, transient
+  // network error) we DO NOT revoke — we just keep the cached snapshot.
+  // Hard revocation only fires when the SELECT clearly succeeds with
+  // zero active rows.
+  try {
+    const { data: deviceRows, error: deviceErr } = await supabase
+      .from("pilot_devices")
+      .select("revoked_at")
+      .eq("pilot_id", pilotId);
+    if (!deviceErr && Array.isArray(deviceRows)) {
+      const hasActive = deviceRows.some(
+        (d) => (d as { revoked_at: string | null }).revoked_at === null
+      );
+      if (deviceRows.length > 0 && !hasActive) {
+        return { ok: false, error: "revoked" };
+      }
+    }
+  } catch {
+    /* non-fatal — keep cached snapshot if the gate query itself errors */
+  }
+
   const [
     { data: squadronRow },
     { data: sortieRows, error: sortiesErr },
