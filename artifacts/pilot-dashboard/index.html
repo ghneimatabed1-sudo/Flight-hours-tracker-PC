@@ -29,18 +29,16 @@
          to the system UI font (system-ui) until the web font arrives. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Standard stylesheet load. We previously used the
+         media="print" + onload="this.media='all'" trick to make the
+         font load non-blocking, but inline event handlers can't be
+         covered by a CSP hash and would be blocked in production.
+         Inter is ~30 KB gzipped and the dashboard already paints a
+         system-font fallback while it streams in. -->
     <link
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      media="print"
-      onload="this.media='all'"
     >
-    <noscript>
-      <link
-        rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      >
-    </noscript>
     <!-- Inline pre-bundle error trap. Runs SYNCHRONOUSLY before the
          module bundle is even fetched, so if the bundle 404s, fails
          CSP, or throws during evaluation we still paint a visible
