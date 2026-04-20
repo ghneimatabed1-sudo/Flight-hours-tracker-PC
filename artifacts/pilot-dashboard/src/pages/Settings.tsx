@@ -68,43 +68,23 @@ function AutoUpdateSection() {
   const downloading = state.kind === "progress";
   const ready = state.kind === "downloaded";
 
+  const statusInline = (() => {
+    if (state.kind === "available") return <span className="text-xs text-amber-400">v{state.version} found — starting download…</span>;
+    if (state.kind === "none") return <span className="text-xs text-emerald-400">You're up to date.</span>;
+    if (state.kind === "error") return <span className="text-xs text-destructive truncate max-w-[14rem]" title={state.message}>Error: {state.message}</span>;
+    if (downloading) return <span className="text-xs text-muted-foreground">{state.percent.toFixed(0)}% · {fmtMB(state.transferred)}/{fmtMB(state.total)}</span>;
+    if (ready) return <span className="text-xs text-emerald-400">v{state.version} ready</span>;
+    return null;
+  })();
+
   return (
     <div className="space-y-2">
       <div className="text-sm font-semibold">Auto-Update</div>
       <p className="text-xs text-muted-foreground">
-        When a new version is released, the desktop app downloads it in the
-        background and installs it on next restart. Currently on
+        When a new version is released, the desktop app updates itself silently. Currently on
         {" "}<span className="font-mono">v{version || "?"}</span>.
-        {!packaged && bridge ? " (Updates only run in the installed build, not in dev.)" : ""}
-        {!bridge ? " (Updates only run in the installed desktop app.)" : ""}
       </p>
-
-      {state.kind === "available" && (
-        <p className="text-xs text-amber-400">Update v{state.version} found — downloading…</p>
-      )}
-      {state.kind === "none" && (
-        <p className="text-xs text-emerald-400">You're on the latest version.</p>
-      )}
-      {downloading && (
-        <div className="space-y-1">
-          <div className="h-2 w-full bg-secondary rounded overflow-hidden border border-border">
-            <div className="h-full bg-primary transition-all" style={{ width: `${Math.min(100, Math.max(0, state.percent)).toFixed(1)}%` }} />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {state.percent.toFixed(0)}% — {fmtMB(state.transferred)} of {fmtMB(state.total)}
-          </p>
-        </div>
-      )}
-      {ready && (
-        <p className="text-xs text-emerald-400">
-          Update v{state.version} downloaded and ready to install.
-        </p>
-      )}
-      {state.kind === "error" && (
-        <p className="text-xs text-destructive break-all">Update error: {state.message}</p>
-      )}
-
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={onCheck}
           disabled={!bridge || !packaged || checking || downloading}
@@ -123,7 +103,13 @@ function AutoUpdateSection() {
             Restart & install now
           </button>
         )}
+        {statusInline}
       </div>
+      {downloading && (
+        <div className="h-1.5 w-full bg-secondary rounded overflow-hidden border border-border">
+          <div className="h-full bg-primary transition-all" style={{ width: `${Math.min(100, Math.max(0, state.percent)).toFixed(1)}%` }} />
+        </div>
+      )}
     </div>
   );
 }
