@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots, useUpdatePilot, useCreatePilot, useDeletePilot, type Pilot } from "@/lib/squadron-data";
+import { getCurrencyWindow } from "@/lib/currency-settings";
 import { Link } from "wouter";
 import { Plus, Search, Pencil, Trash2, X, Loader2, FileDown } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -213,16 +214,74 @@ export default function Roster() {
   );
 }
 
+// ── Currency helpers ────────────────────────────────────────────────────────
+// Given a "last flown" date (ISO string) and a validity window in days,
+// compute the expiry date (also ISO string). Returns "" when the input is
+// empty or unparseable.
+function computeExpiry(lastFlownIso: string, windowDays: number): string {
+  if (!lastFlownIso) return "";
+  const [y, m, d] = lastFlownIso.split("-").map(Number);
+  if (!y || !m || !d) return "";
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + windowDays);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
+// Reverse: given an expiry date, recover the approximate last-flown date so
+// the form shows something sensible when editing an existing pilot.
+function computeLastFlown(expiryIso: string, windowDays: number): string {
+  if (!expiryIso) return "";
+  const [y, m, d] = expiryIso.split("-").map(Number);
+  if (!y || !m || !d) return "";
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() - windowDays);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
+function fmtDate(iso: string): string {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+interface LastFlown { day: string; night: string; nvg: string; irt: string; medical: string; sim: string; }
+
 function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pilot; onClose: () => void; onSave: (p: Pilot) => void; saving: boolean; isNew?: boolean }) {
   const { t } = useI18n();
   const [p, setP] = useState<Pilot>(pilot);
+  const win = getCurrencyWindow();
+
+  // lastFlown is the UI state — what the operator types. On save we convert
+  // to expiry dates (lastFlown + window) before passing to onSave, so the
+  // rest of the system (auto-bump, Currency page, Reminders) is unchanged.
+  const [lastFlown, setLastFlown] = useState<LastFlown>(() => ({
+    day:     computeLastFlown(pilot.expiry.day,     win.day),
+    night:   computeLastFlown(pilot.expiry.night,   win.night),
+    nvg:     computeLastFlown(pilot.expiry.nvg,     win.nvg),
+    irt:     computeLastFlown(pilot.expiry.irt,     win.instrument),
+    medical: computeLastFlown(pilot.expiry.medical, win.medical),
+    sim:     computeLastFlown(pilot.expiry.sim,     win.day),
+  }));
+
   // Functional updater — without this, rapid keystrokes can read a stale `p`
   // closure when React batches updates inside Electron's renderer, making
   // the field appear "frozen" after the first character. Reported by ops.
   const set = <K extends keyof Pilot>(k: K, v: Pilot[K]) => setP(prev => ({ ...prev, [k]: v }));
+
+  const setLF = (k: keyof LastFlown, v: string) => setLastFlown(prev => ({ ...prev, [k]: v }));
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(p);
+    // Convert last-flown dates → expiry dates using the configured windows.
+    const expiry = {
+      day:     computeExpiry(lastFlown.day,     win.day),
+      night:   computeExpiry(lastFlown.night,   win.night),
+      nvg:     computeExpiry(lastFlown.nvg,     win.nvg),
+      irt:     computeExpiry(lastFlown.irt,     win.instrument),
+      medical: computeExpiry(lastFlown.medical, win.medical),
+      sim:     computeExpiry(lastFlown.sim,     win.day),
+    };
+    onSave({ ...p, expiry });
   };
   return (
     // NOTE: no backdrop-blur. Chromium's backdrop-filter on Windows w/ HW
@@ -287,18 +346,41 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
           </div>
           <div className="grid grid-cols-3 gap-3 pt-2 border-t border-border">
             <div className="col-span-3">
-              <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Currency Expiry Dates</div>
-              <div className="text-[11px] text-amber-300 mt-1">
-                Enter the date each currency <strong>EXPIRES</strong> (runs out) — NOT the date the check was performed.
-                A date in the past will show as EXPIRED in red.
+              <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Last Currency Flown</div>
+              <div className="text-[11px] text-muted-foreground mt-1">
+                Enter the <strong>date the check/flight was last performed</strong>. The expiry is calculated automatically
+                using the currency windows configured in Settings (Day: {win.day}d · Night: {win.night}d · NVG: {win.nvg}d · IRT: {win.instrument}d · Medical: {win.medical}d).
               </div>
             </div>
-            <Field label="Day expires on"     value={p.expiry.day}     onChange={v => set("expiry", { ...p.expiry, day: v })}     type="date" testId="input-expDay" />
-            <Field label="Night expires on"   value={p.expiry.night}   onChange={v => set("expiry", { ...p.expiry, night: v })}   type="date" testId="input-expNight" />
-            <Field label="NVG expires on"     value={p.expiry.nvg}     onChange={v => set("expiry", { ...p.expiry, nvg: v })}     type="date" testId="input-expNvg" />
-            <Field label="IRT expires on"     value={p.expiry.irt}     onChange={v => set("expiry", { ...p.expiry, irt: v })}     type="date" testId="input-expIrt" />
-            <Field label="Medical expires on" value={p.expiry.medical} onChange={v => set("expiry", { ...p.expiry, medical: v })} type="date" testId="input-expMedical" />
-            <Field label="Sim expires on"     value={p.expiry.sim}     onChange={v => set("expiry", { ...p.expiry, sim: v })}     type="date" testId="input-expSim" />
+            {([ 
+              { label: "Last Day flown",     k: "day"     as const, days: win.day        },
+              { label: "Last Night flown",   k: "night"   as const, days: win.night      },
+              { label: "Last NVG flown",     k: "nvg"     as const, days: win.nvg        },
+              { label: "Last IRT",           k: "irt"     as const, days: win.instrument },
+              { label: "Last Medical",       k: "medical" as const, days: win.medical    },
+              { label: "Last Sim",           k: "sim"     as const, days: win.day        },
+            ] as { label: string; k: keyof LastFlown; days: number }[]).map(({ label, k, days }) => {
+              const expiry = computeExpiry(lastFlown[k], days);
+              return (
+                <label key={k} className="block text-xs" data-testid={`field-currency-${k}`}>
+                  <span className="text-muted-foreground">{label}</span>
+                  <input
+                    type="date"
+                    value={lastFlown[k]}
+                    onChange={e => setLF(k, e.target.value)}
+                    data-testid={`input-lastFlown-${k}`}
+                    className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm"
+                  />
+                  {expiry ? (
+                    <span className="block mt-0.5 text-[10px] text-emerald-400">
+                      → Expires: {fmtDate(expiry)} ({days}d window)
+                    </span>
+                  ) : (
+                    <span className="block mt-0.5 text-[10px] text-muted-foreground/50">No date set</span>
+                  )}
+                </label>
+              );
+            })}
           </div>
           <div className="grid grid-cols-3 gap-3 pt-2 border-t border-border">
             <label className="block text-xs col-span-3 sm:col-span-1">
