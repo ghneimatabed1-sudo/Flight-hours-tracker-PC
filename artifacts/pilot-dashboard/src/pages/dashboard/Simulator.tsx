@@ -4,8 +4,7 @@ import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { pilots } from "@/lib/mockData";
-import { useSquadrons } from "@/lib/squadron-store";
+import { useDashPilots, useDashSquadrons } from "@/lib/dash-pilots";
 import { fmtDate } from "@/lib/format";
 import { Activity, ArrowUpDown, Printer, Search } from "lucide-react";
 
@@ -14,7 +13,8 @@ type SortKey = "name" | "squadron" | "date";
 export default function Simulator() {
   const { t, lang } = useI18n();
   const { user } = useAuth();
-  const squadrons = useSquadrons();
+  const squadrons = useDashSquadrons();
+  const pilots = useDashPilots();
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<SortKey>("date");
   const [asc, setAsc] = useState(true);
