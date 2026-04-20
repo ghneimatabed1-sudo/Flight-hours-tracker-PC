@@ -1,9 +1,12 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
 import { supabase, supabaseConfigured } from "./supabase";
+
+const LOCAL_PREFS_KEY = "@hawkeye/reminder_prefs";
 
 // Resolve the EAS project id used to scope Expo push tokens. Reads from the
 // EAS config first (set automatically in EAS builds) then falls back to a
@@ -128,33 +131,83 @@ export async function registerForPushNotifications(
   }
 }
 
+// ── local helpers ──────────────────────────────────────────────────────────
+async function loadLocalPrefs(): Promise<ReminderPrefs | null> {
+  try {
+    const raw = await AsyncStorage.getItem(LOCAL_PREFS_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw) as Partial<ReminderPrefs>;
+    return {
+      thresholds:    obj.thresholds    ?? {},
+      pushEnabled:   Boolean(obj.pushEnabled),
+      expoPushToken: obj.expoPushToken ?? null,
+      platform:      obj.platform      ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function saveLocalPrefs(prefs: ReminderPrefs): Promise<boolean> {
+  try {
+    await AsyncStorage.setItem(LOCAL_PREFS_KEY, JSON.stringify(prefs));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ── public API ─────────────────────────────────────────────────────────────
+
 export async function loadReminderPrefs(): Promise<ReminderPrefs> {
-  if (!supabaseConfigured || !supabase) return DEFAULT_PREFS;
-  const { data, error } = await supabase.rpc("get_pilot_reminder_prefs");
-  if (error || !data) return DEFAULT_PREFS;
-  const obj = data as {
-    thresholds?: ReminderThresholds;
-    pushEnabled?: boolean;
-    expoPushToken?: string | null;
-    platform?: string | null;
-  };
-  return {
-    thresholds: obj.thresholds ?? {},
-    pushEnabled: Boolean(obj.pushEnabled),
-    expoPushToken: obj.expoPushToken ?? null,
-    platform: obj.platform ?? null,
-  };
+  // Try Supabase first (requires migration 0011+). If the RPC doesn't exist
+  // yet or Supabase isn't configured, fall back to the local AsyncStorage
+  // copy so pilots can still manage their reminders before the DB migration
+  // is applied.
+  if (supabaseConfigured && supabase) {
+    const { data, error } = await supabase.rpc("get_pilot_reminder_prefs");
+    if (!error && data) {
+      const obj = data as {
+        thresholds?: ReminderThresholds;
+        pushEnabled?: boolean;
+        expoPushToken?: string | null;
+        platform?: string | null;
+      };
+      const prefs: ReminderPrefs = {
+        thresholds:    obj.thresholds    ?? {},
+        pushEnabled:   Boolean(obj.pushEnabled),
+        expoPushToken: obj.expoPushToken ?? null,
+        platform:      obj.platform      ?? null,
+      };
+      // Keep local copy in sync.
+      void saveLocalPrefs(prefs);
+      return prefs;
+    }
+  }
+  // Supabase unavailable or RPC missing — use local copy.
+  return (await loadLocalPrefs()) ?? DEFAULT_PREFS;
 }
 
 export async function saveReminderPrefs(prefs: ReminderPrefs): Promise<boolean> {
-  if (!supabaseConfigured || !supabase) return false;
-  const { error } = await supabase.rpc("save_pilot_reminder_prefs", {
-    p_thresholds: prefs.thresholds,
-    p_push_enabled: prefs.pushEnabled,
-    p_expo_push_token: prefs.expoPushToken,
-    p_platform: prefs.platform,
-  });
-  return !error;
+  // Always persist locally so reminders survive offline / pre-migration.
+  const localOk = await saveLocalPrefs(prefs);
+
+  // Best-effort Supabase sync (silent on failure — migrations may be pending).
+  if (supabaseConfigured && supabase) {
+    supabase
+      .rpc("save_pilot_reminder_prefs", {
+        p_thresholds:       prefs.thresholds,
+        p_push_enabled:     prefs.pushEnabled,
+        p_expo_push_token:  prefs.expoPushToken,
+        p_platform:         prefs.platform,
+      })
+      .then(() => {})
+      .catch(() => {});
+  }
+
+  // Return true as long as local save worked — the user sees no error even
+  // when Supabase migrations haven't been applied yet.
+  return localOk;
 }
 
 // Normalise a per-currency threshold list: dedupe, drop nonsense, sort
