@@ -1740,6 +1740,39 @@ function mockStatus(pilotId: string): PilotLinkStatus {
   };
 }
 
+// All active (non-revoked) linked devices — used by the Settings page so ops
+// can revoke any device even after the pilot has been deleted from the roster.
+export interface LinkedDeviceRow {
+  pilotId: string;
+  linkedAt: string;
+  lastSeenAt: string;
+}
+
+export function useAllLinkedDevices(): UseQueryResult<LinkedDeviceRow[]> {
+  return useQuery<LinkedDeviceRow[]>({
+    queryKey: ["all_linked_devices"],
+    queryFn: async () => {
+      if (!isLive()) {
+        return mockDevices
+          .filter(d => d.revokedAt === null)
+          .map(d => ({ pilotId: d.pilotId, linkedAt: d.linkedAt, lastSeenAt: d.lastSeenAt }));
+      }
+      const { data, error } = await supabase!
+        .from("pilot_devices")
+        .select("pilot_id, linked_at, last_seen_at")
+        .is("revoked_at", null)
+        .order("linked_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []).map(r => ({
+        pilotId:    String(r.pilot_id),
+        linkedAt:   String(r.linked_at),
+        lastSeenAt: String(r.last_seen_at),
+      }));
+    },
+    staleTime: 10_000,
+  });
+}
+
 export function usePilotLinkStatus(pilotId: string | undefined): UseQueryResult<PilotLinkStatus> {
   return useQuery<PilotLinkStatus>({
     queryKey: ["pilot_link_status", pilotId],
@@ -1837,6 +1870,7 @@ export function useRevokePilotDevices() {
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ["pilot_link_status", vars.pilotId] });
+      qc.invalidateQueries({ queryKey: ["all_linked_devices"] });
       qc.invalidateQueries({ queryKey: ["audit_log"] });
     },
   });
