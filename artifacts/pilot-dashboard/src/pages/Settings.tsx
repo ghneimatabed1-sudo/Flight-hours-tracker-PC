@@ -1,10 +1,61 @@
 import { useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { useAuth } from "@/lib/auth";
+import {
+  useAuth,
+  getInactivityMinutes,
+  setInactivityMinutes,
+  INACTIVITY_OPTIONS,
+  type InactivityMinutes,
+} from "@/lib/auth";
 import { useCurrencyWindow, DEFAULT_CURRENCY_WINDOW } from "@/lib/currency-settings";
 import { usePilots, useAllLinkedDevices, useRevokePilotDevices } from "@/lib/squadron-data";
 import { Smartphone, ShieldOff, Loader2 } from "lucide-react";
+
+// Per-user inactivity auto-logout picker. Each operator who signs in on
+// this PC has their own stored preference (keyed by user.id), so Ops can
+// set 4 h while a commander keeps it at 30 m without stepping on each
+// other. 0 = disabled. The auth provider reads this on login and arms
+// the idle watcher.
+function InactivityTimeoutSection() {
+  const { user } = useAuth();
+  const [mins, setMins] = useState<InactivityMinutes>(() => getInactivityMinutes(user?.id));
+  const label = (m: InactivityMinutes) =>
+    m === 0 ? "Off" : m < 60 ? `${m} min` : `${m / 60} h`;
+  const onPick = (m: InactivityMinutes) => {
+    setInactivityMinutes(user?.id, m);
+    setMins(m);
+  };
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-semibold">Auto sign-out when idle</div>
+      <p className="text-xs text-muted-foreground">
+        If this PC is left untouched for the selected time, you'll be signed out
+        automatically. Pick "Off" to stay signed in until you sign out manually.
+        This setting is per-user.
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {INACTIVITY_OPTIONS.map(m => {
+          const active = mins === m;
+          return (
+            <button
+              key={m}
+              onClick={() => onPick(m)}
+              data-testid={`inactivity-${m}`}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium border ${
+                active
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-secondary text-foreground border-border hover:bg-secondary/70"
+              }`}
+            >
+              {label(m)}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function MobileDevicesCard() {
   const { user } = useAuth();
@@ -146,15 +197,12 @@ export default function Settings() {
   };
   const saveCurrencyWindow = (e: React.FormEvent) => {
     e.preventDefault();
-    const d = parseInt(curDay, 10);
-    const n = parseInt(curNvg, 10);
-    const i = parseInt(curIrt, 10);
-    const m = parseInt(curMed, 10);
     setCurWindow({
-      day: Number.isFinite(d) && d > 0 ? d : DEFAULT_CURRENCY_WINDOW.day,
-      nvg: Number.isFinite(n) && n > 0 ? n : DEFAULT_CURRENCY_WINDOW.nvg,
-      instrument: Number.isFinite(i) && i > 0 ? i : DEFAULT_CURRENCY_WINDOW.instrument,
-      medical: Number.isFinite(m) && m > 0 ? m : DEFAULT_CURRENCY_WINDOW.medical,
+      day: parseOr(curDay, DEFAULT_CURRENCY_WINDOW.day),
+      night: parseOr(curNight, DEFAULT_CURRENCY_WINDOW.night),
+      nvg: parseOr(curNvg, DEFAULT_CURRENCY_WINDOW.nvg),
+      instrument: parseOr(curIrt, DEFAULT_CURRENCY_WINDOW.instrument),
+      medical: parseOr(curMed, DEFAULT_CURRENCY_WINDOW.medical),
     });
     setCurSaved(true);
     setTimeout(() => setCurSaved(false), 1500);
@@ -198,6 +246,8 @@ export default function Settings() {
           <div className="font-mono text-xs break-all bg-secondary p-2 rounded border border-border">{fingerprint}</div>
           <button onClick={releaseLicense} className="px-3 py-1.5 rounded-md text-sm bg-destructive/20 text-destructive border border-destructive/40">Release license</button>
           <hr className="border-border" />
+          <InactivityTimeoutSection />
+          <hr className="border-border" />
           <div className="text-sm font-semibold">Auto-Update</div>
           <p className="text-xs text-muted-foreground">When a new version is released, the desktop app updates itself silently. Currently on v1.0.0.</p>
           <button className="px-3 py-1.5 rounded-md text-sm bg-secondary border border-border">Check for updates</button>
@@ -206,7 +256,7 @@ export default function Settings() {
           <form onSubmit={saveCurrencyWindow} className="space-y-3">
             <div className="text-sm font-semibold">{t("currencyWindowTitle")}</div>
             <p className="text-xs text-muted-foreground">{t("currencyWindowBlurb")}</p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-2xl">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 max-w-3xl">
               <label className="block">
                 <span className="text-xs text-muted-foreground">{t("dayCurrencyDays")}</span>
                 <div className="flex items-center gap-2 mt-1">
@@ -290,6 +340,7 @@ export default function Settings() {
               <span className="text-[11px] text-muted-foreground ms-auto">
                 {t("currentWindow")}:
                 {" "}Day <span className="font-mono">{curWindow.day}d</span>
+                {" · "}Night <span className="font-mono">{curWindow.night}d</span>
                 {" · "}NVG <span className="font-mono">{curWindow.nvg}d</span>
                 {" · "}IRT <span className="font-mono">{curWindow.instrument}d</span>
                 {" · "}Med <span className="font-mono">{curWindow.medical}d</span>

@@ -3,10 +3,61 @@ import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots, useUpdatePilot, useCreatePilot, useDeletePilot, type Pilot } from "@/lib/squadron-data";
 import { getCurrencyWindow } from "@/lib/currency-settings";
+import { supabase, supabaseConfigured } from "@/lib/supabase";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Plus, Search, Pencil, Trash2, X, Loader2, FileDown } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
+
+// Per-pilot mobile sync status fetched from list_pilot_sync_status RPC.
+// Green  dot ─ seen within 24 h
+// Yellow dot ─ seen, but > 24 h ago  (phone linked but offline / stale)
+// Grey   dot ─ no row at all         (no phone linked yet)
+interface SyncStatusRow {
+  pilot_id:     string;
+  last_seen_at: string | null;
+  push_enabled: boolean;
+  has_token:    boolean;
+}
+function usePilotSyncStatus() {
+  return useQuery<Map<string, SyncStatusRow>>({
+    queryKey: ["pilot-sync-status"],
+    enabled: supabaseConfigured && !!supabase,
+    refetchInterval: 60_000, // a 1-minute refresh is enough for a "last sync" dot.
+    queryFn: async () => {
+      if (!supabase) return new Map();
+      const { data, error } = await supabase.rpc("list_pilot_sync_status");
+      if (error || !Array.isArray(data)) return new Map();
+      const m = new Map<string, SyncStatusRow>();
+      for (const r of data as SyncStatusRow[]) m.set(r.pilot_id, r);
+      return m;
+    },
+  });
+}
+function syncDotInfo(row: SyncStatusRow | undefined):
+  { color: string; label: string; tooltip: string } {
+  if (!row || !row.has_token) {
+    return { color: "bg-zinc-500", label: "No phone linked",
+      tooltip: "This pilot has not linked a phone yet." };
+  }
+  if (!row.last_seen_at) {
+    return { color: "bg-zinc-500", label: "Never synced",
+      tooltip: "Phone is registered but has never reported in." };
+  }
+  const seen = new Date(row.last_seen_at).getTime();
+  const mins = Math.max(0, Math.round((Date.now() - seen) / 60_000));
+  const pretty =
+    mins < 60 ? `${mins} min ago` :
+    mins < 1440 ? `${Math.round(mins / 60)} h ago` :
+    `${Math.round(mins / 1440)} d ago`;
+  if (mins <= 24 * 60) {
+    return { color: "bg-emerald-500", label: "Synced",
+      tooltip: `Last sync: ${pretty}` };
+  }
+  return { color: "bg-amber-400", label: "Stale",
+    tooltip: `Last sync: ${pretty} — phone hasn't checked in for more than 24h.` };
+}
 
 export default function Roster() {
   const { t } = useI18n();
@@ -14,6 +65,7 @@ export default function Roster() {
   const [importedOnly, setImportedOnly] = useState(false);
   const pilotsQ = usePilots();
   const { data: PILOTS, isLoading, isFetching } = pilotsQ;
+  const syncQ = usePilotSyncStatus();
   const updatePilot = useUpdatePilot();
   const createPilot = useCreatePilot();
   const deletePilot = useDeletePilot();
@@ -132,6 +184,7 @@ export default function Roster() {
           <table className="w-full text-sm">
             <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
+                <th className="px-2 py-2 text-center w-6" title="Mobile sync indicator">●</th>
                 <th className="px-3 py-2 text-left">{t("militaryNumber")}</th>
                 <th className="px-3 py-2 text-left">{t("rank")}</th>
                 <th className="px-3 py-2 text-left">{t("name")}</th>
@@ -148,13 +201,22 @@ export default function Roster() {
             <tbody>
               {list.length === 0 && !isLoading && (
                 <tr>
-                  <td colSpan={11} className="px-3 py-6 text-center text-xs text-muted-foreground" data-testid="empty-pilots">
+                  <td colSpan={12} className="px-3 py-6 text-center text-xs text-muted-foreground" data-testid="empty-pilots">
                     {pilotsQ.isError ? "—" : t("no_records")}
                   </td>
                 </tr>
               )}
-              {list.map((p: Pilot) => (
+              {list.map((p: Pilot) => {
+                const dot = syncDotInfo(syncQ.data?.get(p.id));
+                return (
                 <tr key={p.id} className="border-t border-border row-hover">
+                  <td className="px-2 py-2 text-center" data-testid={`sync-dot-${p.id}`}>
+                    <span
+                      className={`inline-block h-2.5 w-2.5 rounded-full ${dot.color}`}
+                      title={dot.tooltip}
+                      aria-label={dot.label}
+                    />
+                  </td>
                   <td className="px-3 py-2 font-mono">{p.militaryNumber || p.id}</td>
                   <td className="px-3 py-2">{p.rank}</td>
                   <td className="px-3 py-2"><Link href={`/pilot/${p.id}`} className="hover:text-primary">{p.name}</Link></td>
@@ -174,7 +236,8 @@ export default function Roster() {
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

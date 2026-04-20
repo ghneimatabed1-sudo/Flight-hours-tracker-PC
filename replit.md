@@ -12,6 +12,24 @@ The system aims to provide:
 
 The business vision is to modernize RJAF's flight operations management, improve data accuracy, enhance decision-making through real-time insights, and streamline administrative tasks.
 
+# Brand Assets
+
+The Hawk Eye / RJAF Squadron Ops brand assets live in `artifacts/pilot-dashboard/public/brand/`:
+- `hawkeye-logo.png` — 1024×1024 master logo (source for icons).
+- `hawkeye-logo.svg` — vector logo.
+- `hawkeye-wordmark.png` / `.svg` — wordmark.
+- `emblem.png` — RJAF emblem (286×326).
+- `wings.png` — pilot wings graphic.
+
+Windows installer/EXE icon: `artifacts/pilot-dashboard/build/icon.ico` — multi-resolution (16/24/32/48/64/128/256), generated from `hawkeye-logo.png` via ImageMagick. Referenced in `electron-builder.json` as `win.icon`, `nsis.installerIcon`, `nsis.uninstallerIcon`, and `nsis.installerHeaderIcon`. Regenerate with:
+```
+magick public/brand/hawkeye-logo.png -background none \
+  \( -clone 0 -resize 16x16 \) \( -clone 0 -resize 24x24 \) \
+  \( -clone 0 -resize 32x32 \) \( -clone 0 -resize 48x48 \) \
+  \( -clone 0 -resize 64x64 \) \( -clone 0 -resize 128x128 \) \
+  \( -clone 0 -resize 256x256 \) -delete 0 build/icon.ico
+```
+
 # User Preferences
 
 - **Communication Style:** All updates and changes should be clearly documented and explained.
@@ -93,3 +111,39 @@ Ops-only `/monthly-report` page renders ORFG RCN Forms 1, 2, 3, 4 and the Arabic
 - **Add Sortie auto-fill:** When the ops officer picks a pilot or co-pilot, a read-only `PilotAutoFill` line appears under the dropdown showing the pilot's call sign, flight name, military number, Arabic name and qualification badges from the roster — so the officer can confirm they picked the right person without leaving the form.
 - **Help page:** Now covers every major area — Sortie Logging, Roster/Pilots/Rankings, Currency & Expirations, Schedule/Duty/Risk, NOTAMs/Routes/Units, PDF Exports & Archives, Monthly Report, Users/Audit/Ops Team, Settings/License/Updates and the existing Pilot Mobile App + Support sections. EN + AR strings.
 - **Build:** dashboard-windows-installer.yml triggered on main commit `57be433` after wiping prior runs + artifacts.
+
+# v1.0.26–1.0.32 — Lock Screen + The Black Screen Saga
+
+**v1.0.26** shipped Task #83 (manual Lock screen, 30-min idle auto sign-out, pilot ID badge with QR/photo). Immediately introduced a black-screen-on-launch regression on Windows. Six builds (1.0.27 → 1.0.32) were spent isolating the cause — final fix in **v1.0.32**.
+
+**Root cause:** Vite/Rollup minifier left six lucide-react icons (`Inbox`, `Mail`, `Share2`, `UserPlus`, `Users2`, `FileBarChart`) un-renamed in the production bundle while never binding them to the import — they appeared as bare global identifiers (`I:Inbox`) in the menu array, throwing `ReferenceError: Inbox is not defined` the moment the renderer mounted Layout.tsx. Because Layout wraps every signed-in route, the entire app crashed to a blank window.
+
+**Fix:** Alias the affected icons at import (`import { Inbox as InboxIcon, ... } from "lucide-react"`) and use the `*Icon` names everywhere. This forces the bundler to bind the import properly. Verified by grepping the built `dist/public/assets/index-*.js` for `I:Inbox|Mail|Share2|...` — no matches.
+
+**Lesson — lucide-react bundler gotcha:** When adding a new lucide-react icon whose name collides with a possible global or HTML element name (`Inbox`, `Mail`, `Image`, `Link`, etc.), always alias it as `Foo as FooIcon` at import time. The minifier's name-mangler can intermittently skip these, leaving an undefined global in the bundle.
+
+**Diagnostics added during the bisect (kept as safety nets):**
+- Inline pre-bundle error trap in `index.html` paints any uncaught error or unhandled promise rejection to the screen if the React bundle never mounts (8s timeout). Removed from index.html in v1.0.33 cleanup if no longer needed — currently still present.
+- `safeParse` wrapper in `src/lib/auth.tsx` for all `JSON.parse` of localStorage values (defensive, kept).
+- `sandbox: false` + `webSecurity: false` on the Electron BrowserWindow (legitimate for an offline desktop app loading file:// — kept).
+- Auto-open DevTools (v1.0.30) — **removed in v1.0.33**.
+
+**v1.0.33** — clean release. DevTools no longer auto-open. Lock screen + idle timeout fully active. Brand polished.
+
+# v1.0.50 (PC) / v1.0.5 (mobile) — Sync Indicator + Inactivity Auto-Logout
+
+**Roster sync indicator.** New migration `0018_sync_indicator_fix.sql` (supersedes 0017) adds `pilot_reminder_prefs.last_seen_at` plus two RPCs:
+- `ping_pilot_sync()` — resolves `squadron_id` from `pilots.auth_user_id = auth.uid()` and upserts `last_seen_at`. Rejects forged/unbound pilot_id claims.
+- `list_pilot_sync_status()` — **scope-enforced**: pilot mobile callers get their own row only; ops/command callers get every pilot in their squadron (left-joined so pilots with no prefs row still show as "no phone linked"). Never crosses squadrons.
+
+Mobile (`lib/notifications.ts` `pingSync()`) calls the RPC on cold launch, every `AppState → active` foreground, and on a timer driven by the pilot's `autoSyncHours` pref (1/3/6/12h, default 3h). The timer re-arms automatically when Settings writes a new value via `subscribePrefsChange` in `storage.ts`.
+
+PC Roster column shows a coloured dot per pilot with a "Last sync: N min ago" tooltip — 🟢 ≤24h, 🟡 >24h, ⚫ no phone. `usePilotSyncStatus` (inline in `pages/Roster.tsx`) refetches every 60s via React Query.
+
+**Inactivity auto-logout.** Per-user preference (localStorage key `rjaf.inactivityMin.<userId>`, options 0/15/30/60/120/240/480 min, default 120; 0 disables). Settings page has an `InactivityTimeoutSection` picker. `auth.tsx` runs a useEffect idle watcher on `mousemove/keydown/pointerdown/scroll/touchstart`, pauses cleanly on tab-hidden (using wall-clock accounting on return to visible), and re-arms instantly when the Settings picker writes a new value (via an in-process `inactivityListeners` pub/sub — the browser's native `storage` event only fires across tabs).
+
+**Mobile inactivity lock.** When the app goes to `background`/`inactive` we stash `Date.now()`; on return to `active`, if elapsed > `prefs.inactivityMinutes * 60_000` (and the pref is > 0) we call `setUnlocked(false)` so the pilot lands on the lock screen on re-open.
+
+**Deployed:** Migration 0018 via Supabase Management API (HTTP 201). Both apps compile clean (`tsc --noEmit` passes).
+
+**Still pending (next build):** Commander accounts → Supabase table + RLS + login RPCs (currently localStorage-only in `src/lib/commander-store.ts`); remove `DEFAULT_ADMIN_PASSWORD_HASH` + `MASTER_RECOVERY_HASH` from production PC build; trigger PC v1.0.50 + mobile v1.0.5 Windows/EAS builds.

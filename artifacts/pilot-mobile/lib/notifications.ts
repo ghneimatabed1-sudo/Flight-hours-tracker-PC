@@ -213,6 +213,69 @@ export async function saveReminderPrefs(prefs: ReminderPrefs): Promise<boolean> 
   return localOk;
 }
 
+// Auto-register push on cold launch.  Called right after the mobile app
+// has verified its Supabase session.  If the device already has a valid
+// token on the server we do nothing; otherwise we silently request OS
+// permission, grab the Expo push token and persist it with
+// push_enabled=true so alerts and NOTAMs land on this phone without the
+// pilot ever having to open the Reminders screen.  A silent failure
+// (permission denied, EAS id missing, etc.) is swallowed — the pilot can
+// still enable it manually from the Reminders tab.
+export async function autoRegisterPushOnLaunch(): Promise<void> {
+  if (Platform.OS === "web") return;
+  if (!supabaseConfigured || !supabase) return;
+  try {
+    const current = await loadReminderPrefs();
+    // Already registered: refresh the token in case it rotated, but only
+    // if we can do so without prompting (permission already granted).
+    if (current.pushEnabled && current.expoPushToken) {
+      const perm = await Notifications.getPermissionsAsync();
+      if (perm.status !== "granted") return;
+      const r = await registerForPushNotifications(resolveProjectId());
+      if (r.ok && r.token && r.token !== current.expoPushToken) {
+        await saveReminderPrefs({
+          ...current,
+          expoPushToken: r.token,
+          platform: Platform.OS,
+        });
+      }
+      return;
+    }
+    // Not yet registered.  Request permission (OS remembers the answer —
+    // a denied user is NOT re-prompted on every launch).
+    const r = await registerForPushNotifications(resolveProjectId());
+    if (!r.ok || !r.token) return;
+    await saveReminderPrefs({
+      thresholds:    current.thresholds,
+      pushEnabled:   true,
+      expoPushToken: r.token,
+      platform:      Platform.OS,
+    });
+  } catch {
+    // Best-effort — never block app launch because of push registration.
+  }
+}
+
+// ── Sync indicator ────────────────────────────────────────────────────────
+// Ping the Supabase `ping_pilot_sync` RPC so the Ops PC Roster can show
+// this pilot as "recently seen" (green dot within 24 h). Called:
+//   * on cold launch (right after autoRegisterPushOnLaunch),
+//   * whenever the app returns to the foreground (AppState 'active'),
+//   * every N hours on an interval timer while the app is open (N = the
+//     pilot's autoSyncHours pref, 3 h by default).
+// Any failure is swallowed — this is a best-effort heartbeat, never a
+// blocker for the user. Returns true on success so the caller can tell
+// the user "Synced just now" after a manual tap of "Sync now".
+export async function pingSync(): Promise<boolean> {
+  if (!supabaseConfigured || !supabase) return false;
+  try {
+    const { error } = await supabase.rpc("ping_pilot_sync");
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 // Normalise a per-currency threshold list: dedupe, drop nonsense, sort
 // descending so the most-distant reminder shows first.
 export function normaliseThresholds(values: number[]): number[] {

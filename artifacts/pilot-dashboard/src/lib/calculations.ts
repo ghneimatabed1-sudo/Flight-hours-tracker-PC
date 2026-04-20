@@ -100,10 +100,11 @@ export function computePilotTotals(pilot: Pilot, allSorties: Sortie[]): PilotTot
     const isP2 = s.coPilotId === pilot.id;
     if (!isP1 && !isP2) continue;
 
-    const c = sortieCategories(s);
-    // Captain credit prefers explicit per-seat flag (set by the new
-    // simple-mode Add Sortie page). Falls back to legacy assumption that
-    // P1 = captain when the flags are absent.
+    const c = sortieCategories(s, isP1);
+    // Captain credit prefers explicit per-seat flag (set by the rebuilt
+    // Add Sortie page where each seat carries its own captain flag).
+    // Falls back to the legacy assumption that P1 = captain for very old
+    // records that pre-date the per-seat flag.
     const flag = isP1 ? s.pilotIsCaptain : s.coPilotIsCaptain;
     const captainCredit = typeof flag === "boolean" ? flag : isP1;
     const cap = captainCredit ? c.actual : 0;

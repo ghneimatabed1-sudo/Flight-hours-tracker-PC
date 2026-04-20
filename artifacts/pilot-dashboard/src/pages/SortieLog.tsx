@@ -58,6 +58,73 @@ export default function SortieLog() {
     .filter(s => !q || (nameOf(s.pilotId, s.pilotExternal) + " " + nameOf(s.coPilotId, s.coPilotExternal) + " " + s.acNumber + " " + s.name).toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => b.date.localeCompare(a.date));
 
+  // ── Paper-form field derivations ───────────────────────────────────────
+  // The Squadron Sortie Log on paper uses a specific column layout
+  // (Action Before Flight | Action After Flight). We keep the underlying
+  // data identical — pilot hours, currencies and all downstream reports
+  // continue to use the legacy numeric buckets — but the visible columns
+  // here match the paper form one-for-one. Fields that the Add Sortie
+  // form does not yet capture (initials, take-off/landed clock times,
+  // S/B, N/F, Sign) render as "—" until we capture them; the calculation
+  // side is untouched.
+  const DASH = "—";
+  // "Captain Of Aircraft And Pilot" — whichever seat carries the captain
+  // flag; fall back to the 1st-seat pilot when neither flag is set (older
+  // records). Shows both names separated when captain is the 2nd seat.
+  const captainPilot = (s: Sortie) => {
+    if (s.coPilotIsCaptain && !s.pilotIsCaptain)
+      return nameOf(s.coPilotId, s.coPilotExternal);
+    return nameOf(s.pilotId, s.pilotExternal);
+  };
+  // "CREW" — the non-captain seat. External pilots keep their "(squadron)"
+  // tag so the ops officer can tell them apart at a glance.
+  const crewOf = (s: Sortie) => {
+    if (s.coPilotIsCaptain && !s.pilotIsCaptain)
+      return nameOf(s.pilotId, s.pilotExternal);
+    return nameOf(s.coPilotId, s.coPilotExternal);
+  };
+  // "DUTY OR PRACTICE ORDER" — sortie-type + name (e.g. "Training — NVG
+  // pattern"). msnDuty (the newer free-text field) wins when present.
+  const dutyOrder = (s: Sortie) => {
+    if (s.msnDuty && s.msnDuty.trim()) return s.msnDuty.trim();
+    const parts = [s.sortieType, s.name].filter(Boolean);
+    return parts.join(" — ") || DASH;
+  };
+  // "APPROXIMATE Duration of Flight" — the ops-entered flight time. Uses
+  // the same number the hours engine already derives D1/D2/DD/... from.
+  const fmtHrs = (n: number | undefined) =>
+    typeof n === "number" && n > 0 ? n.toFixed(1) : DASH;
+  const durationOf = (s: Sortie) => {
+    if (typeof s.time === "number" && s.time > 0) return fmtHrs(s.time);
+    // Legacy records: reconstruct from the 9-bucket breakdown.
+    const sum = [s.day1, s.day2, s.dayDual, s.night1, s.night2, s.nightDual, s.nvg]
+      .reduce((a, b) => a + (b || 0), 0);
+    return fmtHrs(sum);
+  };
+  // "ACTUAL INSTRUMENT FLY — In The Air" — total IF hours logged on the
+  // sortie. When instrumentFlight=true, that is the full sortie duration;
+  // when SIM/ACT are broken out independently we sum those instead.
+  const ifAir = (s: Sortie) => {
+    if (s.instrumentFlight && typeof s.time === "number") return fmtHrs(s.time);
+    const sum = (s.ifSim || 0) + (s.ifAct || 0);
+    return sum > 0 ? fmtHrs(sum) : DASH;
+  };
+  // "IF APPROACHES — TYPE / NO." — derived from the existing ILS/VOR
+  // counters that AddSortie already captures. Type cell lists the kinds
+  // flown, No. cell shows the total count.
+  const ifApprType = (s: Sortie) => {
+    const kinds: string[] = [];
+    if ((s.ils ?? 0) > 0) kinds.push("ILS");
+    if ((s.vor ?? 0) > 0) kinds.push("VOR");
+    return kinds.length ? kinds.join("+") : DASH;
+  };
+  const ifApprNo = (s: Sortie) => {
+    const n = (s.ils ?? 0) + (s.vor ?? 0);
+    return n > 0 ? String(n) : DASH;
+  };
+  // "Duty Carried out And Reason for not" — free-text remarks field.
+  const dutyDone = (s: Sortie) => (s.remarks && s.remarks.trim()) || DASH;
+
   const snapshotPilots = (s: Sortie): Pilot[] => {
     const ids = [s.pilotId, s.coPilotId].filter(Boolean);
     return ids
@@ -122,53 +189,89 @@ export default function SortieLog() {
 
       <Card className="!p-0 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
+          {/* Squadron Sortie Log — column layout mirrors the official RJAF
+              paper form (Action Before Flight | Action After Flight). The
+              underlying hours, currencies and reports are unchanged; this
+              is purely the ops-officer's viewing / printing surface. */}
+          <table className="w-full text-xs border-collapse">
+            <thead className="bg-secondary/50 text-[10px] uppercase tracking-wider text-muted-foreground">
               <tr>
-                <Th>{t("date")}</Th><Th>{t("acType")}</Th><Th>{t("acNumber")}</Th>
-                <Th>{t("pilot")}</Th><Th>{t("coPilot")}</Th><Th>{t("sortieType")}</Th><Th>{t("sortieName")}</Th>
-                <Th right>D1</Th><Th right>D2</Th><Th right>DD</Th>
-                <Th right>N1</Th><Th right>N2</Th><Th right>ND</Th>
-                <Th right cls="text-rose-300">NVG</Th><Th right>Sim</Th><Th right>Actual</Th>
-                <Th right>{t("actions")}</Th>
+                <Th center rowSpan={2}>Serial<br/>No./Order</Th>
+                <Th center rowSpan={2}>Date</Th>
+                <Th center colSpan={2}>Air Craft</Th>
+                <Th center rowSpan={2}>Captain Of Air Craft<br/>And Pilot</Th>
+                <Th center rowSpan={2}>CREW</Th>
+                <Th center rowSpan={2}>Duty Or<br/>Practice Order</Th>
+                <Th center colSpan={2}>Approximate</Th>
+                <Th center colSpan={2}>Time</Th>
+                <Th center colSpan={3}>Actual Instrument Fly</Th>
+                <Th center colSpan={2}>IF Approaches</Th>
+                <Th center rowSpan={2}>S/B</Th>
+                <Th center rowSpan={2}>N/F</Th>
+                <Th center rowSpan={2}>Duty Carried out<br/>And Reason for not</Th>
+                <Th center rowSpan={2}>Sign</Th>
+                <Th center rowSpan={2}>{t("actions")}</Th>
+              </tr>
+              <tr>
+                {/* Air Craft */}
+                <Th center>Type</Th>
+                <Th center>No.</Th>
+                {/* Approximate */}
+                <Th center>Time to<br/>Start</Th>
+                <Th center>Duration<br/>of Flight</Th>
+                {/* Time */}
+                <Th center>Time of<br/>Take off</Th>
+                <Th center>Time<br/>Landed</Th>
+                {/* Actual Instrument Fly */}
+                <Th center>In The<br/>Air</Th>
+                <Th center>SIM</Th>
+                <Th center>ACT</Th>
+                {/* IF Approaches */}
+                <Th center>TYPE</Th>
+                <Th center>NO.</Th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={17} className="px-3 py-6 text-center text-xs text-muted-foreground" data-testid="empty-sorties">
+                  <td colSpan={22} className="px-3 py-6 text-center text-xs text-muted-foreground" data-testid="empty-sorties">
                     {pilotsQ.isError || sortiesQ.isError ? "—" : t("no_records")}
                   </td>
                 </tr>
               )}
-              {rows.map(s => {
+              {rows.map((s, idx) => {
                 const isFrozen = frozen.isFrozen(s.date);
                 const canEdit = frozen.canEdit(s.date);
                 const locked = isFrozen && !canEdit;
+                const captain = captainPilot(s);
                 return (
                 <tr key={s.id} className={`border-t border-border row-hover ${locked ? "opacity-90" : ""}`} data-testid={`row-sortie-${s.id}`}>
-                  <Td mono>
+                  <Td mono center>{idx + 1}</Td>
+                  <Td mono center>
                     <span className="inline-flex items-center gap-1">
                       {s.date}
                       {locked && <Lock className="h-3 w-3 text-muted-foreground" aria-label="Frozen (older than 12 months)" />}
                       {isFrozen && canEdit && <Unlock className="h-3 w-3 text-amber-300" aria-label="Frozen — this PC is authorized to edit" />}
                     </span>
                   </Td>
-                  <Td>{s.acType}</Td>
-                  <Td mono>{s.acNumber}</Td>
-                  <Td><SeatCell id={s.pilotId} ext={s.pilotExternal} nameMap={pilotMap} /></Td>
-                  <Td><SeatCell id={s.coPilotId} ext={s.coPilotExternal} nameMap={pilotMap} /></Td>
-                  <Td>{s.sortieType}</Td>
-                  <Td>{s.name}</Td>
-                  <Td mono right>{s.day1 || "—"}</Td>
-                  <Td mono right>{s.day2 || "—"}</Td>
-                  <Td mono right>{s.dayDual || "—"}</Td>
-                  <Td mono right>{s.night1 || "—"}</Td>
-                  <Td mono right>{s.night2 || "—"}</Td>
-                  <Td mono right>{s.nightDual || "—"}</Td>
-                  <Td mono right cls={s.nvg ? "text-rose-300" : ""}>{s.nvg || "—"}</Td>
-                  <Td mono right>{s.sim || "—"}</Td>
-                  <Td mono right>{s.actual}</Td>
+                  <Td>{s.acType || DASH}</Td>
+                  <Td mono>{s.acNumber || DASH}</Td>
+                  <Td>{captain || DASH}</Td>
+                  <Td>{crewOf(s) || DASH}</Td>
+                  <Td>{dutyOrder(s)}</Td>
+                  <Td mono center>{DASH}</Td>
+                  <Td mono center>{durationOf(s)}</Td>
+                  <Td mono center>{DASH}</Td>
+                  <Td mono center>{DASH}</Td>
+                  <Td mono center>{ifAir(s)}</Td>
+                  <Td mono center>{fmtHrs(s.ifSim)}</Td>
+                  <Td mono center>{fmtHrs(s.ifAct)}</Td>
+                  <Td mono center>{ifApprType(s)}</Td>
+                  <Td mono center>{ifApprNo(s)}</Td>
+                  <Td mono center>{DASH}</Td>
+                  <Td mono center>{DASH}</Td>
+                  <Td>{dutyDone(s)}</Td>
+                  <Td mono center>{DASH}</Td>
                   <Td right>
                     <div className="inline-flex gap-1 items-center">
                       <button
@@ -252,11 +355,13 @@ function SeatCell({ id, ext, nameMap }: { id: string; ext?: { name: string; squa
   return <>{nameMap[id] || id}</>;
 }
 
-function Th({ children, right, cls = "" }: { children: React.ReactNode; right?: boolean; cls?: string }) {
-  return <th className={`px-3 py-2 ${right ? "text-right" : "text-left"} font-medium ${cls}`}>{children}</th>;
+function Th({ children, right, center, cls = "", rowSpan, colSpan }: { children: React.ReactNode; right?: boolean; center?: boolean; cls?: string; rowSpan?: number; colSpan?: number }) {
+  const align = center ? "text-center" : right ? "text-right" : "text-left";
+  return <th rowSpan={rowSpan} colSpan={colSpan} className={`px-2 py-1.5 border border-border ${align} font-medium ${cls}`}>{children}</th>;
 }
-function Td({ children, mono, right, cls = "" }: { children: React.ReactNode; mono?: boolean; right?: boolean; cls?: string }) {
-  return <td className={`px-3 py-2 ${mono ? "font-mono" : ""} ${right ? "text-right" : ""} ${cls}`}>{children}</td>;
+function Td({ children, mono, right, center, cls = "" }: { children: React.ReactNode; mono?: boolean; right?: boolean; center?: boolean; cls?: string }) {
+  const align = center ? "text-center" : right ? "text-right" : "text-left";
+  return <td className={`px-2 py-1.5 border border-border ${mono ? "font-mono" : ""} ${align} ${cls}`}>{children}</td>;
 }
 
 interface PilotOpt { id: string; label: string; }

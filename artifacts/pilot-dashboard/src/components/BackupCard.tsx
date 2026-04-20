@@ -459,7 +459,7 @@ export function BackupCard() {
               <Clock className="h-3.5 w-3.5 text-muted-foreground" />
               <span className="text-muted-foreground">{tx("Last auto-backup:", "آخر نسخة تلقائية:")}</span>
               <span className="font-mono" data-testid="text-last-auto">
-                {lastAt ? new Date(lastAt).toLocaleString() : tx("Never", "لم تُنشأ بعد")}
+                {lastAt ? fmtDateTimeDDMM(lastAt) : tx("Never", "لم تُنشأ بعد")}
               </span>
             </div>
             <div className="flex items-center gap-1.5">

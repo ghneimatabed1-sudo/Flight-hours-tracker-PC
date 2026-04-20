@@ -70,13 +70,14 @@ function playChirp(): void {
   }
 }
 
-// Fires a native desktop notification. Silent (we already play our own
-// tone) so the OS doesn't layer its default ping on top of our chirp.
+// Fires a native desktop notification WITH the OS default alert sound so
+// the PC audibly beeps even when the app window isn't focused. The Web
+// Audio chirp still plays inside the app for a familiar in-app cue.
 function desktopNotify(title: string, body: string): void {
   if (typeof Notification === "undefined") return;
   if (Notification.permission !== "granted") return;
   try {
-    new Notification(title, { body, silent: true });
+    new Notification(title, { body, silent: false });
   } catch {
     /* Notification constructor can throw on some platforms; ignore. */
   }

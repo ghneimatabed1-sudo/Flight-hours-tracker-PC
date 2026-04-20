@@ -68,6 +68,11 @@ export default function PilotDetail() {
         <Link href="/roster" className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-secondary inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" />Back</Link>
       } />
 
+      {/* System ID — used to identify the pilot when revoking their mobile
+          device link. Surfaced here so the operator can copy it without
+          digging through the database or guessing from the URL. */}
+      <PilotIdBadge pilotId={p.id} />
+
       <div className="grid lg:grid-cols-3 gap-4 mb-4">
         <Card>
           <div className="text-sm font-semibold mb-2">This Month</div>
@@ -431,6 +436,44 @@ function Field({ label, value }: { label: string; value: string }) {
     <div className="bg-secondary/40 border border-border rounded-md px-3 py-2">
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</div>
       <div className="text-sm font-mono mt-0.5">{value}</div>
+    </div>
+  );
+}
+
+// Compact, copyable badge that surfaces the pilot's system ID. The ID is
+// the value the operator types into the Admin → Pilots → Revoke flow when
+// invalidating a stolen / lost mobile device, so it has to be visible on
+// the pilot's individual page (not just buried in URLs or DB rows).
+function PilotIdBadge({ pilotId }: { pilotId: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(pilotId);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch { /* clipboard blocked — no-op */ }
+  };
+  return (
+    <div className="mb-4 flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2">
+      <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+        Pilot ID
+      </span>
+      <code
+        data-testid="text-pilot-id"
+        className="flex-1 font-mono text-sm tracking-wide text-foreground break-all select-all"
+      >
+        {pilotId}
+      </code>
+      <button
+        type="button"
+        data-testid="button-copy-pilot-id"
+        onClick={onCopy}
+        title="Copy ID"
+        className="text-[11px] px-2 py-1 rounded-md border border-border hover:bg-secondary inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+      >
+        {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+        {copied ? "Copied" : "Copy"}
+      </button>
     </div>
   );
 }

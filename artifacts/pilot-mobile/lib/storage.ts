@@ -28,9 +28,17 @@ export interface LinkRecord {
 // the issuing commander keep seeing it.
 export type AlertsTtlDays = 0 | 1 | 3 | 7 | 30;
 
+// Auto-sync interval the mobile app uses to ping the server so the Ops
+// PC Roster sync-indicator dot stays green. 3h is the default; pilots
+// can pick 1 / 3 / 6 / 12 from Settings. The ping is also triggered on
+// cold launch and whenever the app returns to the foreground, so this
+// timer is really only useful for pilots who leave the app open.
+export type AutoSyncHours = 1 | 3 | 6 | 12;
+
 export interface UserPrefs {
   language: "en" | "ar";
   alertsTtlDays?: AlertsTtlDays;
+  autoSyncHours?: AutoSyncHours;
 }
 
 // SecureStore is unavailable on web; fall back to AsyncStorage so the demo
@@ -137,4 +145,15 @@ export async function loadPrefs(): Promise<UserPrefs> {
 
 export async function savePrefs(prefs: UserPrefs): Promise<void> {
   await AsyncStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  prefsListeners.forEach(fn => { try { fn(prefs); } catch { /* ignore */ } });
+}
+
+// In-process pub/sub so callers that cached a pref value (e.g. the
+// sync-heartbeat timer in data.tsx, which arms an interval from
+// autoSyncHours) can re-read it when Settings writes a new value,
+// instead of only picking up the change after an app restart.
+const prefsListeners = new Set<(p: UserPrefs) => void>();
+export function subscribePrefsChange(fn: (p: UserPrefs) => void): () => void {
+  prefsListeners.add(fn);
+  return () => { prefsListeners.delete(fn); };
 }

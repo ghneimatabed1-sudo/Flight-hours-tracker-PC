@@ -129,6 +129,14 @@ export interface Sortie {
   dual?: boolean;
   pilotPosition?: "1st" | "2nd";
   coPilotPosition?: "1st" | "2nd";
+  // Per-seat seat status — independent of the legacy 1st/2nd position field.
+  // The simple-mode Add Sortie page lets each seat carry its own status
+  // ("1st", "2nd", or "Dual") so a single flight can credit one pilot as
+  // P1-flying while the other gets dual-instruction hours. Authoritative for
+  // the new shared totals engine; falls back to legacy day1/day2/dayDual sum
+  // when missing (historical records).
+  pilotSeatStatus?: "1st" | "2nd" | "Dual";
+  coPilotSeatStatus?: "1st" | "2nd" | "Dual";
   pilotIsCaptain?: boolean;
   coPilotIsCaptain?: boolean;
   msnDuty?: string;

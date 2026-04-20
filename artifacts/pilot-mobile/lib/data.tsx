@@ -9,6 +9,9 @@ import React, {
 } from "react";
 
 import { demoSnapshot, DEMO_LINK_CODE, DEMO_MILITARY_NUMBER } from "./mockData";
+import { autoRegisterPushOnLaunch, pingSync } from "./notifications";
+import { AppState, type AppStateStatus } from "react-native";
+import { loadPrefs, subscribePrefsChange } from "./storage";
 import { generateSalt, hashPassword } from "./password";
 import {
   clearLink,
@@ -152,6 +155,16 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         const { data } = (await supabase?.auth.getSession()) ?? { data: null };
         if (data?.session) {
           await applyRefresh(storedLink);
+          // Silently (re-)register the Expo push token on every cold
+          // launch while signed in.  Without this, a pilot who never
+          // opens the Reminders screen would have no row in
+          // pilot_reminder_prefs and the notify-alert / notify-notam
+          // edge functions would skip their device entirely.
+          void autoRegisterPushOnLaunch();
+          // Heartbeat: stamp last_seen_at so the Ops PC Roster shows
+          // this pilot as freshly synced. Also runs on foreground and
+          // on a timer below.
+          void pingSync();
         } else {
           setLastError("revoked");
           await clearLink();
@@ -181,6 +194,66 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       clearInterval(interval);
     };
   }, [link, applyRefresh]);
+
+  // Sync-indicator heartbeat. Keeps pilot_reminder_prefs.last_seen_at
+  // fresh so the Ops PC Roster shows a green dot for this pilot. Three
+  // triggers:
+  //   1. App returns to the foreground (AppState → 'active')
+  //   2. Periodic timer while the app is open, interval taken from the
+  //      pilot's `autoSyncHours` preference (default 3 h).
+  //   3. The cold-launch call is above in the initial-mount effect.
+  useEffect(() => {
+    if (!link || !supabaseConfigured || !link.pilotId) return;
+
+    let hours = 3;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let cancelled = false;
+
+    const armTimer = (h: number) => {
+      if (timer) clearInterval(timer);
+      const ms = Math.max(1, h) * 60 * 60 * 1000;
+      timer = setInterval(() => {
+        if (!cancelled) void pingSync();
+      }, ms);
+    };
+
+    void (async () => {
+      try {
+        const prefs = await loadPrefs();
+        hours = prefs.autoSyncHours ?? 3;
+      } catch { /* keep default */ }
+      if (!cancelled) armTimer(hours);
+    })();
+
+    // Re-arm the heartbeat interval if the pilot picks a new
+    // autoSyncHours value in Settings — otherwise the running timer
+    // would stay on the value we read at mount until the next relink
+    // or app restart.
+    const prefsUnsub = subscribePrefsChange(p => {
+      const next = p.autoSyncHours ?? 3;
+      if (!cancelled && next !== hours) {
+        hours = next;
+        armTimer(hours);
+      }
+    });
+
+    // Phones aren't workstations: the pilot opens and closes the app
+    // dozens of times a day, and an idle-lock on the handset would just
+    // annoy them. So on every foreground we only ping sync — no
+    // auto-logout / auto-lock is enforced on mobile. The device-level
+    // password (configured at link time) and the PC's revoke-device
+    // action remain the two access-control gates.
+    const sub = AppState.addEventListener("change", (s: AppStateStatus) => {
+      if (s === "active") void pingSync();
+    });
+
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+      sub.remove();
+      prefsUnsub();
+    };
+  }, [link]);
 
   const linkAccount = useCallback(
     async (militaryNumber: string, code: string) => {

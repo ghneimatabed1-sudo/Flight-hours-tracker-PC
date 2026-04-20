@@ -87,9 +87,6 @@ export default function WingsIntro({ onDone, durationMs = 1800 }: Props) {
         <Text style={[styles.title, { color: colors.foreground }]}>
           HAWK EYE
         </Text>
-        <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-          عين الصقر
-        </Text>
       </Animated.View>
     </Pressable>
   );

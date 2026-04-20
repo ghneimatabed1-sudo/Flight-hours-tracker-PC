@@ -26,7 +26,7 @@ interface Body {
   username?: string;
   displayName?: string;
   role?: "ops" | "commander" | "deputy";
-  tier?: "hq" | "squadron" | "flight" | "ops" | "deputy";
+  tier?: "hq" | "wing" | "base" | "squadron" | "flight" | "ops" | "deputy";
   squadronNumber?: string;
   squadronName?: string;
   squadronBase?: string;
@@ -99,11 +99,30 @@ Deno.serve(async (req: Request) => {
   const appRole = role === "ops" ? "ops" : role === "deputy" ? "deputy" : "admin";
   const email = `${username}@${sqnSlug(sqnNumber)}.rjaf.local`;
   const password = randomPassword();
+  // Compute the canonical cross-PC id this account is allowed to claim
+  // in cross-pc.ts. The id mirrors what HQLayout passes to
+  // registerLocalPC():
+  //   ops / squadron-tier  → the squadron's display name
+  //   wing/base/hq         → "<TIER>:<displayName>"
+  // RLS on xpc_user_pcs uses meta.pc_id as the only valid value the
+  // user may insert, blocking cross-tenant impersonation.
+  let pcId: string | null = null;
+  if (tier === "ops" || tier === "squadron" || tier === "deputy") {
+    pcId = sqnName || null;
+  } else if (tier === "wing") {
+    pcId = `WING:${displayName}`;
+  } else if (tier === "base") {
+    pcId = `BASE:${displayName}`;
+  } else if (tier === "hq" || tier === "flight") {
+    // Flight commanders sit under HQLayout's "hq" fallback today.
+    pcId = `HQ:${displayName}`;
+  }
   const appMeta = {
     squadron_id: squadronId,
     role: appRole,
     tier,
     squadron_number: sqnNumber || null,
+    pc_id: pcId,
   };
   const userMeta = { displayName };
 
