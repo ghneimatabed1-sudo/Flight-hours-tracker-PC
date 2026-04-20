@@ -176,10 +176,28 @@ function MobileDevicesCard() {
     setRevoking(pilotId);
     try {
       const res = await revoke.mutateAsync({ pilotId, actor: user?.username });
-      setNotice(`Revoked ${res.revoked} device(s) for ${pilotById[pilotId]?.name || pilotId}.`);
-      setTimeout(() => setNotice(null), 4000);
+      if (res.revoked === 0) {
+        setNotice(`No active mobile device found for ${pilotById[pilotId]?.name || pilotId} — nothing to revoke.`);
+      } else {
+        setNotice(`Revoked ${res.revoked} device(s) for ${pilotById[pilotId]?.name || pilotId}.`);
+      }
+      setTimeout(() => setNotice(null), 5000);
     } catch (e) {
-      setNotice(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      // Supabase PostgrestError shape: { code, details, hint, message }.
+      // Plain Error has .message. Anything else gets JSON-stringified (so
+      // the user sees the real reason instead of "[object Object]").
+      const err = e as { code?: string; message?: string; hint?: string };
+      const code = err?.code;
+      const msg = err?.message ?? (e instanceof Error ? e.message : null) ?? (() => {
+        try { return JSON.stringify(e); } catch { return String(e); }
+      })();
+      let friendly = msg;
+      if (code === "42501") {
+        friendly = "Your session expired — sign out and sign back in, then try again. (If this keeps happening, re-activate the license from this PC.)";
+      } else if (code === "PGRST116" || msg.includes("0 rows")) {
+        friendly = "No matching device found for that pilot ID.";
+      }
+      setNotice(`Revoke failed: ${friendly}`);
     } finally {
       setRevoking(null);
     }
