@@ -17,6 +17,11 @@ const IMG = "exports/hawkeye-pdf/images";
 const SCR = "exports/hawkeye-pdf/screens";
 const EMBLEM = "artifacts/pilot-dashboard/public/brand/emblem.png";
 const WORDMARK = "artifacts/pilot-dashboard/public/brand/hawkeye-logo.png";
+// Prefer the compressed .jpg hero images; fall back to .png if only they
+// exist. JPEG at ~80% quality shrinks each hero from ~1 MB to ~60 KB and
+// keeps the PDF under 1 MB so it opens instantly in browser previews.
+const heroExt = fs.existsSync(`${IMG}/cover_hero.jpg`) ? "jpg" : "png";
+const hero = (name) => `${IMG}/${name}.${heroExt}`;
 
 // Brand palette
 const NAVY_DEEP   = "#05081a";
@@ -182,8 +187,8 @@ function iconChain(doc, x, y) {
 function pageCover(doc) {
   bg(doc, NAVY_DEEP);
   // Hero image full-bleed with a dark overlay for legibility.
-  if (fs.existsSync(`${IMG}/cover_hero.png`)) {
-    doc.image(`${IMG}/cover_hero.png`, 0, 0, { width: PAGE_W, height: PAGE_H });
+  if (fs.existsSync(hero("cover_hero"))) {
+    doc.image(hero("cover_hero"), 0, 0, { width: PAGE_W, height: PAGE_H });
   }
   // Dark gradient overlay (manual — fill rects with decreasing alpha)
   for (let i = 0; i < 20; i++) {
@@ -239,10 +244,10 @@ function pageWhatIs(doc) {
   );
 
   // Right-side image
-  if (fs.existsSync(`${IMG}/logbook_modern.png`)) {
+  if (fs.existsSync(hero("logbook_modern"))) {
     doc.save();
     doc.roundedRect(440, 100, 354, 380, 10).clip();
-    doc.image(`${IMG}/logbook_modern.png`, 440, 100, { width: 354, height: 380 });
+    doc.image(hero("logbook_modern"), 440, 100, { width: 354, height: 380 });
     doc.restore();
     doc.roundedRect(440, 100, 354, 380, 10).lineWidth(0.8).strokeColor(GOLD_DIM).stroke();
   }
@@ -270,10 +275,10 @@ function pageEcosystem(doc) {
   sectionTitle(doc, 48, 100, "Three doors, one room",
                "How the pieces fit together.");
 
-  if (fs.existsSync(`${IMG}/ecosystem_diagram.png`)) {
+  if (fs.existsSync(hero("ecosystem_diagram"))) {
     doc.save();
     doc.roundedRect(340, 150, 454, 300, 10).clip();
-    doc.image(`${IMG}/ecosystem_diagram.png`, 340, 150, { width: 454, height: 300 });
+    doc.image(hero("ecosystem_diagram"), 340, 150, { width: 454, height: 300 });
     doc.restore();
     doc.roundedRect(340, 150, 454, 300, 10).lineWidth(0.8).strokeColor(GOLD_DIM).stroke();
   }
@@ -360,10 +365,10 @@ function pageMobile(doc) {
   sectionTitle(doc, 48, 100, "For pilots",
                "The logbook in every pilot's pocket.");
 
-  if (fs.existsSync(`${IMG}/squadron_lineup.png`)) {
+  if (fs.existsSync(hero("squadron_lineup"))) {
     doc.save();
     doc.roundedRect(430, 100, 364, 380, 10).clip();
-    doc.image(`${IMG}/squadron_lineup.png`, 430, 100, { width: 364, height: 380 });
+    doc.image(hero("squadron_lineup"), 430, 100, { width: 364, height: 380 });
     doc.restore();
     doc.roundedRect(430, 100, 364, 380, 10).lineWidth(0.8).strokeColor(GOLD_DIM).stroke();
   }
@@ -420,10 +425,10 @@ function pageAlerts(doc) {
   sectionTitle(doc, 48, 100, "When it matters, you hear it",
                "Per-PC alerts with sound & pop-up.");
 
-  if (fs.existsSync(`${IMG}/network_nodes.png`)) {
+  if (fs.existsSync(hero("network_nodes"))) {
     doc.save();
     doc.roundedRect(430, 150, 364, 240, 10).clip();
-    doc.image(`${IMG}/network_nodes.png`, 430, 150, { width: 364, height: 240 });
+    doc.image(hero("network_nodes"), 430, 150, { width: 364, height: 240 });
     doc.restore();
     doc.roundedRect(430, 150, 364, 240, 10).lineWidth(0.8).strokeColor(GOLD_DIM).stroke();
   }
@@ -460,10 +465,10 @@ function pageSecurity(doc) {
   sectionTitle(doc, 48, 100, "Built for trust",
                "Security & privacy, in plain language.");
 
-  if (fs.existsSync(`${IMG}/security_envelope.png`)) {
+  if (fs.existsSync(hero("security_envelope"))) {
     doc.save();
     doc.roundedRect(500, 100, 294, 380, 10).clip();
-    doc.image(`${IMG}/security_envelope.png`, 500, 100, { width: 294, height: 380 });
+    doc.image(hero("security_envelope"), 500, 100, { width: 294, height: 380 });
     doc.restore();
     doc.roundedRect(500, 100, 294, 380, 10).lineWidth(0.8).strokeColor(GOLD_DIM).stroke();
   }
