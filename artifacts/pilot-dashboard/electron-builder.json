@@ -1,6 +1,6 @@
 {
   "appId": "jo.gov.rjaf.squadron-ops",
-  "productName": "RJAF Squadron Ops",
+  "productName": "Hawk Eye",
   "copyright": "© Captain Abed Ghneimat — Royal Jordanian Air Force",
   "directories": {
     "output": "release",
@@ -15,9 +15,9 @@
   "asar": true,
   "win": {
     "target": [{ "target": "nsis", "arch": ["x64"] }],
-    "icon": "public/brand/emblem.png",
+    "icon": "build/icon.ico",
     "publisherName": "Captain Abed Ghneimat",
-    "artifactName": "RJAF-SquadronOps-Setup-${version}.${ext}"
+    "artifactName": "HawkEye-Setup-${version}.${ext}"
   },
   "nsis": {
     "oneClick": false,
@@ -27,6 +27,9 @@
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
     "shortcutName": "Hawk Eye",
+    "installerIcon": "build/icon.ico",
+    "uninstallerIcon": "build/icon.ico",
+    "installerHeaderIcon": "build/icon.ico",
     "include": "build/installer.nsh"
   },
   "publish": [
