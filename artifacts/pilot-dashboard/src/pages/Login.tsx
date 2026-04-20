@@ -564,11 +564,17 @@ export default function LoginGate() {
               <div className="text-[11px] font-mono text-muted-foreground break-all">FP: {fingerprint}</div>
               {licError && <div className="text-xs text-destructive">{licError}</div>}
               <button disabled={busy} className="w-full py-2 rounded-md bg-primary text-primary-foreground font-medium hover:opacity-90 disabled:opacity-50">{busy ? t("verifying") : t("activate")}</button>
-              {pcRoleLock !== "ops" && (
-                <button type="button" onClick={() => setHqMode(true)} className="w-full text-xs text-amber-400 hover:text-amber-300 pt-1">
-                  {t("superAdminPanel")} / {t("commanderDashboard")} →
-                </button>
-              )}
+              <button
+                type="button"
+                data-testid="button-license-superadmin-access"
+                onClick={() => { setHqMode(true); setU("admin"); setP(""); setErr(null); }}
+                className="w-full text-xs text-amber-400 hover:text-amber-300 pt-1"
+              >
+                {t("superAdminPanel")} / {t("commanderDashboard")} →
+              </button>
+              <p className="text-[10px] text-muted-foreground text-center leading-snug">
+                {t("licenseSuperAdminHint")}
+              </p>
             </form>
           ) : (
             <form onSubmit={submitSetup} className="space-y-3">
