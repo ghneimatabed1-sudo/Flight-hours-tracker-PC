@@ -210,6 +210,30 @@ export default function Currency() {
         subtitle="Each cell is when the currency EXPIRES. Color-coded · earliest expiry first. Hide columns or pilots that don't apply on this PC."
         actions={
           <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 text-xs">
+              <span className="text-muted-foreground">Sort:</span>
+              <select
+                value={sortKey}
+                onChange={e => { setSortKey(e.target.value as CurrencyKey | "worst"); }}
+                className="px-2 py-1.5 rounded-md bg-secondary border border-border text-xs"
+                data-testid="select-sort-key"
+              >
+                <option value="worst">Nearest expiry (any)</option>
+                {COLS.map(c => (
+                  <option key={c.k} value={c.k}>{c.label}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")}
+                className="px-2 py-1.5 rounded-md bg-secondary border border-border flex items-center gap-1"
+                title={sortDir === "asc" ? "Earliest first — click for latest first" : "Latest first — click for earliest first"}
+                data-testid="button-sort-dir"
+              >
+                {sortDir === "asc"
+                  ? <><ArrowUp className="h-3 w-3" /> Earliest</>
+                  : <><ArrowDown className="h-3 w-3" /> Latest</>}
+              </button>
+            </div>
             <button
               onClick={printNow}
               className="px-3 py-1.5 rounded-md text-xs flex items-center gap-1 bg-secondary border border-border hover:bg-secondary/70"
