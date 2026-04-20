@@ -8,9 +8,14 @@ export interface ConfirmDialogProps {
   danger?: boolean;
 }
 
+// NOTE: do NOT add `backdrop-blur-*` to the overlay below. Chromium's
+// backdrop-filter on Windows w/ HW acceleration leaves a compositor-layer
+// artifact that intermittently swallows keystrokes from inputs in the
+// *next* dialog the user opens (e.g. Add Pilot right after delete-confirm).
+// bg-black/70 is just as visually present and never breaks input.
 export function ConfirmDialog({ title, message, confirmLabel, onCancel, onConfirm, busy, danger }: ConfirmDialogProps) {
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onCancel}>
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onCancel}>
       <div className="bg-card border border-border rounded-lg shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
         <div className="p-4 border-b border-border">
           <div className="text-base font-semibold">{title}</div>

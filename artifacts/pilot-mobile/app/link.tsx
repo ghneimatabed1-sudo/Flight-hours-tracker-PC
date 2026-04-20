@@ -54,11 +54,24 @@ export default function LinkScreen() {
       // After linking we first make the pilot create a local device
       // password — the app is then locked on every cold launch. The
       // setup-lock screen forwards to /reminders once the password is
-      // confirmed.
+      // confirmed. If /setup-lock navigation fails for any reason
+      // (route not yet registered, race with auth gate in _layout)
+      // fall through to the tabs root so the user is NEVER stranded
+      // on the link screen after a successful pairing.
       try {
         router.replace("/setup-lock" as never);
       } catch {
-        // Navigation is best-effort; if it fails the user still lands in tabs.
+        try {
+          router.replace("/(tabs)" as never);
+        } catch {
+          try {
+            router.replace("/reminders" as never);
+          } catch {
+            // All nav paths failed — surface a visible error so the
+            // pilot knows the link succeeded and can manually retry.
+            setError(t("link_error_generic"));
+          }
+        }
       }
     }
   };

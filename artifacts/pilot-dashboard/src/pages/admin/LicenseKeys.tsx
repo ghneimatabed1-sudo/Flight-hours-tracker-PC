@@ -1568,7 +1568,7 @@ export default function LicenseKeys() {
           so closing the dialog can't dismiss it. */}
       {setupOk && (
         <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85 backdrop-blur-sm"
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85"
           data-testid="overlay-force-reopen"
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.preventDefault()}

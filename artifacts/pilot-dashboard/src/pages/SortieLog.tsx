@@ -379,7 +379,7 @@ function SortieEditDialog({ sortie, pilots, busy, onCancel, onSave }: SortieEdit
   const num = (v: string) => Number.isFinite(Number(v)) ? Number(v) : 0;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onCancel}>
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onCancel}>
       <div className="bg-card border border-border rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="p-4 border-b border-border">
           <div className="text-base font-semibold">{t("editSortieTitle")}</div>
