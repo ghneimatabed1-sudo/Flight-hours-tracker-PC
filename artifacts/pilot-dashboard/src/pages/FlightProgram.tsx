@@ -179,7 +179,18 @@ export default function FlightProgram() {
     },
     [registry.data, isFlightCmdr, isSquadronCmdr, flightBinding?.pcId],
   );
-  const selectedTarget = targets.find(p => p.id === submitTo);
+  // v1.1.38: forgiving fallback. When the strict tier filter yields zero
+  // PCs (the Sqn Cmdr saw "— pick a registered PC —" and nothing else
+  // because every Flight PC in his registry was tagged with the legacy
+  // tier="squadron" and got filtered out), expose every non-self PC the
+  // registry knows about so the operator can ship the schedule anyway.
+  const targetsFallback = useMemo(
+    () => registry.data.filter(p => !p.isSelf),
+    [registry.data],
+  );
+  const usingFallbackTargets = targets.length === 0 && targetsFallback.length > 0;
+  const effectiveTargets = usingFallbackTargets ? targetsFallback : targets;
+  const selectedTarget = effectiveTargets.find(p => p.id === submitTo);
 
   // Auto-pick the bound squadron commander for flight commanders so the
   // operator never has to confirm a recipient — Submit just sends.
@@ -323,19 +334,31 @@ export default function FlightProgram() {
                   <span className="text-[11px] text-muted-foreground">locked</span>
                 </div>
               ) : (
-                <select
-                  value={submitTo}
-                  onChange={(e) => setSubmitTo(e.target.value)}
-                  className="px-2 py-1.5 rounded-md bg-input border border-border text-sm"
-                  data-testid="select-submit-target"
-                >
-                  <option value="">— pick a registered PC —</option>
-                  {targets.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.squadronName} · {p.tier}{p.online ? " · online" : " · offline"}
-                    </option>
-                  ))}
-                </select>
+                <>
+                  <select
+                    value={submitTo}
+                    onChange={(e) => setSubmitTo(e.target.value)}
+                    className="px-2 py-1.5 rounded-md bg-input border border-border text-sm"
+                    data-testid="select-submit-target"
+                  >
+                    <option value="">— pick a registered PC —</option>
+                    {effectiveTargets.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.deviceName || p.squadronName} · {p.tier}{p.online ? " · online" : " · offline"}
+                      </option>
+                    ))}
+                  </select>
+                  {usingFallbackTargets && (
+                    <span className="text-[10px] text-amber-300">
+                      No PC matched the strict tier filter — showing every PC in the registry ({effectiveTargets.length}). Pick the right one manually.
+                    </span>
+                  )}
+                  {effectiveTargets.length === 0 && (
+                    <span className="text-[10px] text-amber-300">
+                      Registry is empty on this PC. Sign in once on the recipient PC with internet so this PC can see it.
+                    </span>
+                  )}
+                </>
               )}
             </label>
             <div className="flex items-end">

@@ -182,6 +182,20 @@ export default function ScheduleChain() {
     if (myTier === "ops") return [...flightPCs, ...squadronPCs];
     return [];
   }, [myTier, squadronPCs, wingPCs, flightPCs]);
+  // v1.1.38: when the strict tier-filtered list is empty (e.g. Sqn Cmdr
+  // sees zero Flight or Wing PCs because the registry rows for those
+  // PCs were registered before the FLIGHT:/WING: id-prefix scheme and
+  // their DB tier is still "squadron"), fall back to every non-self PC
+  // the registry knows about. The picker tags each row with its current
+  // tier so the operator can pick the right one anyway. Real-world
+  // ops-room recovery: the Sqn Cmdr can still ship the schedule even
+  // when the auto-classifier on his PC has lost track of who is who.
+  const composeTargetsFallback = useMemo(
+    () => sortByName(registry.data.filter(p => !p.isSelf)),
+    [registry.data],
+  );
+  const usingFallbackTargets = composeTargets.length === 0 && composeTargetsFallback.length > 0;
+  const effectiveTargets = usingFallbackTargets ? composeTargetsFallback : composeTargets;
 
   // The ScheduleTier wire enum has flight|squadron|wing|base only —
   // "ops" is a UI-only distinction (the Ops PC sits at squadron tier in
@@ -269,7 +283,7 @@ export default function ScheduleChain() {
                     ? "— pick a Flight Cmdr or Squadron Cmdr PC —"
                     : "— pick a registered Wing or Flight PC —"}
                 </option>
-                {composeTargets.map(p => (
+                {effectiveTargets.map(p => (
                   <option key={p.id} value={p.id}>
                     {p.deviceName || p.squadronName}
                     {p.tier === "flight"
@@ -283,6 +297,16 @@ export default function ScheduleChain() {
                   </option>
                 ))}
               </select>
+              {usingFallbackTargets && (
+                <p className="text-[10px] text-amber-300 mt-1">
+                  No PCs matched the strict tier filter — showing every PC in the registry ({effectiveTargets.length}). Pick the right one manually.
+                </p>
+              )}
+              {effectiveTargets.length === 0 && (
+                <p className="text-[10px] text-amber-300 mt-1">
+                  Registry is empty on this PC. The other PC(s) must sign in once with internet so this PC can see them.
+                </p>
+              )}
             </div>
           </div>
           <div className="overflow-x-auto">
