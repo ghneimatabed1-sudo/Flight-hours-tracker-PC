@@ -996,12 +996,12 @@ function SeatPanel({ label, testIdPrefix, seat, opts, onChange, registeredPCs, m
         </div>
       ) : (
         <select
-          className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs"
+          className="w-full px-2 py-1.5 rounded-md bg-input border border-border text-xs font-bold"
           value={seat.id}
           onChange={e => onChange({ id: e.target.value })}
           data-testid={`select-${testIdPrefix}`}
         >
-          {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {opts.map(o => <option key={o.value} value={o.value} className="font-bold">{o.label}</option>)}
         </select>
       )}
       <div className="flex flex-wrap gap-1.5" data-testid={`status-${testIdPrefix}`}>
