@@ -116,10 +116,33 @@ export default function Roster() {
     .filter(p => !q || (p.name + p.arabicName + p.id).toLowerCase().includes(q.toLowerCase()));
   const importedCount = PILOTS.filter(p => p.imported).length;
 
+  // Military number is the primary identifier the pilot types on their
+  // phone to pair the mobile app. It MUST be non-empty and unique across
+  // the squadron — duplicates would let two pilots collide on the same
+  // login and the mobile pairing flow would be ambiguous. We enforce it
+  // here on every create/edit. (A matching DB-level unique index ensures
+  // multi-PC writes can't race past this guard either.)
+  const validateMilitaryNumber = (next: Pilot): string | null => {
+    const mil = (next.militaryNumber ?? "").trim();
+    if (!mil) {
+      return t("err_militaryNumberRequired");
+    }
+    const lower = mil.toLowerCase();
+    const dup = PILOTS.find(
+      x => x.id !== next.id && (x.militaryNumber ?? "").trim().toLowerCase() === lower,
+    );
+    if (dup) {
+      return `${t("err_militaryNumberDuplicate")} (${dup.rank} ${dup.name} · ${dup.id})`;
+    }
+    return null;
+  };
+
   const onSave = async (next: Pilot) => {
     setErr("");
+    const v = validateMilitaryNumber(next);
+    if (v) { setErr(v); return; }
     try {
-      await updatePilot.mutateAsync(next);
+      await updatePilot.mutateAsync({ ...next, militaryNumber: (next.militaryNumber ?? "").trim() });
       setEditing(null);
     } catch (e) {
       setErr((e as Error).message || "Update failed");
@@ -128,8 +151,10 @@ export default function Roster() {
 
   const onCreate = async (next: Pilot) => {
     setErr("");
+    const v = validateMilitaryNumber(next);
+    if (v) { setErr(v); return; }
     try {
-      await createPilot.mutateAsync(next);
+      await createPilot.mutateAsync({ ...next, militaryNumber: (next.militaryNumber ?? "").trim() });
       setAdding(null);
     } catch (e) {
       setErr((e as Error).message || "Create failed");
@@ -367,7 +392,7 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
             <Field label={t("flightName")} value={p.flightName || ""} onChange={v => set("flightName", v)} testId="input-flightName" />
             <Field label={t("name")} value={p.name} onChange={v => set("name", v)} testId="input-name" />
             <Field label={t("arabicName")} value={p.arabicName} onChange={v => set("arabicName", v)} testId="input-arabicName" />
-            <Field label={t("militaryNumber")} value={p.militaryNumber || ""} onChange={v => set("militaryNumber", v)} testId="input-militaryNumber" />
+            <Field label={`${t("militaryNumber")} *`} value={p.militaryNumber || ""} onChange={v => set("militaryNumber", v)} testId="input-militaryNumber" required />
             <Field label={t("rank")} value={p.rank} onChange={v => set("rank", v)} testId="input-rank" />
             <Field label={t("phone")} value={p.phone} onChange={v => set("phone", v)} testId="input-phone" />
             <label className="block text-xs col-span-2">
@@ -471,7 +496,7 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
   );
 }
 
-function Field({ label, value, onChange, type = "text", testId, autoFocus }: { label: string; value: string; onChange: (v: string) => void; type?: string; testId?: string; autoFocus?: boolean }) {
+function Field({ label, value, onChange, type = "text", testId, autoFocus, required }: { label: string; value: string; onChange: (v: string) => void; type?: string; testId?: string; autoFocus?: boolean; required?: boolean }) {
   return (
     <label className="block text-xs">
       <span className="text-muted-foreground">{label}</span>
@@ -482,6 +507,7 @@ function Field({ label, value, onChange, type = "text", testId, autoFocus }: { l
         data-testid={testId}
         autoComplete="off"
         autoFocus={autoFocus}
+        required={required}
         className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm"
       />
     </label>
