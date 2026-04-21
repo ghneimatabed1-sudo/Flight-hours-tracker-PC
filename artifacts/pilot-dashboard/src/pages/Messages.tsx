@@ -89,17 +89,40 @@ export default function Messages() {
   // and any other tiers are excluded from both the recipient picker
   // and the inbox filter. Flight Commander PCs may only message their
   // bound Squadron Commander, so the picker collapses to that one row.
+  // Squadron commanders officially link specific flight commander PCs in
+  // their squadron at setup time (see LicenseKeys.tsx Setup dialog). Those
+  // IDs are persisted to localStorage on this PC so the Messages picker can
+  // surface them as extra private-message counterparts — otherwise flight
+  // tiers are excluded by the base filter below.
+  const linkedFlightPcIds = useMemo<string[]>(() => {
+    try {
+      const raw = localStorage.getItem("rjaf.linkedFlightPcIds");
+      if (!raw) return [];
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : [];
+    } catch {
+      return [];
+    }
+  }, []);
+
   const selectablePCs = useMemo(
     () => {
       const base = registry.data.filter(
-        p => !p.isSelf && (p.tier === "squadron" || p.tier === "wing" || p.tier === "base"),
+        p => !p.isSelf && (
+          p.tier === "squadron" || p.tier === "wing" || p.tier === "base" ||
+          // Include flight commander PCs the signed-in squadron commander
+          // explicitly linked at setup — those are the officers in this
+          // squadron who need to talk to the squadron commander and the
+          // ops PC.
+          (p.tier === "flight" && linkedFlightPcIds.includes(p.id))
+        ),
       );
       if (isFlightCmdr && flightBinding) {
         return base.filter(p => p.id === flightBinding.pcId);
       }
       return base;
     },
-    [registry.data, isFlightCmdr, flightBinding?.pcId],
+    [registry.data, isFlightCmdr, flightBinding?.pcId, linkedFlightPcIds],
   );
 
   if (!allowed) {

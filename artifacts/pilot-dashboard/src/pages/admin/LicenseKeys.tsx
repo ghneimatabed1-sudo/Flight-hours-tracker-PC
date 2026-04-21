@@ -100,6 +100,15 @@ export default function LicenseKeys() {
   // pickers so commanders are only ever bound to real ops squadron PCs.
   const registeredPcs = useRegisteredPCs();
   const opsSquadronPcs = registeredPcs.data.filter(p => p.tier === "squadron");
+  // Flight commander PCs (tier === "flight") registered for the SAME squadron
+  // as the ops PC the setup operator just picked. This powers the "pick the
+  // flight commanders in this squadron" multi-select below the ops-PC picker.
+  const linkedOpsPc = opsSquadronPcs.find(p => p.id === setupLinkedPcId);
+  const flightPcsForSquadron = linkedOpsPc
+    ? registeredPcs.data.filter(
+        p => p.tier === "flight" && p.squadronName === linkedOpsPc.squadronName,
+      )
+    : [];
   // Commander Setup happens BEFORE this PC has ever signed in to Supabase, so
   // it runs as an anonymous client. The cross-PC registry query already
   // refetches every 30s, but the dialog is often opened right after a
@@ -134,6 +143,12 @@ export default function LicenseKeys() {
   // this commander will monitor. Stored on the commander record as
   // squadronIds so RLS / pickers can scope reads.
   const [setupMonitoredPcIds, setSetupMonitoredPcIds] = useState<string[]>([]);
+  // For squadron commander setup: the list of flight commander PCs inside
+  // the picked ops squadron that this squadron commander is officially
+  // linked to. Persisted to `rjaf.linkedFlightPcIds` so the Messages and
+  // Schedule pickers on this PC include those flight PCs as valid
+  // counterparts — tying the whole squadron group together.
+  const [setupLinkedFlightPcIds, setSetupLinkedFlightPcIds] = useState<string[]>([]);
   const [setupCommanderName, setSetupCommanderName] = useState("");
   const [setupDeviceName, setSetupDeviceName] = useState("");
   const [setupOpsUsername, setSetupOpsUsername] = useState("");
@@ -371,6 +386,7 @@ export default function LicenseKeys() {
     setSetupAccountPassword("");
     setSetupLinkedPcId("");
     setSetupMonitoredPcIds([]);
+    setSetupLinkedFlightPcIds([]);
   }
   // True when the current license-key record assigned a role from the admin
   // page. We use this to disable the role selector inside the Setup dialog.
@@ -636,6 +652,19 @@ export default function LicenseKeys() {
       // operator picks "Squadron Commander" but the PC still shows "HQ
       // Commander" because the seed install key was minted as hq).
       localStorage.setItem("rjaf.assignedRole", setupRole);
+      // Squadron commander → remember which flight commanders sit inside
+      // this squadron so Messages / Schedule pickers on this PC include
+      // them as valid counterparts. Only persisted for squadron commander
+      // setups; other roles clear the key so a reinstall doesn't leak
+      // stale linkage.
+      if (setupRole === "squadron_commander" && setupLinkedFlightPcIds.length > 0) {
+        localStorage.setItem(
+          "rjaf.linkedFlightPcIds",
+          JSON.stringify(setupLinkedFlightPcIds),
+        );
+      } else {
+        localStorage.removeItem("rjaf.linkedFlightPcIds");
+      }
       auth.setPcDeviceName(setupDeviceName.trim());
       auth.setPcRoleLock(roleToLock(setupRole));
 
@@ -1304,6 +1333,63 @@ export default function LicenseKeys() {
                     {lang === "ar"
                       ? "هذا القائد سيرى بيانات هذا السرب فقط."
                       : "This commander will only see data from the squadron picked here."}
+                  </p>
+                </div>
+              )}
+
+              {/* Squadron commander ONLY: pick the flight commanders that belong
+                  to the ops squadron above. They get wired into Messages /
+                  Schedule pickers on this PC so the whole squadron group can
+                  talk to each other. Only rendered after an ops PC is picked —
+                  before that we have no squadron to filter by. */}
+              {setupRole === "squadron_commander" && setupLinkedPcId && (
+                <div className="space-y-2 rounded-md border border-teal-300/40 bg-teal-50/60 dark:bg-teal-950/20 p-3">
+                  <label className="text-sm font-medium text-teal-900 dark:text-teal-200">
+                    {lang === "ar"
+                      ? "قادة الطيران المرتبطون بهذا السرب"
+                      : "Flight commanders linked to this squadron"}
+                  </label>
+                  {flightPcsForSquadron.length === 0 ? (
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                      {lang === "ar"
+                        ? "لا يوجد قادة طيران مسجلون لهذا السرب بعد. أعدّ أجهزة قادة الطيران أولاً، ثم أعد فتح هذه النافذة."
+                        : "No flight commander PCs are registered for this squadron yet. Set up the flight commander PCs first, then re-open this dialog."}
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pe-1">
+                      {flightPcsForSquadron.map(pc => {
+                        const checked = setupLinkedFlightPcIds.includes(pc.id);
+                        return (
+                          <label
+                            key={pc.id}
+                            className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-teal-100/40 dark:hover:bg-teal-900/20 cursor-pointer"
+                            data-testid={`row-linked-flight-pc-${pc.id}`}
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(v) => {
+                                setSetupLinkedFlightPcIds(prev =>
+                                  v ? Array.from(new Set([...prev, pc.id]))
+                                    : prev.filter(x => x !== pc.id),
+                                );
+                              }}
+                              data-testid={`checkbox-linked-flight-pc-${pc.id}`}
+                            />
+                            <span className="text-sm flex-1">
+                              {pc.deviceName || pc.squadronName}
+                            </span>
+                            {pc.online && (
+                              <span className="text-[10px] text-emerald-600 dark:text-emerald-400">●</span>
+                            )}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-teal-900/70 dark:text-teal-200/70">
+                    {lang === "ar"
+                      ? `المرتبطون: ${setupLinkedFlightPcIds.length} — يستطيعون التراسل والتنسيق مع قائد السرب وجهاز العمليات.`
+                      : `Linked: ${setupLinkedFlightPcIds.length} — they can message and coordinate with this squadron commander and the ops PC.`}
                   </p>
                 </div>
               )}

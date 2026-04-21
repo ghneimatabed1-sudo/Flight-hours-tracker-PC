@@ -110,9 +110,29 @@ export default function ScheduleChain() {
     () => registry.data.filter(p => !p.isSelf && p.tier === "base"),
     [registry.data],
   );
+  // Squadron commanders explicitly link specific flight commander PCs at
+  // setup time. When that linkage exists on this PC, narrow the down-chain
+  // composer list to just those — otherwise fall back to every registered
+  // flight PC (legacy behaviour for pre-linkage installs).
+  const linkedFlightPcIds = useMemo<string[]>(() => {
+    try {
+      const raw = localStorage.getItem("rjaf.linkedFlightPcIds");
+      if (!raw) return [];
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : [];
+    } catch {
+      return [];
+    }
+  }, []);
   const flightPCs = useMemo(
-    () => registry.data.filter(p => !p.isSelf && p.tier === "flight"),
-    [registry.data],
+    () => {
+      const all = registry.data.filter(p => !p.isSelf && p.tier === "flight");
+      if (myTier === "squadron" && linkedFlightPcIds.length > 0) {
+        return all.filter(p => linkedFlightPcIds.includes(p.id));
+      }
+      return all;
+    },
+    [registry.data, myTier, linkedFlightPcIds],
   );
   const squadronPCs = useMemo(
     () => registry.data.filter(p => !p.isSelf && p.tier === "squadron"),
