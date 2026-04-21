@@ -100,6 +100,8 @@ export interface CreateCommanderInput {
   // Required when role === "commander"; ignored for role === "ops".
   scope?: CommanderScope;
   squadronIds?: string[];
+  // Optional: lead-chosen password. When omitted or empty, a random one is generated.
+  password?: string;
 }
 
 export interface CreateCommanderResult {
@@ -131,7 +133,8 @@ export async function createCommander(input: CreateCommanderInput): Promise<Crea
     createdAt: new Date().toISOString(),
   };
 
-  const initialPassword = generateInitialPassword();
+  const chosen = (input.password ?? "").trim();
+  const initialPassword = chosen.length >= 4 ? chosen : generateInitialPassword();
   const hashes = readHashes();
   hashes[record.id] = await sha256Hex(initialPassword);
 
@@ -163,10 +166,11 @@ export function deleteCommander(id: string): boolean {
   return true;
 }
 
-export async function resetCommanderPassword(id: string): Promise<string | null> {
+export async function resetCommanderPassword(id: string, password?: string): Promise<string | null> {
   const list = readList();
   if (!list.some(c => c.id === id)) return null;
-  const newPassword = generateInitialPassword();
+  const chosen = (password ?? "").trim();
+  const newPassword = chosen.length >= 4 ? chosen : generateInitialPassword();
   const hashes = readHashes();
   hashes[id] = await sha256Hex(newPassword);
   writeHashes(hashes);
