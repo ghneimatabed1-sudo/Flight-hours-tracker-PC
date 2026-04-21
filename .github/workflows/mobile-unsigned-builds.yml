@@ -2,6 +2,16 @@ name: Hawk Eye — Unsigned Mobile Builds
 
 on:
   workflow_dispatch:
+  # Auto-trigger whenever the mobile app source or this workflow changes
+  # so a fresh APK + IPA is always available on the Actions page after a
+  # version bump or any code change in artifacts/pilot-mobile/. Avoids
+  # the previous workflow where the user had to manually trigger every
+  # build from the GitHub Actions UI.
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/pilot-mobile/**"
+      - ".github/workflows/mobile-unsigned-builds.yml"
 
 env:
   EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
