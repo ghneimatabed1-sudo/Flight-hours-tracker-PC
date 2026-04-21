@@ -499,7 +499,17 @@ export function useRegisteredPCs(): UseQueryResult<RegisteredPC[]> & { data: Reg
       if (isLive()) {
         rows = await liveOrLocal(
           async () => {
-            const { data, error } = await supabase!.from("xpc_registry").select("*");
+            // Defensive cap so the registry query stays fast even if the
+            // table grows to 1000+ PCs (active or retired) over the life
+            // of the deployment. Ordered by last_seen DESC so the most
+            // recently active PCs always make the cut. The schema has a
+            // matching index (xpc_registry_last_seen_idx) so this is a
+            // cheap index scan, not a sequential scan.
+            const { data, error } = await supabase!
+              .from("xpc_registry")
+              .select("*")
+              .order("last_seen", { ascending: false })
+              .limit(1000);
             if (error) throw error;
             return (data ?? []).map(rowToPc);
           },
@@ -1411,6 +1421,15 @@ export function setMessageRetentionDays(days: number) {
 
 // Auto-purge messages older than the configured retention window. Called
 // implicitly on every read; safe to call repeatedly.
+//
+// At 100+ PCs polling messages every ~10s, an unconditional remote DELETE
+// on every fetch fires ~10 deletes/sec against `xpc_messages` even when
+// nothing has expired. We throttle the remote delete to once per hour per
+// browser session so the purge stays effectively maintenance-only at
+// scale; the local localStorage purge still runs on every call so the
+// PC's own UI doesn't keep stale entries around.
+let lastRemotePurgeAt = 0;
+const REMOTE_PURGE_INTERVAL_MS = 60 * 60 * 1000;
 export function purgeExpiredMessages(): void {
   try {
     const rows = readMessages();
@@ -1418,8 +1437,11 @@ export function purgeExpiredMessages(): void {
     if (kept.length !== rows.length) writeMessages(kept);
   } catch { /* localStorage may be unavailable in SSR/tests */ }
   if (isLive()) {
+    const now = Date.now();
+    if (now - lastRemotePurgeAt < REMOTE_PURGE_INTERVAL_MS) return;
+    lastRemotePurgeAt = now;
     const days = getMessageRetentionDays();
-    const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+    const cutoff = new Date(now - days * 86_400_000).toISOString();
     void supabase!.from("xpc_messages").delete().lt("sent_at", cutoff);
   }
 }

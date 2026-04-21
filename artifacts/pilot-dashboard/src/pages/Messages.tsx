@@ -107,6 +107,12 @@ export default function Messages() {
 
   const selectablePCs = useMemo(
     () => {
+      // Hide PCs that haven't reported in 30 days. Without this filter the
+      // recipient picker grows unbounded as PCs are reinstalled / retired
+      // and would become unusable at 100+ deployments. Linked-flight PCs
+      // bypass the staleness filter so a freshly-reimaged flight PC is
+      // never invisible to its own squadron commander while it warms up.
+      const STALE_CUTOFF_MS = Date.now() - 30 * 86_400_000;
       const base = registry.data.filter(
         p => !p.isSelf && (
           p.tier === "squadron" || p.tier === "wing" || p.tier === "base" ||
@@ -116,7 +122,18 @@ export default function Messages() {
           // ops PC.
           (p.tier === "flight" && linkedFlightPcIds.includes(p.id))
         ),
-      );
+      ).filter(p => {
+        if (p.tier === "flight" && linkedFlightPcIds.includes(p.id)) return true;
+        return new Date(p.lastSeen).getTime() >= STALE_CUTOFF_MS;
+      }).sort((a, b) => {
+        // Sort by tier (base → wing → squadron → flight) then by displayed
+        // name so finding a specific PC in a 100-row dropdown is fast.
+        const tierOrder = { base: 0, wing: 1, squadron: 2, flight: 3 } as const;
+        const ta = tierOrder[a.tier as keyof typeof tierOrder] ?? 9;
+        const tb = tierOrder[b.tier as keyof typeof tierOrder] ?? 9;
+        if (ta !== tb) return ta - tb;
+        return (a.deviceName || a.squadronName).localeCompare(b.deviceName || b.squadronName);
+      });
       if (isFlightCmdr && flightBinding) {
         return base.filter(p => p.id === flightBinding.pcId);
       }

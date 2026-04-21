@@ -102,12 +102,23 @@ export default function ScheduleChain() {
   //   Wing tier     → forwards approved programmes to Base.
   //   Flight tier   → composes and submits back to Squadron.
   //   Base tier     → terminal.
+  // Hide PCs that haven't reported in 30 days from the composer dropdowns
+  // so the picker stays scannable at 100+ PC deployments where some rows
+  // are retired or reimaged. Linked-flight bindings bypass this filter
+  // (a freshly reimaged flight PC is never invisible to its squadron).
+  const STALE_CUTOFF_MS = Date.now() - 30 * 86_400_000;
+  const isFresh = (p: { lastSeen: string }) =>
+    new Date(p.lastSeen).getTime() >= STALE_CUTOFF_MS;
+  const sortByName = <T extends { deviceName?: string; squadronName: string }>(arr: T[]): T[] =>
+    [...arr].sort((a, b) =>
+      (a.deviceName || a.squadronName).localeCompare(b.deviceName || b.squadronName),
+    );
   const wingPCs = useMemo(
-    () => registry.data.filter(p => !p.isSelf && p.tier === "wing"),
+    () => sortByName(registry.data.filter(p => !p.isSelf && p.tier === "wing" && isFresh(p))),
     [registry.data],
   );
   const basePCs = useMemo(
-    () => registry.data.filter(p => !p.isSelf && p.tier === "base"),
+    () => sortByName(registry.data.filter(p => !p.isSelf && p.tier === "base" && isFresh(p))),
     [registry.data],
   );
   // Squadron commanders explicitly link specific flight commander PCs at
@@ -126,16 +137,20 @@ export default function ScheduleChain() {
   }, []);
   const flightPCs = useMemo(
     () => {
+      // Linked flight PCs always show even if they've been quiet for 30
+      // days — the binding is explicit and operators expect to see them.
+      // Other flight PCs are filtered by the staleness cutoff so the list
+      // stays manageable in 100+ PC environments.
       const all = registry.data.filter(p => !p.isSelf && p.tier === "flight");
       if (myTier === "squadron" && linkedFlightPcIds.length > 0) {
-        return all.filter(p => linkedFlightPcIds.includes(p.id));
+        return sortByName(all.filter(p => linkedFlightPcIds.includes(p.id)));
       }
-      return all;
+      return sortByName(all.filter(isFresh));
     },
     [registry.data, myTier, linkedFlightPcIds],
   );
   const squadronPCs = useMemo(
-    () => registry.data.filter(p => !p.isSelf && p.tier === "squadron"),
+    () => sortByName(registry.data.filter(p => !p.isSelf && p.tier === "squadron" && isFresh(p))),
     [registry.data],
   );
   // Which PCs may this tier address on the composer? Squadron composers
