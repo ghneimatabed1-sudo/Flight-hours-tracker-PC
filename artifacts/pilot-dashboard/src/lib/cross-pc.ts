@@ -1589,6 +1589,106 @@ export function useMarkMessageRead() {
   });
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Squadron daily snapshot (xpc_squadron_snapshot) — v1.1.26
+// ──────────────────────────────────────────────────────────────────────
+// Each squadron's canonical Ops PC publishes a tiny daily picture of
+// its roster + unavailable list to xpc_squadron_snapshot. Wing / Base /
+// HQ commanders subscribe per-squadron and render that picture inside
+// the squadron drill-down so they can see who's grounded today, who's
+// on leave, and the headline roster — without phoning the squadron.
+//
+// RLS: only the canonical Ops PC for a squadron may UPSERT its own row
+// (ops_pc_id = squadron_id AND ops_pc_id ∈ xpc_my_pc_ids()). Any
+// authenticated user may SELECT.
+export interface SquadronSnapshotPilot {
+  id: string;
+  callSign: string;
+  name: string;
+  flightName?: string | null;
+  rank?: string | null;
+  expDay?: string | null;
+  expNight?: string | null;
+  expNvg?: string | null;
+  expIrt?: string | null;
+  expMedical?: string | null;
+}
+export interface SquadronSnapshotUnavail {
+  id: string;
+  pilotId: string;
+  pilotName: string;
+  from: string;
+  to: string;
+  reason: string;
+}
+export interface SquadronSnapshotPayload {
+  roster: SquadronSnapshotPilot[];
+  unavailable: SquadronSnapshotUnavail[];
+  counts: { pilots: number; unavailToday: number; expired: number; expiringSoon: number };
+}
+export interface SquadronSnapshotRow {
+  squadronId: string;
+  opsPcId: string;
+  snapshotAt: string;
+  payload: SquadronSnapshotPayload;
+}
+
+export async function publishSquadronSnapshot(
+  squadronId: string,
+  payload: SquadronSnapshotPayload,
+): Promise<void> {
+  if (!isLive() || !supabase || !squadronId) return;
+  // Only the canonical Ops PC for this squadron is allowed to publish.
+  const myId = getLocalPcId();
+  if (myId !== squadronId) return;
+  const row = {
+    squadron_id: squadronId,
+    ops_pc_id: squadronId,
+    snapshot_at: nowIso(),
+    payload: payload as unknown as Record<string, unknown>,
+  };
+  const { error } = await supabase
+    .from("xpc_squadron_snapshot")
+    .upsert(row, { onConflict: "squadron_id" });
+  if (error) {
+    // Silent — re-runs on the next tick.
+    void recordAuditEvent({
+      type: "xpc.squadron.snapshot.publish.error",
+      actor: squadronId,
+      detail: { message: error.message },
+    });
+  }
+}
+
+export function useSquadronSnapshot(
+  squadronId: string | null | undefined,
+): UseQueryResult<SquadronSnapshotRow | null> & { data: SquadronSnapshotRow | null } {
+  const enabled = isLive() && !!squadronId;
+  const q = useQuery<SquadronSnapshotRow | null>({
+    queryKey: ["xpc", "squadron-snapshot", squadronId ?? "_"],
+    queryFn: async () => {
+      if (!isLive() || !supabase || !squadronId) return null;
+      const { data, error } = await supabase
+        .from("xpc_squadron_snapshot")
+        .select("squadron_id, ops_pc_id, snapshot_at, payload")
+        .eq("squadron_id", squadronId)
+        .maybeSingle();
+      if (error || !data) return null;
+      return {
+        squadronId: String(data.squadron_id),
+        opsPcId: String(data.ops_pc_id),
+        snapshotAt: String(data.snapshot_at),
+        payload: (data.payload ?? { roster: [], unavailable: [], counts: { pilots: 0, unavailToday: 0, expired: 0, expiringSoon: 0 } }) as SquadronSnapshotPayload,
+      };
+    },
+    enabled,
+    staleTime: 30_000,
+    refetchInterval: enabled ? 60_000 : false,
+    retry: isLive() ? 1 : false,
+  });
+  return { ...q, data: q.data ?? null } as UseQueryResult<SquadronSnapshotRow | null> & { data: SquadronSnapshotRow | null };
+}
+
 // Role helper: which roles are allowed to use the messages UI at all.
 // Commanders only — Squadron / Wing / Base. The squadron Ops Pilot
 // (role="ops"), Ops Pilot deputies (role="deputy") and Flight Cmdrs

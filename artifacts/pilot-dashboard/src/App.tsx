@@ -47,7 +47,8 @@ import PendingApprovals from "@/pages/PendingApprovals";
 import GuestBackfill from "@/pages/GuestBackfill";
 import Messages from "@/pages/Messages";
 import ScheduleChain from "@/pages/ScheduleChain";
-import { registerLocalPC, purgeExpiredMessages, getLocalPcId, setLocalPcId, getDeviceSuffix, publishSquadronFlightGroup, getLatestSquadronFlightGroup, type PcTier } from "@/lib/cross-pc";
+import { registerLocalPC, purgeExpiredMessages, getLocalPcId, setLocalPcId, getDeviceSuffix, publishSquadronFlightGroup, getLatestSquadronFlightGroup, publishSquadronSnapshot, type PcTier, type SquadronSnapshotPayload } from "@/lib/cross-pc";
+import { usePilots, useUnavailable } from "@/lib/squadron-data";
 import Roster from "@/pages/Roster";
 import PilotDetail from "@/pages/PilotDetail";
 import Currency from "@/pages/Currency";
@@ -242,9 +243,97 @@ function Shell() {
   return (
     <Layout>
       <ArchiveBootstrap />
+      <SquadronSnapshotPublisher />
       <SquadronOpsRoutes />
     </Layout>
   );
+}
+
+// Publishes this squadron's roster + unavailable list to xpc_squadron_snapshot
+// every 2 minutes so wing/base/HQ commanders can read the daily picture for
+// any squadron under them. RLS guarantees only the canonical Ops PC for the
+// squadron (where local PC id === squadron code) can write its own row.
+function SquadronSnapshotPublisher() {
+  const auth = useAuth();
+  const pilotsQ = usePilots();
+  const unavailQ = useUnavailable();
+  const role = auth.user?.role;
+  const scope = auth.user?.scope;
+  const sqnName = auth.squadron?.name;
+  const pilots = pilotsQ.data;
+  const unavail = unavailQ.data;
+  useEffect(() => {
+    // Only the squadron-tier ops PC publishes — its local PC id equals
+    // the squadron code (canonical Ops PC). Commander/flight/wing/base PCs
+    // skip publishing entirely; their RLS check would fail anyway.
+    if (!role) return;
+    if (role === "super_admin") return;
+    const isSquadronTier =
+      role === "ops" || (role === "commander" && scope === "squadron");
+    if (!isSquadronTier) return;
+    const squadronId = (sqnName || "").trim();
+    if (!squadronId) return;
+    const myId = getLocalPcId();
+    if (myId !== squadronId) return; // only the canonical Ops PC publishes
+    const today = new Date().toISOString().slice(0, 10);
+    const tick = () => {
+      const pmap = new Map(pilots.map(p => [p.id, p]));
+      // Pilots unavailable today (date string compare works because YYYY-MM-DD).
+      const todayUnavail = unavail.filter(u => u.from <= today && u.to >= today);
+      // Headline counts (compute simple expired/soon by checking the four
+      // currency expiry dates per pilot — string compare against today is
+      // fine since dates are stored YYYY-MM-DD).
+      const horizon = (() => {
+        const d = new Date(); d.setDate(d.getDate() + 30);
+        return d.toISOString().slice(0, 10);
+      })();
+      let expired = 0;
+      let expiringSoon = 0;
+      for (const p of pilots) {
+        const dates = [p.expiry?.day, p.expiry?.night, p.expiry?.nvg, p.expiry?.irt, p.expiry?.medical].filter(Boolean) as string[];
+        if (dates.some(d => d < today)) expired++;
+        else if (dates.some(d => d <= horizon)) expiringSoon++;
+      }
+      const payload: SquadronSnapshotPayload = {
+        roster: pilots.map(p => ({
+          id: p.id,
+          callSign: p.callSign ?? "",
+          name: p.name ?? "",
+          flightName: p.flightName ?? null,
+          rank: p.rank ?? null,
+          expDay: p.expiry?.day ?? null,
+          expNight: p.expiry?.night ?? null,
+          expNvg: p.expiry?.nvg ?? null,
+          expIrt: p.expiry?.irt ?? null,
+          expMedical: p.expiry?.medical ?? null,
+        })),
+        unavailable: todayUnavail.map(u => ({
+          id: u.id,
+          pilotId: u.pilotId,
+          pilotName: pmap.get(u.pilotId)?.name ?? u.pilotId,
+          from: u.from,
+          to: u.to,
+          reason: u.reason ?? "",
+        })),
+        counts: {
+          pilots: pilots.length,
+          unavailToday: todayUnavail.length,
+          expired,
+          expiringSoon,
+        },
+      };
+      void publishSquadronSnapshot(squadronId, payload);
+    };
+    // Publish once shortly after mount, then every 2 minutes. We piggy-back
+    // on the same ±7s jitter pattern the heartbeat uses so 100+ squadrons
+    // don't all upsert simultaneously.
+    const jitter = Math.floor(Math.random() * 14_000) - 7_000;
+    const firstDelay = 5_000 + Math.max(0, jitter);
+    const t1 = window.setTimeout(tick, firstDelay);
+    const interval = window.setInterval(tick, 120_000 + jitter);
+    return () => { window.clearTimeout(t1); window.clearInterval(interval); };
+  }, [role, scope, sqnName, pilots, unavail]);
+  return null;
 }
 
 function ArchiveBootstrap() {

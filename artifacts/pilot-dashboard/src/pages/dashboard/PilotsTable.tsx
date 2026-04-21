@@ -10,7 +10,8 @@ import { CurrencyCell, StatusBadge } from "@/components/StatusBadge";
 import { useDashPilots, useDashSquadrons } from "@/lib/dash-pilots";
 import { pilotWorstStatus, pilotWorstDate, fmtDate } from "@/lib/format";
 import type { CurrencyStatus, Pilot } from "@/lib/types";
-import { Search, ArrowUpDown, ChevronLeft, Download, Printer, FileSpreadsheet } from "lucide-react";
+import { Search, ArrowUpDown, ChevronLeft, Download, Printer, FileSpreadsheet, UserX, Clock } from "lucide-react";
+import { useSquadronSnapshot } from "@/lib/cross-pc";
 
 type SortKey = keyof Pick<Pilot, "callSign" | "fullName" | "monthlyHours" | "grandTotalHours" | "nvgTotalHours">;
 
@@ -63,6 +64,15 @@ export default function PilotsTable() {
     if (sortKey === k) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortKey(k); setSortDir("asc"); }
   }
+
+  // Wing/base/HQ commanders viewing a squadron drill-down read the live
+  // daily snapshot the squadron's Ops PC publishes to xpc_squadron_snapshot.
+  // The squadron's own commander/ops PC ignores this — they have the real
+  // local data already. Squadron drill-down only.
+  const isCrossSqnViewer =
+    user.role === "commander" && (user.scope === "wing" || user.scope === "base" || user.scope === "hq");
+  const snapshotQ = useSquadronSnapshot(isCrossSqnViewer && focusedSqn ? focusedSqn.code : null);
+  const snapshot = snapshotQ.data;
 
   const reportTitle = focusedSqn
     ? `${t("pilotReport")} — ${lang === "ar" ? focusedSqn.nameAr : focusedSqn.name}`
@@ -202,6 +212,81 @@ export default function PilotsTable() {
           )}
         </div>
       </div>
+
+      {isCrossSqnViewer && focusedSqn && (
+        <Card className="no-print">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="text-sm font-semibold flex items-center gap-2">
+                <Clock className="h-4 w-4 text-primary" />
+                Daily picture
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {snapshot
+                  ? `Last sync: ${fmtDate(snapshot.snapshotAt, lang)} · ${new Date(snapshot.snapshotAt).toLocaleTimeString()}`
+                  : (snapshotQ.isLoading ? "—" : "No live data from this squadron yet")}
+              </div>
+            </div>
+            {snapshot && (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="rounded-md border border-border bg-secondary/30 p-2">
+                    <div className="text-[10px] uppercase text-muted-foreground tracking-wider">{t("pilots")}</div>
+                    <div className="text-lg font-semibold tabular-nums">{snapshot.payload.counts.pilots}</div>
+                  </div>
+                  <div className="rounded-md border border-border bg-secondary/30 p-2">
+                    <div className="text-[10px] uppercase text-muted-foreground tracking-wider">Unavailable today</div>
+                    <div className="text-lg font-semibold tabular-nums text-amber-400">{snapshot.payload.counts.unavailToday}</div>
+                  </div>
+                  <div className="rounded-md border border-border bg-secondary/30 p-2">
+                    <div className="text-[10px] uppercase text-muted-foreground tracking-wider">{t("expiringSoon")}</div>
+                    <div className="text-lg font-semibold tabular-nums text-yellow-400">{snapshot.payload.counts.expiringSoon}</div>
+                  </div>
+                  <div className="rounded-md border border-border bg-secondary/30 p-2">
+                    <div className="text-[10px] uppercase text-muted-foreground tracking-wider">{t("expired")}</div>
+                    <div className="text-lg font-semibold tabular-nums text-red-400">{snapshot.payload.counts.expired}</div>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold mb-1.5 flex items-center gap-1.5">
+                    <UserX className="h-3.5 w-3.5 text-amber-400" />
+                    Unavailable today
+                    <span className="text-muted-foreground font-normal">({snapshot.payload.unavailable.length})</span>
+                  </div>
+                  {snapshot.payload.unavailable.length === 0 ? (
+                    <div className="text-xs text-muted-foreground italic px-1 py-2">
+                      All pilots available.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-md border border-border">
+                      <table className="w-full text-xs">
+                        <thead className="bg-secondary/40 text-muted-foreground uppercase text-[10px]">
+                          <tr>
+                            <th className="text-start px-2 py-1.5">Pilot</th>
+                            <th className="text-start px-2 py-1.5">From</th>
+                            <th className="text-start px-2 py-1.5">To</th>
+                            <th className="text-start px-2 py-1.5">Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {snapshot.payload.unavailable.map(u => (
+                            <tr key={u.id} className="border-t border-border">
+                              <td className="px-2 py-1.5">{u.pilotName}</td>
+                              <td className="px-2 py-1.5 font-mono">{u.from}</td>
+                              <td className="px-2 py-1.5 font-mono">{u.to}</td>
+                              <td className="px-2 py-1.5 text-muted-foreground">{u.reason || "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="print-only print-header">
         <h1>{reportTitle}</h1>
