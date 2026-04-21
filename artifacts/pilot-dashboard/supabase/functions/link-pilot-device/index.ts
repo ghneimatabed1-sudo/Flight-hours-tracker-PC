@@ -57,22 +57,13 @@ async function findPilot(admin: Sb, raw: string) {
   const trimmed = raw.trim();
   if (!trimmed) return null;
   // Try identifiers in priority order — first hit wins.
-  // Each lookup is case-insensitive (ilike) and uses the FULL string;
-  // we never substring-match to avoid cross-pilot collisions.
+  // STRICT MODE (per ops): pilots may only pair with their MILITARY NUMBER.
+  // Names, call signs, flight names, phone numbers, and the internal Pxxx
+  // pilot id are all rejected here — those identifiers were causing
+  // confusion (multiple pilots can share a name, call signs change, etc).
+  // The military number is unique-per-squadron at the database level
+  // (migration 0021), so a single ilike match is unambiguous.
   const attempts: { label: string; build: () => Sb }[] = [
-    {
-      label: "id (case-insensitive)",
-      build: () => admin.from("pilots").select("*").ilike("id", trimmed),
-    },
-    {
-      label: "name (column)",
-      build: () => admin.from("pilots").select("*").ilike("name", trimmed),
-    },
-    {
-      label: "arabic_name (column)",
-      build: () =>
-        admin.from("pilots").select("*").ilike("arabic_name", trimmed),
-    },
     {
       label: "data.militaryNumber",
       build: () =>
@@ -80,43 +71,6 @@ async function findPilot(admin: Sb, raw: string) {
           .from("pilots")
           .select("*")
           .filter("data->>militaryNumber", "ilike", trimmed),
-    },
-    {
-      label: "data.callSign",
-      build: () =>
-        admin
-          .from("pilots")
-          .select("*")
-          .filter("data->>callSign", "ilike", trimmed),
-    },
-    {
-      label: "data.flightName",
-      build: () =>
-        admin
-          .from("pilots")
-          .select("*")
-          .filter("data->>flightName", "ilike", trimmed),
-    },
-    {
-      label: "data.name",
-      build: () =>
-        admin.from("pilots").select("*").filter("data->>name", "ilike", trimmed),
-    },
-    {
-      label: "data.arabicName",
-      build: () =>
-        admin
-          .from("pilots")
-          .select("*")
-          .filter("data->>arabicName", "ilike", trimmed),
-    },
-    {
-      label: "data.phone",
-      build: () =>
-        admin
-          .from("pilots")
-          .select("*")
-          .filter("data->>phone", "ilike", trimmed),
     },
   ];
 

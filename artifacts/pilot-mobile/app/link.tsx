@@ -130,9 +130,9 @@ export default function LinkScreen() {
           <TextInput
             value={militaryNumber}
             onChangeText={setMilitaryNumber}
-            autoCapitalize="characters"
+            autoCapitalize="none"
             autoCorrect={false}
-            placeholder="P001"
+            placeholder="62701"
             placeholderTextColor={colors.mutedForeground}
             style={[
               styles.input,
