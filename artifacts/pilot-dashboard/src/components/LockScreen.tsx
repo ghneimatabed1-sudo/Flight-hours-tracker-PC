@@ -48,12 +48,16 @@ export default function LockScreen({ onUnlock }: { onUnlock: () => void }) {
       "wheel",
       "scroll",
     ];
+    // Boolean `useCapture` overload so add/remove always match. Object-form
+    // options have left stale listeners attached in some Chromium builds,
+    // which then swallow keystrokes from real input fields after the lock
+    // screen unmounts (the freeze that only minimise/restore can clear).
     for (const ev of events) {
-      document.addEventListener(ev, wake, { capture: true, passive: true });
+      document.addEventListener(ev, wake, true);
     }
     return () => {
       for (const ev of events) {
-        document.removeEventListener(ev, wake, { capture: true } as EventListenerOptions);
+        document.removeEventListener(ev, wake, true);
       }
     };
   }, [armed, onUnlock]);

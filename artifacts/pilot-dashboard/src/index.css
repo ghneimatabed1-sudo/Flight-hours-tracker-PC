@@ -493,13 +493,19 @@ html, body, #root {
 }
 
 /* ─────────────────────────────────────────────────────────────────────
-   Radix UI workaround: when a <Select> closes inside a <Dialog> and the
-   dialog re-renders new conditional fields at the same time, Radix can
-   leave inline `pointer-events: none` on the body, freezing every input
-   on the page for 30–60 seconds. The Setup dialog (License Keys page)
-   triggers this every time the operator picks a role and new commander/
-   squadron fields appear. Force pointer-events back on regardless of
+   Radix UI workaround: when a <Select>, <Popover>, or <Combobox> closes
+   inside a <Dialog> (or any portal) Radix may leave inline
+   `pointer-events: none` on the body, html, or the React root, which
+   freezes every input on the page until the Electron window is
+   minimised and restored. Force pointer-events back on regardless of
    what Radix sets inline. Outside-click detection still works because
-   Radix listens at the document level, not via body pointer-events.
+   Radix listens at the document level, not via pointer-events.
+
+   The MutationObserver in src/main.tsx is the belt-and-braces fix that
+   actually strips the inline style; this CSS is the safety net so the
+   user is never blocked even if the observer misses a frame.
    ───────────────────────────────────────────────────────────────────── */
-body { pointer-events: auto !important; }
+html,
+body,
+#root,
+main { pointer-events: auto !important; }

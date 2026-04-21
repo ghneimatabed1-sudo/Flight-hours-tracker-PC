@@ -60,8 +60,13 @@ export function useIdleTimeout(
       "wheel",
       "scroll",
     ];
+    // Use the boolean `useCapture` overload so add and remove always agree.
+    // The mismatched-options overload (object on add, object on remove) has
+    // historically failed to detach listeners in some Chromium builds, leaving
+    // stale capture-phase listeners on document that break input focus until
+    // the window is minimised/restored.
     for (const ev of events) {
-      document.addEventListener(ev, onActivity, { capture: true, passive: true });
+      document.addEventListener(ev, onActivity, true);
     }
     document.addEventListener("visibilitychange", onVisibility);
 
@@ -70,7 +75,7 @@ export function useIdleTimeout(
     return () => {
       if (timer !== null) window.clearTimeout(timer);
       for (const ev of events) {
-        document.removeEventListener(ev, onActivity, { capture: true } as EventListenerOptions);
+        document.removeEventListener(ev, onActivity, true);
       }
       document.removeEventListener("visibilitychange", onVisibility);
     };

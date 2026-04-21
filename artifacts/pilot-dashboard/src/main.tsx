@@ -80,9 +80,39 @@ window.addEventListener("unhandledrejection", (e) => {
   showPostMountError(e.reason);
 });
 
+// ─────────────────────────────────────────────────────────────────────
+// Input-freeze guard. Radix UI portals (Select, Popover, Dialog,
+// Combobox) occasionally leave `pointer-events: none` set as an inline
+// style on <body> or <html> after they close. When that happens every
+// input on the page stops accepting clicks/keystrokes until the
+// Electron window is minimised and restored. We use a MutationObserver
+// to strip the offending inline style the moment it appears so the
+// freeze is invisible to the operator.
+// ─────────────────────────────────────────────────────────────────────
+function installPointerEventsGuard(): void {
+  const fix = (el: HTMLElement | null) => {
+    if (!el) return;
+    if (el.style.pointerEvents === "none") {
+      el.style.pointerEvents = "";
+    }
+  };
+  fix(document.body);
+  fix(document.documentElement);
+  const obs = new MutationObserver(muts => {
+    for (const m of muts) {
+      if (m.type === "attributes" && m.attributeName === "style") {
+        fix(m.target as HTMLElement);
+      }
+    }
+  });
+  obs.observe(document.body, { attributes: true, attributeFilter: ["style"] });
+  obs.observe(document.documentElement, { attributes: true, attributeFilter: ["style"] });
+}
+
 try {
   // The outbox worker is best-effort — never let it block React mounting.
   try { startOutboxWorker(); } catch (e) { console.warn("outbox worker failed:", e); }
+  try { installPointerEventsGuard(); } catch (e) { console.warn("pointer-events guard failed:", e); }
   createRoot(document.getElementById("root")!).render(<App />);
 } catch (err) {
   showFatal(err);
