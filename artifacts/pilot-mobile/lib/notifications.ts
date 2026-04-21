@@ -192,24 +192,30 @@ export async function saveReminderPrefs(prefs: ReminderPrefs): Promise<boolean> 
   // Always persist locally so reminders survive offline / pre-migration.
   const localOk = await saveLocalPrefs(prefs);
 
-  // Best-effort Supabase sync (silent on failure — migrations may be pending).
+  // Supabase sync. We AWAIT this so a failed save (e.g. RPC raising
+  // 'unauthorized' because the pilot's auth_user_id binding was never
+  // set during pairing) propagates back to the UI and the toggle does
+  // NOT appear to be saved when it isn't. Without this await, the
+  // toggle in Reminders silently reverts to OFF on the next visit
+  // because the local copy is overwritten by the stale Supabase row.
   if (supabaseConfigured && supabase) {
-    void (async () => {
-      try {
-        await supabase.rpc("save_pilot_reminder_prefs", {
-          p_thresholds:       prefs.thresholds,
-          p_push_enabled:     prefs.pushEnabled,
-          p_expo_push_token:  prefs.expoPushToken,
-          p_platform:         prefs.platform,
-        });
-      } catch {
-        // Migrations may not be applied yet — local save already succeeded.
+    try {
+      const { error } = await supabase.rpc("save_pilot_reminder_prefs", {
+        p_thresholds:       prefs.thresholds,
+        p_push_enabled:     prefs.pushEnabled,
+        p_expo_push_token:  prefs.expoPushToken,
+        p_platform:         prefs.platform,
+      });
+      if (error) {
+        console.warn("[reminders] save_pilot_reminder_prefs error:", error.message);
+        return false;
       }
-    })();
+    } catch (err) {
+      console.warn("[reminders] save_pilot_reminder_prefs threw:", err);
+      return false;
+    }
   }
 
-  // Return true as long as local save worked — the user sees no error even
-  // when Supabase migrations haven't been applied yet.
   return localOk;
 }
 

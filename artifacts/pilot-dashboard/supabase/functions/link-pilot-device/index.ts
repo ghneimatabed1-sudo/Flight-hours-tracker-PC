@@ -298,6 +298,25 @@ Deno.serve(async (req) => {
     last_seen_at: nowIso,
     revoked_at: null,
   };
+  // CRITICAL: bind the auth user to the pilots row. The pilot mobile RLS
+  // (pilots_self_select in 0003) and the reminder-prefs save RPC
+  // (save_pilot_reminder_prefs in 0005) BOTH require
+  // `pilots.auth_user_id = auth.uid()`. Without this update the pilot can
+  // sign in but every "save my push token" call raises 'unauthorized' and
+  // the dashboard's notify-alert leg finds no token to push to → alerts
+  // only appear when the app is open. Migration 0022 backfills already-
+  // paired pilots; this line keeps new pairings correct going forward.
+  const { error: bindErr } = await admin
+    .from("pilots")
+    .update({ auth_user_id: userId })
+    .eq("id", pilot.id)
+    .eq("squadron_id", codeRow.squadron_id);
+  if (bindErr) {
+    console.log("[link] pilots.auth_user_id update error:", bindErr.message);
+    // Don't fail the pair — pilot can still read public squadron data; the
+    // backfill migration / next pair attempt will heal the binding.
+  }
+
   const { error: deviceErr } = await admin
     .from("pilot_devices")
     .upsert(deviceRow, { onConflict: "user_id" });
