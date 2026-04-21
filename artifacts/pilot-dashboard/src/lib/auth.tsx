@@ -493,7 +493,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (cancelled) return;
           if (resync.ok) {
             signedIn = true;
-            await recordAuditEvent({ type: "supabase.creds.resynced", actor: username, detail: { trigger: "startup" } });
+            void recordAuditEvent({ type: "supabase.creds.resynced", actor: username, detail: { trigger: "startup" } });
           } else {
             lastErr = resync.error ?? lastErr;
           }
@@ -533,7 +533,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (supabaseConfigured) {
         const res = await validateLicenseRemote(k, state.fingerprint, u);
         if (!res.ok) {
-          await recordAuditEvent({ type: "license.activate.failed", actor: u, detail: { key: k.slice(0, 8) + "…", reason: res.error } });
+          void recordAuditEvent({ type: "license.activate.failed", actor: u, detail: { key: k.slice(0, 8) + "…", reason: res.error } });
           return { ok: false, error: res.error ?? "License rejected by server." };
         }
         localStorage.setItem("rjaf.licensed", "1");
@@ -541,7 +541,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem("rjaf.licenseUser", u);
         localStorage.setItem("rjaf.licenseBoundFp", state.fingerprint);
         if (res.squadronId) localStorage.setItem("rjaf.squadronId", res.squadronId);
-        await recordAuditEvent({ type: "license.activate.ok", actor: u, detail: { squadronId: res.squadronId } });
+        void recordAuditEvent({ type: "license.activate.ok", actor: u, detail: { squadronId: res.squadronId } });
         setState(s => ({ ...s, licensed: true }));
         return { ok: true };
       }
@@ -593,7 +593,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem("rjaf.fails", String(fails));
         if (lockedUntil) localStorage.setItem("rjaf.lockUntil", String(lockedUntil));
         setState(s => ({ ...s, failedAttempts: fails, lockedUntil }));
-        await recordAuditEvent({ type: "login.failed", actor: username, detail: { reason, fails } });
+        void recordAuditEvent({ type: "login.failed", actor: username, detail: { reason, fails } });
         return { ok: false as const, error: lockedUntil ? "locked" : "bad" };
       };
 
@@ -613,9 +613,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const lock = readPcRoleLock();
       if (lock && hqUser && hqUser.role !== lock) {
         if (hqUser.role === "super_admin") {
-          await recordAuditEvent({ type: "login.rolelock.override", actor: username, detail: { lock } });
+          void recordAuditEvent({ type: "login.rolelock.override", actor: username, detail: { lock } });
         } else {
-          await recordAuditEvent({ type: "login.rolelock.blocked", actor: username, detail: { lock, attemptedRole: hqUser.role } });
+          void recordAuditEvent({ type: "login.rolelock.blocked", actor: username, detail: { lock, attemptedRole: hqUser.role } });
           return { ok: false, error: "role_locked" };
         }
       }
@@ -646,7 +646,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               secret: (data.secret as string) ?? "",
               otpauth: (data.otpauth as string) ?? "",
             });
-            await recordAuditEvent({
+            void recordAuditEvent({
               type: "login.2fa.required",
               actor: username,
               detail: { stage: enrolled ? "verify" : "enroll" },
@@ -674,7 +674,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const isMaster = attemptHash === MASTER_RECOVERY_HASH;
           if (attemptHash !== expectedHash && !isMaster) return await recordFail("bad_credentials");
           if (isMaster) {
-            await recordAuditEvent({ type: "login.master_recovery", actor: username, detail: {} });
+            void recordAuditEvent({ type: "login.master_recovery", actor: username, detail: {} });
           }
         }
         const existing = localStorage.getItem(ADMIN_TOTP_SECRET_KEY);
@@ -685,7 +685,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             secret: existing,
             otpauth: otpauthURL(existing, hqUser.username, ADMIN_TOTP_ISSUER),
           });
-          await recordAuditEvent({ type: "login.2fa.required", actor: username, detail: { stage: "verify" } });
+          void recordAuditEvent({ type: "login.2fa.required", actor: username, detail: { stage: "verify" } });
           return { ok: false, requires2fa: "verify" };
         }
         const secret = generateSecret();
@@ -695,7 +695,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           secret,
           otpauth: otpauthURL(secret, hqUser.username, ADMIN_TOTP_ISSUER),
         });
-        await recordAuditEvent({ type: "login.2fa.required", actor: username, detail: { stage: "enroll" } });
+        void recordAuditEvent({ type: "login.2fa.required", actor: username, detail: { stage: "enroll" } });
         return { ok: false, requires2fa: "enroll" };
       }
 
@@ -745,7 +745,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const resync = await resyncSupabaseCreds(u, hqUser.role === "ops" ? "ops" : "commander", sqn);
             if (resync.ok) {
               sbOk = true;
-              await recordAuditEvent({ type: "supabase.creds.resynced", actor: u, detail: { trigger: "login" } });
+              void recordAuditEvent({ type: "supabase.creds.resynced", actor: u, detail: { trigger: "login" } });
             } else {
               lastErr = resync.error ?? lastErr;
               console.warn("[supabase-resync] failed", resync.error);
@@ -756,7 +756,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // successful because the dashboard would be silently read-only.
             const msg = `Cannot reach data server (${lastErr ?? "unknown"}). Check internet connection and try again, or contact your Super Admin.`;
             setSilentAuthError(msg);
-            await recordAuditEvent({ type: "login.supabase.unreachable", actor: username, detail: { reason: lastErr } });
+            void recordAuditEvent({ type: "login.supabase.unreachable", actor: username, detail: { reason: lastErr } });
             return { ok: false, error: msg };
           }
         }
@@ -764,7 +764,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem("rjaf.user", JSON.stringify(verified));
         localStorage.removeItem("rjaf.fails");
         localStorage.removeItem("rjaf.lockUntil");
-        await recordAuditEvent({ type: "login.ok", actor: username, detail: { role: verified.role } });
+        void recordAuditEvent({ type: "login.ok", actor: username, detail: { role: verified.role } });
         setSilentAuthError(null);
         setState(s => ({ ...s, user: verified, failedAttempts: 0, lockedUntil: null }));
         return { ok: true };
@@ -793,14 +793,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ?? "ops");
         const role: User["role"] = rawRole === "deputy" ? "ops" : rawRole;
         if (lock && role !== lock) {
-          await recordAuditEvent({ type: "login.rolelock.blocked", actor: username, detail: { lock, attemptedRole: role } });
+          void recordAuditEvent({ type: "login.rolelock.blocked", actor: username, detail: { lock, attemptedRole: role } });
           return { ok: false, error: "role_locked" };
         }
         const user: User = { username, role, displayName: (data.user.user_metadata?.displayName as string) ?? username };
         localStorage.setItem("rjaf.user", JSON.stringify(user));
         localStorage.removeItem("rjaf.fails");
         localStorage.removeItem("rjaf.lockUntil");
-        await recordAuditEvent({ type: "login.ok", actor: username });
+        void recordAuditEvent({ type: "login.ok", actor: username });
         setSilentAuthError(null);
         setState(s => ({ ...s, user, failedAttempts: 0, lockedUntil: null }));
         return { ok: true };
@@ -863,7 +863,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             : undefined;
           const usedRecoveryCode = !!data.usedRecoveryCode;
           if (usedRecoveryCode) {
-            await recordAuditEvent({
+            void recordAuditEvent({
               type: "login.2fa.recovery_used",
               actor: hqUser.username,
               detail: {},
@@ -888,7 +888,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return { ok: true, recoveryCodes };
           }
           localStorage.setItem("rjaf.user", JSON.stringify(hqUser));
-          await recordAuditEvent({
+          void recordAuditEvent({
             type: "login.ok",
             actor: hqUser.username,
             detail: { role: hqUser.role, twoFactor: true, viaRecoveryCode: usedRecoveryCode },
@@ -912,7 +912,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           writeDemoRecoveryCodes(stored);
           recoveryMatched = true;
           const remaining = stored.filter(c => !c.usedAt).length;
-          await recordAuditEvent({
+          void recordAuditEvent({
             type: "login.2fa.recovery_used",
             actor: pending.user.username,
             detail: { remaining },
@@ -926,7 +926,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const lockedUntil = fails >= 5 ? now + 5 * 60_000 : null;
         localStorage.setItem("rjaf.fails", String(fails));
         if (lockedUntil) localStorage.setItem("rjaf.lockUntil", String(lockedUntil));
-        await recordAuditEvent({
+        void recordAuditEvent({
           type: "login.2fa.failed",
           actor: pending.user.username,
           detail: { stage: pending.mode, fails, mode: usedRecoveryShape ? "recovery" : "totp" },
@@ -948,7 +948,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         );
         writeDemoRecoveryCodes(hashed);
         updateAdminRecoveryRemaining(mintedRecoveryCodes.length);
-        await recordAuditEvent({
+        void recordAuditEvent({
           type: "login.2fa.enrolled",
           actor: pending.user.username,
         });
@@ -971,7 +971,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { ok: true, recoveryCodes: mintedRecoveryCodes };
       }
       localStorage.setItem("rjaf.user", JSON.stringify(hqUser));
-      await recordAuditEvent({
+      void recordAuditEvent({
         type: "login.ok",
         actor: hqUser.username,
         detail: { role: hqUser.role, twoFactor: true, viaRecoveryCode: recoveryMatched },
@@ -998,7 +998,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const newHash = await sha256Hex(np);
       localStorage.setItem(ADMIN_PASSWORD_HASH_KEY, newHash);
       setAdminProvisioned(true);
-      await recordAuditEvent({ type: "admin.password.provisioned", actor: "admin", detail: {} });
+      void recordAuditEvent({ type: "admin.password.provisioned", actor: "admin", detail: {} });
       return { ok: true };
     },
     resetSuperAdminPasswordWithMaster: async (masterPassword, newPassword) => {
@@ -1011,13 +1011,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // accepted.
       const masterHash = await sha256Hex(mp);
       if (masterHash !== MASTER_RECOVERY_HASH) {
-        await recordAuditEvent({ type: "admin.password.master_reset.failed", actor: "unknown", detail: { reason: "bad_master" } });
+        void recordAuditEvent({ type: "admin.password.master_reset.failed", actor: "unknown", detail: { reason: "bad_master" } });
         return { ok: false, error: "bad_master" };
       }
       if (np.length < 8) return { ok: false, error: "too_short" };
       const newHash = await sha256Hex(np);
       localStorage.setItem(ADMIN_PASSWORD_HASH_KEY, newHash);
-      await recordAuditEvent({ type: "admin.password.master_reset.ok", actor: "master-recovery", detail: {} });
+      void recordAuditEvent({ type: "admin.password.master_reset.ok", actor: "master-recovery", detail: {} });
       return { ok: true };
     },
     changeSuperAdminPassword: async (currentPassword, newPassword, totpCode) => {
@@ -1063,7 +1063,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (reason === "bad_input") return { ok: false, error: "bad_input" };
             return { ok: false, error: reason };
           }
-          await recordAuditEvent({ type: "admin.password.change.ok", actor: u.username, detail: { via: "edge-function" } });
+          void recordAuditEvent({ type: "admin.password.change.ok", actor: u.username, detail: { via: "edge-function" } });
           return { ok: true };
         } catch (e: unknown) {
           return { ok: false, error: e instanceof Error ? e.message : "server_error" };
@@ -1079,13 +1079,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const expectedHash = storedHash ?? DEFAULT_ADMIN_PASSWORD_HASH;
       const attemptHash = await sha256Hex(currentPassword);
       if (attemptHash !== expectedHash) {
-        await recordAuditEvent({ type: "admin.password.change.failed", actor: u.username, detail: { reason: "bad_current" } });
+        void recordAuditEvent({ type: "admin.password.change.failed", actor: u.username, detail: { reason: "bad_current" } });
         return { ok: false, error: "bad_current" };
       }
 
       const newHash = await sha256Hex(np);
       localStorage.setItem(ADMIN_PASSWORD_HASH_KEY, newHash);
-      await recordAuditEvent({ type: "admin.password.change.ok", actor: u.username, detail: {} });
+      void recordAuditEvent({ type: "admin.password.change.ok", actor: u.username, detail: {} });
       return { ok: true };
     },
     regenerateRecoveryCodes: async (code) => {
@@ -1125,7 +1125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         })),
       );
       writeDemoRecoveryCodes(hashed);
-      await recordAuditEvent({
+      void recordAuditEvent({
         type: "super_admin.2fa.recovery_regenerated",
         actor: u.username,
         detail: { count: fresh.length },
@@ -1170,7 +1170,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               ? (data.recoveryRemaining as number)
               : codes.length,
           );
-          await recordAuditEvent({
+          void recordAuditEvent({
             type: "super_admin.2fa.recovery_regenerated",
             actor,
             detail: { count: codes.length },
@@ -1195,7 +1195,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       );
       writeDemoRecoveryCodes(hashed);
       updateAdminRecoveryRemaining(fresh.length);
-      await recordAuditEvent({
+      void recordAuditEvent({
         type: "super_admin.2fa.recovery_regenerated",
         actor,
         detail: { count: fresh.length },

@@ -82,17 +82,33 @@ export function FlightBindingGate({ children }: { children: ReactNode }) {
         <div className="rounded-full bg-amber-500/15 text-amber-500 p-2">
           <Plane className="h-5 w-5" />
         </div>
-        <div className="flex-1">
+        <div className="flex-1 space-y-2">
           <div className="text-base font-semibold flex items-center gap-2">
-            <Link2 className="h-4 w-4" /> Awaiting Super Admin binding
+            <Link2 className="h-4 w-4" /> Awaiting squadron link-up
           </div>
-          <p className="text-xs text-muted-foreground leading-relaxed mt-1">
-            This Flight Commander PC has not yet been bound to a Squadron
-            Commander by Super Admin. Ask Super Admin to open
-            <span className="font-mono"> Commanders → Flight bindings </span>
-            and assign this account ({user?.username}) to a squadron.
-            {syncing ? " Checking for an updated binding…" : ""}
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            This Flight Commander PC ({user?.username}) is not yet linked
+            to a Squadron Commander. There are two ways to complete the
+            link — either one will unlock this PC automatically:
           </p>
+          <ol className="text-xs text-muted-foreground leading-relaxed space-y-1 list-decimal ms-5">
+            <li>
+              <span className="text-foreground font-medium">Recommended:</span> ask the Squadron
+              Commander to sign in on the squadron PC, open
+              <span className="font-mono"> Setup → Flight commanders</span>,
+              and tick this PC. The link applies on this PC within ~30 seconds.
+            </li>
+            <li>
+              Or ask Super Admin to open
+              <span className="font-mono"> Commanders → Flight bindings </span>
+              and assign this account to a squadron.
+            </li>
+          </ol>
+          {syncing && (
+            <p className="text-[11px] text-muted-foreground italic">
+              Checking for an updated link…
+            </p>
+          )}
         </div>
       </div>
     </div>

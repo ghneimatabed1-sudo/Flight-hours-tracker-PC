@@ -245,23 +245,31 @@ export async function recordAuditEvent(event: {
     detail: event.detail ?? {},
     occurred_at: new Date().toISOString(),
   });
-  // Opportunistic retention eviction. We don't fail the insert if cleanup
-  // hits an error — the cap is a soft guardrail, not a correctness contract.
-  try {
-    const { count } = await supabase
-      .from("audit_log")
-      .select("*", { count: "exact", head: true });
-    if (typeof count === "number" && count > AUDIT_RETENTION_ROWS) {
-      const overflow = count - AUDIT_RETENTION_ROWS;
-      const { data: oldest } = await supabase
-        .from("audit_log")
-        .select("id")
-        .order("occurred_at", { ascending: true })
-        .limit(overflow);
-      const ids = (oldest ?? []).map((r: { id: number | string }) => r.id);
-      if (ids.length > 0) {
-        await supabase.from("audit_log").delete().in("id", ids);
-      }
-    }
-  } catch { /* retention is best-effort */ }
+  // Opportunistic retention eviction — runs fire-and-forget so it NEVER
+  // blocks the caller. The cleanup adds 1-2 sequential network roundtrips
+  // (count + delete) which used to compound on hot paths like login,
+  // making the sign-in button stay disabled for an extra 1-2 seconds while
+  // the cap was being trimmed. Also: only check the cap on ~1 in 25
+  // writes so we're not paying for a count() roundtrip on every event.
+  if (Math.random() < 0.04) {
+    void (async () => {
+      try {
+        const { count } = await supabase!
+          .from("audit_log")
+          .select("*", { count: "exact", head: true });
+        if (typeof count === "number" && count > AUDIT_RETENTION_ROWS) {
+          const overflow = count - AUDIT_RETENTION_ROWS;
+          const { data: oldest } = await supabase!
+            .from("audit_log")
+            .select("id")
+            .order("occurred_at", { ascending: true })
+            .limit(overflow);
+          const ids = (oldest ?? []).map((r: { id: number | string }) => r.id);
+          if (ids.length > 0) {
+            await supabase!.from("audit_log").delete().in("id", ids);
+          }
+        }
+      } catch { /* retention is best-effort */ }
+    })();
+  }
 }
