@@ -165,8 +165,16 @@ export default function AddSortie() {
   const setSeat = (which: "pilot" | "coPilot", patch: Partial<SeatState>) =>
     setForm(f => ({ ...f, [which]: { ...f[which], ...patch } }));
 
+  // v1.1.35: pilot/co-pilot autofill defaults to the short Flight Name
+  // when the pilot has one (e.g. "Falcon 1") — operators write
+  // schedules with call signs, not full English names. Falls back to
+  // "Rank Full Name" when Flight Name is empty. Saved value is the
+  // pilot id, unchanged, so existing sortie rows are not affected.
   const pilotOpts = useMemo(
-    () => PILOTS.map(p => ({ value: p.id, label: `${p.rank} ${p.name}` })),
+    () => PILOTS.map(p => ({
+      value: p.id,
+      label: p.flightName?.trim() || `${p.rank} ${p.name}`,
+    })),
     [PILOTS],
   );
   const pilotById = (id: string) => PILOTS.find(p => p.id === id);
@@ -545,7 +553,8 @@ export default function AddSortie() {
   const seatLabel = (id: string, ext?: { name: string }) => {
     if (ext?.name) return ext.name;
     const p = pilotById(id);
-    return p ? `${p.rank} ${p.name}` : id || "—";
+    if (!p) return id || "—";
+    return p.flightName?.trim() || `${p.rank} ${p.name}`;
   };
 
   return (
@@ -799,7 +808,8 @@ export default function AddSortie() {
           busy={del.isPending}
           pilotName={(id) => {
             const p = pilotById(id);
-            return p ? `${p.rank} ${p.name}` : id;
+            if (!p) return id;
+            return p.flightName?.trim() || `${p.rank} ${p.name}`;
           }}
         />
       )}
@@ -814,7 +824,8 @@ export default function AddSortie() {
           busy={update.isPending}
           pilotName={(id) => {
             const p = pilotById(id);
-            return p ? `${p.rank} ${p.name}` : id;
+            if (!p) return id;
+            return p.flightName?.trim() || `${p.rank} ${p.name}`;
           }}
         />
       )}

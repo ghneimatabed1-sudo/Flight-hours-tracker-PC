@@ -85,8 +85,18 @@ export default function ScheduleChain() {
   const decide = useDecideSchedule();
   const acceptEdits = useAcceptScheduleEdit();
   const pilotsQ = usePilots();
+  // v1.1.35: pilot/co-pilot autofill in the schedule composer defaults
+  // to the short Flight Name when the pilot has one set on the roster
+  // (operators write schedules with call-sign-style names like "Falcon
+  // 1", not the full English name). Fallback to "Rank Full Name" for
+  // pilots whose Flight Name field is empty so nothing breaks.
+  // The saved value is unchanged (still the full English name) so
+  // existing schedule rows and downstream lookups are untouched.
   const pilotOptions = useMemo(
-    () => pilotsQ.data.map(p => ({ value: p.name, label: `${p.rank} ${p.name}` })),
+    () => pilotsQ.data.map(p => ({
+      value: p.name,
+      label: p.flightName?.trim() || `${p.rank} ${p.name}`,
+    })),
     [pilotsQ.data],
   );
 
