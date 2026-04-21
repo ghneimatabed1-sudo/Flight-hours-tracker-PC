@@ -150,8 +150,15 @@ export default function Messages() {
         const boundPc = registry.data.find(p => p.id === flightBinding.pcId);
         const normalize = (s: string | undefined | null) =>
           (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-        const boundKey = normalize(boundPc?.squadronName);
-        const boundDigits = (boundPc?.squadronName ?? "").match(/\d+/)?.[0] ?? "";
+        // v1.1.34: when the Ops PC is fully shut down and its registry
+        // row hasn't synced to this Flight PC yet, `boundPc` is
+        // undefined — leaving the Sqn Cmdr off the picker. Fall back
+        // to this Flight PC's own squadron name from the auth context
+        // so the Flight Cmdr ↔ Sqn Cmdr channel keeps working with
+        // the Ops PC powered off.
+        const opsSqName = boundPc?.squadronName ?? squadron?.name ?? "";
+        const boundKey = normalize(opsSqName);
+        const boundDigits = opsSqName.match(/\d+/)?.[0] ?? "";
         const sameSquadron = (other: { squadronName?: string }) => {
           const k = normalize(other.squadronName);
           if (!k || !boundKey) return false;
@@ -210,8 +217,13 @@ export default function Messages() {
       const boundPc = registry.data.find(p => p.id === flightBinding.pcId);
       const normalize = (s: string | undefined | null) =>
         (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-      const boundKey = normalize(boundPc?.squadronName);
-      const boundDigits = (boundPc?.squadronName ?? "").match(/\d+/)?.[0] ?? "";
+      // v1.1.34: same fallback as the picker — if the Ops PC is shut
+      // down and unreachable in registry, anchor the same-squadron
+      // check on this Flight PC's own auth squadron name so the send
+      // to the Sqn Cmdr still passes the guard.
+      const opsSqName = boundPc?.squadronName ?? squadron?.name ?? "";
+      const boundKey = normalize(opsSqName);
+      const boundDigits = opsSqName.match(/\d+/)?.[0] ?? "";
       const targetKey = normalize(target.squadronName);
       const sameSquadron =
         !!boundKey && !!targetKey && (
