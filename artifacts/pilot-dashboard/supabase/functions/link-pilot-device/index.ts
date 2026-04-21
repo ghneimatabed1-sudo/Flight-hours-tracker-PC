@@ -200,31 +200,23 @@ Deno.serve(async (req) => {
   const email = `pilot+${pilot.id.toLowerCase()}@rjaf.local`.replace(/\s+/g, "");
   const password = randomPassword();
 
-  // a. Try create. If already exists, fetch + update password.
   let userId: string | null = null;
-  const { data: created, error: createErr } = await admin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    app_metadata: {
-      pilot_id: pilot.id,
-      squadron_id: codeRow.squadron_id,
-      role: "pilot",
-    },
-    user_metadata: { pilot_id: pilot.id },
-  });
-  if (created?.user) {
-    userId = created.user.id;
-  } else if (createErr && /already/i.test(createErr.message ?? "")) {
-    // Locate the existing user by email and rotate password.
-    const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-    const existing = list?.users?.find((u) => (u.email ?? "").toLowerCase() === email);
-    if (!existing) {
-      console.log("[link] could not locate existing auth user for", email);
-      return reply({ ok: false, error: "generic" }, 500);
-    }
-    userId = existing.id;
-    await admin.auth.admin.updateUserById(existing.id, {
+
+  // a. Fast path: if this pilot has paired before, the auth user_id is
+  // already recorded on their pilot_devices row. This is an O(1) indexed
+  // lookup and scales to any number of total auth users (the listUsers
+  // fallback below only paginates 1000 at a time, so for deployments with
+  // 1000+ pilots across squadrons we want to avoid it whenever possible).
+  const { data: existingDevice } = await admin
+    .from("pilot_devices")
+    .select("user_id")
+    .eq("pilot_id", pilot.id)
+    .not("user_id", "is", null)
+    .limit(1)
+    .maybeSingle();
+  if (existingDevice?.user_id) {
+    userId = existingDevice.user_id;
+    const { error: updErr } = await admin.auth.admin.updateUserById(userId, {
       password,
       app_metadata: {
         pilot_id: pilot.id,
@@ -232,10 +224,77 @@ Deno.serve(async (req) => {
         role: "pilot",
       },
     });
-  } else if (createErr) {
-    console.log("[link] createUser error:", createErr.message);
-    return reply({ ok: false, error: "generic" }, 500);
+    if (updErr) {
+      console.log("[link] updateUserById (fast path) error:", updErr.message);
+      // Fall through to the create/lookup path; userId will be re-resolved.
+      userId = null;
+    }
   }
+
+  // b. Try create. If already exists, paginate listUsers to find them.
+  if (!userId) {
+    const { data: created, error: createErr } = await admin.auth.admin
+      .createUser({
+        email,
+        password,
+        email_confirm: true,
+        app_metadata: {
+          pilot_id: pilot.id,
+          squadron_id: codeRow.squadron_id,
+          role: "pilot",
+        },
+        user_metadata: { pilot_id: pilot.id },
+      });
+    if (created?.user) {
+      userId = created.user.id;
+    } else if (createErr && /already/i.test(createErr.message ?? "")) {
+      // Paginate listUsers — capped to keep the function within its
+      // execution budget. With perPage=1000 this covers up to 50,000
+      // total auth users across every squadron, well above any realistic
+      // RJAF deployment.
+      const PER_PAGE = 1000;
+      const MAX_PAGES = 50;
+      let existing: { id: string } | undefined;
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        const { data: list, error: listErr } = await admin.auth.admin
+          .listUsers({ page, perPage: PER_PAGE });
+        if (listErr) {
+          console.log("[link] listUsers page", page, "error:", listErr.message);
+          break;
+        }
+        const users = list?.users ?? [];
+        existing = users.find(
+          (u) => (u.email ?? "").toLowerCase() === email,
+        );
+        if (existing) break;
+        if (users.length < PER_PAGE) break; // last page
+      }
+      if (!existing) {
+        console.log("[link] could not locate existing auth user for", email);
+        return reply({ ok: false, error: "generic" }, 500);
+      }
+      userId = existing.id;
+      const { error: updErr } = await admin.auth.admin.updateUserById(
+        existing.id,
+        {
+          password,
+          app_metadata: {
+            pilot_id: pilot.id,
+            squadron_id: codeRow.squadron_id,
+            role: "pilot",
+          },
+        },
+      );
+      if (updErr) {
+        console.log("[link] updateUserById (lookup path) error:", updErr.message);
+        return reply({ ok: false, error: "generic" }, 500);
+      }
+    } else if (createErr) {
+      console.log("[link] createUser error:", createErr.message);
+      return reply({ ok: false, error: "generic" }, 500);
+    }
+  }
+
   if (!userId) {
     return reply({ ok: false, error: "generic" }, 500);
   }
