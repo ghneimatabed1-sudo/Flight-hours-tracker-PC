@@ -201,6 +201,13 @@ function CommanderRoutes() {
       <Route path="/dashboard/sticky" component={StickyNotes} />
       <Route path="/dashboard/schedule-chain" component={ScheduleChain} />
       <Route path="/dashboard/messages" component={Messages} />
+      {/* Settings (auto-updater toggle + "Check for app update" button) is
+          available to every commander scope so flight / wing / base / HQ
+          PCs can pull the same updates as the ops PC without ever touching
+          the Super Admin panel. Mounted under both /settings and
+          /dashboard/settings so links from either layout resolve. */}
+      <Route path="/dashboard/settings" component={SettingsPage} />
+      <Route path="/settings" component={SettingsPage} />
       {/* See SquadronOpsRoutes catch-all: redirect home rather than 404. */}
       <Route><Redirect to="/dashboard" /></Route>
     </Switch>
@@ -314,6 +321,20 @@ function ArchiveBootstrap() {
     }
     const displayName =
       configuredCode || displayNameRaw || username || `${tier.toUpperCase()} PC`;
+    // Default the PC's device label to the user's account display name
+    // if the operator never set a custom one in Setup → Security. Without
+    // this, every PC in a squadron showed just the squadron code (e.g.
+    // "NO.8 · offline") in the recipient pickers and operators couldn't
+    // tell which physical PC was which. The custom name in
+    // `rjaf.pcDeviceName` still wins when present — we only fill the
+    // empty case so this never overwrites an explicit operator choice.
+    try {
+      const currentDevName = (localStorage.getItem("rjaf.pcDeviceName") ?? "").trim();
+      const fallback = (displayNameRaw || username || "").trim();
+      if (!currentDevName && fallback) {
+        localStorage.setItem("rjaf.pcDeviceName", fallback);
+      }
+    } catch { /* localStorage blocked — registry just shows the code */ }
     const tick = () => {
       registerLocalPC({ id, displayName, tier, base: sqnBase });
       purgeExpiredMessages();

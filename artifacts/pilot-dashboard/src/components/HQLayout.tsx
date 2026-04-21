@@ -57,6 +57,14 @@ export function HQLayout({ children }: { children: ReactNode }) {
               { path: "/dashboard/simulator", labelKey: "simulator" as Key, icon: <Gauge className="h-4 w-4" /> },
             ]
           : []),
+        // Flight commanders also create the daily flight schedule sheet —
+        // it's the same FlightProgram editor the squadron commander uses,
+        // and submissions still flow up the chain (Flight → Squadron →
+        // Wing → Base) via Schedule Chain. Without this entry the flight
+        // commander has no way to start a sheet, only to forward one.
+        ...(user.scope === "flight"
+          ? [{ path: "/dashboard/flight-program", labelKey: "nav_flight_program" as Key, icon: <ClipboardList className="h-4 w-4" /> }]
+          : []),
         // Squadron + Flight commanders get a read-only Unavailable list
         // (see who in the squadron is on leave / grounded). Wing / base /
         // HQ scope skip it — they don't drill into a single squadron's
@@ -81,6 +89,11 @@ export function HQLayout({ children }: { children: ReactNode }) {
         ...(canUseMessages(user.role, user.scope)
           ? [{ path: "/dashboard/messages", labelKey: "nav_messages" as Key, icon: <Mail className="h-4 w-4" /> }]
           : []),
+        // Settings: every commander scope (squadron / flight / wing / base
+        // / HQ) needs the auto-updater toggle and the manual "Check for
+        // app update" button. Without this entry the operator on a flight
+        // commander PC has no way to pull a new installer build.
+        { path: "/dashboard/settings", labelKey: "nav_settings" as Key, icon: <SettingsIcon className="h-4 w-4" /> },
       ];
 
   return (
