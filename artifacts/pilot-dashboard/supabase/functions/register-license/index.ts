@@ -1,27 +1,33 @@
 // Supabase Edge Function: register-license
 //
 // POST { key, username, squadronNumber, squadronName, squadronBase, expiresAt? }
+// Header: X-Provisioning-Secret: <REGISTER_LICENSE_SECRET env var>
 //
-//   1. Upserts the squadron row keyed by `number` so two PCs activating the
+//   1. Validates the REGISTER_LICENSE_SECRET header to block unauthenticated
+//      callers from reaching the provisioning logic at all.
+//   2. Verifies the license key ALREADY EXISTS in the licenses table (pre-seeded
+//      by an admin). Arbitrary / invented keys are rejected.
+//   3. Upserts the squadron row keyed by `number` so two PCs activating the
 //      same physical squadron share one uuid.
-//   2. Inserts the license row (bound_fingerprint=null until first activation).
-//   3. Provisions a Supabase auth user for the ops account so the browser can
+//   4. Links the license row to the squadron (first activation).
+//   5. Provisions a Supabase auth user for the ops account so the browser can
 //      obtain a JWT carrying app_metadata.squadron_id + role="ops". Without
 //      this every operational-table read/write is silently filtered out by
 //      RLS and PCs cannot share data.
-//   4. Mirrors the auth user into public.users.
-//   5. Returns { ok, squadronId, supabaseEmail, supabasePassword } — the
+//   6. Mirrors the auth user into public.users.
+//   7. Returns { ok, squadronId, supabaseEmail, supabasePassword } — the
 //      client persists the supabase creds locally and uses them to sign into
 //      Supabase right after the local password verify on every login.
 //
 // Deploy with:
 //   supabase functions deploy register-license --no-verify-jwt
+//   (Bootstrap flow — no existing session yet, but protected by the shared secret)
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-provisioning-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -57,6 +63,28 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return reply({ ok: false, error: "method_not_allowed" }, 405);
 
+  // ── Provisioning secret gate ─────────────────────────────────────────────
+  // This function is deployed with --no-verify-jwt because it is part of the
+  // initial bootstrap flow (no Supabase session exists yet). We compensate by
+  // requiring a pre-shared secret known only to legitimate client builds.
+  // Set REGISTER_LICENSE_SECRET in the Supabase function secrets (not in the
+  // client env), then embed the matching value as VITE_REGISTER_LICENSE_SECRET
+  // in the desktop build. Never expose this secret in a public web build.
+  // @ts-ignore Deno
+  const expectedSecret = Deno.env.get("REGISTER_LICENSE_SECRET") ?? "";
+  if (!expectedSecret) {
+    // Misconfigured deployment — refuse all requests until the secret is set.
+    return reply({ ok: false, error: "server_misconfigured" }, 503);
+  }
+
+  const incomingSecret = req.headers.get("x-provisioning-secret") ?? "";
+  // Constant-time comparison to prevent timing attacks.
+  if (incomingSecret.length !== expectedSecret.length ||
+      !constantTimeEqual(incomingSecret, expectedSecret)) {
+    return reply({ ok: false, error: "unauthorized" }, 401);
+  }
+
+  // ── Parse body ───────────────────────────────────────────────────────────
   let body: Body;
   try { body = await req.json(); }
   catch { return reply({ ok: false, error: "bad_json" }, 400); }
@@ -78,59 +106,57 @@ Deno.serve(async (req: Request) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
 
-  // 1. Upsert squadron by number.
-  let squadronId: string;
-  const { data: existingSqn } = await admin
+  // ── License key validation ───────────────────────────────────────────────
+  // The license key MUST have been pre-seeded by an admin (via the admin
+  // dashboard or a migration). We do NOT allow arbitrary keys to be invented
+  // and inserted here — that would let any caller bootstrap a squadron account
+  // for any key they invent.
+  const { data: licenseRow, error: licLookupErr } = await admin
+    .from("licenses")
+    .select("key, squadron_id, expires_at, revoked_at")
+    .eq("key", key)
+    .maybeSingle();
+
+  if (licLookupErr) {
+    return reply({ ok: false, error: "license_lookup_failed", detail: licLookupErr.message }, 500);
+  }
+  if (!licenseRow) {
+    // Key does not exist — not a legitimately issued key.
+    return reply({ ok: false, error: "invalid_license_key" }, 403);
+  }
+  if (licenseRow.revoked_at && new Date(licenseRow.revoked_at) <= new Date()) {
+    return reply({ ok: false, error: "license_revoked" }, 403);
+  }
+  if (licenseRow.expires_at && new Date(licenseRow.expires_at) < new Date()) {
+    return reply({ ok: false, error: "license_expired" }, 403);
+  }
+
+  // ── Verify the license belongs to the requested squadron ─────────────────
+  // licenses.squadron_id is NOT NULL — every key is pre-seeded with the
+  // squadron it may activate. Reject attempts to use a key for a different
+  // squadron (prevents cross-tenant key reuse).
+  const licSqnId = licenseRow.squadron_id as string;
+
+  // Look up the squadron by the number supplied by the caller.
+  const { data: requestedSqn } = await admin
     .from("squadrons")
     .select("id")
     .eq("number", sqnNumber)
     .maybeSingle();
 
-  if (existingSqn) {
-    squadronId = existingSqn.id as string;
-  } else {
-    const { data: created, error: sqnErr } = await admin
-      .from("squadrons")
-      .insert({ number: sqnNumber, name: sqnName, base: sqnBase })
-      .select("id")
-      .single();
-    if (sqnErr || !created) {
-      return reply({ ok: false, error: "squadron_create_failed", detail: sqnErr?.message }, 500);
-    }
-    squadronId = created.id as string;
+  if (requestedSqn && requestedSqn.id !== licSqnId) {
+    // The key belongs to a different squadron than the one being requested.
+    return reply({ ok: false, error: "license_squadron_mismatch" }, 403);
   }
 
-  // 2. Idempotent license insert.
-  const { data: existingLic } = await admin
-    .from("licenses")
-    .select("key")
-    .eq("key", key)
-    .maybeSingle();
+  // ── Upsert squadron by number ────────────────────────────────────────────
+  // The authoritative squadron record is identified by the license's
+  // squadron_id — we use that as our source of truth.
+  const squadronId = licSqnId;
 
-  if (!existingLic) {
-    const { error: licErr } = await admin.from("licenses").insert({
-      key,
-      squadron_id: squadronId,
-      bound_fingerprint: null,
-      expires_at: body.expiresAt ?? null,
-    });
-    if (licErr) {
-      return reply({ ok: false, error: "license_create_failed", detail: licErr.message }, 500);
-    }
-  }
-
-  // 3. Provision (or refresh) the Supabase auth user for this ops account.
-  //    Email is deterministic: `${username}@${slug(squadronNumber)}.rjaf.local`
-  //    so two PCs setting up the same squadron+username converge on one auth
-  //    user. The password we mint here is random and only stored in the
-  //    response — the client persists it locally and uses it for subsequent
-  //    auth.signInWithPassword calls.
+  // ── Provision the Supabase auth user for this ops account ────────────────
   const email = `${username}@${sqnSlug(sqnNumber)}.rjaf.local`;
   const password = randomPassword();
-  // pc_id is the canonical cross-PC identifier this auth user is allowed
-  // to act as in cross-pc.ts (registry / pending / schedule / messages).
-  // For ops accounts it is exactly the squadron's name — RLS on the
-  // xpc_* tables binds writes to this claim.
   const appMeta = {
     squadron_id: squadronId,
     role: "ops",
@@ -170,7 +196,7 @@ Deno.serve(async (req: Request) => {
     userId = created.user.id;
   }
 
-  // 4. Mirror into public.users (best-effort; not fatal).
+  // ── Mirror into public.users (best-effort; not fatal) ────────────────────
   try {
     await admin.from("users").upsert(
       {
@@ -198,3 +224,16 @@ Deno.serve(async (req: Request) => {
     supabasePassword: password,
   });
 });
+
+/**
+ * Constant-time string comparison to prevent timing side-channel attacks
+ * when comparing the provisioning secret.
+ */
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}

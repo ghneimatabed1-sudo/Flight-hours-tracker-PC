@@ -62,15 +62,28 @@ export interface RegisterLicenseResult {
 // sign into Supabase and obtain a JWT carrying app_metadata.squadron_id.
 // Without that JWT every operational-table read/write is silently filtered
 // by RLS and PCs cannot share data.
+//
+// This call is routed through the api-server proxy (/api/license/register)
+// rather than directly to the Supabase edge function. The provisioning
+// secret lives only in the api-server's environment — it is never bundled
+// into client code. VITE_API_SERVER_URL is just a base URL (not a secret)
+// and defaults to the same-origin /api path for web builds.
 export async function registerLicenseRemote(
   args: RegisterLicenseArgs
 ): Promise<RegisterLicenseResult> {
-  if (!supabase) return { ok: false, error: "supabase_not_configured" };
-  const { data, error } = await supabase.functions.invoke("register-license", {
-    body: args,
-  });
-  if (error) return { ok: false, error: error.message };
-  const payload = data as RegisterLicenseResult | null;
+  const apiBase = (import.meta.env.VITE_API_SERVER_URL as string | undefined) ?? "/api";
+  let resp: Response;
+  try {
+    resp = await fetch(`${apiBase}/license/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+    });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "network_error" };
+  }
+  let payload: RegisterLicenseResult | null = null;
+  try { payload = await resp.json(); } catch { /* ignore */ }
   if (!payload?.ok) return { ok: false, error: payload?.error ?? "register_failed" };
   return {
     ok: true,
@@ -159,6 +172,11 @@ export function getSupabaseCreds(username: string): SupabaseCreds | null {
 // password the client must persist. After a successful re-sync this
 // helper also signs the browser into Supabase so the very next write
 // carries a valid JWT — no extra round-trip from the caller.
+//
+// IMPORTANT: provision-commander now enforces JWT authentication —
+// the caller must already be signed into Supabase (via a valid session)
+// before calling this helper. The Supabase client automatically forwards
+// the current session token in the Authorization header.
 export async function resyncSupabaseCreds(
   username: string,
   role: "ops" | "commander" = "ops",

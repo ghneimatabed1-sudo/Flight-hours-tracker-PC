@@ -12,7 +12,8 @@
 // null; they will not pass squadron-RLS by design.
 //
 // Deploy with:
-//   supabase functions deploy provision-commander --no-verify-jwt
+//   supabase functions deploy provision-commander
+//   (JWT verification is required — do NOT use --no-verify-jwt)
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -54,6 +55,42 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return reply({ ok: false, error: "method_not_allowed" }, 405);
 
+  // ── Authentication gate ──────────────────────────────────────────────────
+  // JWT verification is enabled for this function (deployed WITHOUT
+  // --no-verify-jwt). Supabase validates the token before we even reach here,
+  // but we additionally inspect the claims to enforce that only already-
+  // authenticated ops/admin users can provision new accounts.
+  // @ts-ignore Deno
+  const url = Deno.env.get("SUPABASE_URL")!;
+  // @ts-ignore Deno
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  // @ts-ignore Deno
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const callerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+
+  if (!callerToken) {
+    return reply({ ok: false, error: "unauthorized" }, 401);
+  }
+
+  // Verify the caller's JWT and inspect their app_metadata claims.
+  const callerClient = createClient(url, anonKey, {
+    auth: { persistSession: false },
+    global: { headers: { Authorization: `Bearer ${callerToken}` } },
+  });
+  const { data: { user: callerUser }, error: callerErr } = await callerClient.auth.getUser();
+  if (callerErr || !callerUser) {
+    return reply({ ok: false, error: "unauthorized" }, 401);
+  }
+
+  const callerRole = (callerUser.app_metadata?.role as string | undefined) ?? "";
+  const allowedRoles = ["ops", "admin"];
+  if (!allowedRoles.includes(callerRole)) {
+    return reply({ ok: false, error: "forbidden" }, 403);
+  }
+
+  // ── Parse body ───────────────────────────────────────────────────────────
   let body: Body;
   try { body = await req.json(); } catch { return reply({ ok: false, error: "bad_json" }, 400); }
 
@@ -67,11 +104,50 @@ Deno.serve(async (req: Request) => {
 
   if (!username) return reply({ ok: false, error: "missing_username" }, 400);
 
-  // @ts-ignore Deno
-  const url = Deno.env.get("SUPABASE_URL")!;
-  // @ts-ignore Deno
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
+
+  // ── Enforce caller-level privilege constraints ────────────────────────────
+  if (callerRole === "ops") {
+    // Ops callers may only provision accounts within their own squadron.
+    // They must always supply a squadronNumber — omitting it would allow
+    // creating a null-squadron (HQ-scoped) account which bypasses RLS.
+    if (!sqnNumber) {
+      return reply({ ok: false, error: "squadron_number_required" }, 400);
+    }
+
+    // Ops callers may only provision squadron/flight/deputy-tier accounts.
+    // Allowing hq/wing/base would let them create cross-tenant admin accounts.
+    const opsAllowedTiers = ["squadron", "flight", "deputy"];
+    if (!opsAllowedTiers.includes(tier)) {
+      return reply({ ok: false, error: "forbidden" }, 403);
+    }
+
+    // Ops callers may not promote accounts to role=ops (would create a
+    // parallel ops account for the same squadron outside normal provisioning).
+    if (role === "ops") {
+      return reply({ ok: false, error: "forbidden" }, 403);
+    }
+
+    // Verify the target squadron number maps to the caller's own squadron.
+    const callerSqnId = callerUser.app_metadata?.squadron_id as string | undefined;
+    if (!callerSqnId) {
+      return reply({ ok: false, error: "forbidden" }, 403);
+    }
+    const { data: targetSqn } = await admin
+      .from("squadrons")
+      .select("id")
+      .eq("number", sqnNumber)
+      .maybeSingle();
+    if (!targetSqn || targetSqn.id !== callerSqnId) {
+      return reply({ ok: false, error: "forbidden" }, 403);
+    }
+  } else if (callerRole === "admin") {
+    // Admin (HQ-tier) callers may provision any tier and across squadrons,
+    // but may not create new role=ops accounts (those go through register-license).
+    if (role === "ops") {
+      return reply({ ok: false, error: "forbidden" }, 403);
+    }
+  }
 
   // Resolve squadron. Optional for HQ commander.
   let squadronId: string | null = null;
@@ -84,6 +160,10 @@ Deno.serve(async (req: Request) => {
     if (existing) {
       squadronId = existing.id as string;
     } else {
+      // Only admins may implicitly create new squadron rows.
+      if (callerRole !== "admin") {
+        return reply({ ok: false, error: "squadron_not_found" }, 404);
+      }
       const { data: created, error: sqnErr } = await admin
         .from("squadrons")
         .insert({ number: sqnNumber, name: sqnName, base: sqnBase })
@@ -99,13 +179,7 @@ Deno.serve(async (req: Request) => {
   const appRole = role === "ops" ? "ops" : role === "deputy" ? "deputy" : "admin";
   const email = `${username}@${sqnSlug(sqnNumber)}.rjaf.local`;
   const password = randomPassword();
-  // Compute the canonical cross-PC id this account is allowed to claim
-  // in cross-pc.ts. The id mirrors what HQLayout passes to
-  // registerLocalPC():
-  //   ops / squadron-tier  → the squadron's display name
-  //   wing/base/hq         → "<TIER>:<displayName>"
-  // RLS on xpc_user_pcs uses meta.pc_id as the only valid value the
-  // user may insert, blocking cross-tenant impersonation.
+
   let pcId: string | null = null;
   if (tier === "ops" || tier === "squadron" || tier === "deputy") {
     pcId = sqnName || null;
@@ -114,7 +188,6 @@ Deno.serve(async (req: Request) => {
   } else if (tier === "base") {
     pcId = `BASE:${displayName}`;
   } else if (tier === "hq" || tier === "flight") {
-    // Flight commanders sit under HQLayout's "hq" fallback today.
     pcId = `HQ:${displayName}`;
   }
   const appMeta = {
@@ -156,8 +229,6 @@ Deno.serve(async (req: Request) => {
     userId = created.user.id;
   }
 
-  // Mirror into public.users where possible. public.users requires
-  // squadron_id NOT NULL, so HQ commanders are skipped.
   if (squadronId) {
     try {
       await admin.from("users").upsert(
@@ -176,8 +247,8 @@ Deno.serve(async (req: Request) => {
   await admin.from("audit_log").insert({
     squadron_id: squadronId,
     type: "user.provision",
-    actor: username,
-    detail: { role: appRole, tier, squadronNumber: sqnNumber || null },
+    actor: callerUser.id,
+    detail: { provisionedUsername: username, role: appRole, tier, squadronNumber: sqnNumber || null },
   });
 
   return reply({
