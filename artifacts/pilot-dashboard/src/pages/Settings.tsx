@@ -623,7 +623,13 @@ export default function Settings() {
             </div>
           </form>
         </Card>
-        <MobileDevicesCard />
+        {/* v1.1.43: Mobile Devices / Active Connections is an Ops-PC
+            tool — pairing pilot phones to a squadron is the Ops officer's
+            job, not the Squadron Commander's or Flight Commander's.
+            Hide the whole card (including the manual revoke form) on
+            commander-tier accounts so it never appears in the Sqn Cmdr
+            or Flight Cmdr Settings page. */}
+        {(user?.role === "ops" || user?.role === "deputy") && <MobileDevicesCard />}
         <Card className="lg:col-span-2 flex items-center gap-5">
           <img src="brand/wings.png" className="h-16 object-contain shrink-0 opacity-95" alt="Pilot Wings" />
           <div className="space-y-1.5 flex-1">
