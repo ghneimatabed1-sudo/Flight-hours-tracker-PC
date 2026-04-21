@@ -79,7 +79,27 @@ jobs:
           BASE_PATH: "./"
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          # Public URL of the api-server. The license-registration flow
+          # routes through this server so the provisioning secret stays
+          # off the client. If unset, the renderer falls back to "/api"
+          # which fails immediately in a packaged Electron app loading
+          # from file:// — the operator sees "Failed to fetch" on Setup.
+          VITE_API_SERVER_URL: ${{ secrets.VITE_API_SERVER_URL }}
         run: pnpm run build
+
+      - name: Verify VITE_API_SERVER_URL was injected
+        # Hard-fail the build if the api-server URL is missing. Better to
+        # break the pipeline now than ship another installer that bricks
+        # at the Setup step on every base.
+        run: |
+          set -euo pipefail
+          if [ -z "${VITE_API_SERVER_URL:-}" ]; then
+            echo "::error::VITE_API_SERVER_URL secret is not set in this repo. License registration will fail on every PC. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "VITE_API_SERVER_URL ok: $VITE_API_SERVER_URL"
+        env:
+          VITE_API_SERVER_URL: ${{ secrets.VITE_API_SERVER_URL }}
 
       - name: Verify renderer output exists
         run: |
