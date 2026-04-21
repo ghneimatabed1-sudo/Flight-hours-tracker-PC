@@ -71,7 +71,19 @@ export interface RegisterLicenseResult {
 export async function registerLicenseRemote(
   args: RegisterLicenseArgs
 ): Promise<RegisterLicenseResult> {
-  const apiBase = (import.meta.env.VITE_API_SERVER_URL as string | undefined) ?? "/api";
+  // Build the registration endpoint robustly:
+  //  - When VITE_API_SERVER_URL is unset (web build, same-origin) we fall back
+  //    to the relative `/api` path.
+  //  - When it IS set (Electron installer, points at the published api-server)
+  //    we strip any trailing slash and any trailing `/api` segment the operator
+  //    may have included, then re-append `/api`. This way the secret can be
+  //    set to `https://pc-builder.replit.app` OR `https://pc-builder.replit.app/api`
+  //    and both produce the same correct URL — instead of silently dropping
+  //    the `/api` prefix and getting served the SPA's index.html (which is
+  //    exactly the "Failed to fetch" we kept seeing in the field).
+  const rawBase = (import.meta.env.VITE_API_SERVER_URL as string | undefined) ?? "";
+  const trimmed = rawBase.replace(/\/+$/, "").replace(/\/api$/, "");
+  const apiBase = trimmed ? `${trimmed}/api` : "/api";
   let resp: Response;
   try {
     resp = await fetch(`${apiBase}/license/register`, {
