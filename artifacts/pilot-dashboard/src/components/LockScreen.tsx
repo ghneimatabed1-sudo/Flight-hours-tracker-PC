@@ -86,22 +86,15 @@ export default function LockScreen({ onUnlock }: { onUnlock: () => void }) {
       <div className="lock-sheen absolute inset-x-0 top-0 h-1/2 pointer-events-none" />
 
       <div className="relative h-full w-full flex flex-col items-center justify-center px-6">
-        {/* Big centerpiece is the Hawk Eye disc logo (the product mark for
-            this PC application). The RJAF service emblem moves down beside
-            the wordmark as the institutional credit. */}
+        {/* Big centerpiece is the RJAF service emblem (the institutional
+            mark). The wordmark sits below as the product credit. */}
         <img
-          src="brand/hawkeye-logo.svg"
+          src="brand/emblem.png"
           alt=""
           aria-hidden="true"
           className="h-32 w-32 object-contain mb-5 lock-breathe drop-shadow-[0_0_28px_rgba(212,175,55,0.35)]"
         />
         <div className="flex items-center gap-3 max-w-[80vw] opacity-95">
-          <img
-            src="brand/emblem.png"
-            alt=""
-            aria-hidden="true"
-            className="h-16 w-16 object-contain shrink-0 drop-shadow-[0_0_14px_rgba(212,175,55,0.25)]"
-          />
           <span
             className="gold-grad font-bold tracking-[0.32em] text-3xl md:text-4xl select-none"
             style={{ fontFamily: "Inter, 'Segoe UI', system-ui, sans-serif" }}

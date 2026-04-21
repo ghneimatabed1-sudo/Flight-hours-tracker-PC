@@ -82,7 +82,7 @@ export default function OpeningAnimation() {
           }}
         >
           <motion.img
-            src="brand/hawkeye-logo.svg"
+            src="brand/emblem.png"
             alt=""
             initial={{ opacity: 0, scale: 0.94 }}
             animate={{ opacity: 1, scale: 1 }}

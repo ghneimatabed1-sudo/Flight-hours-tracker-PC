@@ -9,7 +9,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/hawkeye-logo.png",
+      "image": "./assets/images/emblem.png",
       "resizeMode": "contain",
       "backgroundColor": "#050810"
     },
