@@ -403,19 +403,14 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
   writeRegistry(rows);
   // Fire-and-forget upsert into the shared registry. Failures are silent
   // — this runs every 30s anyway so a flaky write recovers on its own.
-  // Also claim this pc id under the caller's auth.uid via xpc_user_pcs so
-  // RLS on the cross-PC tables recognises subsequent inserts/updates.
+  // The PC-claim in xpc_user_pcs is now handled by ensureMyPcClaim()
+  // with retry semantics, since it's the gate for every cross-PC RLS
+  // policy (a missed claim = every send/receive fails with code 42501
+  // "row violates row-level security policy").
   if (isLive()) {
+    void ensureMyPcClaim(o.id);
     void (async () => {
       try {
-        const { data: au } = await supabase!.auth.getUser();
-        const uid = au?.user?.id;
-        if (uid) {
-          await supabase!.from("xpc_user_pcs").upsert(
-            { user_id: uid, pc_id: o.id },
-            { onConflict: "user_id,pc_id" },
-          );
-        }
         const dbTier = o.tier === "flight" ? "squadron" : o.tier;
         await supabase!.from("xpc_registry").upsert({
           id: o.id,
@@ -430,6 +425,67 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
         // Silent. Local mirror is authoritative until migrations land.
       }
     })();
+  }
+}
+
+// ---------------------------------------------------------------------
+// PC-claim management.
+//
+// Every write to xpc_messages / xpc_schedule_shares / xpc_pending is
+// gated by the RLS policy `from_pc_id = ANY (xpc_my_pc_ids())`, where
+// `xpc_my_pc_ids()` returns the array of pc_ids claimed by the current
+// auth.uid in `xpc_user_pcs`. If the claim was never persisted (e.g.
+// the heartbeat fired BEFORE supabase finished restoring the session,
+// or the user signed in via signInWithPassword AFTER the first
+// registerLocalPC tick), every cross-PC operation fails with the
+// 42501 error users see as "Server error: row violates row-level
+// security policy for table xpc_messages".
+//
+// `ensureMyPcClaim` is called from registerLocalPC (every 30s
+// heartbeat), from useSendMessage / submit / decide / forward
+// mutationFns (defensive, just before the write), and once from the
+// auth flow right after signInWithPassword resolves. Each call retries
+// the auth.getUser lookup for up to ~5s with backoff, then upserts the
+// claim. A successful upsert is cached in-memory so subsequent calls
+// for the same (uid,pcId) pair are no-ops.
+// ---------------------------------------------------------------------
+
+const claimedKeys = new Set<string>();
+
+export async function ensureMyPcClaim(pcId: string | null | undefined): Promise<boolean> {
+  if (!pcId || !isLive() || !supabase) return false;
+  // Try up to 6 times spaced ~750ms apart (≈4.5s) for the supabase
+  // session to settle after a fresh sign-in. Once we have a uid, the
+  // upsert itself is idempotent and synchronous from the client's
+  // point of view.
+  let uid: string | undefined;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      const { data } = await supabase.auth.getUser();
+      uid = data?.user?.id;
+      if (uid) break;
+    } catch { /* network blip — retry */ }
+    await new Promise(r => setTimeout(r, 750));
+  }
+  if (!uid) return false;
+  const cacheKey = `${uid}::${pcId}`;
+  if (claimedKeys.has(cacheKey)) return true;
+  try {
+    const { error } = await supabase.from("xpc_user_pcs").upsert(
+      { user_id: uid, pc_id: pcId },
+      { onConflict: "user_id,pc_id" },
+    );
+    if (error) {
+      // Surface the failure to the console — silent failure here is
+      // what kept the bug invisible in production for so long.
+      console.warn("[xpc] PC claim upsert failed:", error.message, { pcId });
+      return false;
+    }
+    claimedKeys.add(cacheKey);
+    return true;
+  } catch (e) {
+    console.warn("[xpc] PC claim threw:", (e as Error)?.message);
+    return false;
   }
 }
 
@@ -624,6 +680,10 @@ export function useSubmitPending() {
         status: "pending",
       };
       if (isLive()) {
+        // RLS gate on xpc_pending.insert is
+        // (hosting_squadron_id = ANY (xpc_my_pc_ids())). The hosting
+        // PC is the local PC submitting the cross-squadron sortie.
+        await ensureMyPcClaim(row.hostingSquadronId);
         const { error } = await supabase!.from("xpc_pending").insert(pendingToRow(row));
         if (error) throw error;
       } else {
@@ -1031,6 +1091,10 @@ export function useSubmitSchedule() {
         chainPcIds: [input.originSquadronId, input.targetPcId],
       };
       if (isLive()) {
+        // RLS gate on xpc_schedule_shares.insert is
+        // (origin_squadron_id = ANY (xpc_my_pc_ids())). Defensive
+        // claim, same reasoning as useSendMessage.
+        await ensureMyPcClaim(share.originSquadronId);
         const { error } = await supabase!.from("xpc_schedule_shares").insert(shareToRow(share));
         if (error) throw error;
       } else {
@@ -1423,6 +1487,13 @@ export function useSendMessage() {
         inHistory: false,
       };
       if (isLive()) {
+        // RLS gate: every xpc_messages.insert requires from_pc_id to
+        // appear in xpc_my_pc_ids() for the signed-in user. Without
+        // this defensive claim, a heartbeat that hasn't yet completed
+        // its first upsert will yield code 42501 ("row violates
+        // row-level security policy for table xpc_messages") on the
+        // very first send.
+        await ensureMyPcClaim(msg.fromPcId);
         const { error } = await supabase!.from("xpc_messages").insert(messageToRow(msg));
         if (error) throw error;
       } else {
