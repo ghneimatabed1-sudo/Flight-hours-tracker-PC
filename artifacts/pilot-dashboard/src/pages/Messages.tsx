@@ -135,7 +135,39 @@ export default function Messages() {
         return (a.deviceName || a.squadronName).localeCompare(b.deviceName || b.squadronName);
       });
       if (isFlightCmdr && flightBinding) {
-        return base.filter(p => p.id === flightBinding.pcId);
+        // v1.1.30: a Flight Cmdr PC was previously locked to messaging
+        // ONLY the PC it was bound to (the Ops PC, since Ops is the
+        // squadron anchor). That meant the squadron commander could
+        // never be reached from the flight commander's PC even though
+        // both PCs sit in the same squadron group. Widen the picker so
+        // the Flight Cmdr can message every squadron-tier PC that
+        // belongs to the same squadron as the bound Ops PC — that
+        // surfaces both the Ops PC and the Squadron Commander PC.
+        // Names are normalised the same way the LicenseKeys setup
+        // dialog matches them (lowercase + strip non-alphanumeric, plus
+        // a substring + bare-number fallback), so spelling drift like
+        // "NO.8" vs "no 8" vs "8 SQN" still groups correctly.
+        const boundPc = registry.data.find(p => p.id === flightBinding.pcId);
+        const normalize = (s: string | undefined | null) =>
+          (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+        const boundKey = normalize(boundPc?.squadronName);
+        const boundDigits = (boundPc?.squadronName ?? "").match(/\d+/)?.[0] ?? "";
+        const sameSquadron = (other: { squadronName?: string }) => {
+          const k = normalize(other.squadronName);
+          if (!k || !boundKey) return false;
+          if (k === boundKey) return true;
+          if (k.includes(boundKey) || boundKey.includes(k)) return true;
+          if (boundDigits && k.includes(boundDigits)) return true;
+          return false;
+        };
+        return base.filter(p =>
+          // Always include the bound Ops PC even if registry doesn't
+          // show it (defensive — the binding is the source of truth).
+          p.id === flightBinding.pcId
+          // Plus every squadron-tier PC sharing the bound squadron —
+          // picks up the Squadron Commander PC alongside the Ops PC.
+          || (p.tier === "squadron" && sameSquadron(p))
+        );
       }
       return base;
     },
