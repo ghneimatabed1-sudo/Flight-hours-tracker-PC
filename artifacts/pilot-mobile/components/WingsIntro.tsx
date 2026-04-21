@@ -80,7 +80,7 @@ export default function WingsIntro({ onDone, durationMs = 1800 }: Props) {
     >
       <Animated.View style={{ opacity, transform: [{ scale }] }}>
         <Image
-          source={require("../assets/images/hawkeye-logo.png")}
+          source={require("../assets/images/emblem.png")}
           style={styles.logo}
           resizeMode="contain"
         />
