@@ -220,8 +220,19 @@ export function useCreatePilot() {
         saveMockPilots();
         return p;
       }
-      const { data, error } = await supabase!.from("pilots").insert({
-        id: p.id,
+      // pilots.id is the GLOBAL primary key across every squadron in the
+      // database. The Roster form picks the "next" id by looking at pilots
+      // loaded for THIS squadron only, so if another PC's squadron already
+      // has the same id (or a stale local cache miscounted), the insert
+      // would fail with "duplicate key value violates unique constraint
+      // pilots_pkey". To make Add Pilot bullet-proof we:
+      //   1. Try the requested id first.
+      //   2. On 23505 (unique violation), query the actual max id across
+      //      ALL squadrons and retry with the next free Pxxx, up to 10x.
+      // This is invisible to the operator — they just see the new pilot
+      // appear with whatever id was actually free.
+      const buildPayload = (id: string) => ({
+        id,
         name: p.name,
         arabic_name: p.arabicName,
         rank: p.rank,
@@ -258,9 +269,44 @@ export function useCreatePilot() {
           qualifications: p.qualifications,
           lastSimDate: p.lastSimDate,
         },
-      }).select().single();
-      if (error) throw error;
-      return rowToPilot(data);
+      });
+
+      const nextFreeId = async (): Promise<string> => {
+        const { data: rows } = await supabase!
+          .from("pilots")
+          .select("id")
+          .like("id", "P%");
+        const used = new Set((rows ?? []).map(r => String(r.id)));
+        const nums = (rows ?? [])
+          .map(r => parseInt(String(r.id).replace(/\D/g, ""), 10))
+          .filter(n => !isNaN(n));
+        let n = (nums.length ? Math.max(...nums) : 0) + 1;
+        // Defensive: skip any id that somehow appears in the used set
+        // (shouldn't happen if max is correct, but cheap insurance).
+        while (used.has(`P${String(n).padStart(3, "0")}`)) n++;
+        return `P${String(n).padStart(3, "0")}`;
+      };
+
+      let attemptId = p.id;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const { data, error } = await supabase!
+          .from("pilots")
+          .insert(buildPayload(attemptId))
+          .select()
+          .single();
+        if (!error) return rowToPilot(data);
+        // 23505 = unique_violation. Only retry if it's the primary-key
+        // collision we know how to recover from; surface anything else
+        // (e.g. the new militaryNumber unique index) to the caller so the
+        // form can show the proper validation message.
+        const code = (error as { code?: string }).code;
+        const msg = (error.message ?? "").toLowerCase();
+        if (code !== "23505" || !msg.includes("pilots_pkey")) throw error;
+        attemptId = await nextFreeId();
+      }
+      throw new Error(
+        "Could not allocate a free pilot ID after 10 attempts — please refresh and try again.",
+      );
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pilots"] }),
   });
