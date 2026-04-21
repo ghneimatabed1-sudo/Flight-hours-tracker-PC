@@ -145,11 +145,44 @@ export default function LicenseKeys() {
   // setupLinkedPcId is declared to avoid a temporal-dead-zone crash in
   // production bundles ("Cannot access 'M' before initialization").
   const linkedOpsPc = opsSquadronPcs.find(p => p.id === setupLinkedPcId);
+  // Normalize squadron labels before matching so a flight PC named with
+  // a slightly different spelling still gets recognised as part of the
+  // same squadron. Operators reported the strict equality match left
+  // their flight PCs invisible when they typed e.g. "no.8 ", "8 SQN",
+  // or "NO.8\n" during the flight PC setup. We lowercase, strip every
+  // non-alphanumeric character (so "NO.8", "no 8", "no-8", "no_8" and
+  // "8" all collapse to "no8"), and compare on that. We also try the
+  // bare squadron number as a secondary anchor.
+  const normalizeSqLabel = (s: string | undefined | null) =>
+    (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const opsSqKey = normalizeSqLabel(linkedOpsPc?.squadronName);
+  const opsSqDigits = (linkedOpsPc?.squadronName ?? "").match(/\d+/)?.[0] ?? "";
   const flightPcsForSquadron = linkedOpsPc
-    ? registeredPcs.data.filter(
-        p => p.tier === "flight" && p.squadronName === linkedOpsPc.squadronName,
-      )
+    ? registeredPcs.data.filter(p => {
+        if (p.tier !== "flight") return false;
+        const flKey = normalizeSqLabel(p.squadronName);
+        if (!flKey) return false;
+        if (flKey === opsSqKey) return true;
+        // Substring either direction handles "no8" ⊂ "no8sqn" etc.
+        if (opsSqKey && (flKey.includes(opsSqKey) || opsSqKey.includes(flKey))) return true;
+        // Fall back to the squadron number alone (very short labels like
+        // "8" still catch "no8" or "8sqn" via substring above; this
+        // branch protects the case where the ops PC label is just "8").
+        if (opsSqDigits && flKey.includes(opsSqDigits)) return true;
+        return false;
+      })
     : [];
+  // Diagnostic fallback: every registered flight PC in the ecosystem,
+  // regardless of squadron label. If the strict filter above finds none
+  // but there ARE flight PCs registered somewhere, we expose them
+  // through an expander so the squadron commander can still tick the
+  // right one and complete setup without having to re-image the flight
+  // PC just to fix its squadron-name spelling.
+  const allRegisteredFlightPcs = registeredPcs.data.filter(p => p.tier === "flight");
+  const showFallbackFlightPicker =
+    !!linkedOpsPc
+    && flightPcsForSquadron.length === 0
+    && allRegisteredFlightPcs.length > 0;
   const [setupCommanderName, setSetupCommanderName] = useState("");
   const [setupDeviceName, setSetupDeviceName] = useState("");
   const [setupOpsUsername, setSetupOpsUsername] = useState("");
@@ -1350,12 +1383,59 @@ export default function LicenseKeys() {
                       ? "قادة الطيران المرتبطون بهذا السرب"
                       : "Flight commanders linked to this squadron"}
                   </label>
-                  {flightPcsForSquadron.length === 0 ? (
+                  {flightPcsForSquadron.length === 0 && !showFallbackFlightPicker ? (
                     <p className="text-[11px] text-amber-700 dark:text-amber-300">
                       {lang === "ar"
                         ? "لا يوجد قادة طيران مسجلون لهذا السرب بعد. أعدّ أجهزة قادة الطيران أولاً، ثم أعد فتح هذه النافذة."
                         : "No flight commander PCs are registered for this squadron yet. Set up the flight commander PCs first, then re-open this dialog."}
                     </p>
+                  ) : showFallbackFlightPicker ? (
+                    /* Fallback path: zero strict matches, but the
+                       ecosystem has flight PCs registered under a
+                       different squadron-name spelling. Show them all
+                       so the squadron commander can still tick the
+                       right one and unblock setup. The amber notice
+                       explains the spelling-mismatch situation in
+                       plain terms. */
+                    <div className="space-y-2">
+                      <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                        {lang === "ar"
+                          ? `لم يتم العثور على قادة طيران بنفس اسم السرب "${linkedOpsPc?.squadronName ?? ""}". تظهر أدناه جميع أجهزة قادة الطيران المسجلة (${allRegisteredFlightPcs.length}) — اختر التي تنتمي لهذا السرب.`
+                          : `No flight commander PCs match the squadron name "${linkedOpsPc?.squadronName ?? ""}" exactly. Showing all registered flight commander PCs (${allRegisteredFlightPcs.length}) — tick the ones that belong to this squadron.`}
+                      </p>
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto pe-1">
+                        {allRegisteredFlightPcs.map(pc => {
+                          const checked = setupLinkedFlightPcIds.includes(pc.id);
+                          return (
+                            <label
+                              key={pc.id}
+                              className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-teal-100/40 dark:hover:bg-teal-900/20 cursor-pointer"
+                              data-testid={`row-fallback-flight-pc-${pc.id}`}
+                            >
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={(v) => {
+                                  setSetupLinkedFlightPcIds(prev =>
+                                    v ? Array.from(new Set([...prev, pc.id]))
+                                      : prev.filter(x => x !== pc.id),
+                                  );
+                                }}
+                                data-testid={`checkbox-fallback-flight-pc-${pc.id}`}
+                              />
+                              <span className="text-sm flex-1">
+                                {pc.deviceName || pc.squadronName}
+                                <span className="ms-2 text-[10px] text-muted-foreground">
+                                  · sqn label: {pc.squadronName || "—"}
+                                </span>
+                              </span>
+                              {pc.online && (
+                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400">●</span>
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
                   ) : (
                     <div className="space-y-1.5 max-h-48 overflow-y-auto pe-1">
                       {flightPcsForSquadron.map(pc => {
