@@ -395,8 +395,57 @@ function ArchiveBootstrap() {
       } catch { /* ignore parse / storage errors */ }
     };
     tick();
-    const handle = window.setInterval(tick, 30_000);
-    return () => window.clearInterval(handle);
+
+    // ── 100+ device autonomy hardening (v1.1.24) ──────────────────────
+    // The base heartbeat fires every 30s. With 100+ PCs that all signed
+    // in around the same time (e.g. 0800 squadron stand-up) this would
+    // dogpile xpc_registry and xpc_user_pcs upserts at the same instant
+    // every 30s window. We add ±7s of per-PC jitter so the writes spread
+    // out evenly across each window. The jitter is computed once per
+    // session so each PC keeps a consistent cadence (no sawtooth).
+    const jitterMs = Math.floor(Math.random() * 14_000) - 7_000; // ±7s
+    const intervalMs = 30_000 + jitterMs;
+    const handle = window.setInterval(tick, intervalMs);
+
+    // Fast recovery from sleep / network drops: an idle PC's 30s timer
+    // can be paused by the OS for minutes at a time when the laptop lid
+    // closes or the workstation sleeps. Without this, the PC could be
+    // missing from every other PC's recipient picker for up to 5 minutes
+    // after wake-up while the next tick crawls in. Listening for online +
+    // visibilitychange events triggers an immediate heartbeat AND
+    // invalidates the cross-PC query cache so dropdowns refresh on the
+    // spot. Also covers the "moved between Wi-Fi networks" case.
+    const refreshAfterReconnect = () => {
+      try {
+        // Immediate heartbeat so this PC reappears in others' pickers
+        // within seconds, not minutes.
+        tick();
+      } catch { /* tick is best-effort */ }
+      try {
+        // Force-refetch every cross-PC dataset so this PC's view of who
+        // else is online catches up to reality immediately. Targets
+        // anything keyed on "xpc-…" — registry, messages, schedules,
+        // pending approvals.
+        queryClient.invalidateQueries({
+          predicate: (q) =>
+            Array.isArray(q.queryKey) &&
+            typeof q.queryKey[0] === "string" &&
+            (q.queryKey[0] as string).startsWith("xpc-"),
+        });
+      } catch { /* invalidate is best-effort */ }
+    };
+    const onOnline = () => refreshAfterReconnect();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshAfterReconnect();
+    };
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      window.clearInterval(handle);
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [role, scope, username, displayNameRaw, sqnName, sqnBase]);
   return null;
 }
