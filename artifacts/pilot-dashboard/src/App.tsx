@@ -92,6 +92,7 @@ import FlightRecords from "@/pages/dashboard/FlightRecords";
 import FlightProgram from "@/pages/FlightProgram";
 import StickyNotes from "@/pages/StickyNotes";
 import CommanderUnavailable from "@/pages/dashboard/UnavailableView";
+import CommanderCurrencies from "@/pages/dashboard/Currencies";
 
 function SquadronOpsRoutes() {
   return (
@@ -107,6 +108,7 @@ function SquadronOpsRoutes() {
       <Route path="/roster" component={Roster} />
       <Route path="/pilot/:id" component={PilotDetail} />
       <Route path="/currency" component={Currency} />
+      <Route path="/expired" component={ExpiredAfter} />
       <Route path="/rankings" component={Rankings} />
       <Route path="/cycle" component={Cycle} />
       <Route path="/leaves" component={Leaves} />
@@ -179,6 +181,7 @@ function CommanderRoutes() {
       <Route path="/dashboard/squadron/:id" component={PilotsTable} />
       <Route path="/dashboard/pilot/:id" component={DashboardPilotDetail} />
       <Route path="/dashboard/alerts" component={Alerts} />
+      <Route path="/dashboard/currencies" component={CommanderCurrencies} />
       <Route path="/dashboard/pilot-alerts" component={PilotAlerts} />
       <Route path="/dashboard/simulator" component={Simulator} />
       <Route path="/dashboard/flights" component={FlightRecords} />
