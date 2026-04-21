@@ -11,6 +11,11 @@ name: Build Windows Installer (RJAF Squadron Ops)
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
+    paths:
+      - "artifacts/pilot-dashboard/**"
+      - ".github/workflows/dashboard-windows-installer.yml"
     tags:
       - "v*"
 
