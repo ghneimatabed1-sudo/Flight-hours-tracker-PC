@@ -245,8 +245,33 @@ export default function ScheduleChain() {
     setSubmitTo("");
   };
 
-  const incoming = sharesQ.data.filter(s => s.currentPcId === myPcId);
-  const sent = sharesQ.data.filter(s => s.originSquadronId === myPcId && s.currentPcId !== myPcId);
+  // v1.1.39: Ops PC (id = "<sqn>") and Sqn Cmdr PC (id = "SQDNCMD:<sqn>")
+  // are physically distinct but logically the same squadron. A schedule
+  // addressed to either id should surface on BOTH inboxes so the
+  // operator never has to guess which one was picked. Without this
+  // mirror, a Flight Cmdr submitting "to NO.8" lands the share on Ops
+  // only and the Sqn Cmdr never sees it (and vice-versa).
+  const peerSquadronId = useMemo<string | null>(() => {
+    if (!myPcId) return null;
+    if (myTier !== "squadron" && myTier !== "ops") return null;
+    if (myPcId.startsWith("SQDNCMD:")) {
+      // I am the Sqn Cmdr PC → my peer is the bare squadron-name Ops PC.
+      return myPcId.slice("SQDNCMD:".length);
+    }
+    if (!myPcId.includes(":")) {
+      // I am the Ops PC (canonical bare id) → my peer is SQDNCMD:<me>.
+      return `SQDNCMD:${myPcId}`;
+    }
+    return null;
+  }, [myPcId, myTier]);
+  const incoming = sharesQ.data.filter(
+    s => s.currentPcId === myPcId || (peerSquadronId !== null && s.currentPcId === peerSquadronId),
+  );
+  const sent = sharesQ.data.filter(
+    s => (s.originSquadronId === myPcId || (peerSquadronId !== null && s.originSquadronId === peerSquadronId))
+      && s.currentPcId !== myPcId
+      && (peerSquadronId === null || s.currentPcId !== peerSquadronId),
+  );
 
   return (
     <div>
