@@ -381,11 +381,26 @@ export default function Squadrons() {
                 have registered under its name yet). */}
             {editingId && (
               <div className="space-y-2 rounded-md border border-teal-300/40 bg-teal-50/60 dark:bg-teal-950/20 p-3">
-                <Label className="text-sm font-medium text-teal-900 dark:text-teal-200">
-                  {lang === "ar"
-                    ? "قادة الطيران في هذا السرب"
-                    : "Flight commanders in this squadron"}
-                </Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-sm font-medium text-teal-900 dark:text-teal-200">
+                    {lang === "ar"
+                      ? "قادة الطيران في هذا السرب"
+                      : "Flight commanders in this squadron"}
+                  </Label>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-[11px]"
+                    onClick={() => { void registeredPcs.refetch(); }}
+                    disabled={registeredPcs.isFetching}
+                    data-testid="button-refresh-flight-pcs"
+                  >
+                    {registeredPcs.isFetching
+                      ? (lang === "ar" ? "جارٍ التحديث…" : "Refreshing…")
+                      : (lang === "ar" ? "تحديث من الشبكة" : "Refresh from network")}
+                  </Button>
+                </div>
                 {loadingGroup ? (
                   <p className="text-[11px] text-muted-foreground">
                     {lang === "ar" ? "جارٍ التحميل…" : "Loading current group…"}

@@ -300,10 +300,19 @@ export default function Messages() {
                 <option value="">— pick a registered PC —</option>
                 {selectablePCs.map(p => (
                   <option key={p.id} value={p.id}>
-                    {p.deviceName || p.squadronName}{p.online ? " · online" : " · offline"}
+                    {p.deviceName || p.squadronName}{p.online ? " · online" : " · offline (will deliver on reconnect)"}
                   </option>
                 ))}
               </select>
+              {composeTo && (() => {
+                const sel = selectablePCs.find(p => p.id === composeTo);
+                if (!sel || sel.online) return null;
+                return (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1">
+                    This PC isn't connected right now. Send anyway — the message is stored on the network and the recipient sees it the moment Hawk Eye next syncs (usually within 30 seconds of them coming online).
+                  </p>
+                );
+              })()}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
