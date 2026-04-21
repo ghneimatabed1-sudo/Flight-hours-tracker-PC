@@ -269,12 +269,32 @@ export default function Commanders() {
 // commander username; on that commander's next sign-in the gate auto-
 // applies the override and skips the manual picker. The flight commander
 // can still override locally after binding (e.g. mid-deployment).
+//
+// v1.1.23 (Apr 2026): Picker now binds to the **Squadron Ops PC** (the
+// canonical PC the squadron commander operates from). The squadron
+// commander identity itself auto-resolves from that ops PC's registry
+// row — operators no longer pick a person, they pick the workstation,
+// and HQ sees who is currently sitting at it (deviceName label). This
+// stays in sync automatically: when a different commander signs into
+// the ops PC and updates the device label, the resolved name shown
+// here refreshes on the next registry poll without anyone re-binding.
 function FlightBindingPicker({ username }: { username: string }) {
   const reg = useRegisteredPCs();
   const [current, setCurrent] = useState(() => getAdminFlightBindingFor(username));
   const squadronPCs = reg.data
     .filter(p => p.tier === "squadron")
     .sort((a, b) => a.squadronName.localeCompare(b.squadronName));
+
+  // Live look-up of the currently-bound ops PC so the displayed
+  // squadron commander label (deviceName) reflects whoever is sitting
+  // at that workstation right now — not the cached label captured at
+  // bind time. Falls back to the cached pcName if the ops PC is offline
+  // or has been removed from the registry.
+  const boundLive = current
+    ? squadronPCs.find(p => p.id === current.pcId) ?? null
+    : null;
+  const liveCommanderLabel =
+    boundLive?.deviceName?.trim() || boundLive?.squadronName || current?.pcName || "";
 
   // Radix Select v2 forbids empty SelectItem values, so the "unbound"
   // sentinel is a non-empty string and we map it back to null on apply.
@@ -293,23 +313,37 @@ function FlightBindingPicker({ username }: { username: string }) {
   };
 
   return (
-    <div className="mt-1.5 flex items-center gap-1.5 text-[11px]" data-testid={`fbinding-${username}`}>
-      <Link2 className="h-3 w-3 text-muted-foreground" />
-      <Select value={current?.pcId ?? UNBOUND_SENTINEL} onValueChange={apply}>
-        <SelectTrigger className="h-7 text-xs w-56" data-testid={`select-fbinding-${username}`}>
-          <SelectValue placeholder="Bind to Squadron PC…" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={UNBOUND_SENTINEL}>— Unbound —</SelectItem>
-          {squadronPCs.map(p => (
-            <SelectItem key={p.id} value={p.id}>{p.squadronName}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+    <div className="mt-1.5 flex flex-col gap-1 text-[11px]" data-testid={`fbinding-${username}`}>
+      <div className="flex items-center gap-1.5">
+        <Link2 className="h-3 w-3 text-muted-foreground" />
+        <Select value={current?.pcId ?? UNBOUND_SENTINEL} onValueChange={apply}>
+          <SelectTrigger className="h-7 text-xs w-72" data-testid={`select-fbinding-${username}`}>
+            <SelectValue placeholder="Bind to Squadron Ops PC…" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={UNBOUND_SENTINEL}>— Unbound —</SelectItem>
+            {squadronPCs.map(p => {
+              // Each row shows the squadron AND the current commander
+              // label sitting at that ops PC, so HQ knows exactly who
+              // they're attaching the flight commander to.
+              const cdr = p.deviceName?.trim();
+              return (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.squadronName}
+                  {cdr ? ` · Sqn Cdr: ${cdr}` : ""}
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
+      </div>
       {current && (
-        <span className="text-muted-foreground truncate max-w-[140px]" title={current.pcName}>
-          → {current.pcName}
-        </span>
+        <div className="pl-4.5 text-muted-foreground" data-testid={`fbinding-resolved-${username}`}>
+          → Ops PC: <span className="text-foreground">{current.pcName}</span>
+          {liveCommanderLabel && liveCommanderLabel !== current.pcName ? (
+            <> · Sqn Cdr: <span className="text-foreground">{liveCommanderLabel}</span></>
+          ) : null}
+        </div>
       )}
     </div>
   );
