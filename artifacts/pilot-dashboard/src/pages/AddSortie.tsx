@@ -37,8 +37,24 @@ const SORTIE_TYPES = [
   "NAV", "NAV DAY", "NAV NIGHT",
   "FCF", "ACADEMIC", "EMER", "INSTR",
   "CHECK RIDE", "TRANSPORT", "SAR", "MEDEVAC",
+  // April 2026 field-use additions. These six "special" types ALWAYS
+  // require at least one seat to be flown as Dual (instructor + student),
+  // and the submit handler enforces that (see DUAL_REQUIRED_TYPES below).
+  "IRT", "COURSE DAY", "COURSE NVG", "COURSE NIGHT",
+  "EMERGENCY TRAINING", "STAND EVAL",
   "Other…",
 ];
+
+// Sortie types where one of the two seats MUST carry status=Dual on
+// submit. Comparison is case-insensitive so a custom "Other…" value typed
+// as "irt" or "Stand Eval" still trips the rule.
+const DUAL_REQUIRED_TYPES = new Set([
+  "IRT", "COURSE DAY", "COURSE NVG", "COURSE NIGHT",
+  "EMERGENCY TRAINING", "STAND EVAL",
+]);
+function isDualRequired(t: string): boolean {
+  return DUAL_REQUIRED_TYPES.has(t.trim().toUpperCase());
+}
 
 type Condition = "Day" | "Night";
 // Each seat carries its own status — Pilot can be 1st PLT while Co-Pilot is
@@ -250,23 +266,38 @@ export default function AddSortie() {
     // attributed to whichever seat is "1st" and a dual portion attributed to
     // the dual buckets — so a (Pilot=1st PLT, Co-Pilot=Dual) sortie correctly
     // accumulates flight + dual instruction hours on the same record.
-    const eitherDual = form.pilot.status === "Dual" || form.coPilot.status === "Dual";
+    const eitherDual =
+      form.pilot.status === "Dual" ||
+      form.coPilot.status === "Dual" ||
+      isDualRequired(
+        form.sortieType === "Other…"
+          ? (form.sortieTypeOther.trim() || "OTHER")
+          : form.sortieType,
+      );
     // Single seat-aware routing pass — both seats' statuses route the same
     // flight time into their respective bucket. The legacy "extra dual hours"
     // input is folded into the dual bucket via a second pass with both seats
     // forced to Dual (covers the case where a sortie logged additional dual
     // instruction time beyond the primary block).
+    const sortieType = form.sortieType === "Other…"
+      ? form.sortieTypeOther.trim() || "OTHER"
+      : form.sortieType;
+
+    // Special-sortie DUAL rule: IRT, the three COURSE types (DAY/NVG/NIGHT),
+    // EMERGENCY TRAINING and STAND EVAL are instructional flights. The
+    // captain's seat keeps whatever status the operator picked, but the
+    // CO-PILOT's hours must always be credited as DUAL regardless of the
+    // co-pilot's rank. We force it here at bucketing time so the totals,
+    // currencies and reports reflect dual-instruction time correctly.
+    const dualRequired = isDualRequired(sortieType);
+    const effectiveCoPilotStatus = dualRequired ? "Dual" : form.coPilot.status;
     const totalTime = time + dual;
     const merged = deriveSortieBuckets({
       time: totalTime,
       condition: cond,
       pilotStatus: form.pilot.status,
-      coPilotStatus: form.coPilot.status,
+      coPilotStatus: effectiveCoPilotStatus,
     });
-
-    const sortieType = form.sortieType === "Other…"
-      ? form.sortieTypeOther.trim() || "OTHER"
-      : form.sortieType;
 
     const ifSim = parseFloat(form.ifSim || "0") || 0;
     const ifAct = parseFloat(form.ifAct || "0") || 0;
@@ -299,7 +330,10 @@ export default function AddSortie() {
       pilotPosition,
       coPilotPosition,
       pilotSeatStatus: form.pilot.status,
-      coPilotSeatStatus: form.coPilot.status,
+      // For special sortie types (IRT/Course/Emergency/Stand Eval) the
+      // co-pilot is treated as Dual no matter what the operator picked,
+      // so the persisted seat status reflects how hours were credited.
+      coPilotSeatStatus: effectiveCoPilotStatus,
       pilotIsCaptain,
       coPilotIsCaptain,
       msnDuty: form.msnDuty.trim() || undefined,
@@ -800,12 +834,20 @@ type MiniProps = {
 };
 function Mini({ label, value, onChange, type = "text", placeholder, step }: MiniProps) {
   if (type === "date") {
+    // Sorties are always recorded for a flight that has *already happened*
+    // — there is no legitimate reason for ops to log a sortie dated in the
+    // future. We pin the date picker's `max` to today so the OS calendar
+    // visually disables future cells AND the manual-typed validation in
+    // DateInput still accepts past dates freely (back-dating an entry the
+    // operator forgot to log earlier in the week is a normal workflow).
+    const todayIso = new Date().toISOString().slice(0, 10);
     return (
       <label className="block">
         <span className="text-[11px] text-muted-foreground">{label}</span>
         <DateInput
-          value={value}
+          value={String(value)}
           onChange={onChange}
+          max={todayIso}
           className="w-full mt-0.5 px-2 py-1.5 rounded-md bg-input border border-border text-xs font-mono"
         />
       </label>

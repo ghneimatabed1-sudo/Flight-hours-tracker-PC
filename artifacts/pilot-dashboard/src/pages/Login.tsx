@@ -262,11 +262,16 @@ export default function LoginGate() {
       <div className="w-full max-w-md">
         <div className="flex flex-col items-center mb-6">
           <img src="brand/emblem.png" className="h-24 w-24 object-contain mb-3" alt="Royal Jordanian Air Force" />
-          <img
-            src="brand/hawkeye-wordmark.svg"
-            className="h-10 max-w-full object-contain"
-            alt={t("appName")}
-          />
+          {/* April 2026: replaced the old Hawk-Eye wordmark with the RJAF
+              emblem text mark per CO request — the eye glyph was off-brand
+              for any non-Hawk Eye context. The emblem.png above carries
+              the visual identity; this line just shows the app name. */}
+          <div
+            className="h-10 max-w-full flex items-center justify-center text-2xl font-semibold tracking-wide gold-grad"
+            aria-label={t("appName")}
+          >
+            {t("appName")}
+          </div>
           <div className="text-xs text-muted-foreground text-center mt-2">{t("appTag")}</div>
         </div>
 

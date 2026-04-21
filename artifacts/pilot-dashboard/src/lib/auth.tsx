@@ -780,9 +780,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (error || !data.user) return await recordFail(error?.message ?? "auth_failed");
         // app_metadata is the trusted source (server-stamped by edge functions
         // and protected from client modification); user_metadata is a fallback.
-        const role = ((data.user.app_metadata?.role as User["role"])
+        // Normalize "deputy" → "ops" so the second/third ops officers
+        // provisioned through the provision-user edge function (which writes
+        // role="deputy" by default) are treated as full ops by the rest of
+        // the app — including the per-PC role lock check below. Without
+        // this normalization the *first* ops officer signs in fine but
+        // every subsequent deputy hits role_locked because their JWT
+        // carries "deputy" while the PC is pinned to "ops". Symptom field
+        // ops reported as "second ops user can't log in".
+        const rawRole = ((data.user.app_metadata?.role as User["role"])
           ?? (data.user.user_metadata?.role as User["role"])
           ?? "ops");
+        const role: User["role"] = rawRole === "deputy" ? "ops" : rawRole;
         if (lock && role !== lock) {
           await recordAuditEvent({ type: "login.rolelock.blocked", actor: username, detail: { lock, attemptedRole: role } });
           return { ok: false, error: "role_locked" };

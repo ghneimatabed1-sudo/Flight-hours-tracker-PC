@@ -12,6 +12,7 @@ import {
   type Pilot,
   type PilotLinkStatus,
 } from "@/lib/squadron-data";
+import type { OtherAircraftEntry } from "@/lib/mock";
 import { computePilotTotals } from "@/lib/calculations";
 import { useAuth } from "@/lib/auth";
 import {
@@ -105,6 +106,8 @@ export default function PilotDetail() {
       </Card>
 
       <MobileAccessCard pilotId={p.id} />
+
+      <OtherAircraftCard pilot={p} />
 
       <Card className="!p-0 overflow-hidden">
         <div className="px-4 py-2 border-b border-border text-sm font-semibold">Sortie History ({sorties.length})</div>
@@ -475,5 +478,118 @@ function PilotIdBadge({ pilotId }: { pilotId: string }) {
         {copied ? "Copied" : "Copy"}
       </button>
     </div>
+  );
+}
+
+// Other-aircraft experience editor. Lets the ops officer record airframes
+// the pilot has flown outside this squadron's primary type (e.g. UH-1H,
+// AH-1F) along with total hours and a free-form note. Stored on the pilot
+// record as `otherAircraft: { type, hours, notes }[]` and persisted via
+// useUpdatePilot. Read-only for any role that can't edit pilots — the
+// underlying mutation already enforces that, we just hide the controls.
+function OtherAircraftCard({ pilot }: { pilot: Pilot }) {
+  const update = useUpdatePilot();
+  const auth = useAuth();
+  const canEdit = auth.user?.role === "ops" || auth.user?.role === "admin" || auth.user?.role === "super_admin";
+  const list: OtherAircraftEntry[] = pilot.otherAircraft ?? [];
+  const [draft, setDraft] = useState<OtherAircraftEntry>({ type: "", hours: undefined, notes: "" });
+
+  const save = (next: OtherAircraftEntry[]) => {
+    update.mutate({ ...pilot, otherAircraft: next });
+  };
+
+  const add = () => {
+    if (!draft.type.trim()) return;
+    save([...list, { type: draft.type.trim(), hours: draft.hours, notes: draft.notes?.trim() || undefined }]);
+    setDraft({ type: "", hours: undefined, notes: "" });
+  };
+  const remove = (i: number) => {
+    save(list.filter((_, idx) => idx !== i));
+  };
+
+  return (
+    <Card className="!p-4">
+      <div className="text-sm font-semibold mb-2">Other-Aircraft Experience</div>
+      {list.length === 0 ? (
+        <div className="text-xs text-muted-foreground" data-testid="empty-other-aircraft">
+          No other-aircraft experience recorded.
+        </div>
+      ) : (
+        <table className="w-full text-sm" data-testid="table-other-aircraft">
+          <thead className="text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="text-left py-1">Type</th>
+              <th className="text-left py-1">Hours</th>
+              <th className="text-left py-1">Notes</th>
+              {canEdit && <th />}
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((e, i) => (
+              <tr key={`${e.type}-${i}`} className="border-t border-border">
+                <td className="py-1 font-medium">{e.type}</td>
+                <td className="py-1 font-mono">{e.hours ?? "—"}</td>
+                <td className="py-1 text-muted-foreground">{e.notes ?? "—"}</td>
+                {canEdit && (
+                  <td className="py-1 text-right">
+                    <button
+                      onClick={() => remove(i)}
+                      className="text-xs text-destructive hover:underline"
+                      data-testid={`button-remove-other-ac-${i}`}
+                    >
+                      Remove
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {canEdit && (
+        <div className="flex flex-wrap items-end gap-2 mt-3 pt-3 border-t border-border">
+          <label className="text-xs text-muted-foreground flex flex-col">
+            <span>Type</span>
+            <input
+              value={draft.type}
+              onChange={e => setDraft(d => ({ ...d, type: e.target.value }))}
+              placeholder="e.g. UH-1H"
+              className="mt-0.5 px-2 py-1.5 rounded-md bg-input border border-border text-sm w-40"
+              data-testid="input-other-ac-type"
+            />
+          </label>
+          <label className="text-xs text-muted-foreground flex flex-col">
+            <span>Hours</span>
+            <input
+              type="number"
+              min={0}
+              step="0.1"
+              value={draft.hours ?? ""}
+              onChange={e => setDraft(d => ({ ...d, hours: e.target.value === "" ? undefined : Number(e.target.value) }))}
+              className="mt-0.5 px-2 py-1.5 rounded-md bg-input border border-border text-sm w-24 font-mono"
+              data-testid="input-other-ac-hours"
+            />
+          </label>
+          <label className="text-xs text-muted-foreground flex flex-col flex-1 min-w-[160px]">
+            <span>Notes</span>
+            <input
+              value={draft.notes ?? ""}
+              onChange={e => setDraft(d => ({ ...d, notes: e.target.value }))}
+              placeholder="Optional"
+              className="mt-0.5 px-2 py-1.5 rounded-md bg-input border border-border text-sm"
+              data-testid="input-other-ac-notes"
+            />
+          </label>
+          <button
+            onClick={add}
+            disabled={!draft.type.trim() || update.isPending}
+            className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm disabled:opacity-50"
+            data-testid="button-add-other-ac"
+          >
+            Add
+          </button>
+        </div>
+      )}
+    </Card>
   );
 }

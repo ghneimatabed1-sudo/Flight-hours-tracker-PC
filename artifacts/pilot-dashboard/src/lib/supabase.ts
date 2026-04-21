@@ -196,6 +196,13 @@ export function clearSupabaseCreds(username: string): void {
   try { localStorage.setItem(SB_CREDS_KEY, JSON.stringify(map)); } catch { /* swallow */ }
 }
 
+// Hard retention cap for the audit_log table. Pages × page-size in the UI
+// (50 × 50 = 2,500 rows) — keeping the table itself bounded means an old
+// deployment can't accumulate millions of rows that slow every page load.
+// Eviction runs opportunistically on insert: count rows, and if we're over
+// the cap, delete the oldest row(s) so the new one fits.
+export const AUDIT_RETENTION_ROWS = 2500;
+
 export async function recordAuditEvent(event: {
   type: string;
   actor?: string;
@@ -208,4 +215,23 @@ export async function recordAuditEvent(event: {
     detail: event.detail ?? {},
     occurred_at: new Date().toISOString(),
   });
+  // Opportunistic retention eviction. We don't fail the insert if cleanup
+  // hits an error — the cap is a soft guardrail, not a correctness contract.
+  try {
+    const { count } = await supabase
+      .from("audit_log")
+      .select("*", { count: "exact", head: true });
+    if (typeof count === "number" && count > AUDIT_RETENTION_ROWS) {
+      const overflow = count - AUDIT_RETENTION_ROWS;
+      const { data: oldest } = await supabase
+        .from("audit_log")
+        .select("id")
+        .order("occurred_at", { ascending: true })
+        .limit(overflow);
+      const ids = (oldest ?? []).map((r: { id: number | string }) => r.id);
+      if (ids.length > 0) {
+        await supabase.from("audit_log").delete().in("id", ids);
+      }
+    }
+  } catch { /* retention is best-effort */ }
 }

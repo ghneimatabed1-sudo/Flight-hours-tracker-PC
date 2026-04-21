@@ -21,6 +21,12 @@ const api = {
   checkForUpdates: (): Promise<{ ok: boolean; version?: string | null; reason?: string }> =>
     ipcRenderer.invoke("rjaf:checkForUpdates"),
   installUpdateNow: (): Promise<boolean> => ipcRenderer.invoke("rjaf:installUpdateNow"),
+  // Auto-update preference (per-role, set from the Settings page). When
+  // OFF, the Electron main process skips the silent startup check and
+  // disables autoUpdater.autoDownload so updates only happen when the
+  // operator clicks "Check for updates" manually.
+  setAutoUpdate: (enabled: boolean): Promise<boolean> =>
+    ipcRenderer.invoke("rjaf:setAutoUpdate", !!enabled),
   // Append a single line to the packaged app's renderer-error.log. Used by
   // the renderer to surface non-fatal failures (e.g. Supabase silent auth
   // failing on launch) to support without a full crash dialog.

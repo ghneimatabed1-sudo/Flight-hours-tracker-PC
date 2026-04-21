@@ -63,6 +63,18 @@ export interface Pilot {
   // Date of the pilot's most recent simulator session. Visible only to the
   // squadron commander on the dashboard.
   lastSimDate?: string;
+  // Other-aircraft experience the pilot has flown outside the unit's
+  // primary type (e.g. UH-1H, AH-1F, sim-only types). Free-form so units
+  // can capture whatever airframes matter to them; rendered as a small
+  // section on the pilot detail page so commanders can see the wider
+  // background at a glance.
+  otherAircraft?: OtherAircraftEntry[];
+}
+
+export interface OtherAircraftEntry {
+  type: string;        // e.g. "UH-1H"
+  hours?: number;      // total hours on type
+  notes?: string;      // optional comments / role / dates
 }
 
 export type CurrencyKey = "day" | "night" | "nvg" | "irt" | "medical" | "sim";

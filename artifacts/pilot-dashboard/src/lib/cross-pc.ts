@@ -122,6 +122,73 @@ export function setFlightBinding(b: FlightBinding | null) {
   localStorage.setItem(FLIGHT_BIND_NAME_KEY, b.pcName || b.pcId);
 }
 
+// Admin-driven Flight↔Squadron commander binding overrides. April 2026:
+// per CO request the binding selection is moved out of the flight PC's
+// first-run gate and into Super Admin → Commanders, so HQ controls who
+// reports to whom. The override is keyed by the flight commander's
+// username; when that commander signs in on any PC, the gate auto-applies
+// the override and skips the manual picker. Stored in a single
+// localStorage map per PC so admin presets are restorable from any
+// machine that's been synced.
+const ADMIN_FLIGHT_BIND_KEY = "rjaf.pc.flight.adminOverrides";
+type AdminBindingMap = Record<string, FlightBinding>;
+function readAdminMap(): AdminBindingMap {
+  try {
+    const raw = localStorage.getItem(ADMIN_FLIGHT_BIND_KEY);
+    return raw ? (JSON.parse(raw) as AdminBindingMap) : {};
+  } catch { return {}; }
+}
+export function getAdminFlightBindingFor(username: string | null | undefined): FlightBinding | null {
+  if (!username) return null;
+  const m = readAdminMap();
+  return m[username.toLowerCase()] ?? null;
+}
+export function setAdminFlightBindingFor(username: string, b: FlightBinding | null) {
+  const m = readAdminMap();
+  const key = username.toLowerCase();
+  if (!b || !b.pcId) delete m[key];
+  else m[key] = { pcId: b.pcId, pcName: b.pcName || b.pcId };
+  try { localStorage.setItem(ADMIN_FLIGHT_BIND_KEY, JSON.stringify(m)); } catch { /* ignore */ }
+  // Broadcast to every other PC via the shared audit_log channel. The
+  // event carries the full binding map so a flight PC that boots later
+  // gets the latest view in a single fetch (see syncAdminFlightBindingsFromRemote).
+  void recordAuditEvent({
+    type: "admin.flight.binding.set",
+    actor: "super-admin",
+    detail: { username: key, binding: b ?? null, map: m },
+  });
+}
+export function listAdminFlightBindings(): AdminBindingMap {
+  return readAdminMap();
+}
+
+// Pull the latest admin-published flight bindings from Supabase and cache
+// them locally. The Super Admin writes the binding by calling
+// setAdminFlightBindingFor above, which both updates their localStorage
+// AND inserts an audit_log row containing the full map. Any other PC can
+// recover the latest state by selecting the most recent
+// admin.flight.binding.set event. This is the cross-PC channel that
+// distinguishes the April 2026 implementation from the previous
+// localStorage-only approach.
+export async function syncAdminFlightBindingsFromRemote(): Promise<void> {
+  if (!isLive() || !supabase) return;
+  const { data, error } = await supabase
+    .from("audit_log")
+    .select("detail")
+    .eq("type", "admin.flight.binding.set")
+    .order("occurred_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return;
+  const detail = (data as { detail?: Record<string, unknown> }).detail ?? {};
+  const map = (detail.map ?? {}) as AdminBindingMap;
+  if (map && typeof map === "object") {
+    try {
+      localStorage.setItem(ADMIN_FLIGHT_BIND_KEY, JSON.stringify(map));
+    } catch { /* ignore */ }
+  }
+}
+
 export interface SquadronPC {
   id: string;             // canonical ecosystem id (squadron name, or
                           // commander-scope id e.g. "WING:NWAC")

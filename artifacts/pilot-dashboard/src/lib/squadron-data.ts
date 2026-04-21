@@ -94,6 +94,12 @@ function rowToPilot(r: Record<string, unknown>): Pilot {
     hiddenCurrencies: Array.isArray(data.hiddenCurrencies) ? data.hiddenCurrencies : undefined,
     qualifications: Array.isArray(data.qualifications) ? data.qualifications : undefined,
     lastSimDate: data.lastSimDate ? String(data.lastSimDate) : undefined,
+    // Other-aircraft experience (April 2026): list of airframes flown
+    // outside the squadron's primary type. Persisted inside the JSONB
+    // `data` blob alongside every other free-form pilot field.
+    otherAircraft: Array.isArray(data.otherAircraft)
+      ? (data.otherAircraft as Pilot["otherAircraft"])
+      : undefined,
   };
 }
 
@@ -198,6 +204,7 @@ export function useUpdatePilot() {
           hiddenCurrencies: p.hiddenCurrencies,
           qualifications: p.qualifications,
           lastSimDate: p.lastSimDate,
+          otherAircraft: p.otherAircraft,
         },
       }).eq("id", p.id).select().single();
       if (error) throw error;
@@ -268,6 +275,7 @@ export function useCreatePilot() {
           hiddenCurrencies: p.hiddenCurrencies,
           qualifications: p.qualifications,
           lastSimDate: p.lastSimDate,
+          otherAircraft: p.otherAircraft,
         },
       });
 
@@ -570,6 +578,7 @@ async function applyCurrencyRefresh(
           hiddenCurrencies: p.hiddenCurrencies,
           qualifications: p.qualifications,
           lastSimDate: p.lastSimDate,
+          otherAircraft: p.otherAircraft,
         },
       }).eq("id", p.id);
       if (error) throw error;
@@ -866,6 +875,7 @@ function pilotDataPayload(p: Pilot) {
     hiddenCurrencies: p.hiddenCurrencies,
     qualifications: p.qualifications,
     lastSimDate: p.lastSimDate,
+    otherAircraft: p.otherAircraft,
   };
 }
 
@@ -1496,6 +1506,14 @@ const SEED_AUDIT: AuditRow[] = [
   { ts: "2026-04-17 11:01:55", user: "admin", action: "Reset Password", target: "deputy.k" },
 ];
 
+// Audit retention cap: 50 entries per "page" × 50 pages = 2,500 rows max.
+// Anything older falls off the end of the visible log; in live (Supabase)
+// mode the rows are still in the database but the UI never asks for them
+// past row 2,500 so the page stays snappy on slow ops PCs.
+export const AUDIT_PAGE_SIZE = 50;
+export const AUDIT_MAX_PAGES = 50;
+export const AUDIT_MAX_ROWS = AUDIT_PAGE_SIZE * AUDIT_MAX_PAGES;
+
 export function useAuditLog(): UseQueryResult<AuditRow[]> & { data: AuditRow[] } {
   const q = useQuery<AuditRow[]>({
     queryKey: ["audit_log"],
@@ -1505,7 +1523,7 @@ export function useAuditLog(): UseQueryResult<AuditRow[]> & { data: AuditRow[] }
         .from("audit_log")
         .select("occurred_at, actor, type, detail")
         .order("occurred_at", { ascending: false })
-        .limit(200);
+        .limit(AUDIT_MAX_ROWS);
       if (error) throw error;
       return (data ?? []).map(r => ({
         ts: new Date(r.occurred_at as string).toISOString().replace("T", " ").slice(0, 19),

@@ -114,7 +114,12 @@ function SquadronOpsRoutes() {
       <Route path="/leaves" component={Leaves} />
       <Route path="/unavailable" component={Unavailable} />
       <Route path="/duty" component={DutyWeek} />
-      <Route path="/schedule" component={Schedule} />
+      {/* Daily Missions (/schedule) was retired in the April 2026 field-use
+          review. The route was previously kept mounted as a dead link to
+          satisfy old bookmarks, but the reviewer flagged it as still
+          accessible — so it now redirects to the Flight Program which
+          replaced its workflow. */}
+      <Route path="/schedule">{() => { window.location.replace("/flight-program"); return null; }}</Route>
       <Route path="/flight-program" component={FlightProgram} />
       <Route path="/risk" component={Risk} />
       <Route path="/coordinating" component={Coordinating} />

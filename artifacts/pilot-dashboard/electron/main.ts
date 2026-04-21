@@ -21,6 +21,12 @@ import * as os from "os";
 import * as crypto from "crypto";
 
 const isDev = !app.isPackaged;
+
+// Mutable global controlled by the renderer's per-role auto-update toggle
+// (Settings → Auto-Update). Defaults ON to preserve historical behaviour
+// for installs that never set the preference. Updated via the
+// `rjaf:setAutoUpdate` IPC handler below.
+let autoUpdateEnabled = true;
 let mainWindow: BrowserWindow | null = null;
 
 function hardwareFingerprint(): string {
@@ -199,8 +205,14 @@ app.whenReady().then(() => {
   // compiled installer + latest.yml — never the source code. Pilots get a
   // popup when a newer version is published.
   if (!isDev) {
-    autoUpdater.autoDownload = true;
-    autoUpdater.autoInstallOnAppQuit = true;
+    // Auto-update preference is persisted per-role in the renderer
+    // (localStorage `rjaf.autoUpdate.<role>`). On launch we don't know the
+    // current role yet, so the renderer pushes the resolved value back
+    // through `rjaf:setAutoUpdate` once it boots. Until that arrives we
+    // default to ON to preserve the prior behaviour for already-deployed
+    // installs.
+    autoUpdater.autoDownload = autoUpdateEnabled;
+    autoUpdater.autoInstallOnAppQuit = autoUpdateEnabled;
     // Skip GitHub pre-releases. CI publishes every build as a pre-release
     // for manual testing; only when the user flips a release to "Latest"
     // on GitHub does it reach installed apps.
@@ -231,10 +243,12 @@ app.whenReady().then(() => {
     autoUpdater.on("update-downloaded", (info) => send("rjaf:update", { kind: "downloaded", version: info.version }));
     autoUpdater.on("error", (err) => send("rjaf:update", { kind: "error", message: err?.message ?? String(err) }));
 
-    autoUpdater.checkForUpdatesAndNotify().catch((err: Error) => {
-      // eslint-disable-next-line no-console
-      console.warn("Update check failed:", err.message);
-    });
+    if (autoUpdateEnabled) {
+      autoUpdater.checkForUpdatesAndNotify().catch((err: Error) => {
+        // eslint-disable-next-line no-console
+        console.warn("Update check failed:", err.message);
+      });
+    }
   }
 
   app.on("activate", () => {
@@ -290,6 +304,19 @@ ipcMain.handle("rjaf:installUpdateNow", () => {
   // Quits all windows, runs the NSIS installer, relaunches the new build.
   setImmediate(() => autoUpdater.quitAndInstall(true, true));
   return true;
+});
+
+// Renderer-driven auto-update toggle (Settings page → per-role flag).
+// Flipping this OFF disables autoDownload + autoInstallOnAppQuit so the
+// app will only check/install when the operator explicitly clicks the
+// manual button. ON restores the silent behaviour.
+ipcMain.handle("rjaf:setAutoUpdate", (_evt, enabled: boolean) => {
+  autoUpdateEnabled = !!enabled;
+  try {
+    autoUpdater.autoDownload = autoUpdateEnabled;
+    autoUpdater.autoInstallOnAppQuit = autoUpdateEnabled;
+  } catch { /* not yet initialised in dev */ }
+  return autoUpdateEnabled;
 });
 
 // ── Backup file-system bridge ───────────────────────────────────────────

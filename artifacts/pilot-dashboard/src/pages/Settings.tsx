@@ -138,6 +138,7 @@ type ElectronBridge = {
   isPackaged?: () => Promise<boolean>;
   checkForUpdates?: () => Promise<{ ok: boolean; version?: string | null; reason?: string }>;
   installUpdateNow?: () => Promise<boolean>;
+  setAutoUpdate?: (enabled: boolean) => Promise<boolean>;
   onUpdateEvent?: (cb: (e: UpdState) => void) => () => void;
 };
 function getBridge(): ElectronBridge | null {
@@ -146,19 +147,57 @@ function getBridge(): ElectronBridge | null {
 
 function fmtMB(bytes: number) { return (bytes / (1024 * 1024)).toFixed(1) + " MB"; }
 
+// Per-role auto-update preference. Stored as `rjaf.autoUpdate.<role>` in
+// localStorage so a commander on the same PC can disable silent updates
+// (e.g. before a planning sortie) without affecting Ops. Default ON.
+// The Electron main-process auto-updater reads this key on app launch
+// AND on every "Check for updates" press to decide whether to silently
+// install or only notify.
+function autoUpdateKey(role: string | null | undefined): string {
+  return `rjaf.autoUpdate.${role ?? "default"}`;
+}
+function readAutoUpdate(role: string | null | undefined): boolean {
+  try {
+    const v = localStorage.getItem(autoUpdateKey(role));
+    return v === null ? true : v === "1";
+  } catch { return true; }
+}
+function writeAutoUpdate(role: string | null | undefined, on: boolean) {
+  try { localStorage.setItem(autoUpdateKey(role), on ? "1" : "0"); } catch { /* ignore */ }
+}
+
 function AutoUpdateSection() {
   const bridge = getBridge();
+  const { user } = useAuth();
   const [version, setVersion] = useState<string>("");
   const [packaged, setPackaged] = useState<boolean>(false);
   const [state, setState] = useState<UpdState>({ kind: "idle" });
+  const [autoOn, setAutoOn] = useState<boolean>(() => readAutoUpdate(user?.role));
+
+  // Re-read whenever the role changes — switching accounts on the same
+  // PC must surface that account's saved preference, not a stale one.
+  useEffect(() => { setAutoOn(readAutoUpdate(user?.role)); }, [user?.role]);
+
+  const toggleAuto = useCallback((next: boolean) => {
+    setAutoOn(next);
+    writeAutoUpdate(user?.role, next);
+    // Push the new preference into the Electron main process so
+    // autoUpdater.autoDownload / startup checks reflect it immediately.
+    // No-op in browser/dev — the bridge is only present in packaged builds.
+    void bridge?.setAutoUpdate?.(next);
+  }, [user?.role, bridge]);
 
   useEffect(() => {
     if (!bridge) return;
     bridge.appVersion().then(setVersion).catch(() => {});
     bridge.isPackaged?.().then(p => setPackaged(!!p)).catch(() => {});
+    // Sync the persisted preference to the main process on mount, so the
+    // updater starts with the right `autoDownload` value (the renderer is
+    // the source of truth — main only knows the default until we tell it).
+    void bridge.setAutoUpdate?.(readAutoUpdate(user?.role));
     const off = bridge.onUpdateEvent?.((e) => setState(e));
     return () => { off?.(); };
-  }, [bridge]);
+  }, [bridge, user?.role]);
 
   const onCheck = useCallback(async () => {
     if (!bridge?.checkForUpdates) return;
@@ -190,6 +229,18 @@ function AutoUpdateSection() {
         When a new version is released, the desktop app updates itself silently. Currently on
         {" "}<span className="font-mono">v{version || "?"}</span>.
       </p>
+      <label className="flex items-center gap-2 text-xs select-none">
+        <input
+          type="checkbox"
+          checked={autoOn}
+          onChange={e => toggleAuto(e.target.checked)}
+          data-testid="toggle-auto-update"
+        />
+        <span>
+          Install updates automatically
+          {user?.role && <span className="text-muted-foreground"> (for {user.role})</span>}
+        </span>
+      </label>
       <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={onCheck}

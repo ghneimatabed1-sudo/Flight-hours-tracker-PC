@@ -16,7 +16,12 @@ import {
   type AccountRole,
 } from "@/lib/commander-store";
 import type { CommanderScope } from "@/lib/types";
-import { Users, Plus, Trash2, KeyRound, Copy, Info } from "lucide-react";
+import {
+  useRegisteredPCs,
+  getAdminFlightBindingFor,
+  setAdminFlightBindingFor,
+} from "@/lib/cross-pc";
+import { Users, Plus, Trash2, KeyRound, Copy, Info, Link2 } from "lucide-react";
 
 const scopeKeys: Record<CommanderScope, "scopeSquadron" | "scopeFlight" | "scopeWing" | "scopeBase" | "scopeHQ"> = {
   squadron: "scopeSquadron",
@@ -154,7 +159,12 @@ export default function Commanders() {
                         {u.role === "ops" ? t("roleOps") : t("roleCommander")}
                       </span>
                     </td>
-                    <td className="py-2 px-3">{u.scope ? t(scopeKeys[u.scope]) : "—"}</td>
+                    <td className="py-2 px-3">
+                      {u.scope ? t(scopeKeys[u.scope]) : "—"}
+                      {u.role === "commander" && u.scope === "flight" && (
+                        <FlightBindingPicker username={u.username} />
+                      )}
+                    </td>
                     <td className="py-2 px-3 text-end space-x-2 rtl:space-x-reverse whitespace-nowrap">
                       <Button size="sm" variant="outline" onClick={() => reset(u.id)} data-testid={`button-reset-${u.id}`}>
                         <KeyRound className="h-3 w-3 me-1" />{t("resetPassword")}
@@ -249,6 +259,58 @@ export default function Commanders() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// Flight↔Squadron commander binding picker. April 2026: moved here from the
+// per-PC FlightBindingGate so HQ can pre-bind any flight commander to a
+// Squadron PC. The chosen pcId is stored in a localStorage map keyed by
+// commander username; on that commander's next sign-in the gate auto-
+// applies the override and skips the manual picker. The flight commander
+// can still override locally after binding (e.g. mid-deployment).
+function FlightBindingPicker({ username }: { username: string }) {
+  const reg = useRegisteredPCs();
+  const [current, setCurrent] = useState(() => getAdminFlightBindingFor(username));
+  const squadronPCs = reg.data
+    .filter(p => p.tier === "squadron")
+    .sort((a, b) => a.squadronName.localeCompare(b.squadronName));
+
+  // Radix Select v2 forbids empty SelectItem values, so the "unbound"
+  // sentinel is a non-empty string and we map it back to null on apply.
+  const UNBOUND_SENTINEL = "__unbound__";
+  const apply = (pcId: string) => {
+    if (!pcId || pcId === UNBOUND_SENTINEL) {
+      setAdminFlightBindingFor(username, null);
+      setCurrent(null);
+      return;
+    }
+    const target = squadronPCs.find(p => p.id === pcId);
+    if (!target) return;
+    const next = { pcId: target.id, pcName: target.squadronName };
+    setAdminFlightBindingFor(username, next);
+    setCurrent(next);
+  };
+
+  return (
+    <div className="mt-1.5 flex items-center gap-1.5 text-[11px]" data-testid={`fbinding-${username}`}>
+      <Link2 className="h-3 w-3 text-muted-foreground" />
+      <Select value={current?.pcId ?? UNBOUND_SENTINEL} onValueChange={apply}>
+        <SelectTrigger className="h-7 text-xs w-56" data-testid={`select-fbinding-${username}`}>
+          <SelectValue placeholder="Bind to Squadron PC…" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={UNBOUND_SENTINEL}>— Unbound —</SelectItem>
+          {squadronPCs.map(p => (
+            <SelectItem key={p.id} value={p.id}>{p.squadronName}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {current && (
+        <span className="text-muted-foreground truncate max-w-[140px]" title={current.pcName}>
+          → {current.pcName}
+        </span>
+      )}
     </div>
   );
 }

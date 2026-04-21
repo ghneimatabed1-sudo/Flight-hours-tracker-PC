@@ -44,7 +44,10 @@ const ITEMS: readonly Item[] = [
   { p: "/leaves", k: "nav_leaves", I: PalmtreeIcon },
   { p: "/unavailable", k: "nav_unavail", I: UserX },
   { p: "/duty", k: "nav_duty", I: Calendar },
-  { p: "/schedule", k: "nav_schedule", I: ClipboardList },
+  // Daily Missions (/schedule) was removed per April 2026 field-use review —
+  // operators reported the page duplicated the Flight Program board and was
+  // never used in practice. The route still exists for any deep links from
+  // older screenshots; only the sidebar entry is gone.
   { p: "/flight-program", k: "nav_flight_program", I: ClipboardList },
   { p: "/risk", k: "nav_risk", I: ShieldAlert },
   { p: "/coordinating", k: "nav_coord", I: FileText },
