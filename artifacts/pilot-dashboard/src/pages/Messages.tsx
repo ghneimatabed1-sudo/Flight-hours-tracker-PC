@@ -61,14 +61,7 @@ export default function Messages() {
     : user?.scope === "flight" ? "flight"
     : "squadron";
   const isFlightCmdr = user?.role === "commander" && user?.scope === "flight";
-  const isOpsPilot = user?.role === "ops";
-  const isSquadronCmdr = user?.role === "commander" && user?.scope === "squadron";
   const flightBinding = isFlightCmdr ? getFlightBinding() : null;
-  // Same-squadron normalised matcher — used by both the Flight Cmdr
-  // and Ops Pilot picker branches so spelling drift in the squadron
-  // label ("NO.8" vs "no 8" vs "8 SQN") never hides peer PCs.
-  const normalizeSqLabel = (s: string | undefined | null) =>
-    (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
   // Use the canonical PC id written by registerLocalPC (squadron name for
   // squadron tier, "WING:..." / "BASE:..." for commander tiers) so both
   // the writer (sender) and the reader (recipient inbox filter) agree.
@@ -207,9 +200,31 @@ export default function Messages() {
       toast({ title: "Messages restricted to Flt/Sqn/Wing/Base only", variant: "destructive" });
       return;
     }
-    if (isFlightCmdr && flightBinding && target.id !== flightBinding.pcId) {
-      toast({ title: "Flight Commander can only message the bound Squadron Commander", variant: "destructive" });
-      return;
+    if (isFlightCmdr && flightBinding) {
+      // v1.1.31: Flight Cmdr may message the bound Ops PC OR any
+      // squadron-tier PC inside the same squadron (the Squadron Cmdr
+      // PC). Anything outside that scope (other squadrons, wing/base,
+      // unrelated flight PCs) stays blocked. Mirrors the picker's own
+      // selectablePCs filter so what the operator can SEE matches
+      // what the send guard accepts.
+      const boundPc = registry.data.find(p => p.id === flightBinding.pcId);
+      const normalize = (s: string | undefined | null) =>
+        (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+      const boundKey = normalize(boundPc?.squadronName);
+      const boundDigits = (boundPc?.squadronName ?? "").match(/\d+/)?.[0] ?? "";
+      const targetKey = normalize(target.squadronName);
+      const sameSquadron =
+        !!boundKey && !!targetKey && (
+          targetKey === boundKey
+          || targetKey.includes(boundKey) || boundKey.includes(targetKey)
+          || (!!boundDigits && targetKey.includes(boundDigits))
+        );
+      const isBound = target.id === flightBinding.pcId;
+      const isSquadronPeer = target.tier === "squadron" && sameSquadron;
+      if (!isBound && !isSquadronPeer) {
+        toast({ title: "Flight Commander may only message PCs in the bound squadron", variant: "destructive" });
+        return;
+      }
     }
     await send.mutateAsync({
       threadId: replyTo?.threadId,

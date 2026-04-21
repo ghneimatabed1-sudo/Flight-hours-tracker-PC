@@ -1696,12 +1696,6 @@ export function useSquadronSnapshot(
 // an ops-floor tool.
 export function canUseMessages(role: string | undefined, scope: string | undefined): boolean {
   if (role === "super_admin") return true;
-  // v1.1.31: Ops Pilot is now a first-class participant in private
-  // messaging — bidirectional with linked Flight Cmdrs and the
-  // Squadron Cmdr inside the same squadron, plus monitoring tiers
-  // (Wing / Base) above. The Ops PC is the squadron's anchor, so
-  // operationally it must be reachable from every PC in the chain.
-  if (role === "ops") return true;
   if (role === "commander") {
     return scope === "flight" || scope === "squadron" || scope === "wing" || scope === "base";
   }
