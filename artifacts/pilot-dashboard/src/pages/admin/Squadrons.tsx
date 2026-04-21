@@ -62,15 +62,38 @@ export default function Squadrons() {
   const [linkedFlightIds, setLinkedFlightIds] = useState<string[]>([]);
   const [loadingGroup, setLoadingGroup] = useState(false);
   const registeredPcs = useRegisteredPCs();
-  // Every flight commander PC that registered itself under the name of
-  // the squadron being edited. The admin picks from this set when
-  // choosing who is in the squadron's commanding group.
+  // Show all flight commander PCs even when the strict squadron-name
+  // match fails. v1.1.32: ports the v1.1.29 LicenseKeys helper so the
+  // Super Admin sees the same forgiving same-squadron list and the same
+  // "show every registered flight PC" fallback when spelling drifts
+  // (e.g. "NO.8" vs "no 8" vs "8 SQN") would otherwise hide them.
+  const normalizeSqLabel = (s: string | undefined | null) =>
+    (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const sqKey = normalizeSqLabel(draft.name);
+  const sqDigits = (draft.name ?? "").match(/\d+/)?.[0] ?? "";
   const flightPcsForSquadron = useMemo(() => {
     if (!editingId) return [];
-    return registeredPcs.data.filter(
-      p => p.tier === "flight" && p.squadronName === draft.name,
-    );
-  }, [registeredPcs.data, editingId, draft.name]);
+    return registeredPcs.data.filter(p => {
+      if (p.tier !== "flight") return false;
+      const flKey = normalizeSqLabel(p.squadronName);
+      if (!flKey) return false;
+      if (sqKey && flKey === sqKey) return true;
+      if (sqKey && (flKey.includes(sqKey) || sqKey.includes(flKey))) return true;
+      if (sqDigits && flKey.includes(sqDigits)) return true;
+      return false;
+    });
+  }, [registeredPcs.data, editingId, sqKey, sqDigits]);
+  // Diagnostic fallback — every registered flight PC in the ecosystem,
+  // regardless of label. The Super Admin can always tick the right
+  // ones from here when spelling drift hides them from the strict list.
+  const allRegisteredFlightPcs = useMemo(
+    () => registeredPcs.data.filter(p => p.tier === "flight"),
+    [registeredPcs.data],
+  );
+  const showFallbackFlightPicker =
+    !!editingId
+    && flightPcsForSquadron.length === 0
+    && allRegisteredFlightPcs.length > 0;
 
   function openCreate() {
     setEditingId(null);
@@ -367,12 +390,50 @@ export default function Squadrons() {
                   <p className="text-[11px] text-muted-foreground">
                     {lang === "ar" ? "جارٍ التحميل…" : "Loading current group…"}
                   </p>
-                ) : flightPcsForSquadron.length === 0 ? (
+                ) : flightPcsForSquadron.length === 0 && !showFallbackFlightPicker ? (
                   <p className="text-[11px] text-amber-700 dark:text-amber-300">
                     {lang === "ar"
-                      ? "لا يوجد قادة طيران مسجلون لهذا السرب بعد."
-                      : "No flight commander PCs are registered under this squadron yet."}
+                      ? "لا يوجد قادة طيران مسجلون لهذا السرب بعد. افتح \"حارس الصقر\" على جهاز قائد الطيران وسجّل الدخول مرة واحدة، ثم أعد فتح هذا الحوار."
+                      : "No flight commander PCs are registered yet. Open Hawk Eye on the flight commander PC and sign in once, then re-open this dialog."}
                   </p>
+                ) : flightPcsForSquadron.length === 0 ? (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pe-1">
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300 mb-1">
+                      {lang === "ar"
+                        ? "لم يطابق أي جهاز اسم السرب تماماً. اختر الجهاز الصحيح من القائمة الكاملة أدناه:"
+                        : "No PC matched this squadron name exactly. Pick the right one from the full list below:"}
+                    </p>
+                    {allRegisteredFlightPcs.map(pc => {
+                      const checked = linkedFlightIds.includes(pc.id);
+                      return (
+                        <label
+                          key={pc.id}
+                          className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-teal-100/40 dark:hover:bg-teal-900/20 cursor-pointer"
+                          data-testid={`row-sqn-flight-fallback-${pc.id}`}
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(v) => {
+                              setLinkedFlightIds(prev =>
+                                v ? Array.from(new Set([...prev, pc.id]))
+                                  : prev.filter(x => x !== pc.id),
+                              );
+                            }}
+                            data-testid={`checkbox-sqn-flight-fallback-${pc.id}`}
+                          />
+                          <span className="text-sm flex-1">
+                            {pc.deviceName || pc.squadronName || pc.id}
+                            <span className="text-[10px] text-muted-foreground ms-1">
+                              ({pc.squadronName || "—"})
+                            </span>
+                          </span>
+                          {pc.online && (
+                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400">●</span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
                 ) : (
                   <div className="space-y-1.5 max-h-48 overflow-y-auto pe-1">
                     {flightPcsForSquadron.map(pc => {
