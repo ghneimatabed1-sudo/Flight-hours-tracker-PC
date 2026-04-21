@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { useDashPilots, useDashSquadrons } from "@/lib/dash-pilots";
 import { pilotWorstStatus, pilotWorstDate, currencyStatus, fmtDate } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
-import { ChevronLeft, Eye, Plane, Calendar, Award, Printer, Sun, Moon, Cpu, Gauge, Star } from "lucide-react";
+import { ChevronLeft, Lock, Plane, Calendar, Award, Printer, Sun, Moon, MoonStar, Cpu, Gauge, Star } from "lucide-react";
 
 export default function PilotDetail() {
   const { t, lang, dir } = useI18n();
@@ -54,7 +54,7 @@ export default function PilotDetail() {
         </div>
         <div className="flex gap-2 flex-wrap">
           <StatusBadge status={pilotWorstStatus(pilot)} date={pilotWorstDate(pilot)} />
-          <Badge variant="outline" className="gap-1"><Eye className="h-3 w-3" />{t("readOnly")}</Badge>
+          <Badge variant="outline" className="gap-1"><Lock className="h-3 w-3" />{t("readOnly")}</Badge>
         </div>
       </div>
 
@@ -93,7 +93,7 @@ export default function PilotDetail() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <HourStat icon={<Sun className="h-3 w-3" />} label={t("dayHours")} value={pilot.dayHours} />
             <HourStat icon={<Moon className="h-3 w-3" />} label={t("nightHours")} value={pilot.nightHours} />
-            <HourStat icon={<Eye className="h-3 w-3" />} label={t("nvgTotal")} value={pilot.nvgTotalHours} accent="text-rose-500 dark:text-rose-300" />
+            <HourStat icon={<MoonStar className="h-3 w-3" />} label={t("nvgTotal")} value={pilot.nvgTotalHours} accent="text-rose-500 dark:text-rose-300" />
             <HourStat icon={<Gauge className="h-3 w-3" />} label={t("instrumentHours")} value={pilot.instrumentHours} />
             <HourStat icon={<Cpu className="h-3 w-3" />} label={t("simHours")} value={pilot.simHours} />
             <HourStat icon={<Star className="h-3 w-3" />} label={t("captainHours")} value={pilot.captainHours} accent="text-amber-600 dark:text-amber-400" />

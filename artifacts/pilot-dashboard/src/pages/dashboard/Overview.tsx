@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useDashPilots, useDashSquadrons } from "@/lib/dash-pilots";
 import { pilotWorstStatus } from "@/lib/format";
-import { ChevronRight, Eye, Plane, Users, AlertTriangle, Clock, Printer } from "lucide-react";
+import { ChevronRight, Lock, Plane, Users, AlertTriangle, Clock, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function CommanderOverview() {
@@ -33,7 +33,7 @@ export default function CommanderOverview() {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-xl font-bold">{t("overview")}</h2>
         <div className="flex items-center gap-2 no-print">
-          <Badge variant="outline" className="gap-1"><Eye className="h-3 w-3" />{t("readOnly")}</Badge>
+          <Badge variant="outline" className="gap-1"><Lock className="h-3 w-3" />{t("readOnly")}</Badge>
           <Button size="sm" variant="outline" onClick={() => window.print()} data-testid="button-print-overview">
             <Printer className="h-3.5 w-3.5 me-1" />{t("print")}
           </Button>

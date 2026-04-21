@@ -7,7 +7,7 @@ import { computeAllTotals } from "@/lib/calculations";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 import { Link } from "wouter";
 import {
-  Plane, MoonStar, Eye, Cpu, Users, Calendar, AlertTriangle,
+  Plane, MoonStar, Moon, Cpu, Users, Calendar, AlertTriangle,
   ChevronRight, Activity, Megaphone, Radio,
 } from "lucide-react";
 
@@ -140,7 +140,7 @@ export default function Dashboard() {
             <div className="flex items-center gap-5 flex-wrap text-sm">
               <Chip icon={<Plane className="h-3.5 w-3.5" />} label={t("dayShort")} value={monthDay} />
               <Chip icon={<MoonStar className="h-3.5 w-3.5" />} label={t("nightShort")} value={monthNight} />
-              <Chip icon={<Eye className="h-3.5 w-3.5" />} label={t("nvgShort")} value={monthNvg} accent="text-rose-300" />
+              <Chip icon={<Moon className="h-3.5 w-3.5" />} label={t("nvgShort")} value={monthNvg} accent="text-rose-300" />
               <Chip icon={<Cpu className="h-3.5 w-3.5" />} label={t("simShort")} value={monthSim} />
             </div>
           </div>
