@@ -195,6 +195,15 @@ app.whenReady().then(() => {
     autoUpdater.allowPrerelease = false;
     autoUpdater.channel = "latest";
 
+    // Builds are unsigned (no code-signing certificate). Disable the
+    // Authenticode publisher-name check that NsisUpdater performs by
+    // default — otherwise upgrades from a previously-signed install
+    // (publisherName "Captain Abed Ghneimat") refuse every new build
+    // with "not digitally signed". Returning null tells electron-updater
+    // the signature is acceptable.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (autoUpdater as any).verifyUpdateCodeSignature = () => Promise.resolve(null);
+
     // Pipe every update lifecycle event to the renderer so the Settings
     // page can show real progress instead of guessing. Renderer subscribes
     // via `rjafElectron.onUpdateEvent(cb)`.

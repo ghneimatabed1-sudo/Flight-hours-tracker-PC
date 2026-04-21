@@ -16,7 +16,6 @@
   "win": {
     "target": [{ "target": "nsis", "arch": ["x64"] }],
     "icon": "build/icon.ico",
-    "publisherName": "Captain Abed Ghneimat",
     "artifactName": "HawkEye-Setup-${version}.${ext}"
   },
   "nsis": {
