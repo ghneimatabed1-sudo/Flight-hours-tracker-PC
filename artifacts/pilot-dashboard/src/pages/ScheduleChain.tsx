@@ -153,17 +153,17 @@ export default function ScheduleChain() {
   }, []);
   const flightPCs = useMemo(
     () => {
-      // Linked flight PCs always show even if they've been quiet for 30
-      // days — the binding is explicit and operators expect to see them.
-      // Other flight PCs are filtered by the staleness cutoff so the list
-      // stays manageable in 100+ PC environments.
+      // v1.1.42: drop the linked-flight gate. Earlier we narrowed this
+      // to PCs the Sqn Cmdr explicitly linked at setup, but in the live
+      // deployment that setup step gets skipped — leaving the picker
+      // empty for the Sqn Cmdr. Show every fresh Flight PC the registry
+      // knows about, plus every linked Flight PC unconditionally (no
+      // staleness cutoff so a freshly-reimaged flight PC is visible
+      // immediately).
       const all = registry.data.filter(p => !p.isSelf && p.tier === "flight");
-      if (myTier === "squadron" && linkedFlightPcIds.length > 0) {
-        return sortByName(all.filter(p => linkedFlightPcIds.includes(p.id)));
-      }
-      return sortByName(all.filter(isFresh));
+      return sortByName(all.filter(p => linkedFlightPcIds.includes(p.id) || isFresh(p)));
     },
-    [registry.data, myTier, linkedFlightPcIds],
+    [registry.data, linkedFlightPcIds],
   );
   const squadronPCs = useMemo(
     () => sortByName(registry.data.filter(p => !p.isSelf && p.tier === "squadron" && isFresh(p))),

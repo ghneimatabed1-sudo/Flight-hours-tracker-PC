@@ -113,14 +113,15 @@ export default function Messages() {
       // bypass the staleness filter so a freshly-reimaged flight PC is
       // never invisible to its own squadron commander while it warms up.
       const STALE_CUTOFF_MS = Date.now() - 30 * 86_400_000;
+      // v1.1.42: drop the "must be linked" gate that was hiding every
+      // Flight Cmdr PC from the Sqn Cmdr's recipient picker whenever
+      // the operator skipped the linked-flight setup step. Now any
+      // Flight/Squadron/Wing/Base PC in the registry is selectable;
+      // the staleness cutoff still trims unbounded growth in 100+
+      // deployments, and explicitly-linked Flight PCs still bypass it.
       const base = registry.data.filter(
         p => !p.isSelf && (
-          p.tier === "squadron" || p.tier === "wing" || p.tier === "base" ||
-          // Include flight commander PCs the signed-in squadron commander
-          // explicitly linked at setup — those are the officers in this
-          // squadron who need to talk to the squadron commander and the
-          // ops PC.
-          (p.tier === "flight" && linkedFlightPcIds.includes(p.id))
+          p.tier === "squadron" || p.tier === "wing" || p.tier === "base" || p.tier === "flight"
         ),
       ).filter(p => {
         if (p.tier === "flight" && linkedFlightPcIds.includes(p.id)) return true;
@@ -180,6 +181,17 @@ export default function Messages() {
     },
     [registry.data, isFlightCmdr, flightBinding?.pcId, linkedFlightPcIds],
   );
+  // v1.1.42: forgiving fallback. If the strict tier filter yields zero
+  // recipients (registry rows are all stale, or the tier classifier on
+  // this PC has lost track of which is which), expose every non-self
+  // row so the operator can still pick someone manually. Mirrors the
+  // ScheduleChain composer's escape hatch.
+  const selectablePCsFallback = useMemo(
+    () => registry.data.filter(p => !p.isSelf),
+    [registry.data],
+  );
+  const usingFallbackRecipients = selectablePCs.length === 0 && selectablePCsFallback.length > 0;
+  const effectiveSelectablePCs = usingFallbackRecipients ? selectablePCsFallback : selectablePCs;
 
   if (!allowed) {
     return (
@@ -310,14 +322,24 @@ export default function Messages() {
                 data-testid="select-recipient"
               >
                 <option value="">— pick a registered PC —</option>
-                {selectablePCs.map(p => (
+                {effectiveSelectablePCs.map(p => (
                   <option key={p.id} value={p.id}>
-                    {p.deviceName || p.squadronName}{p.online ? " · online" : " · offline (will deliver on reconnect)"}
+                    {p.deviceName || p.squadronName} · {p.tier}{p.online ? " · online" : " · offline (will deliver on reconnect)"}
                   </option>
                 ))}
               </select>
+              {usingFallbackRecipients && (
+                <p className="text-[11px] text-amber-300 mt-1">
+                  No PC matched the strict tier filter — showing every PC in the registry ({effectiveSelectablePCs.length}). Pick the right one manually.
+                </p>
+              )}
+              {effectiveSelectablePCs.length === 0 && (
+                <p className="text-[11px] text-amber-300 mt-1">
+                  Registry is empty on this PC. Sign in once on the recipient PC with internet so this PC can see it.
+                </p>
+              )}
               {composeTo && (() => {
-                const sel = selectablePCs.find(p => p.id === composeTo);
+                const sel = effectiveSelectablePCs.find(p => p.id === composeTo);
                 if (!sel || sel.online) return null;
                 return (
                   <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1">
