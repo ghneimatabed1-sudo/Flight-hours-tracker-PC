@@ -223,7 +223,7 @@ export default function ScheduleChain() {
                 </option>
                 {composeTargets.map(p => (
                   <option key={p.id} value={p.id}>
-                    {p.squadronName}
+                    {p.deviceName || p.squadronName}
                     {p.tier === "flight" ? " · flight" : p.tier === "wing" && p.wing ? ` · ${p.wing}` : ""}
                     {p.online ? " · online" : " · offline"}
                   </option>

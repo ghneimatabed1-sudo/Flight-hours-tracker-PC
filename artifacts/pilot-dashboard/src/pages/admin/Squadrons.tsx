@@ -90,10 +90,11 @@ export default function Squadrons() {
     });
     setErr(null);
     setLinkedFlightIds([]);
-    // The squadron commander PC's canonical id in the cross-PC registry
-    // is its squadron name (see registerLocalPC → App.tsx). Use that as
-    // the group key for both loading and publishing.
-    const pcId = s.name;
+    // v1.1.18: the squadron commander PC's canonical id in the
+    // cross-PC registry is now SQDNCMD:<squadron-name> — the ops PC of
+    // the same squadron uses the bare squadron name. The group is
+    // owned by the COMMANDER, so key it by the SQDNCMD: id.
+    const pcId = `SQDNCMD:${s.name}`;
     setEditingPcId(pcId);
     setEditingPcName(s.name);
     setDialogOpen(true);

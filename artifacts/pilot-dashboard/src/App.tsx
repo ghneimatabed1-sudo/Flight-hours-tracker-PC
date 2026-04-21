@@ -285,17 +285,30 @@ function ArchiveBootstrap() {
         : "squadron"; // ops officer
     const configuredCode = sqnName?.trim() || "";
     const existingId = getLocalPcId();
-    const tierPrefix = `${tier.toUpperCase()}:`;
-    const existingMatchesTier = tier === "squadron"
+    // Squadron tier covers TWO physically distinct PCs in the same
+    // squadron — the ops PC (role === "ops") and the squadron commander
+    // PC (role === "commander", scope === "squadron"). They must NOT
+    // share a registry id or their heartbeats overwrite each other and
+    // the picker dropdowns only show one of them. The ops PC keeps the
+    // canonical squadron-name id (so wing/base shares route here for
+    // chain ops); the squadron commander PC gets a SQDNCMD: prefix so
+    // it appears as its own selectable PC with its own device name and
+    // its own online indicator.
+    const isSqnCommander = role === "commander" && scope === "squadron";
+    const tierPrefix = isSqnCommander
+      ? "SQDNCMD:"
+      : `${tier.toUpperCase()}:`;
+    const isCanonicalSquadron = tier === "squadron" && !isSqnCommander;
+    const existingMatchesTier = isCanonicalSquadron
       ? existingId !== "" && !existingId.includes(":")
       : existingId.startsWith(tierPrefix);
     let id: string;
     if (configuredCode) {
-      id = tier === "squadron" ? configuredCode : `${tierPrefix}${configuredCode}`;
+      id = isCanonicalSquadron ? configuredCode : `${tierPrefix}${configuredCode}`;
     } else if (existingMatchesTier) {
       id = existingId;
     } else if (username) {
-      id = tier === "squadron" ? username : `${tierPrefix}${username}`;
+      id = isCanonicalSquadron ? username : `${tierPrefix}${username}`;
     } else {
       return; // no usable id yet — wait for next render
     }
