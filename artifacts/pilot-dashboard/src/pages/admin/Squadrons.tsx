@@ -94,6 +94,21 @@ export default function Squadrons() {
     !!editingId
     && flightPcsForSquadron.length === 0
     && allRegisteredFlightPcs.length > 0;
+  // v1.1.37: ultimate escape hatch. If the registry has ZERO entries
+  // tagged tier="flight" (e.g. the flight cmdr PC was first registered
+  // before the FLIGHT: id-prefix scheme existed and its row in the DB
+  // still says tier="squadron"), the operator still needs to be able to
+  // bind the right PC. Show every non-self PC in the registry with its
+  // tier badge so the admin can tick the flight cmdr PC manually.
+  const allOtherPcs = useMemo(
+    () => registeredPcs.data.filter(p => !p.isSelf),
+    [registeredPcs.data],
+  );
+  const showAnyTierFallback =
+    !!editingId
+    && flightPcsForSquadron.length === 0
+    && allRegisteredFlightPcs.length === 0
+    && allOtherPcs.length > 0;
 
   function openCreate() {
     setEditingId(null);
@@ -405,12 +420,57 @@ export default function Squadrons() {
                   <p className="text-[11px] text-muted-foreground">
                     {lang === "ar" ? "جارٍ التحميل…" : "Loading current group…"}
                   </p>
+                ) : showAnyTierFallback ? (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pe-1">
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300 mb-1">
+                      {lang === "ar"
+                        ? `لم يُسجَّل أي جهاز كقائد طيران بعد. القائمة أدناه تعرض كل أجهزة الشبكة (${allOtherPcs.length}) — اختر جهاز قائد الطيران يدوياً:`
+                        : `No PC is tagged as flight commander yet. Showing every PC the network has seen (${allOtherPcs.length}) — pick the flight commander PC manually:`}
+                    </p>
+                    {allOtherPcs.map(pc => {
+                      const checked = linkedFlightIds.includes(pc.id);
+                      return (
+                        <label
+                          key={pc.id}
+                          className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-teal-100/40 dark:hover:bg-teal-900/20 cursor-pointer"
+                          data-testid={`row-sqn-anytier-${pc.id}`}
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(v) => {
+                              setLinkedFlightIds(prev =>
+                                v ? Array.from(new Set([...prev, pc.id]))
+                                  : prev.filter(x => x !== pc.id),
+                              );
+                            }}
+                            data-testid={`checkbox-sqn-anytier-${pc.id}`}
+                          />
+                          <span className="text-sm flex-1">
+                            {pc.deviceName || pc.squadronName || pc.id}
+                            <span className="text-[10px] text-muted-foreground ms-1">
+                              [{pc.tier}] ({pc.squadronName || "—"})
+                            </span>
+                          </span>
+                          {pc.online && (
+                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400">●</span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
                 ) : flightPcsForSquadron.length === 0 && !showFallbackFlightPicker ? (
-                  <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                    {lang === "ar"
-                      ? "لا يوجد قادة طيران مسجلون لهذا السرب بعد. افتح \"حارس الصقر\" على جهاز قائد الطيران وسجّل الدخول مرة واحدة، ثم أعد فتح هذا الحوار."
-                      : "No flight commander PCs are registered yet. Open Hawk Eye on the flight commander PC and sign in once, then re-open this dialog."}
-                  </p>
+                  <div className="space-y-1">
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                      {lang === "ar"
+                        ? "لا يوجد قادة طيران مسجلون لهذا السرب بعد. افتح \"حارس الصقر\" على جهاز قائد الطيران وسجّل الدخول مرة واحدة، ثم أعد فتح هذا الحوار."
+                        : "No flight commander PCs are registered yet. Open Hawk Eye on the flight commander PC and sign in once, then re-open this dialog."}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {lang === "ar"
+                        ? `تشخيص: السجل يحتوي ${registeredPcs.data.length} جهاز(أجهزة)، منها ${allRegisteredFlightPcs.length} كقائد طيران.`
+                        : `Diagnostic: registry has ${registeredPcs.data.length} PC(s) total, ${allRegisteredFlightPcs.length} tagged as flight.`}
+                    </p>
+                  </div>
                 ) : flightPcsForSquadron.length === 0 ? (
                   <div className="space-y-1.5 max-h-48 overflow-y-auto pe-1">
                     <p className="text-[11px] text-amber-700 dark:text-amber-300 mb-1">
