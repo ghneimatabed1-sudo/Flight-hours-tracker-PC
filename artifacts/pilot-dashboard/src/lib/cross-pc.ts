@@ -1702,17 +1702,27 @@ export function canUseMessages(role: string | undefined, scope: string | undefin
   return false;
 }
 
-// Role helper: which roles see the schedule chain UI. Flight Cmdr is
-// allowed to participate. Ops Pilot (deputy / flight commander on the
-// squadron sub-account) sees nothing.
+// Role helper: which roles see the schedule chain UI.
+//
+// v1.1.28 widening: the Ops Pilot is now a first-class participant
+// in the schedule chain so the operations desk can both publish the
+// daily flight programme to the linked Flight Commanders and to the
+// Squadron Commander, AND receive returned/edited programmes back from
+// either side. The Ops PC sits at "squadron" tier in the registry but
+// has its own canonical id (= squadron code), so shares route to it
+// exactly like to any other PC.
+//
+// The schedule sharing channels are:
+//   Ops Pilot   ⇄ Flight Cmdr     (peer share within the squadron)
+//   Ops Pilot   ⇄ Squadron Cmdr   (peer share within the squadron)
+//   Flight Cmdr ─▶ Squadron Cmdr  (approve / reject)
+//   Squadron Cmdr ─▶ Wing Cmdr    (approve / reject; on approve the
+//                                  share auto-forwards down to Base)
+//   Base Cmdr   (read-only, terminal recipient)
+// HQ tier never participates.
 export function canUseScheduleChain(role: string | undefined, scope: string | undefined): boolean {
   if (role === "super_admin") return true;
-  // The schedule sharing chain runs:
-  //   Flight Cmdr ─▶ Squadron Cmdr (approve / reject)
-  //   Squadron Cmdr ─▶ Wing Cmdr (approve / reject; on approve the share
-  //                                auto-forwards down to the Base Cmdr)
-  //   Base Cmdr (read-only, terminal recipient)
-  // The Ops Pilot's PC and the HQ tier never participate.
+  if (role === "ops") return true; // Ops Pilot's PC — squadron-tier peer
   if (role === "commander") {
     return scope === "flight" || scope === "squadron"
         || scope === "wing"   || scope === "base";

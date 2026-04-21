@@ -24,7 +24,7 @@ import {
   Mail as MailIcon,
   Share2 as Share2Icon,
 } from "lucide-react";
-import { canUseMessages } from "@/lib/cross-pc";
+import { canUseMessages, canUseScheduleChain } from "@/lib/cross-pc";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
 import { IncomingAlertWatcher } from "@/components/IncomingAlertWatcher";
 
@@ -131,11 +131,11 @@ export default function Layout({ children }: { children: ReactNode }) {
             // it cascades into the local calc engine on accept.
             if (p === "/messages") return canUseMessages(user?.role, undefined);
             if (p === "/schedule-chain") {
-              // Sharing Schedule label hidden from the operations pilot's
-              // sidebar at the operator's request — the route remains
-              // mounted so commanders / sub-account flows that link in
-              // directly keep working.
-              return user?.role !== "ops";
+              // v1.1.28: Ops Pilot is now a first-class participant in
+              // the schedule chain (peer share with linked Flight Cmdrs
+              // AND with the Squadron Cmdr, both directions). The label
+              // is shown for every role canUseScheduleChain accepts.
+              return canUseScheduleChain(user?.role, undefined);
             }
             if (p === "/pending") return user?.role === "ops" || user?.role === "super_admin";
             return true;

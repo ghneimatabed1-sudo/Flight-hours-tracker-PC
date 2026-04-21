@@ -57,8 +57,14 @@ export default function ScheduleChain() {
   // v1.0.45: "flight" is now a first-class schedule-chain tier so a
   // Flight Commander PC can compose & submit a sortie schedule to the
   // parent Squadron, and receive shares back from the Squadron.
-  const myTier: "flight" | "squadron" | "wing" | "base" =
-    user?.scope === "flight" ? "flight"
+  // v1.1.28: "ops" is added as a peer of "squadron". The Ops Pilot's
+  // PC sits at squadron tier in the registry (canonical id = squadron
+  // code) but its composer addresses Flight Cmdrs (down) and the
+  // Squadron Cmdr (peer at squadron tier) instead of Wing — Ops never
+  // forwards up the chain, it only shares laterally inside the squadron.
+  const myTier: "flight" | "ops" | "squadron" | "wing" | "base" =
+    user?.role === "ops" ? "ops"
+    : user?.scope === "flight" ? "flight"
     : user?.scope === "wing" ? "wing"
     : user?.scope === "base" ? "base"
     : "squadron";
@@ -159,8 +165,20 @@ export default function ScheduleChain() {
   const composeTargets = useMemo(() => {
     if (myTier === "flight") return squadronPCs;
     if (myTier === "squadron") return [...wingPCs, ...flightPCs];
+    // Ops Pilot: lateral peer share inside the squadron only.
+    // Down-chain → linked Flight Cmdr PCs.
+    // Peer-chain → other squadron-tier PCs (the Squadron Cmdr PC sits
+    // here; self is already excluded by the registry filters above).
+    if (myTier === "ops") return [...flightPCs, ...squadronPCs];
     return [];
   }, [myTier, squadronPCs, wingPCs, flightPCs]);
+
+  // The ScheduleTier wire enum has flight|squadron|wing|base only —
+  // "ops" is a UI-only distinction (the Ops PC sits at squadron tier in
+  // the registry). Map "ops" → "squadron" whenever the value crosses
+  // the wire (decide history entries, RLS-checked tier comparisons).
+  const wireTier: "flight" | "squadron" | "wing" | "base" =
+    myTier === "ops" ? "squadron" : myTier;
 
   if (!allowed) {
     return (
@@ -213,10 +231,11 @@ export default function ScheduleChain() {
         subtitle={`Chain: Flight ↔ Squadron → Wing → Base · this PC: ${myPcName} (${myTier})`}
       />
 
-      {/* Compose new schedule — available to Squadron and Flight tiers.
-          Squadron composers pick a Wing PC (up-chain) or a Flight PC
-          (down-chain). Flight composers pick a Squadron PC. */}
-      {(myTier === "squadron" || myTier === "flight") && (
+      {/* Compose new schedule — available to Squadron, Flight and Ops
+          tiers. Squadron composers pick a Wing PC (up-chain) or a Flight
+          PC (down-chain). Flight composers pick a Squadron PC. Ops Pilot
+          composers pick a Flight Cmdr PC or the Squadron Cmdr PC. */}
+      {(myTier === "squadron" || myTier === "flight" || myTier === "ops") && (
         <Card className="mb-3">
           <div className="text-sm font-semibold mb-2">Compose & submit</div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
@@ -228,18 +247,28 @@ export default function ScheduleChain() {
               <label className="text-[11px] text-muted-foreground">
                 {myTier === "flight"
                   ? "Send to (Squadron PC)"
+                  : myTier === "ops"
+                  ? "Send to (Flight Cmdr or Squadron Cmdr PC)"
                   : "Send to (Wing or Flight PC)"}
               </label>
               <select value={submitTo} onChange={e => setSubmitTo(e.target.value)} className="w-full mt-1 px-3 py-1.5 rounded-md bg-input border border-border text-sm" data-testid="select-target">
                 <option value="">
                   {myTier === "flight"
                     ? "— pick a registered Squadron PC —"
+                    : myTier === "ops"
+                    ? "— pick a Flight Cmdr or Squadron Cmdr PC —"
                     : "— pick a registered Wing or Flight PC —"}
                 </option>
                 {composeTargets.map(p => (
                   <option key={p.id} value={p.id}>
                     {p.deviceName || p.squadronName}
-                    {p.tier === "flight" ? " · flight" : p.tier === "wing" && p.wing ? ` · ${p.wing}` : ""}
+                    {p.tier === "flight"
+                      ? " · Flight Cmdr"
+                      : p.tier === "squadron"
+                      ? " · Squadron Cmdr"
+                      : p.tier === "wing" && p.wing
+                      ? ` · ${p.wing}`
+                      : ""}
                     {p.online ? " · online" : " · offline"}
                   </option>
                 ))}
@@ -378,7 +407,7 @@ export default function ScheduleChain() {
                               const baseId = forwardTo || basePCs[0].id;
                               const baseTarget = basePCs.find(p => p.id === baseId) ?? basePCs[0];
                               await decide.mutateAsync({
-                                id: share.id, action: "forward", by: approver, tier: myTier,
+                                id: share.id, action: "forward", by: approver, tier: wireTier,
                                 forwardPcId: baseTarget.id, forwardPcName: baseTarget.squadronName,
                               });
                               await decide.mutateAsync({
@@ -387,7 +416,7 @@ export default function ScheduleChain() {
                               });
                               toast({ title: `Approved · sent to ${baseTarget.squadronName}` });
                             } else {
-                              await decide.mutateAsync({ id: share.id, action: "approve", by: approver, tier: myTier, note: decisionNote || undefined });
+                              await decide.mutateAsync({ id: share.id, action: "approve", by: approver, tier: wireTier, note: decisionNote || undefined });
                               toast({ title: "Approved" });
                             }
                             setDecisionNote("");
@@ -402,7 +431,7 @@ export default function ScheduleChain() {
                         </button>
                         <button
                           onClick={async () => {
-                            await decide.mutateAsync({ id: share.id, action: "reject", by: user?.username ?? "ops", tier: myTier, note: decisionNote || undefined });
+                            await decide.mutateAsync({ id: share.id, action: "reject", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined });
                             toast({ title: "Rejected" }); setDecisionNote("");
                           }}
                           className="px-3 py-1.5 rounded-md bg-rose-500/20 border border-rose-400/40 text-rose-100 text-xs font-semibold inline-flex items-center gap-1"
@@ -412,7 +441,7 @@ export default function ScheduleChain() {
                         </button>
                         <button
                           onClick={async () => {
-                            await decide.mutateAsync({ id: share.id, action: "hold", by: user?.username ?? "ops", tier: myTier, note: decisionNote || undefined });
+                            await decide.mutateAsync({ id: share.id, action: "hold", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined });
                             toast({ title: "Held" }); setDecisionNote("");
                           }}
                           className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs inline-flex items-center gap-1"
@@ -429,7 +458,7 @@ export default function ScheduleChain() {
                                     id: share.id,
                                     action: "edit",
                                     by: user?.username ?? "ops",
-                                    tier: myTier,
+                                    tier: wireTier,
                                     note: decisionNote || undefined,
                                     editedProgram: buf,
                                     editedRows: programToShareRows(buf),
@@ -467,7 +496,7 @@ export default function ScheduleChain() {
                         ) : (
                           <button
                             onClick={async () => {
-                              await decide.mutateAsync({ id: share.id, action: "edit", by: user?.username ?? "ops", tier: myTier, note: decisionNote || undefined, editedRows: share.rows });
+                              await decide.mutateAsync({ id: share.id, action: "edit", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined, editedRows: share.rows });
                               toast({ title: "Edits returned to originator" }); setDecisionNote("");
                             }}
                             className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs inline-flex items-center gap-1"
