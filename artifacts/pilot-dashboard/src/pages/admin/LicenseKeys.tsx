@@ -15,6 +15,7 @@ import type { CommanderScope } from "@/lib/types";
 import { fmtDate, fmtDateTime } from "@/lib/format";
 import { KeyRound, Copy, Check, User as UserIcon, Wrench, Lock, Shuffle } from "lucide-react";
 import { useRegisteredPCs } from "@/lib/cross-pc";
+import { useQueryClient } from "@tanstack/react-query";
 import { Checkbox } from "@/components/ui/checkbox";
 
 // One-shot Check-for-Updates control rendered next to the Setup error block.
@@ -99,6 +100,14 @@ export default function LicenseKeys() {
   // pickers so commanders are only ever bound to real ops squadron PCs.
   const registeredPcs = useRegisteredPCs();
   const opsSquadronPcs = registeredPcs.data.filter(p => p.tier === "squadron");
+  // Commander Setup happens BEFORE this PC has ever signed in to Supabase, so
+  // it runs as an anonymous client. The cross-PC registry query already
+  // refetches every 30s, but the dialog is often opened right after a
+  // Super Admin seeds a new ops PC entry — waiting up to 30s for the
+  // cached empty result to expire feels broken. Invalidate the cache
+  // every time the dialog opens so the dropdown always reflects the
+  // server's latest state within a blink.
+  const qc = useQueryClient();
 
   // Setup-dialog roles. We keep five UI choices but collapse the three
   // commander tiers into the same underlying PcRoleLock value ("commander"),
@@ -344,6 +353,7 @@ export default function LicenseKeys() {
 
   function openSetup() {
     setSetupOpen(true);
+    qc.invalidateQueries({ queryKey: ["xpc", "registry"] });
     setSetupErr(null);
     setSetupOk(null);
     setSetupCredentials(null);

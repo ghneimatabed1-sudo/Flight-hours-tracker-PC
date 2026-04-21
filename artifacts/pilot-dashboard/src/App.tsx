@@ -159,6 +159,12 @@ function AdminRoutes() {
       <Route path="/admin/security" component={AdminSecurity} />
       <Route path="/admin/reminders" component={RemindersSchedule} />
       <Route path="/admin/reminders/log" component={ReminderLog} />
+      {/* Settings page (auto-updater toggle + "Check for app update" button)
+          is shared with SquadronOpsRoutes. The HQ sidebar links to /settings
+          so super_admin users need this route mounted here too — without it
+          the catch-all below was silently redirecting clicks back to
+          /admin, making the Settings entry appear broken. */}
+      <Route path="/settings" component={SettingsPage} />
       {/* See SquadronOpsRoutes catch-all: redirect home rather than 404. */}
       <Route><Redirect to="/admin" /></Route>
     </Switch>
