@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { useI18n, type Key } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2, Bell } from "lucide-react";
+import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2, Bell, Settings as SettingsIcon } from "lucide-react";
 import { canUseMessages, canUseScheduleChain } from "@/lib/cross-pc";
 import { FlightBindingGate, FlightBindingBadge } from "@/components/FlightBindingGate";
 import emblem from "@assets/rjaf_emblem.png";
@@ -37,6 +37,7 @@ export function HQLayout({ children }: { children: ReactNode }) {
         { path: "/admin/reminders", labelKey: "remindersSchedule", icon: <AlarmClock className="h-4 w-4" /> },
         { path: "/admin/audit", labelKey: "auditLog", icon: <ListChecks className="h-4 w-4" /> },
         { path: "/admin/security", labelKey: "nav_security", icon: <Lock className="h-4 w-4" /> },
+        { path: "/settings", labelKey: "nav_settings", icon: <SettingsIcon className="h-4 w-4" /> },
       ]
     : [
         { path: "/dashboard", labelKey: "overview", icon: <BarChart3 className="h-4 w-4" /> },

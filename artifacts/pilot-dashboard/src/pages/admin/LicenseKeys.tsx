@@ -17,6 +17,67 @@ import { KeyRound, Copy, Check, User as UserIcon, Wrench, Lock, Shuffle } from "
 import { useRegisteredPCs } from "@/lib/cross-pc";
 import { Checkbox } from "@/components/ui/checkbox";
 
+// One-shot Check-for-Updates control rendered next to the Setup error block.
+// Lets an operator stuck on a broken installer pull the latest build without
+// leaving the modal. No-op outside packaged Electron.
+function SetupUpdateButton({ lang }: { lang: "en" | "ar" }): JSX.Element | null {
+  type Bridge = {
+    checkForUpdates?: () => Promise<{ ok: boolean; version?: string | null; reason?: string }>;
+    installUpdateNow?: () => Promise<boolean>;
+    onUpdateEvent?: (cb: (e: { kind: string; version?: string; percent?: number; message?: string }) => void) => () => void;
+    isPackaged?: () => Promise<boolean>;
+  };
+  const bridge = (typeof window !== "undefined" ? (window as unknown as { rjafElectron?: Bridge }).rjafElectron : null) ?? null;
+  const [status, setStatus] = useState<string>("");
+  const [downloadedVersion, setDownloadedVersion] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!bridge?.onUpdateEvent) return;
+    const off = bridge.onUpdateEvent((e) => {
+      switch (e.kind) {
+        case "checking": setStatus(lang === "ar" ? "جارٍ البحث عن تحديث…" : "Checking for update…"); break;
+        case "available": setStatus(lang === "ar" ? `يجري التنزيل ${e.version ?? ""}…` : `Downloading ${e.version ?? ""}…`); break;
+        case "progress": setStatus(lang === "ar" ? `التنزيل ${Math.round(e.percent ?? 0)}%` : `Downloading ${Math.round(e.percent ?? 0)}%`); break;
+        case "downloaded":
+          setDownloadedVersion(e.version ?? null);
+          setStatus(lang === "ar" ? `جاهز للتثبيت (${e.version ?? ""})` : `Ready to install (${e.version ?? ""})`);
+          break;
+        case "none": setStatus(lang === "ar" ? "لا يوجد تحديث جديد." : "No update available."); break;
+        case "error": setStatus(lang === "ar" ? `خطأ في التحديث: ${e.message ?? ""}` : `Update error: ${e.message ?? ""}`); break;
+      }
+    });
+    return off;
+  }, [bridge, lang]);
+  if (!bridge?.checkForUpdates) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 pt-1">
+      {downloadedVersion ? (
+        <Button
+          size="sm"
+          className="h-7 px-3 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white"
+          onClick={async () => { setBusy(true); await bridge.installUpdateNow?.(); }}
+          disabled={busy}
+          data-testid="button-setup-install-update"
+        >
+          {lang === "ar" ? "ثبّت التحديث وأعد التشغيل" : "Install update & restart"}
+        </Button>
+      ) : (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-3 text-[11px]"
+          onClick={async () => { setBusy(true); setStatus(""); try { await bridge.checkForUpdates?.(); } finally { setBusy(false); } }}
+          disabled={busy}
+          data-testid="button-setup-check-update"
+        >
+          {lang === "ar" ? "تحقق من تحديث التطبيق" : "Check for app update"}
+        </Button>
+      )}
+      {status && <span className="text-[11px] text-muted-foreground">{status}</span>}
+    </div>
+  );
+}
+
 function genKey(code: string): string {
   const rnd = Array.from({ length: 16 }, () => Math.floor(Math.random() * 36).toString(36).toUpperCase()).join("");
   return `EE-${code}-${rnd.slice(0, 4)}-${rnd.slice(4, 8)}-${rnd.slice(8, 12)}-${rnd.slice(12, 16)}`;
@@ -1484,8 +1545,14 @@ export default function LicenseKeys() {
               )}
 
               {setupErr && (
-                <div className="rounded border border-red-300 bg-red-50 dark:bg-red-950 p-2 text-xs text-red-900 dark:text-red-100">
-                  {setupErr}
+                <div className="rounded border border-red-300 bg-red-50 dark:bg-red-950 p-2 text-xs text-red-900 dark:text-red-100 space-y-2">
+                  <div>{setupErr}</div>
+                  {/* When the server-registration step fails (most often a
+                      stale installer pointing at an old api-server URL), give
+                      the operator a one-click way to pull the latest build
+                      without leaving this dialog. The button is gated to
+                      packaged Electron — it's a no-op in dev/browser. */}
+                  {/Failed to fetch|تعذر/.test(setupErr) && <SetupUpdateButton lang={lang} />}
                 </div>
               )}
             </div>
