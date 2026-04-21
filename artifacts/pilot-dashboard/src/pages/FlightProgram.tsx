@@ -143,6 +143,11 @@ export default function FlightProgram() {
   const [showDefaults, setShowDefaults] = useState(false);
   const [showSubmit, setShowSubmit]   = useState(false);
   const [submitTo, setSubmitTo]       = useState("");
+  // v1.1.41: Flight Cmdr may temporarily unlock the bound recipient and
+  // pick a specific PC (e.g. the Sqn Cmdr PC explicitly, instead of the
+  // bound Ops PC). The bound binding is preserved — only the picker is
+  // expanded for THIS submit.
+  const [unlockRecipient, setUnlockRecipient] = useState(false);
 
   // When the date changes, swap to that day's program (or a fresh one).
   useEffect(() => { setProg(loadProgram(date, defaults)); }, [date, defaults]);
@@ -323,15 +328,24 @@ export default function FlightProgram() {
           <div className="grid sm:grid-cols-3 gap-2">
             <label className="sm:col-span-2 flex flex-col gap-1">
               <span className="text-[11px] text-muted-foreground">
-                {isFlightCmdr && flightBinding ? "Recipient (bound Squadron Commander)" : "Recipient PC"}
+                {isFlightCmdr && flightBinding && !unlockRecipient
+                  ? "Recipient (bound Squadron — Ops + Cmdr will both see it)"
+                  : "Recipient PC"}
               </span>
-              {isFlightCmdr && flightBinding ? (
+              {isFlightCmdr && flightBinding && !unlockRecipient ? (
                 <div
-                  className="px-2 py-1.5 rounded-md bg-secondary/40 border border-border text-sm font-medium flex items-center justify-between"
+                  className="px-2 py-1.5 rounded-md bg-secondary/40 border border-border text-sm font-medium flex items-center justify-between gap-2"
                   data-testid="bound-recipient"
                 >
-                  <span>{flightBinding.pcName}</span>
-                  <span className="text-[11px] text-muted-foreground">locked</span>
+                  <span className="truncate">{flightBinding.pcName}</span>
+                  <button
+                    type="button"
+                    onClick={() => { setUnlockRecipient(true); setSubmitTo(""); }}
+                    className="text-[11px] text-amber-300 hover:text-amber-200 underline whitespace-nowrap"
+                    data-testid="button-unlock-recipient"
+                  >
+                    Change…
+                  </button>
                 </div>
               ) : (
                 <>
