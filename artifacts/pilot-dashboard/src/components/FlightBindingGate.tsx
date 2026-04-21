@@ -5,6 +5,8 @@ import {
   setFlightBinding,
   getAdminFlightBindingFor,
   syncAdminFlightBindingsFromRemote,
+  syncSquadronFlightGroupForFlightPc,
+  getLocalPcId,
   type FlightBinding,
 } from "@/lib/cross-pc";
 import { Plane, Link2 } from "lucide-react";
@@ -35,10 +37,33 @@ export function FlightBindingGate({ children }: { children: ReactNode }) {
     void (async () => {
       try { await syncAdminFlightBindingsFromRemote(); } catch { /* offline ok */ }
       if (cancelled) return;
+      // Admin-driven override wins when present (Super Admin explicitly
+      // pinned this flight commander to a squadron).
       const override = getAdminFlightBindingFor(user?.username);
       if (override) {
         setFlightBinding(override);
         setBinding(override);
+        setSyncing(false);
+        return;
+      }
+      // Otherwise: honour the squadron-commander-published group. When a
+      // Squadron Commander ticks this flight PC in their Setup dialog,
+      // the commander PC broadcasts a "xpc.squadron.flight.group.set"
+      // event every 30s; we listen for one that lists our canonical id
+      // and auto-apply the squadron PC as our binding. This is what ties
+      // the ops PC + squadron commander + linked flight commanders into
+      // one messaging group without any admin step.
+      const myPcId = getLocalPcId();
+      let groupBinding: FlightBinding | null = null;
+      if (myPcId) {
+        try {
+          groupBinding = await syncSquadronFlightGroupForFlightPc(myPcId);
+        } catch { /* offline ok */ }
+      }
+      if (cancelled) return;
+      if (groupBinding) {
+        setFlightBinding(groupBinding);
+        setBinding(groupBinding);
       } else {
         setFlightBinding(null);
         setBinding(null);

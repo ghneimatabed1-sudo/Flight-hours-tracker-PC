@@ -47,7 +47,7 @@ import PendingApprovals from "@/pages/PendingApprovals";
 import GuestBackfill from "@/pages/GuestBackfill";
 import Messages from "@/pages/Messages";
 import ScheduleChain from "@/pages/ScheduleChain";
-import { registerLocalPC, purgeExpiredMessages, getLocalPcId, type PcTier } from "@/lib/cross-pc";
+import { registerLocalPC, purgeExpiredMessages, getLocalPcId, publishSquadronFlightGroup, type PcTier } from "@/lib/cross-pc";
 import Roster from "@/pages/Roster";
 import PilotDetail from "@/pages/PilotDetail";
 import Currency from "@/pages/Currency";
@@ -304,6 +304,23 @@ function ArchiveBootstrap() {
     const tick = () => {
       registerLocalPC({ id, displayName, tier, base: sqnBase });
       purgeExpiredMessages();
+      // Squadron commanders re-broadcast their flight-commander group on
+      // every heartbeat so any flight PC coming online later picks up the
+      // binding within 30s. Ops PCs (tier === "squadron" but
+      // role === "ops") are excluded — only the actual squadron COMMANDER
+      // owns the group definition. Empty lists skip the broadcast so we
+      // don't publish a no-op event every 30s.
+      try {
+        const isSquadronCommander =
+          role === "commander" && scope === "squadron";
+        if (isSquadronCommander) {
+          const raw = localStorage.getItem("rjaf.linkedFlightPcIds");
+          const ids: string[] = raw ? JSON.parse(raw) : [];
+          if (Array.isArray(ids) && ids.length > 0) {
+            void publishSquadronFlightGroup(id, displayName, ids);
+          }
+        }
+      } catch { /* ignore parse / storage errors */ }
     };
     tick();
     const handle = window.setInterval(tick, 30_000);

@@ -189,6 +189,82 @@ export async function syncAdminFlightBindingsFromRemote(): Promise<void> {
   }
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Squadron-commander → flight-commander group. Published by a Squadron
+// Commander PC when it finishes Setup with a non-empty
+// `rjaf.linkedFlightPcIds`. Any flight commander PC whose id is in
+// `flightPcIds` picks this up on sign-in and auto-sets its local
+// flight binding to the squadron commander PC — so the whole squadron
+// group (ops PC + squadron commander + linked flight commanders) can
+// message and coordinate without an additional admin step.
+// ──────────────────────────────────────────────────────────────────────
+export interface SquadronFlightGroup {
+  squadronPcId: string;
+  squadronPcName: string;
+  flightPcIds: string[];
+  publishedAt: string;
+}
+
+export async function publishSquadronFlightGroup(
+  squadronPcId: string,
+  squadronPcName: string,
+  flightPcIds: string[],
+): Promise<void> {
+  if (!squadronPcId) return;
+  const payload: SquadronFlightGroup = {
+    squadronPcId,
+    squadronPcName: squadronPcName || squadronPcId,
+    flightPcIds: Array.from(new Set(flightPcIds.filter(Boolean))),
+    publishedAt: nowIso(),
+  };
+  try {
+    await recordAuditEvent({
+      type: "xpc.squadron.flight.group.set",
+      actor: squadronPcId,
+      detail: payload as unknown as Record<string, unknown>,
+    });
+  } catch {
+    // Silent — the registry heartbeat re-runs every 30s and will retry.
+  }
+}
+
+// Called on every flight commander PC sign-in. Finds the most recent
+// squadron group that lists THIS flight PC, and returns the squadron
+// binding to apply. Returns null when no group claims this PC or when
+// offline (the caller falls back to the admin-override path).
+export async function syncSquadronFlightGroupForFlightPc(
+  flightPcId: string,
+): Promise<FlightBinding | null> {
+  if (!isLive() || !supabase || !flightPcId) return null;
+  const { data, error } = await supabase
+    .from("audit_log")
+    .select("detail, occurred_at")
+    .eq("type", "xpc.squadron.flight.group.set")
+    .order("occurred_at", { ascending: false })
+    .limit(50);
+  if (error || !data) return null;
+  // Latest group (per squadron) wins — walk newest → oldest and return
+  // the first one whose flightPcIds includes us.
+  for (const row of data as { detail?: Record<string, unknown> }[]) {
+    const d = row.detail ?? {};
+    const ids = Array.isArray((d as { flightPcIds?: unknown }).flightPcIds)
+      ? ((d as { flightPcIds: unknown[] }).flightPcIds.filter(
+          (x): x is string => typeof x === "string",
+        ))
+      : [];
+    if (!ids.includes(flightPcId)) continue;
+    const sqId = typeof (d as { squadronPcId?: unknown }).squadronPcId === "string"
+      ? (d as { squadronPcId: string }).squadronPcId
+      : "";
+    const sqName = typeof (d as { squadronPcName?: unknown }).squadronPcName === "string"
+      ? (d as { squadronPcName: string }).squadronPcName
+      : sqId;
+    if (!sqId) continue;
+    return { pcId: sqId, pcName: sqName };
+  }
+  return null;
+}
+
 export interface SquadronPC {
   id: string;             // canonical ecosystem id (squadron name, or
                           // commander-scope id e.g. "WING:NWAC")
