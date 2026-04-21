@@ -264,14 +264,33 @@ export default function ScheduleChain() {
     }
     return null;
   }, [myPcId, myTier]);
-  const incoming = sharesQ.data.filter(
-    s => s.currentPcId === myPcId || (peerSquadronId !== null && s.currentPcId === peerSquadronId),
-  );
-  const sent = sharesQ.data.filter(
-    s => (s.originSquadronId === myPcId || (peerSquadronId !== null && s.originSquadronId === peerSquadronId))
-      && s.currentPcId !== myPcId
-      && (peerSquadronId === null || s.currentPcId !== peerSquadronId),
-  );
+  // v1.1.40: tier-prefix-equivalent matcher. Flight, Wing, Base and
+  // Sqn Cmdr ids carry a "#<deviceSuffix>" tail to keep two PCs sharing
+  // the same account distinguishable in the registry. But the device
+  // suffix is regenerated whenever localStorage is cleared (reimage,
+  // browser cache flush, fresh install) — so a returned-edit addressed
+  // to the OLD suffix never lands on the same logical seat after the
+  // reset. Match by the seat's "<TIER>:<base>" prefix instead so the
+  // inbox catches its own work even when the suffix changes.
+  const myLogicalSeat = useMemo<string | null>(() => {
+    if (!myPcId) return null;
+    const hashIdx = myPcId.indexOf("#");
+    if (hashIdx < 0) return null; // bare squadron id has no suffix
+    return myPcId.slice(0, hashIdx); // e.g. "FLIGHT:NO.8"
+  }, [myPcId]);
+  const matchesMe = (id: string | null | undefined): boolean => {
+    if (!id || !myPcId) return false;
+    if (id === myPcId) return true;
+    if (peerSquadronId !== null && id === peerSquadronId) return true;
+    if (myLogicalSeat !== null) {
+      const hashIdx = id.indexOf("#");
+      const otherSeat = hashIdx < 0 ? id : id.slice(0, hashIdx);
+      if (otherSeat === myLogicalSeat) return true;
+    }
+    return false;
+  };
+  const incoming = sharesQ.data.filter(s => matchesMe(s.currentPcId));
+  const sent = sharesQ.data.filter(s => matchesMe(s.originSquadronId) && !matchesMe(s.currentPcId));
 
   return (
     <div>
