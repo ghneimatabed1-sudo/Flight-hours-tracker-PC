@@ -47,7 +47,7 @@ import PendingApprovals from "@/pages/PendingApprovals";
 import GuestBackfill from "@/pages/GuestBackfill";
 import Messages from "@/pages/Messages";
 import ScheduleChain from "@/pages/ScheduleChain";
-import { registerLocalPC, purgeExpiredMessages, getLocalPcId, publishSquadronFlightGroup, getLatestSquadronFlightGroup, type PcTier } from "@/lib/cross-pc";
+import { registerLocalPC, purgeExpiredMessages, getLocalPcId, setLocalPcId, getDeviceSuffix, publishSquadronFlightGroup, getLatestSquadronFlightGroup, type PcTier } from "@/lib/cross-pc";
 import Roster from "@/pages/Roster";
 import PilotDetail from "@/pages/PilotDetail";
 import Currency from "@/pages/Currency";
@@ -309,16 +309,35 @@ function ArchiveBootstrap() {
     const existingMatchesTier = isCanonicalSquadron
       ? existingId !== "" && !existingId.includes(":")
       : existingId.startsWith(tierPrefix);
+    // Persisted id always wins. This guarantees one physical PC keeps the
+    // SAME registry id across restarts, account changes, and account
+    // re-issues — no second row appearing in the picker, no orphaned
+    // claim row in xpc_user_pcs, no flight binding breaking when an
+    // operator updates their display name. The persistence happens at
+    // the bottom of this block via setLocalPcId(id).
     let id: string;
-    if (configuredCode) {
-      id = isCanonicalSquadron ? configuredCode : `${tierPrefix}${configuredCode}`;
-    } else if (existingMatchesTier) {
+    if (existingMatchesTier && existingId) {
       id = existingId;
-    } else if (username) {
-      id = isCanonicalSquadron ? username : `${tierPrefix}${username}`;
+    } else if (configuredCode || username) {
+      // Logical base = squadron code if configured, else the auth
+      // username. The canonical ops PC keeps the bare logical base — its
+      // id IS the squadron's address that other PCs route to. Every
+      // other tier (squadron commander, flight, wing, base, HQ) appends
+      // a stable per-machine suffix so two PCs sharing the same account
+      // (e.g. two flight commander offices) stay distinguishable in the
+      // picker and never overwrite each other's registry row.
+      const logicalBase = (configuredCode || username) as string;
+      if (isCanonicalSquadron) {
+        id = logicalBase;
+      } else {
+        id = `${tierPrefix}${logicalBase}#${getDeviceSuffix()}`;
+      }
     } else {
       return; // no usable id yet — wait for next render
     }
+    // Persist the resolved id so subsequent boots reuse it verbatim. The
+    // condition prevents a needless write when the id is already cached.
+    if (id !== existingId) setLocalPcId(id);
     const displayName =
       configuredCode || displayNameRaw || username || `${tier.toUpperCase()} PC`;
     // Default the PC's device label to the user's account display name

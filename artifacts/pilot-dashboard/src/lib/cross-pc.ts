@@ -342,6 +342,38 @@ function localPcId(): string {
 export function getLocalPcId(): string {
   return localPcId();
 }
+export function setLocalPcId(id: string): void {
+  try {
+    if (id) localStorage.setItem("rjaf.xpc.localId", id);
+  } catch { /* localStorage may be blocked in tests */ }
+}
+
+// Stable per-machine random suffix. Generated once on first request and
+// cached in localStorage so the same physical PC always derives the same
+// suffix across restarts. Used to disambiguate two PCs that happen to be
+// signed in with the same account (e.g. two flight commander offices
+// sharing one set of credentials) — without a suffix they would heartbeat
+// to the same registry id and overwrite each other every 30 seconds. The
+// canonical ops PC intentionally does NOT use this suffix because its id
+// IS the squadron's address that other PCs route to.
+export function getDeviceSuffix(): string {
+  try {
+    const existing = localStorage.getItem("rjaf.deviceSuffix");
+    if (existing && /^[0-9a-f]{6}$/.test(existing)) return existing;
+    let fresh = "";
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      fresh = crypto.randomUUID().replace(/-/g, "").slice(0, 6);
+    } else {
+      fresh = Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0");
+    }
+    localStorage.setItem("rjaf.deviceSuffix", fresh);
+    return fresh;
+  } catch {
+    // localStorage blocked — return an in-process random so the session
+    // still has a unique-ish suffix even if it can't be persisted.
+    return Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0");
+  }
+}
 
 export interface RegisterPcOpts {
   id: string;
