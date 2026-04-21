@@ -89,26 +89,38 @@ function createWindow() {
     }
   };
   mainWindow.once("ready-to-show", () => showOnce("ready-to-show"));
+  // SAFETY NET: if `ready-to-show` doesn't fire within 15 seconds, force the
+  // window visible so the operator never stares at an invisible process. We
+  // log this to the renderer-error log for diagnostics but do NOT pop a modal
+  // — on cold installs (first launch after install, Windows Defender scan,
+  // SmartScreen, font fetch) the renderer routinely needs >4s to paint, and
+  // showing an "error" modal that requires a click on every cold start is
+  // worse than the (rare) silent-blank-window case it was guarding against.
+  // The modal is still raised for *real* failures (did-fail-load,
+  // render-process-gone, preload-error, missing-index, loadFile-rejected).
   setTimeout(() => {
     if (!shown) {
       logErr(
         "ready-to-show-timeout",
-        "Renderer did not signal ready within 4s — forcing window visible. Open DevTools (Ctrl+Shift+I) for details.",
+        "Renderer did not signal ready within 15s — forcing window visible. This is usually harmless on cold installs.",
+        { silent: true },
       );
       showOnce("timeout");
-      try { mainWindow?.webContents.openDevTools({ mode: "detach" }); } catch { /* ignore */ }
     }
-  }, 4000);
+  }, 15000);
 
   // ── Diagnostics so we never ship another silent blue-screen ─────────
   // If the renderer fails to load (bad path, missing asset, ESM blocked
   // under file://) or crashes, write a log under userData and pop a
   // dialog so the operator can take a screenshot for support.
   const logFile = path.join(app.getPath("userData"), "renderer-error.log");
-  const logErr = (label: string, detail: string) => {
+  const logErr = (label: string, detail: string, opts?: { silent?: boolean }) => {
     const line = `[${new Date().toISOString()}] ${label}: ${detail}\n`;
     try { fs.appendFileSync(logFile, line); } catch { /* best effort */ }
-    if (!isDev) {
+    // Suppress the modal + DevTools auto-open for non-fatal diagnostics
+    // (e.g. ready-to-show-timeout, which only means "cold start was slow").
+    // Real failures still pop the modal so Super Admin can be alerted.
+    if (!isDev && !opts?.silent) {
       try { mainWindow?.webContents.openDevTools({ mode: "detach" }); } catch { /* ignore */ }
       dialog.showErrorBox(
         "Hawk Eye — startup error",
