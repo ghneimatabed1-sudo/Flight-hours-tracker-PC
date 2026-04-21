@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-24", "postgresql-16"]
 
 [deployment]
 router = "application"
@@ -90,3 +90,6 @@ VITE_SUPABASE_URL = "https://nklrdhfsbevckovqqkah.supabase.co"
 EXPO_PUBLIC_SUPABASE_URL = "https://nklrdhfsbevckovqqkah.supabase.co"
 VITE_SUPABASE_ANON_KEY = "sb_publishable_qeCAqVTqnwkS3lP7Dfch_w_weAb_l4_"
 EXPO_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_qeCAqVTqnwkS3lP7Dfch_w_weAb_l4_"
+
+[nix]
+channel = "stable-25_05"
