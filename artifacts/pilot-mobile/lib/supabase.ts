@@ -231,6 +231,7 @@ export type LinkErrorCode =
   | "not_found"
   | "bad_code"
   | "revoked"
+  | "device_link_failed"
   | "supabase_not_configured"
   | "generic";
 
@@ -256,6 +257,7 @@ function classifyError(message?: string): LinkErrorCode {
   if (m.includes("invalid_credentials") || m.includes("not_found"))
     return "bad_code";
   if (m.includes("unauthorized") || m.includes("revoked")) return "revoked";
+  if (m.includes("device_link_failed")) return "device_link_failed";
   return "generic";
 }
 

@@ -24,6 +24,24 @@ BEGIN;
 DROP INDEX IF EXISTS public.pilot_devices_user_id_uniq;
 DROP INDEX IF EXISTS public.pilot_devices_token_hash_uniq;
 
+-- Self-heal any duplicate non-null user_id rows that the partial index
+-- previously hid (it only enforced uniqueness when user_id IS NOT NULL,
+-- so older bugs could in theory have left orphans). Keep the most recent
+-- linked_at row per user_id and drop the rest.
+DELETE FROM public.pilot_devices a
+USING public.pilot_devices b
+WHERE a.user_id IS NOT NULL
+  AND a.user_id = b.user_id
+  AND a.id <> b.id
+  AND (a.linked_at, a.id) < (b.linked_at, b.id);
+
+DELETE FROM public.pilot_devices a
+USING public.pilot_devices b
+WHERE a.token_hash IS NOT NULL
+  AND a.token_hash = b.token_hash
+  AND a.id <> b.id
+  AND (a.linked_at, a.id) < (b.linked_at, b.id);
+
 ALTER TABLE public.pilot_devices
   ADD CONSTRAINT pilot_devices_user_id_key UNIQUE (user_id);
 
