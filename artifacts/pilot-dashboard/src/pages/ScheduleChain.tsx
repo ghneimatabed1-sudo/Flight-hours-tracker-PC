@@ -319,7 +319,7 @@ export default function ScheduleChain() {
                             <label className="text-[10px] uppercase tracking-wider text-muted-foreground">On approve, send to Base PC</label>
                             <select value={forwardTo || basePCs[0]?.id || ""} onChange={e => setForwardTo(e.target.value)} className="px-2 py-1 rounded bg-input border border-border text-xs" data-testid={`forward-target-${share.id}`}>
                               {basePCs.map(p => (
-                                <option key={p.id} value={p.id}>{p.squadronName}{p.base ? ` · ${p.base}` : ""}{p.online ? " · online" : " · offline"}</option>
+                                <option key={p.id} value={p.id}>{p.deviceName || p.squadronName}{p.online ? " · online" : " · offline"}</option>
                               ))}
                             </select>
                           </div>

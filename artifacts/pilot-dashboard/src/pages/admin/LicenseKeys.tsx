@@ -1294,7 +1294,7 @@ export default function LicenseKeys() {
                       <SelectContent>
                         {opsSquadronPcs.map(pc => (
                           <SelectItem key={pc.id} value={pc.id} data-testid={`option-linked-pc-${pc.id}`}>
-                            {pc.squadronName}{pc.base ? ` — ${pc.base}` : ""}{pc.online ? " ●" : ""}
+                            {pc.deviceName || pc.squadronName}{pc.online ? " ●" : ""}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1341,8 +1341,7 @@ export default function LicenseKeys() {
                               data-testid={`checkbox-monitored-pc-${pc.id}`}
                             />
                             <span className="text-sm flex-1">
-                              {pc.squadronName}
-                              {pc.base ? <span className="text-muted-foreground"> — {pc.base}</span> : null}
+                              {pc.deviceName || pc.squadronName}
                             </span>
                             {pc.online && (
                               <span className="text-[10px] text-emerald-600 dark:text-emerald-400">●</span>

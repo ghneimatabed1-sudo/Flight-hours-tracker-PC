@@ -196,6 +196,11 @@ export interface SquadronPC {
   tier: PcTier;
   base?: string;          // e.g. "Marka"
   wing?: string;          // e.g. "RWAC"
+  // Optional friendly device label the owner of this PC set in Setup /
+  // Security (rjaf.pcDeviceName). When present, commander pickers prefer
+  // this over the base suffix because operators asked to identify PCs by
+  // "the name I gave the device", not by the airbase it happens to be at.
+  deviceName?: string;
   lastSeen: string;       // ISO
 }
 
@@ -247,6 +252,7 @@ function rowToPc(r: Record<string, unknown>): SquadronPC {
     tier,
     base: r.base ? String(r.base) : undefined,
     wing: r.wing ? String(r.wing) : undefined,
+    deviceName: r.device_name ? String(r.device_name) : undefined,
     lastSeen: String(r.last_seen ?? nowIso()),
   };
 }
@@ -260,12 +266,19 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
     : opts;
   if (!o.id) return;
   localStorage.setItem("rjaf.xpc.localId", o.id);
+  // Pick up the friendly device label the operator saved in Setup /
+  // Security (localStorage `rjaf.pcDeviceName`) so commander pickers can
+  // show "8SQN — Ops Cockpit-3" instead of repeating the base name.
+  const deviceName = (() => {
+    try { return localStorage.getItem("rjaf.pcDeviceName") || undefined; } catch { return undefined; }
+  })();
   const entry: SquadronPC = {
     id: o.id,
     squadronName: o.displayName,
     tier: o.tier,
     base: o.base,
     wing: o.wing,
+    deviceName,
     lastSeen: nowIso(),
   };
   // Mirror into localStorage so the offline fallback path (and a quick
@@ -296,6 +309,7 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
           tier: dbTier,
           base: o.base ?? null,
           wing: o.wing ?? null,
+          device_name: deviceName ?? null,
           last_seen: entry.lastSeen,
         }, { onConflict: "id" });
       } catch {

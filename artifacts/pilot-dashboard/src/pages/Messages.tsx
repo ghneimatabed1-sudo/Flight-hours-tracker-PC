@@ -206,7 +206,7 @@ export default function Messages() {
                 <option value="">— pick a registered PC —</option>
                 {selectablePCs.map(p => (
                   <option key={p.id} value={p.id}>
-                    {p.squadronName}{p.base ? ` · ${p.base}` : ""}{p.online ? " · online" : " · offline"}
+                    {p.deviceName || p.squadronName}{p.online ? " · online" : " · offline"}
                   </option>
                 ))}
               </select>
