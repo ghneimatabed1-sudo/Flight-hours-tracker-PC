@@ -254,7 +254,12 @@ export interface LinkResult {
 
 function classifyError(message?: string): LinkErrorCode {
   const m = (message ?? "").toLowerCase();
-  if (m.includes("invalid_credentials") || m.includes("not_found"))
+  // Server explicitly says the username/identifier did not match any pilot —
+  // surface that as `not_found` so the UI tells the pilot to check their
+  // username with the squadron officer (they were getting the misleading
+  // "verification code is incorrect" before).
+  if (m.includes("not_found")) return "not_found";
+  if (m.includes("bad_code") || m.includes("invalid_credentials"))
     return "bad_code";
   if (m.includes("unauthorized") || m.includes("revoked")) return "revoked";
   if (m.includes("device_link_failed")) return "device_link_failed";
