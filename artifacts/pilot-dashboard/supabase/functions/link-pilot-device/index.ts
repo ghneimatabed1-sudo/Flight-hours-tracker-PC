@@ -259,28 +259,58 @@ Deno.serve(async (req) => {
     consumed_at: new Date().toISOString(),
   }).eq("id", codeRow.id);
 
-  // Record (or refresh) the device link. Note: pilot_devices.user_id is a
-  // column added in migration 0016 — earlier deployments of this function
-  // lost the insert because the column did not exist, leaving the dashboard
-  // stuck on "NOT LINKED / Never". The unique index is on user_id, and we
-  // also clear revoked_at so a previously-revoked phone re-linking with a
-  // new code is reactivated atomically.
+  // Record (or refresh) the device link.
+  //
+  // History:
+  //   * Migration 0016 added `pilot_devices.user_id`. Earlier deployments of
+  //     this function lost the insert because the column did not exist,
+  //     leaving the dashboard stuck on "NOT LINKED / Never".
+  //   * Migration 0020 (Apr 2026) replaced the *partial* unique INDEXES on
+  //     user_id / token_hash with real unique CONSTRAINTS so PostgREST
+  //     `upsert(..., { onConflict: "user_id" })` actually works. Before that
+  //     change Postgres raised "no unique or exclusion constraint matching
+  //     the ON CONFLICT specification" and the error was silently swallowed.
+  //
+  // Defensive fallback: if the upsert still fails for any reason (schema
+  // drift, transient error), fall back to an explicit delete-then-insert so
+  // the dashboard cannot get stuck on "NOT LINKED" again. If even the
+  // fallback fails, surface the error to the mobile app so the pilot is told
+  // to retry rather than silently "succeeding" with no dashboard visibility.
   const nowIso = new Date().toISOString();
-  const { error: deviceErr } = await admin.from("pilot_devices").upsert(
-    {
-      pilot_id: pilot.id,
-      squadron_id: codeRow.squadron_id,
-      user_id: userId,
-      linked_at: nowIso,
-      last_seen_at: nowIso,
-      revoked_at: null,
-    },
-    { onConflict: "user_id" },
-  );
+  const deviceRow = {
+    pilot_id: pilot.id,
+    squadron_id: codeRow.squadron_id,
+    user_id: userId,
+    linked_at: nowIso,
+    last_seen_at: nowIso,
+    revoked_at: null,
+  };
+  const { error: deviceErr } = await admin
+    .from("pilot_devices")
+    .upsert(deviceRow, { onConflict: "user_id" });
   if (deviceErr) {
-    // Don't fail the link for the user — they have a working session — but
-    // log so ops can see why the dashboard might still show NOT LINKED.
-    console.log("[link] pilot_devices upsert error:", deviceErr.message);
+    console.log(
+      "[link] pilot_devices upsert error, falling back:",
+      deviceErr.message,
+    );
+    const { error: delErr } = await admin
+      .from("pilot_devices")
+      .delete()
+      .eq("user_id", userId);
+    if (delErr) {
+      console.log("[link] pilot_devices delete fallback error:", delErr.message);
+    }
+    const { error: insErr } = await admin
+      .from("pilot_devices")
+      .insert(deviceRow);
+    if (insErr) {
+      console.log("[link] pilot_devices insert fallback error:", insErr.message);
+      return reply({
+        ok: false,
+        error: "device_link_failed",
+        detail: insErr.message,
+      }, 500);
+    }
   }
 
   return reply({
