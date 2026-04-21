@@ -47,7 +47,7 @@ import PendingApprovals from "@/pages/PendingApprovals";
 import GuestBackfill from "@/pages/GuestBackfill";
 import Messages from "@/pages/Messages";
 import ScheduleChain from "@/pages/ScheduleChain";
-import { registerLocalPC, purgeExpiredMessages, getLocalPcId, publishSquadronFlightGroup, type PcTier } from "@/lib/cross-pc";
+import { registerLocalPC, purgeExpiredMessages, getLocalPcId, publishSquadronFlightGroup, getLatestSquadronFlightGroup, type PcTier } from "@/lib/cross-pc";
 import Roster from "@/pages/Roster";
 import PilotDetail from "@/pages/PilotDetail";
 import Currency from "@/pages/Currency";
@@ -314,11 +314,30 @@ function ArchiveBootstrap() {
         const isSquadronCommander =
           role === "commander" && scope === "squadron";
         if (isSquadronCommander) {
-          const raw = localStorage.getItem("rjaf.linkedFlightPcIds");
-          const ids: string[] = raw ? JSON.parse(raw) : [];
-          if (Array.isArray(ids) && ids.length > 0) {
-            void publishSquadronFlightGroup(id, displayName, ids);
-          }
+          // Pull the latest admin-published group for this squadron and
+          // adopt it locally so edits made from Super Admin → Squadrons
+          // (another PC) converge here too. Without this, the commander
+          // PC's next broadcast would overwrite the admin's change with
+          // its own stale localStorage copy. The local copy wins only
+          // when no remote group exists yet.
+          void (async () => {
+            try {
+              const remote = await getLatestSquadronFlightGroup(id);
+              if (remote) {
+                localStorage.setItem(
+                  "rjaf.linkedFlightPcIds",
+                  JSON.stringify(remote.flightPcIds),
+                );
+              }
+            } catch { /* offline ok */ }
+            try {
+              const raw = localStorage.getItem("rjaf.linkedFlightPcIds");
+              const ids: string[] = raw ? JSON.parse(raw) : [];
+              if (Array.isArray(ids) && ids.length > 0) {
+                void publishSquadronFlightGroup(id, displayName, ids);
+              }
+            } catch { /* ignore */ }
+          })();
         }
       } catch { /* ignore parse / storage errors */ }
     };

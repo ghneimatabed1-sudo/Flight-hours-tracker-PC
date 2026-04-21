@@ -7,12 +7,13 @@
 // "activate other PCs" flow was blocked. This version adds Create / Edit /
 // Delete / Enable-Disable, backed by the local squadron store.
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useI18n } from "@/lib/i18n";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { pilots } from "@/lib/mockData";
 import {
@@ -22,6 +23,11 @@ import {
   deleteSquadron,
   setSquadronEnabled,
 } from "@/lib/squadron-store";
+import {
+  useRegisteredPCs,
+  getLatestSquadronFlightGroup,
+  publishSquadronFlightGroup,
+} from "@/lib/cross-pc";
 import type { Squadron } from "@/lib/types";
 import { Plane, Plus, Pencil, Trash2 } from "lucide-react";
 
@@ -45,13 +51,33 @@ export default function Squadrons() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingPcId, setEditingPcId] = useState<string>("");
+  const [editingPcName, setEditingPcName] = useState<string>("");
   const [draft, setDraft] = useState<DraftSquadron>(EMPTY_DRAFT);
   const [err, setErr] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  // Linked flight commander PCs for the squadron being edited. Populated
+  // from the latest xpc.squadron.flight.group.set audit_log event when
+  // the edit dialog opens, and re-published when the admin saves.
+  const [linkedFlightIds, setLinkedFlightIds] = useState<string[]>([]);
+  const [loadingGroup, setLoadingGroup] = useState(false);
+  const registeredPcs = useRegisteredPCs();
+  // Every flight commander PC that registered itself under the name of
+  // the squadron being edited. The admin picks from this set when
+  // choosing who is in the squadron's commanding group.
+  const flightPcsForSquadron = useMemo(() => {
+    if (!editingId) return [];
+    return registeredPcs.data.filter(
+      p => p.tier === "flight" && p.squadronName === draft.name,
+    );
+  }, [registeredPcs.data, editingId, draft.name]);
 
   function openCreate() {
     setEditingId(null);
+    setEditingPcId("");
+    setEditingPcName("");
     setDraft(EMPTY_DRAFT);
+    setLinkedFlightIds([]);
     setErr(null);
     setDialogOpen(true);
   }
@@ -63,7 +89,20 @@ export default function Squadrons() {
       base: s.base, baseAr: s.baseAr, wing: s.wing, wingAr: s.wingAr,
     });
     setErr(null);
+    setLinkedFlightIds([]);
+    // The squadron commander PC's canonical id in the cross-PC registry
+    // is its squadron name (see registerLocalPC → App.tsx). Use that as
+    // the group key for both loading and publishing.
+    const pcId = s.name;
+    setEditingPcId(pcId);
+    setEditingPcName(s.name);
     setDialogOpen(true);
+    setLoadingGroup(true);
+    void (async () => {
+      const group = await getLatestSquadronFlightGroup(pcId);
+      if (group) setLinkedFlightIds(group.flightPcIds);
+      setLoadingGroup(false);
+    })();
   }
 
   function save() {
@@ -91,6 +130,18 @@ export default function Squadrons() {
         wing: trimmedWing,
         wingAr: draft.wingAr.trim() || trimmedWing,
       });
+      // Re-publish the squadron's flight-commander group with the
+      // admin's current selection. The squadron commander PC's
+      // heartbeat will converge on this new list within ~30s; flight
+      // commander PCs whose id appears here will auto-bind to the
+      // squadron commander on their next sign-in.
+      if (editingPcId) {
+        void publishSquadronFlightGroup(
+          editingPcId,
+          editingPcName || trimmedName,
+          linkedFlightIds,
+        );
+      }
     } else {
       const res = addSquadron({
         name: trimmedName,
@@ -301,6 +352,64 @@ export default function Squadrons() {
                 />
               </div>
             </div>
+            {/* Flight commander group editor — only meaningful when editing
+                an existing squadron (for new squadrons no flight PCs can
+                have registered under its name yet). */}
+            {editingId && (
+              <div className="space-y-2 rounded-md border border-teal-300/40 bg-teal-50/60 dark:bg-teal-950/20 p-3">
+                <Label className="text-sm font-medium text-teal-900 dark:text-teal-200">
+                  {lang === "ar"
+                    ? "قادة الطيران في هذا السرب"
+                    : "Flight commanders in this squadron"}
+                </Label>
+                {loadingGroup ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    {lang === "ar" ? "جارٍ التحميل…" : "Loading current group…"}
+                  </p>
+                ) : flightPcsForSquadron.length === 0 ? (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                    {lang === "ar"
+                      ? "لا يوجد قادة طيران مسجلون لهذا السرب بعد."
+                      : "No flight commander PCs are registered under this squadron yet."}
+                  </p>
+                ) : (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pe-1">
+                    {flightPcsForSquadron.map(pc => {
+                      const checked = linkedFlightIds.includes(pc.id);
+                      return (
+                        <label
+                          key={pc.id}
+                          className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-teal-100/40 dark:hover:bg-teal-900/20 cursor-pointer"
+                          data-testid={`row-sqn-flight-${pc.id}`}
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(v) => {
+                              setLinkedFlightIds(prev =>
+                                v ? Array.from(new Set([...prev, pc.id]))
+                                  : prev.filter(x => x !== pc.id),
+                              );
+                            }}
+                            data-testid={`checkbox-sqn-flight-${pc.id}`}
+                          />
+                          <span className="text-sm flex-1">
+                            {pc.deviceName || pc.squadronName}
+                          </span>
+                          {pc.online && (
+                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400">●</span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                <p className="text-[10px] text-teal-900/70 dark:text-teal-200/70">
+                  {lang === "ar"
+                    ? `المرتبطون: ${linkedFlightIds.length}. سيسري التغيير خلال ٣٠ ثانية من الحفظ على جميع أجهزة السرب.`
+                    : `Linked: ${linkedFlightIds.length}. Changes propagate to every PC in the squadron within ~30s of saving.`}
+                </p>
+              </div>
+            )}
             {err && <div className="text-sm text-destructive">{err}</div>}
           </div>
           <DialogFooter>

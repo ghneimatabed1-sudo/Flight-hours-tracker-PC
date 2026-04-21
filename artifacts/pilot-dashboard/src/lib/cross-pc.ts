@@ -232,6 +232,44 @@ export async function publishSquadronFlightGroup(
 // squadron group that lists THIS flight PC, and returns the squadron
 // binding to apply. Returns null when no group claims this PC or when
 // offline (the caller falls back to the admin-override path).
+// Super Admin entry point: fetch the most recent group published for a
+// given squadron PC id. Used by the Squadrons admin page so the edit
+// dialog can pre-populate the flight-commander checkbox list and the
+// admin can add/remove members post-setup without visiting the
+// squadron commander PC.
+export async function getLatestSquadronFlightGroup(
+  squadronPcId: string,
+): Promise<SquadronFlightGroup | null> {
+  if (!isLive() || !supabase || !squadronPcId) return null;
+  const { data, error } = await supabase
+    .from("audit_log")
+    .select("detail, occurred_at")
+    .eq("type", "xpc.squadron.flight.group.set")
+    .order("occurred_at", { ascending: false })
+    .limit(50);
+  if (error || !data) return null;
+  for (const row of data as { detail?: Record<string, unknown> }[]) {
+    const d = row.detail ?? {};
+    const sid = typeof (d as { squadronPcId?: unknown }).squadronPcId === "string"
+      ? (d as { squadronPcId: string }).squadronPcId
+      : "";
+    if (sid !== squadronPcId) continue;
+    const ids = Array.isArray((d as { flightPcIds?: unknown }).flightPcIds)
+      ? ((d as { flightPcIds: unknown[] }).flightPcIds.filter(
+          (x): x is string => typeof x === "string",
+        ))
+      : [];
+    const name = typeof (d as { squadronPcName?: unknown }).squadronPcName === "string"
+      ? (d as { squadronPcName: string }).squadronPcName
+      : sid;
+    const at = typeof (d as { publishedAt?: unknown }).publishedAt === "string"
+      ? (d as { publishedAt: string }).publishedAt
+      : nowIso();
+    return { squadronPcId: sid, squadronPcName: name, flightPcIds: ids, publishedAt: at };
+  }
+  return null;
+}
+
 export async function syncSquadronFlightGroupForFlightPc(
   flightPcId: string,
 ): Promise<FlightBinding | null> {
