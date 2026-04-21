@@ -61,7 +61,14 @@ export default function Messages() {
     : user?.scope === "flight" ? "flight"
     : "squadron";
   const isFlightCmdr = user?.role === "commander" && user?.scope === "flight";
+  const isOpsPilot = user?.role === "ops";
+  const isSquadronCmdr = user?.role === "commander" && user?.scope === "squadron";
   const flightBinding = isFlightCmdr ? getFlightBinding() : null;
+  // Same-squadron normalised matcher — used by both the Flight Cmdr
+  // and Ops Pilot picker branches so spelling drift in the squadron
+  // label ("NO.8" vs "no 8" vs "8 SQN") never hides peer PCs.
+  const normalizeSqLabel = (s: string | undefined | null) =>
+    (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
   // Use the canonical PC id written by registerLocalPC (squadron name for
   // squadron tier, "WING:..." / "BASE:..." for commander tiers) so both
   // the writer (sender) and the reader (recipient inbox filter) agree.
