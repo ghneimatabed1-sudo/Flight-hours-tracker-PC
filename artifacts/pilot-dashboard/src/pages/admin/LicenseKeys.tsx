@@ -100,15 +100,6 @@ export default function LicenseKeys() {
   // pickers so commanders are only ever bound to real ops squadron PCs.
   const registeredPcs = useRegisteredPCs();
   const opsSquadronPcs = registeredPcs.data.filter(p => p.tier === "squadron");
-  // Flight commander PCs (tier === "flight") registered for the SAME squadron
-  // as the ops PC the setup operator just picked. This powers the "pick the
-  // flight commanders in this squadron" multi-select below the ops-PC picker.
-  const linkedOpsPc = opsSquadronPcs.find(p => p.id === setupLinkedPcId);
-  const flightPcsForSquadron = linkedOpsPc
-    ? registeredPcs.data.filter(
-        p => p.tier === "flight" && p.squadronName === linkedOpsPc.squadronName,
-      )
-    : [];
   // Commander Setup happens BEFORE this PC has ever signed in to Supabase, so
   // it runs as an anonymous client. The cross-PC registry query already
   // refetches every 30s, but the dialog is often opened right after a
@@ -149,6 +140,16 @@ export default function LicenseKeys() {
   // Schedule pickers on this PC include those flight PCs as valid
   // counterparts — tying the whole squadron group together.
   const [setupLinkedFlightPcIds, setSetupLinkedFlightPcIds] = useState<string[]>([]);
+  // Flight commander PCs (tier === "flight") registered for the SAME squadron
+  // as the ops PC the setup operator just picked. Computed AFTER
+  // setupLinkedPcId is declared to avoid a temporal-dead-zone crash in
+  // production bundles ("Cannot access 'M' before initialization").
+  const linkedOpsPc = opsSquadronPcs.find(p => p.id === setupLinkedPcId);
+  const flightPcsForSquadron = linkedOpsPc
+    ? registeredPcs.data.filter(
+        p => p.tier === "flight" && p.squadronName === linkedOpsPc.squadronName,
+      )
+    : [];
   const [setupCommanderName, setSetupCommanderName] = useState("");
   const [setupDeviceName, setSetupDeviceName] = useState("");
   const [setupOpsUsername, setSetupOpsUsername] = useState("");
