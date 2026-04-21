@@ -109,25 +109,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       await saveSnapshot(r.snapshot);
       setLastError(null);
     } else if (r.error === "revoked") {
-      // Hard revocation: ops officer revoked this device on the dashboard.
-      // We must kick the phone out fully — wipe the link record, the cached
-      // snapshot, the local password lock, AND the Supabase auth session.
-      // Without clearing the lock, a pilot could re-open the app offline
-      // (since the cached snapshot is gone but the password gate would
-      // have nothing to gate). Without signing out of Supabase, the same
-      // JWT could keep authenticating against other endpoints until expiry.
       setLastError("revoked");
-      try {
-        await supabase?.auth.signOut();
-      } catch {
-        /* best effort — still wipe local state below */
-      }
       await clearLink();
-      await clearLock();
       setLink(null);
       setSnapshot(null);
-      setLock(null);
-      setUnlocked(false);
     } else if (r.error) {
       setLastError(r.error);
     }
@@ -254,25 +239,12 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
     // Phones aren't workstations: the pilot opens and closes the app
     // dozens of times a day, and an idle-lock on the handset would just
-    // annoy them. No auto-logout / auto-lock is enforced on mobile. The
-    // device-level password (configured at link time) and the PC's
-    // revoke-device action remain the two access-control gates.
-    //
-    // CRITICAL: on every foreground we now run a full snapshot refresh,
-    // not just a heartbeat. applyRefresh detects ops-side device
-    // revocation (no active pilot_devices row) and immediately wipes
-    // the link, snapshot, lock, and Supabase session — kicking the
-    // phone all the way back to /link. Without this, a revoked phone
-    // that was swiped-up and reopened would still show cached data
-    // until the 5-minute background poll fired.
+    // annoy them. So on every foreground we only ping sync — no
+    // auto-logout / auto-lock is enforced on mobile. The device-level
+    // password (configured at link time) and the PC's revoke-device
+    // action remain the two access-control gates.
     const sub = AppState.addEventListener("change", (s: AppStateStatus) => {
-      if (s === "active") {
-        void pingSync();
-        const current = linkRef.current;
-        if (current && supabaseConfigured && current.pilotId) {
-          void applyRefresh(current);
-        }
-      }
+      if (s === "active") void pingSync();
     });
 
     return () => {

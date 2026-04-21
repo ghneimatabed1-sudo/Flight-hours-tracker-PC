@@ -6,72 +6,16 @@ name: Build Windows Installer (RJAF Squadron Ops)
 # stays in this private repo; only compiled binaries are exposed.
 #
 # Triggers:
-#   - manual (workflow_dispatch)        — build + publish a release on demand
-#   - push of a v* tag                  — cut a release
-#   - push to main, gated by `gate` job — auto-release on version bump or
-#     when the head commit message contains the `[release]` marker. Routine
-#     commits to main do NOT spend Windows runner minutes.
+#   - manual (workflow_dispatch) — build + publish a release on demand
+#   - push of a v* tag          — cut a release
 on:
   workflow_dispatch:
   push:
     tags:
       - "v*"
-    branches:
-      - main
 
 jobs:
-  # Cheap Linux pre-flight that decides whether the expensive Windows build
-  # should run. Always builds for workflow_dispatch and v* tag pushes; for
-  # plain pushes to main, only builds when:
-  #   - the head commit message contains `[release]` (case-insensitive), OR
-  #   - artifacts/pilot-dashboard/package.json `version` changed vs HEAD~1.
-  gate:
-    runs-on: ubuntu-latest
-    outputs:
-      should_build: ${{ steps.decide.outputs.should_build }}
-    steps:
-      - name: Checkout (with previous commit for diff)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: Decide whether to build
-        id: decide
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF_TYPE: ${{ github.ref_type }}
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
-        run: |
-          set -euo pipefail
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$REF_TYPE" = "tag" ]; then
-            echo "trigger: $EVENT_NAME (ref_type=$REF_TYPE) — building"
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if printf '%s' "${COMMIT_MSG:-}" | grep -qiF '[release]'; then
-            echo "trigger: [release] marker found in head commit message — building"
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          PKG=artifacts/pilot-dashboard/package.json
-          CUR=$(node -p "require('./$PKG').version")
-          if git cat-file -e HEAD~1:"$PKG" 2>/dev/null; then
-            PREV=$(git show "HEAD~1:$PKG" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>process.stdout.write(JSON.parse(d).version))")
-          else
-            PREV=""
-          fi
-          echo "pilot-dashboard version: previous='$PREV' current='$CUR'"
-          if [ -n "$PREV" ] && [ "$CUR" != "$PREV" ]; then
-            echo "trigger: version bumped $PREV -> $CUR — building"
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "no [release] marker and no version bump — skipping Windows installer build"
-            echo "should_build=false" >> "$GITHUB_OUTPUT"
-          fi
-
   build-exe:
-    needs: gate
-    if: needs.gate.outputs.should_build == 'true'
     runs-on: windows-latest
     defaults:
       run:

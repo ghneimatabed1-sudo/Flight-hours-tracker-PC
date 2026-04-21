@@ -66,6 +66,36 @@ function showPostMountError(err: unknown): void {
   } catch { /* never let the error reporter itself throw */ }
 }
 
+// Discrete bottom-right toast for post-mount runtime errors that aren't
+// caught by React's ErrorBoundary (async callbacks, event handlers,
+// promise rejections, etc.). Auto-dismisses after 10s. The user can
+// click it to copy the message — useful when reporting a bug.
+function showPostMountError(err: unknown): void {
+  try {
+    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    // De-dup back-to-back identical errors within 2s
+    const w = window as unknown as { __lastErrMsg?: string; __lastErrAt?: number };
+    if (w.__lastErrMsg === msg && Date.now() - (w.__lastErrAt ?? 0) < 2000) return;
+    w.__lastErrMsg = msg; w.__lastErrAt = Date.now();
+    let host = document.getElementById("__hawkeye_err_toast");
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "__hawkeye_err_toast";
+      host.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:99999;display:flex;flex-direction:column;gap:8px;max-width:420px;pointer-events:none;font-family:Inter,system-ui,sans-serif;";
+      document.body.appendChild(host);
+    }
+    const card = document.createElement("div");
+    card.style.cssText = "background:#1a1410;border:1px solid rgba(245,158,11,0.5);color:#fbbf24;padding:10px 12px;border-radius:8px;font-size:12px;line-height:1.4;box-shadow:0 8px 24px rgba(0,0,0,0.5);pointer-events:auto;cursor:pointer;";
+    card.title = "Click to copy error";
+    card.textContent = `⚠ ${msg.slice(0, 200)}`;
+    card.onclick = () => {
+      try { navigator.clipboard.writeText(msg); card.style.opacity = "0.5"; } catch { /* ignore */ }
+    };
+    host.appendChild(card);
+    setTimeout(() => { card.style.transition = "opacity .4s"; card.style.opacity = "0"; setTimeout(() => card.remove(), 400); }, 10000);
+  } catch { /* never let the error reporter itself throw */ }
+}
+
 window.addEventListener("error", (e) => {
   const root = document.getElementById("root");
   // Pre-mount: full-screen fatal overlay (the bundle itself failed).
