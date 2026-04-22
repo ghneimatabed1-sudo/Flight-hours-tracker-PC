@@ -128,7 +128,7 @@ export default function FlightScheduleSheet({
   return (
     <div
       id="flight-program-sheet"
-      className="bg-white text-black border border-black p-3 space-y-2 text-[11px] print:text-[10px] print:p-2 relative"
+      className="print-target bg-white text-black border border-black p-3 space-y-2 text-[11px] print:text-[9px] print:p-2 relative"
       dir="ltr"
     >
       {approvedAt && (

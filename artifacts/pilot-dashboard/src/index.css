@@ -377,13 +377,52 @@ html, body, #root {
 ─────────────────────────────────────────────────────────────────── */
 .print-only { display: none; }
 @media print {
-  @page { size: A4 landscape; margin: 12mm; }
+  @page { size: A4 landscape; margin: 10mm; }
 
   html, body {
     background: #fff !important;
     color: #000 !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+  }
+
+  /* v1.1.48: print-isolation trick. When a page contains a
+     `.print-target` or `.print-area` element, ONLY that subtree
+     appears on paper — every other element (sidebar, top header,
+     toolbars, panels, dialogs, page chrome, even sibling cards on
+     the same page) is hidden via visibility:hidden so the printout
+     contains nothing but the document the operator wanted. The old
+     selector-by-selector chrome list (aside, header, nav, etc.) is
+     kept below as a belt-and-braces fallback for pages that don't
+     opt in with print-target / print-area. */
+  body:has(.print-target) > *,
+  body:has(.print-area) > * {
+    visibility: hidden !important;
+  }
+  body:has(.print-target) .print-target,
+  body:has(.print-area) .print-area {
+    visibility: visible !important;
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+  body:has(.print-target) .print-target *,
+  body:has(.print-area) .print-area * {
+    visibility: visible !important;
+  }
+  /* Keep the printable subtree contained — never let a child push
+     past the page edge and trigger a second page. */
+  .print-target, .print-area {
+    overflow: hidden !important;
+    page-break-inside: avoid !important;
+  }
+  .print-target table, .print-area table {
+    table-layout: fixed !important;
+    word-wrap: break-word !important;
   }
 
   /* Anything explicitly opted out of print. */
