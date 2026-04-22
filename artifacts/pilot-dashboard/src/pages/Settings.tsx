@@ -10,7 +10,7 @@ import {
 } from "@/lib/auth";
 import { useCurrencyWindow, DEFAULT_CURRENCY_WINDOW } from "@/lib/currency-settings";
 import { usePilots, useAllLinkedDevices, useRevokePilotDevices } from "@/lib/squadron-data";
-import { Smartphone, ShieldOff, Loader2, AlertTriangle } from "lucide-react";
+import { Smartphone, ShieldOff, Loader2, AlertTriangle, Eraser } from "lucide-react";
 
 function ReleaseLicenseButton({ onConfirm }: { onConfirm: () => void }) {
   const [open, setOpen] = useState(false);
@@ -109,6 +109,164 @@ function ReleaseLicenseButton({ onConfirm }: { onConfirm: () => void }) {
                 className="px-4 py-2 rounded-md text-sm font-semibold bg-destructive text-destructive-foreground disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {secs > 0 ? `Wait ${secs}s` : "Release license"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// "Reset this PC" — the nuclear option. Visible to every role (Ops,
+// Sqn Cdr, Flight Cdr, Wing Cdr, Base, HQ Super Admin) so any operator
+// who suspects this PC has a stuck/wrong registration can wipe it
+// clean without waiting for a developer.
+//
+// What it does:
+//   • DELETEs this PC's row from xpc_registry on Supabase
+//   • DELETEs this PC's claim from xpc_user_pcs on Supabase
+//   • Signs out from Supabase
+//   • Clears every `rjaf.*` localStorage key on this device
+//   • Hard reloads → next launch is exactly like a fresh install
+//
+// The actual implementation lives in auth.tsx (resetThisPC) so it has
+// access to the supabase client and the auth state setters.
+function ResetPcButton({ onConfirm }: { onConfirm: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [secs, setSecs] = useState(5);
+  const [typed, setTyped] = useState("");
+  const [working, setWorking] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setSecs(5);
+    setTyped("");
+    setWorking(false);
+    const id = setInterval(() => {
+      setSecs(s => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [open]);
+
+  const canConfirm = !working && secs === 0 && typed.trim().toUpperCase() === "RESET";
+
+  const myPcId = (() => {
+    try { return localStorage.getItem("rjaf.xpc.localId") ?? ""; } catch { return ""; }
+  })();
+  const myDeviceLabel = (() => {
+    try { return localStorage.getItem("rjaf.pcDeviceName") ?? ""; } catch { return ""; }
+  })();
+
+  const handleConfirm = async () => {
+    setWorking(true);
+    try { await onConfirm(); } finally {
+      // resetThisPC reloads the page, so this normally never runs;
+      // keep it defensive in case the reload is blocked.
+      setWorking(false);
+      setOpen(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        data-testid="button-reset-pc"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm bg-destructive/20 text-destructive border border-destructive/40 hover:bg-destructive/30"
+      >
+        <Eraser className="h-3.5 w-3.5" />
+        Reset this PC
+      </button>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          data-testid="modal-reset-pc"
+        >
+          <div className="w-full max-w-md rounded-lg border border-destructive/60 bg-card shadow-2xl">
+            <div className="flex items-start gap-3 p-4 border-b border-border">
+              <AlertTriangle className="h-6 w-6 text-destructive shrink-0 mt-0.5" />
+              <div>
+                <div className="text-base font-semibold text-destructive">Reset this PC — are you sure?</div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  This is the nuclear option. After confirmation this PC will be
+                  indistinguishable from a brand-new install — and the central
+                  Supabase registration for this device ID will be deleted.
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs space-y-1.5">
+                <div className="font-medium text-amber-300">This PC's identity (will be deleted):</div>
+                <div className="font-mono text-[11px] break-all text-foreground/90">
+                  {myPcId || <span className="italic text-muted-foreground">(no PC id registered yet)</span>}
+                </div>
+                {myDeviceLabel && (
+                  <div className="text-[11px] text-foreground/70">Label: {myDeviceLabel}</div>
+                )}
+              </div>
+
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs space-y-1.5">
+                <div className="font-medium text-destructive">What gets deleted on Supabase:</div>
+                <ul className="list-disc ms-4 space-y-0.5 text-foreground/90">
+                  <li>This PC's row in <span className="font-mono">xpc_registry</span> (other PCs stop seeing it).</li>
+                  <li>This PC's claim in <span className="font-mono">xpc_user_pcs</span>.</li>
+                </ul>
+                <div className="font-medium text-destructive pt-1">What gets wiped locally:</div>
+                <ul className="list-disc ms-4 space-y-0.5 text-foreground/90">
+                  <li>License activation, signed-in user, squadron config.</li>
+                  <li>PC id, device suffix, device label, role lock.</li>
+                  <li>Every other Hawk Eye preference saved on this PC.</li>
+                </ul>
+                <div className="font-medium text-emerald-300 pt-1">What is NOT touched:</div>
+                <ul className="list-disc ms-4 space-y-0.5 text-foreground/90">
+                  <li>Pilots, sorties, schedules, messages — none of the squadron's data.</li>
+                  <li>Other PCs' registrations.</li>
+                </ul>
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground">
+                  Type <span className="font-mono font-semibold text-destructive">RESET</span> to confirm:
+                </label>
+                <input
+                  value={typed}
+                  onChange={e => setTyped(e.target.value)}
+                  data-testid="input-reset-confirm"
+                  autoFocus
+                  className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border font-mono text-sm uppercase tracking-wider"
+                  placeholder="RESET"
+                />
+              </div>
+
+              {secs > 0 && (
+                <div className="text-[11px] text-amber-400 text-center">
+                  Confirm button unlocks in <span className="font-mono font-semibold">{secs}s</span>…
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 p-4 border-t border-border">
+              <button
+                onClick={() => setOpen(false)}
+                disabled={working}
+                data-testid="button-reset-cancel"
+                className="px-4 py-2 rounded-md text-sm bg-secondary border border-border hover:bg-secondary/80 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirm}
+                disabled={!canConfirm}
+                data-testid="button-reset-confirm"
+                className="px-4 py-2 rounded-md text-sm font-semibold bg-destructive text-destructive-foreground disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-2"
+              >
+                {working ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                {working ? "Resetting…" : secs > 0 ? `Wait ${secs}s` : "Reset this PC"}
               </button>
             </div>
           </div>
@@ -454,7 +612,7 @@ function MobileDevicesCard() {
 
 export default function Settings() {
   const { t, lang, setLang } = useI18n();
-  const { squadron, configureSquadron, fingerprint, releaseLicense, user } = useAuth();
+  const { squadron, configureSquadron, fingerprint, releaseLicense, resetThisPC, user } = useAuth();
   const [name, setName] = useState(squadron?.name || "");
   const [num, setNum] = useState(squadron?.number || "");
   const [base, setBase] = useState(squadron?.base || "");
@@ -521,7 +679,16 @@ export default function Settings() {
           <div className="text-sm font-semibold">License & Hardware</div>
           <div className="text-xs text-muted-foreground">PC fingerprint (locked):</div>
           <div className="font-mono text-xs break-all bg-secondary p-2 rounded border border-border">{fingerprint}</div>
-          <ReleaseLicenseButton onConfirm={releaseLicense} />
+          <div className="flex flex-wrap items-center gap-2">
+            <ReleaseLicenseButton onConfirm={releaseLicense} />
+            <ResetPcButton onConfirm={resetThisPC} />
+          </div>
+          <p className="text-[11px] text-muted-foreground -mt-1">
+            <span className="font-semibold">Reset this PC</span> wipes this device's
+            registration on the central server (xpc_registry + xpc_user_pcs) and clears
+            every Hawk Eye setting saved locally — leaving the PC ready to set up from
+            scratch. Other PCs and squadron data are not affected.
+          </p>
           <hr className="border-border" />
           <InactivityTimeoutSection />
           <hr className="border-border" />

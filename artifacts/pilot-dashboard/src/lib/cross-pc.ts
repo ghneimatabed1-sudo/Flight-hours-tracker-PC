@@ -39,6 +39,17 @@ const isLive = () => supabaseConfigured && supabase !== null;
 let lastHeartbeatErrorMsg: string | null = null;
 let lastHeartbeatErrorAt: number | null = null;
 let lastHeartbeatOkAt: number | null = null;
+
+// Module-scope flag set by `setResetInProgress` (called from auth.tsx
+// `resetThisPC` right before the cloud DELETEs). Suppresses any
+// concurrent / subsequent heartbeat tick from re-upserting the
+// xpc_registry / xpc_user_pcs rows we are about to delete. Without
+// this flag, the 30-second heartbeat interval can fire between
+// DELETE and window.location.reload() and silently re-create the
+// exact rows the user just asked us to wipe.
+let resetInProgress = false;
+export function setResetInProgress(v: boolean) { resetInProgress = v; }
+export function isResetInProgress(): boolean { return resetInProgress; }
 const heartbeatListeners = new Set<() => void>();
 
 function notifyHeartbeat() { for (const fn of heartbeatListeners) fn(); }
@@ -550,8 +561,12 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
   // but the registry UPSERT would silently fail under RLS — leaving
   // the PC invisible to everyone else. The new path captures the
   // error and surfaces it through the existing data-error indicator.
-  if (isLive()) {
+  if (isLive() && !resetInProgress) {
     void (async () => {
+      // Recheck the flag inside the async closure — the user may have
+      // started a "Reset this PC" between the outer check and the
+      // microtask actually running.
+      if (resetInProgress) return;
       const claimOk = await ensureMyPcClaim(o.id);
       if (!claimOk) {
         reportHeartbeatError(

@@ -5,6 +5,7 @@ import { SUPER_ADMIN } from "./mockData";
 import { findCommanderByUsername, verifyCommanderPassword } from "./commander-store";
 import type { User } from "./types";
 import { generateSecret, otpauthURL, verifyTotp } from "./totp";
+import { setResetInProgress } from "./cross-pc";
 
 // Demo-only fallback when Supabase isn't configured (in-browser preview).
 // In any real install (`supabaseConfigured === true`) the secret is held
@@ -226,6 +227,13 @@ interface AuthCtx extends AuthState {
   ackRecoveryCodes: () => void;
   logout: () => void;
   releaseLicense: () => void;
+  // Nuclear "Reset this PC" — wipes every trace of this device from the
+  // central Supabase tables (xpc_registry + xpc_user_pcs row for this
+  // PC's id) AND every `rjaf.*` localStorage key, then signs out from
+  // Supabase and reloads. After this runs, the next launch is
+  // indistinguishable from a fresh install. Returns a promise so the
+  // confirmation dialog can wait for the cloud DELETE before reloading.
+  resetThisPC: () => Promise<void>;
   backendMode: "supabase" | "demo";
   // Per-PC role lock. `null` = no lock. When set, login screen shows only
   // the matching role's form and login() rejects accounts of other roles.
@@ -1237,6 +1245,86 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem("rjaf.deviceSuffix");
       updateAdminRecoveryRemaining(null);
       setState(s => ({ ...s, licensed: false, user: null }));
+    },
+    resetThisPC: async () => {
+      // "Reset this PC" — the nuclear option exposed in Settings for
+      // every role. Wipes every trace of this device so the next launch
+      // is indistinguishable from a fresh install.
+      //
+      //   0. setResetInProgress(true) — silences the 30s heartbeat in
+      //      cross-pc.ts so it can't re-upsert the rows we are about
+      //      to delete. Without this guard, a tick can fire between
+      //      DELETE and reload and silently re-create them.
+      //   1. DELETE this PC's row from xpc_registry (other PCs stop
+      //      seeing it as a known seat).
+      //   2. DELETE this PC's claim from xpc_user_pcs (no orphan claim
+      //      left under the current auth.uid).
+      //   3. supabase.auth.signOut() so the cached session can't be
+      //      reused after reload.
+      //   4. Wipe EVERY `rjaf.*` key from localStorage — using
+      //      Object.keys instead of an enumerated list so future keys
+      //      are also cleared without needing to update this code.
+      //   5. Reload to land back on the first-launch screen.
+      //
+      // Unlike releaseLicense (which is best-effort fire-and-forget)
+      // we inspect the {error} object Supabase returns. RLS / network
+      // failures are surfaced in the console with a hard error log so
+      // the operator (or the dev console) can see why the cloud row
+      // was NOT deleted, instead of the bug we just spent a release
+      // hunting down (silent failures behind a green pill).
+      setResetInProgress(true);
+      const myPcId = localStorage.getItem("rjaf.xpc.localId") ?? "";
+      const failures: string[] = [];
+      if (supabase && myPcId) {
+        try {
+          const { error } = await supabase.from("xpc_registry").delete().eq("id", myPcId);
+          if (error) {
+            failures.push(`xpc_registry: ${error.message}`);
+            console.error("[resetThisPC] xpc_registry delete failed:", error);
+          }
+        } catch (e) {
+          failures.push(`xpc_registry threw: ${(e as Error)?.message ?? String(e)}`);
+          console.error("[resetThisPC] xpc_registry delete threw:", e);
+        }
+        try {
+          const { error } = await supabase.from("xpc_user_pcs").delete().eq("pc_id", myPcId);
+          if (error) {
+            failures.push(`xpc_user_pcs: ${error.message}`);
+            console.error("[resetThisPC] xpc_user_pcs delete failed:", error);
+          }
+        } catch (e) {
+          failures.push(`xpc_user_pcs threw: ${(e as Error)?.message ?? String(e)}`);
+          console.error("[resetThisPC] xpc_user_pcs delete threw:", e);
+        }
+      }
+      if (supabase) {
+        try { await supabase.auth.signOut(); } catch { /* ignore */ }
+      }
+      try {
+        const keys = Object.keys(localStorage);
+        for (const k of keys) {
+          if (k.startsWith("rjaf.")) localStorage.removeItem(k);
+        }
+      } catch { /* localStorage blocked — nothing more we can do */ }
+      try { sessionStorage.clear(); } catch { /* ignore */ }
+      // If any cloud delete failed, warn the user before we reload so
+      // they know the central registration may still be there. We
+      // still proceed to reload — local state is wiped either way and
+      // a fresh setup will simply overwrite the stale row.
+      if (failures.length > 0) {
+        try {
+          window.alert(
+            "Reset done locally, but the central server reported errors deleting this PC's registration:\n\n" +
+            failures.map(f => "  • " + f).join("\n") +
+            "\n\nThe PC will be reset locally on reload. If the cloud row is still there after a fresh setup, contact the developer.",
+          );
+        } catch { /* alert may be blocked in iframe — console.error above is the fallback */ }
+      }
+      // Hard reload — this guarantees in-memory state (queries,
+      // intervals, the heartbeat closure) is wiped, not just React
+      // state. The resetInProgress flag is module-scope so it dies
+      // with the page; no need to clear it manually.
+      try { window.location.reload(); } catch { /* ignore */ }
     },
     pcRoleLock,
     setPcRoleLock: applyPcRoleLock,
