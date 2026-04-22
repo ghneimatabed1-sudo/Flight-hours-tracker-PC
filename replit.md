@@ -30,41 +30,27 @@ magick public/brand/hawkeye-logo.png -background none \
   \( -clone 0 -resize 256x256 \) -delete 0 build/icon.ico
 ```
 
-# Domain Logic — Currency Refresh Rules (canonical, do not re-ask)
+# Domain Logic Memory
 
-When a sortie is saved, the per-pilot currency expiry dates on the
-Pilot row (`pilot.expiry.*`) get bumped forward to
-`sortieDate + window` for both the pilot and co-pilot. Refresh never
-moves a date backwards — if a later expiry already exists from a
-more recent sortie, it is kept.
+Canonical rules for every big domain decision live in
+**`.local/memory/`**. Read the matching file BEFORE touching any
+of these areas — never re-ask the operator about settled
+decisions. Update the file (and append a Change Log entry) every
+time the rule shifts.
 
-| Currency on Currency page | Trigger | Window default | Notes |
-|---|---|---|---|
-| **Day** | sortie `condition === "Day"` | 30 d | Independent from Night/NVG. |
-| **Night** | sortie `condition === "Night"` | 30 d | Fully independent from NVG (since v1.1.69). |
-| **NVG** | sortie `condition === "NVG"` | 30 d | Fully independent from Night. |
-| **IRT (Instrument)** | sortie has `instrumentFlight === true` OR `sortieType === "IRT"` | 365 d | "IRT" is the RJAF short name for instrument flying. Auto-refreshed by IRT/instrument sorties. |
-| **Simulator** | **MANUAL ONLY** — never auto-bumped by any sortie | 365 d | Simulator is an overseas training event, not a flight. The operator types the date manually on the pilot form. The Currency page just shows the days-left countdown against that manual date. |
-| **Mission Qual** | TBD | TBD | Pending operator decision; currently no auto-refresh. |
-| **Medical** | **MANUAL ONLY** | 365 d | Doctor visit, not a flight. Manually edited on the pilot form. |
+Index of memory files:
+- `.local/memory/README.md` — index + update protocol
+- `.local/memory/currency-refresh.md` — Day/Night/NVG/IRT auto, Sim/Medical manual
+- `.local/memory/active-pc-visibility.md` — 90 s active window + offline messaging
+- `.local/memory/add-pilot-form.md` — six date fields, English rank, multi-segment qualification
+- `.local/memory/print-system.md` — global print rules + `data-print-area`
+- `.local/memory/phone-pair-indicator.md` — Roster green dot
+- `.local/memory/user-management.md` — User Manager hidden vs Assigned Ops Pilots
+- `.local/memory/reminders-wording.md` — "Sent" replaces "Fired"
 
-Refresh code path:
-- `applyCurrencyRefresh()` → `refreshCurrenciesForSortie()` in
-  `artifacts/pilot-dashboard/src/lib/squadron-data.ts` (~line 603).
-- Called from `useCreateSortie` and `useUpdateSortie` (both demo and
-  live paths).
-- Per-currency window comes from `getCurrencyWindow()` in
-  `artifacts/pilot-dashboard/src/lib/currency-settings.ts`,
-  configurable per squadron in the Settings page.
-
-Critical invariants:
-- Day, Night, NVG, IRT are FULLY INDEPENDENT — flying one never
-  bumps another.
-- Simulator and Medical are MANUAL ONLY — never read by
-  `refreshCurrenciesForSortie`. Do not add them to its branches.
-- Refresh applies to BOTH `pilotId` and `coPilotId` (both seats
-  earn the currency credit). External/guest pilots are skipped
-  intentionally — they have no local pilot record.
+When the operator settles a new non-trivial domain decision, add a
+new file under `.local/memory/` and link it from
+`.local/memory/README.md` and from this index.
 
 # User Preferences
 
