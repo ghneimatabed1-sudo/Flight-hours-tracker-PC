@@ -224,9 +224,13 @@ app.whenReady().then(() => {
     // default — otherwise upgrades from a previously-signed install
     // (publisherName "Captain Abed Ghneimat") refuse every new build
     // with "not digitally signed". Returning null tells electron-updater
-    // the signature is acceptable.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (autoUpdater as any).verifyUpdateCodeSignature = () => Promise.resolve(null);
+    // the signature is acceptable. We extend the typed surface narrowly
+    // (no `any`) so the override is type-checked against the real shape
+    // electron-updater exposes for the NSIS code-signature hook.
+    type UpdaterWithSignatureHook = typeof autoUpdater & {
+      verifyUpdateCodeSignature?: (publisherNames: string[], path: string) => Promise<string | null>;
+    };
+    (autoUpdater as UpdaterWithSignatureHook).verifyUpdateCodeSignature = () => Promise.resolve(null);
 
     // Pipe every update lifecycle event to the renderer so the Settings
     // page can show real progress instead of guessing. Renderer subscribes
