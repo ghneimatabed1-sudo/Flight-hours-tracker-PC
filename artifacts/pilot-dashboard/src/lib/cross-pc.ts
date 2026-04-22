@@ -617,11 +617,21 @@ export function useRegisteredPCs(): UseQueryResult<RegisteredPC[]> & { data: Reg
       } else {
         rows = readRegistry();
       }
-      return rows.map(r => ({
-        ...r,
-        online: new Date(r.lastSeen).getTime() >= cutoff,
-        isSelf: r.id === me,
-      }));
+      // v1.1.59: hard-filter any TEST_DEMO:-prefixed rows from every UI
+      // surface. The headless e2e test suite (.local/tests/cross-pc-e2e.mjs)
+      // creates synthetic registry rows during runs and cleans them at the
+      // end, but if a run is killed mid-execution the rows can briefly
+      // linger and confuse operators ("what is NO.99? I didn't register
+      // that"). The TEST_DEMO: prefix is reserved for that test harness;
+      // no production PC may use it. Filter at the source so downstream
+      // pickers, inboxes and counts can never see them.
+      return rows
+        .filter(r => !r.id.startsWith("TEST_DEMO:"))
+        .map(r => ({
+          ...r,
+          online: new Date(r.lastSeen).getTime() >= cutoff,
+          isSelf: r.id === me,
+        }));
     },
     refetchInterval: 30_000,
     staleTime: 10_000,
