@@ -345,8 +345,7 @@ export default function FlightScheduleSheet({
 
         <div className="col-span-6 grid grid-cols-2 gap-4 pb-1">
           <div className="text-center">
-            <div className="font-semibold text-[11px]">FLT.CMDR</div>
-            <div className="font-bold text-[11px] mb-1">LTC AUDEH …………….</div>
+            <div className="font-bold text-[11px] mb-1">FLT.CMDR</div>
             {readOnly ? (
               <div className="font-bold text-[11px] border-b border-black px-1">{prog.fltCmdr || "\u00A0"}</div>
             ) : (
@@ -359,8 +358,7 @@ export default function FlightScheduleSheet({
             )}
           </div>
           <div className="text-center">
-            <div className="font-semibold text-[11px]">SQDN.CMDR</div>
-            <div className="font-bold text-[11px] mb-1">LTC. BILAL ………………</div>
+            <div className="font-bold text-[11px] mb-1">SQDN.CMDR</div>
             {readOnly ? (
               <div className="font-bold text-[11px] border-b border-black px-1">{prog.sqdnCmdr || "\u00A0"}</div>
             ) : (

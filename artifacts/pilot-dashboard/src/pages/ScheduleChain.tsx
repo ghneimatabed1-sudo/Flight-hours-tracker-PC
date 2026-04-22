@@ -48,6 +48,7 @@ function programToShareRows(p: ScheduleProgram): ScheduleRow[] {
 const blankRow = (): ScheduleRow => ({
   id: `R-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
   ac: "", config: "", route: "", crew: [], mission: "", takeoff: "", land: "", fuel: "",
+  dn: "D", dur: "", remarks: "", atcTakeoff: "", atcLanding: "",
 });
 
 export default function ScheduleChain() {
@@ -397,20 +398,56 @@ export default function ScheduleChain() {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                <tr><th className="px-1 text-left">A/C</th><th className="px-1 text-left">Pilot</th><th className="px-1 text-left">Co-Pilot</th><th className="px-1 text-left">Config</th><th className="px-1 text-left">Route</th><th className="px-1 text-left">Mission</th><th className="px-1 text-left">Takeoff</th><th className="px-1 text-left">Land</th><th className="px-1 text-left">Fuel</th><th /></tr>
+                {/* v1.1.47: header layout mirrors the printed Flight
+                    Schedule sheet — merged CREW (PILOT + CO-PILOT) and
+                    merged ATC USE (TAKE OFF + LANDING) so the operator
+                    composes shares against the SAME column structure
+                    they print on paper. */}
+                <tr>
+                  <th rowSpan={2} className="px-1 text-left">NO</th>
+                  <th rowSpan={2} className="px-1 text-left">D/N</th>
+                  <th rowSpan={2} className="px-1 text-left">A/C TYPE</th>
+                  <th colSpan={2} className="px-1 text-center border-b border-border">CREW</th>
+                  <th rowSpan={2} className="px-1 text-left">CONFIGURATION</th>
+                  <th rowSpan={2} className="px-1 text-left">ROUTE</th>
+                  <th rowSpan={2} className="px-1 text-left">T/O TIME</th>
+                  <th rowSpan={2} className="px-1 text-left">MSN \ DUTY</th>
+                  <th rowSpan={2} className="px-1 text-left">DUR.</th>
+                  <th rowSpan={2} className="px-1 text-left">FUEL</th>
+                  <th rowSpan={2} className="px-1 text-left">REMARKS</th>
+                  <th colSpan={2} className="px-1 text-center border-b border-border">ATC USE</th>
+                  <th rowSpan={2} />
+                </tr>
+                <tr>
+                  <th className="px-1 text-left">PILOT</th>
+                  <th className="px-1 text-left">CO-PILOT</th>
+                  <th className="px-1 text-left">TAKE OFF</th>
+                  <th className="px-1 text-left">LANDING</th>
+                </tr>
               </thead>
               <tbody>
-                {draftRows.map(r => (
+                {draftRows.map((r, idx) => (
                   <tr key={r.id} className="border-t border-border">
-                    <td className="p-1"><input value={r.ac} onChange={e => updateRow(r.id, { ac: e.target.value })} className="w-20 px-1 py-1 bg-input border border-border rounded text-xs font-mono" /></td>
-                    <td className="p-1"><input value={r.crew[0] ?? ""} onChange={e => updateRow(r.id, { crew: [e.target.value, r.crew[1] ?? ""].filter((v, i) => v || i === 0) })} className="w-32 px-1 py-1 bg-input border border-border rounded text-xs" placeholder="Pilot" data-testid="input-draft-pilot" /></td>
-                    <td className="p-1"><input value={r.crew[1] ?? ""} onChange={e => updateRow(r.id, { crew: [r.crew[0] ?? "", e.target.value].filter((v, i) => v || i === 0) })} className="w-32 px-1 py-1 bg-input border border-border rounded text-xs" placeholder="Co-Pilot" data-testid="input-draft-copilot" /></td>
+                    <td className="p-1 text-center text-muted-foreground font-mono text-[11px]">{idx + 1}</td>
+                    <td className="p-1">
+                      <select value={r.dn ?? "D"} onChange={e => updateRow(r.id, { dn: e.target.value })} className="w-14 px-1 py-1 bg-input border border-border rounded text-xs font-mono" data-testid={`input-draft-dn-${idx}`}>
+                        <option value="D">D</option>
+                        <option value="N">N</option>
+                        <option value="NVG">NVG</option>
+                      </select>
+                    </td>
+                    <td className="p-1"><input value={r.ac} onChange={e => updateRow(r.id, { ac: e.target.value })} className="w-20 px-1 py-1 bg-input border border-border rounded text-xs font-mono" placeholder="UH-60M" /></td>
+                    <td className="p-1"><input value={r.crew[0] ?? ""} onChange={e => updateRow(r.id, { crew: [e.target.value, r.crew[1] ?? ""].filter((v, i) => v || i === 0) })} className="w-28 px-1 py-1 bg-input border border-border rounded text-xs" placeholder="Pilot" data-testid="input-draft-pilot" /></td>
+                    <td className="p-1"><input value={r.crew[1] ?? ""} onChange={e => updateRow(r.id, { crew: [r.crew[0] ?? "", e.target.value].filter((v, i) => v || i === 0) })} className="w-28 px-1 py-1 bg-input border border-border rounded text-xs" placeholder="Co-Pilot" data-testid="input-draft-copilot" /></td>
                     <td className="p-1"><input value={r.config} onChange={e => updateRow(r.id, { config: e.target.value })} className="w-24 px-1 py-1 bg-input border border-border rounded text-xs" /></td>
-                    <td className="p-1"><input value={r.route ?? ""} onChange={e => updateRow(r.id, { route: e.target.value })} className="w-32 px-1 py-1 bg-input border border-border rounded text-xs" placeholder="OJAM-OJAQ" data-testid="input-draft-route" /></td>
-                    <td className="p-1"><input value={r.mission} onChange={e => updateRow(r.id, { mission: e.target.value })} className="w-32 px-1 py-1 bg-input border border-border rounded text-xs" /></td>
+                    <td className="p-1"><input value={r.route ?? ""} onChange={e => updateRow(r.id, { route: e.target.value })} className="w-28 px-1 py-1 bg-input border border-border rounded text-xs" placeholder="OJAM-OJAQ" data-testid="input-draft-route" /></td>
                     <td className="p-1"><input value={r.takeoff} onChange={e => updateRow(r.id, { takeoff: e.target.value })} className="w-16 px-1 py-1 bg-input border border-border rounded text-xs font-mono" placeholder="0800" /></td>
-                    <td className="p-1"><input value={r.land} onChange={e => updateRow(r.id, { land: e.target.value })} className="w-16 px-1 py-1 bg-input border border-border rounded text-xs font-mono" placeholder="0930" /></td>
+                    <td className="p-1"><input value={r.mission} onChange={e => updateRow(r.id, { mission: e.target.value })} className="w-28 px-1 py-1 bg-input border border-border rounded text-xs" /></td>
+                    <td className="p-1"><input value={r.dur ?? ""} onChange={e => updateRow(r.id, { dur: e.target.value })} className="w-16 px-1 py-1 bg-input border border-border rounded text-xs font-mono" placeholder="1+30" data-testid={`input-draft-dur-${idx}`} /></td>
                     <td className="p-1"><input value={r.fuel} onChange={e => updateRow(r.id, { fuel: e.target.value })} className="w-16 px-1 py-1 bg-input border border-border rounded text-xs font-mono" /></td>
+                    <td className="p-1"><input value={r.remarks ?? ""} onChange={e => updateRow(r.id, { remarks: e.target.value })} className="w-28 px-1 py-1 bg-input border border-border rounded text-xs" data-testid={`input-draft-remarks-${idx}`} /></td>
+                    <td className="p-1"><input value={r.atcTakeoff ?? ""} onChange={e => updateRow(r.id, { atcTakeoff: e.target.value })} className="w-16 px-1 py-1 bg-input border border-border rounded text-xs font-mono" data-testid={`input-draft-atc-to-${idx}`} /></td>
+                    <td className="p-1"><input value={r.atcLanding ?? r.land ?? ""} onChange={e => updateRow(r.id, { atcLanding: e.target.value, land: e.target.value })} className="w-16 px-1 py-1 bg-input border border-border rounded text-xs font-mono" placeholder="0930" data-testid={`input-draft-atc-ldg-${idx}`} /></td>
                     <td className="p-1"><button onClick={() => removeRow(r.id)} className="p-1 text-muted-foreground hover:text-rose-300"><Trash2 className="h-3 w-3" /></button></td>
                   </tr>
                 ))}
@@ -705,22 +742,33 @@ function ScheduleTable({ share }: { share: ScheduleShare }) {
   );
   return (
     <div className="overflow-x-auto">
+      {/* v1.1.47: same column layout as the printed Flight Schedule
+          sheet (merged CREW and ATC USE headers). */}
       <table className="w-full text-xs">
         <thead className="text-[10px] uppercase tracking-wider text-muted-foreground bg-secondary/30">
           <tr>
-            <th className="px-2 py-1 text-left">A/C</th>
-            <th className="px-2 py-1 text-left">Pilot</th>
-            <th className="px-2 py-1 text-left">Co-Pilot</th>
-            <th className="px-2 py-1 text-left">Config</th>
-            <th className="px-2 py-1 text-left">Route</th>
-            <th className="px-2 py-1 text-left">Mission</th>
-            <th className="px-2 py-1 text-right">Takeoff</th>
-            <th className="px-2 py-1 text-right">Land</th>
-            <th className="px-2 py-1 text-right">Fuel</th>
+            <th rowSpan={2} className="px-2 py-1 text-left">NO</th>
+            <th rowSpan={2} className="px-2 py-1 text-left">D/N</th>
+            <th rowSpan={2} className="px-2 py-1 text-left">A/C TYPE</th>
+            <th colSpan={2} className="px-2 py-1 text-center border-b border-border">CREW</th>
+            <th rowSpan={2} className="px-2 py-1 text-left">CONFIGURATION</th>
+            <th rowSpan={2} className="px-2 py-1 text-left">ROUTE</th>
+            <th rowSpan={2} className="px-2 py-1 text-right">T/O TIME</th>
+            <th rowSpan={2} className="px-2 py-1 text-left">MSN \ DUTY</th>
+            <th rowSpan={2} className="px-2 py-1 text-right">DUR.</th>
+            <th rowSpan={2} className="px-2 py-1 text-right">FUEL</th>
+            <th rowSpan={2} className="px-2 py-1 text-left">REMARKS</th>
+            <th colSpan={2} className="px-2 py-1 text-center border-b border-border">ATC USE</th>
+          </tr>
+          <tr>
+            <th className="px-2 py-1 text-left">PILOT</th>
+            <th className="px-2 py-1 text-left">CO-PILOT</th>
+            <th className="px-2 py-1 text-right">TAKE OFF</th>
+            <th className="px-2 py-1 text-right">LANDING</th>
           </tr>
         </thead>
         <tbody>
-          {diff.map(d => {
+          {diff.map((d, idx) => {
             const r = d.next ?? d.prev!;
             const cls =
               d.kind === "added" ? "no-print-diff bg-emerald-500/10"
@@ -729,15 +777,20 @@ function ScheduleTable({ share }: { share: ScheduleShare }) {
               : "";
             return (
               <tr key={r.id} className={`border-t border-border ${cls}`} data-testid={`diff-${d.kind}`}>
+                <td className="px-2 py-1 text-center font-mono">{idx + 1}</td>
+                <td className="px-2 py-1 font-mono">{r.dn ?? ""}</td>
                 <td className="px-2 py-1 font-mono">{r.ac}</td>
                 <td className="px-2 py-1">{r.crew[0] ?? ""}</td>
                 <td className="px-2 py-1">{r.crew[1] ?? ""}</td>
                 <td className="px-2 py-1">{r.config}</td>
                 <td className="px-2 py-1">{r.route ?? ""}</td>
-                <td className="px-2 py-1">{r.mission}</td>
                 <td className="px-2 py-1 text-right font-mono">{r.takeoff}</td>
-                <td className="px-2 py-1 text-right font-mono">{r.land}</td>
+                <td className="px-2 py-1">{r.mission}</td>
+                <td className="px-2 py-1 text-right font-mono">{r.dur ?? ""}</td>
                 <td className="px-2 py-1 text-right font-mono">{r.fuel}</td>
+                <td className="px-2 py-1">{r.remarks ?? ""}</td>
+                <td className="px-2 py-1 text-right font-mono">{r.atcTakeoff ?? ""}</td>
+                <td className="px-2 py-1 text-right font-mono">{r.atcLanding ?? r.land ?? ""}</td>
               </tr>
             );
           })}

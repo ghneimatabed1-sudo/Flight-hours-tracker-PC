@@ -915,6 +915,19 @@ export interface ScheduleRow {
   takeoff: string;
   land: string;
   fuel: string;
+  // v1.1.47: optional fields added so the Schedule Chain compose/read
+  // table can mirror the printed Flight Schedule sheet's column layout.
+  // All optional → existing rows in xpc_schedule_shares stay valid.
+  /** D = day, N = night (or NVG / N&D). */
+  dn?: string;
+  /** Sortie duration, free-form (e.g. "1+30"). */
+  dur?: string;
+  /** Free-form remarks. */
+  remarks?: string;
+  /** ATC USE — take-off slot. */
+  atcTakeoff?: string;
+  /** ATC USE — landing slot. */
+  atcLanding?: string;
 }
 
 // Full Flight Program snapshot — when an ops officer submits the daily
