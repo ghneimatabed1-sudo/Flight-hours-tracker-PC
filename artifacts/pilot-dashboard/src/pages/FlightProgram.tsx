@@ -4,13 +4,17 @@ import { useI18n } from "@/lib/i18n";
 import { usePilots } from "@/lib/squadron-data";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
-import { Printer, Save, Settings, Send, X as CloseIcon } from "lucide-react";
+import { Printer, Save, Settings, Send, X as CloseIcon, Check, X, Trash2 } from "lucide-react";
 import FlightScheduleSheet, { emptyProgramRow } from "@/components/FlightScheduleSheet";
 import {
   type ScheduleProgram,
   type ScheduleProgramRow,
   useRegisteredPCs,
   useSubmitSchedule,
+  useScheduleShares,
+  useDecideSchedule,
+  useDeleteScheduleShare,
+  makePcMatcher,
   getLocalPcId,
   getFlightBinding,
 } from "@/lib/cross-pc";
@@ -290,6 +294,7 @@ export default function FlightProgram() {
 
   return (
     <div className="space-y-3" dir={dir}>
+      <FlightProgramShareInbox />
       {/* Toolbar — hidden on print. Date + mode + Save + Print + Submit + Defaults. */}
       <div className="no-print flex items-center gap-2 flex-wrap">
         <DateInput
@@ -499,6 +504,133 @@ export default function FlightProgram() {
           input, select { border: none !important; }
         }
       `}</style>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   v1.1.61 Flight Program — Incoming/Sent share panel
+   ────────────────────────────────────────────────────────────────────
+   The Flight Schedule (paper) page used to be a composer-only surface:
+   you authored a sheet and pressed Submit. Acting on returned edits or
+   cleaning up bad sheets meant switching to the Schedule Chain page.
+   This compact panel surfaces every program-style share that touches
+   this PC (incoming + sent) right at the top of the Flight Schedule
+   page so Approve / Reject / Delete / Print can be done without
+   leaving the page. It is a deliberate mirror of the action set on
+   ScheduleChain.tsx — same mutations, same RLS authority. */
+function FlightProgramShareInbox() {
+  const { user } = useAuth();
+  const { data: shares = [] } = useScheduleShares();
+  const decide = useDecideSchedule();
+  const deleteShare = useDeleteScheduleShare();
+  const { toast } = useToast();
+  const me = getLocalPcId();
+  const matcher = useMemo(() => makePcMatcher(), [me]);
+  // Only program-style (paper sheet) shares belong on this page; the
+  // compact-rows shares stay on Schedule Chain so we don't double up.
+  const programShares = useMemo(
+    () => shares.filter(s => !!s.program),
+    [shares],
+  );
+  const incoming = useMemo(
+    () => programShares.filter(s => matcher.matchesMe(s.currentPcId) && !matcher.matchesMe(s.originSquadronId)),
+    [programShares, matcher],
+  );
+  const sent = useMemo(
+    () => programShares.filter(s => matcher.matchesMe(s.originSquadronId) && !s.originatorDismissedAt),
+    [programShares, matcher],
+  );
+  const wireTier: "flight" | "squadron" | "wing" | "base" =
+    user?.scope === "wing" ? "wing"
+    : user?.scope === "base" ? "base"
+    : user?.scope === "flight" ? "flight"
+    : "squadron";
+
+  if (incoming.length === 0 && sent.length === 0) return null;
+
+  return (
+    <div className="no-print space-y-2">
+      {incoming.length > 0 && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 space-y-2">
+          <div className="text-xs font-semibold text-amber-200">
+            Incoming flight programs awaiting your action ({incoming.length})
+          </div>
+          {incoming.map(share => (
+            <div key={share.id} className="flex items-center justify-between gap-2 border border-border bg-background/50 rounded p-2">
+              <div className="text-xs">
+                <div className="font-semibold">{share.date}</div>
+                <div className="text-[11px] text-muted-foreground">
+                  From {share.originSquadronName} · {share.status}
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  onClick={async () => {
+                    await decide.mutateAsync({ id: share.id, action: "approve", by: user?.username ?? "ops", tier: wireTier });
+                    toast({ title: "Approved" });
+                  }}
+                  className="px-2 py-1 rounded bg-emerald-500/20 border border-emerald-400/40 text-emerald-100 text-[11px] font-semibold inline-flex items-center gap-1"
+                  data-testid={`fp-approve-${share.id}`}
+                >
+                  <Check className="h-3 w-3" /> Approve
+                </button>
+                <button
+                  onClick={async () => {
+                    await decide.mutateAsync({ id: share.id, action: "reject", by: user?.username ?? "ops", tier: wireTier });
+                    toast({ title: "Rejected" });
+                  }}
+                  className="px-2 py-1 rounded bg-rose-500/20 border border-rose-400/40 text-rose-100 text-[11px] font-semibold inline-flex items-center gap-1"
+                  data-testid={`fp-reject-${share.id}`}
+                >
+                  <X className="h-3 w-3" /> Reject
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!window.confirm("Delete this flight schedule from EVERY PC?\n\nThis is permanent. Originator, reviewers, approvers — everyone loses their copy. Cannot be undone.")) return;
+                    await deleteShare.mutateAsync({ id: share.id });
+                    toast({ title: "Schedule deleted from every PC" });
+                  }}
+                  className="px-2 py-1 rounded bg-rose-700/30 border border-rose-500/60 text-rose-50 text-[11px] font-semibold inline-flex items-center gap-1"
+                  data-testid={`fp-delete-${share.id}`}
+                  title="Permanent delete — removes this schedule from every PC in the chain"
+                >
+                  <Trash2 className="h-3 w-3" /> Delete
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {sent.length > 0 && (
+        <div className="rounded-md border border-border bg-secondary/20 p-3 space-y-2">
+          <div className="text-xs font-semibold text-muted-foreground">
+            Flight programs you sent ({sent.length})
+          </div>
+          {sent.map(share => (
+            <div key={share.id} className="flex items-center justify-between gap-2 border border-border bg-background/50 rounded p-2">
+              <div className="text-xs">
+                <div className="font-semibold">{share.date}</div>
+                <div className="text-[11px] text-muted-foreground">
+                  Now at {share.currentPcName ?? "—"} · {share.status}
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!window.confirm("Delete this flight schedule from EVERY PC?\n\nThis is permanent. Originator, reviewers, approvers — everyone loses their copy. Cannot be undone.")) return;
+                  await deleteShare.mutateAsync({ id: share.id });
+                  toast({ title: "Schedule deleted from every PC" });
+                }}
+                className="px-2 py-1 rounded bg-rose-700/30 border border-rose-500/60 text-rose-50 text-[11px] font-semibold inline-flex items-center gap-1"
+                data-testid={`fp-sent-delete-${share.id}`}
+                title="Permanent delete — removes this schedule from every PC in the chain"
+              >
+                <Trash2 className="h-3 w-3" /> Delete everywhere
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
