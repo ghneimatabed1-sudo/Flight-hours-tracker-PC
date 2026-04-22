@@ -47,6 +47,7 @@ import PendingApprovals from "@/pages/PendingApprovals";
 import GuestBackfill from "@/pages/GuestBackfill";
 import Messages from "@/pages/Messages";
 import ScheduleChain from "@/pages/ScheduleChain";
+import FinalSchedules from "@/pages/FinalSchedules";
 import { registerLocalPC, purgeExpiredMessages, getLocalPcId, setLocalPcId, getDeviceSuffix, publishSquadronFlightGroup, getLatestSquadronFlightGroup, publishSquadronSnapshot, type PcTier, type SquadronSnapshotPayload } from "@/lib/cross-pc";
 import { usePilots, useUnavailable } from "@/lib/squadron-data";
 import Roster from "@/pages/Roster";
@@ -122,6 +123,7 @@ function SquadronOpsRoutes() {
           replaced its workflow. */}
       <Route path="/schedule">{() => { window.location.replace("/flight-program"); return null; }}</Route>
       <Route path="/flight-program" component={FlightProgram} />
+      <Route path="/final-schedules" component={FinalSchedules} />
       <Route path="/risk" component={Risk} />
       <Route path="/coordinating" component={Coordinating} />
       <Route path="/notams" component={NotamsPage} />

@@ -4,8 +4,8 @@ import { useAuth } from "@/lib/auth";
 import { useI18n, type Key } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2, Bell, Settings as SettingsIcon } from "lucide-react";
-import { canUseMessages, canUseScheduleChain } from "@/lib/cross-pc";
+import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2, Bell, ClipboardCheck, Settings as SettingsIcon } from "lucide-react";
+import { canUseMessages, canUseScheduleChain, canViewFinalSchedules } from "@/lib/cross-pc";
 import { FlightBindingGate, FlightBindingBadge } from "@/components/FlightBindingGate";
 import emblem from "@assets/rjaf_emblem.png";
 import { RecoveryCodesLowBanner } from "@/components/RecoveryCodesLowBanner";
@@ -85,6 +85,12 @@ export function HQLayout({ children }: { children: ReactNode }) {
         // sheet so they don't get this page in their sidebar.
         ...(canUseScheduleChain(user.role, user.scope)
           ? [{ path: "/dashboard/schedule-chain", labelKey: "nav_schedule_chain" as Key, icon: <Share2 className="h-4 w-4" /> }]
+          : []),
+        // v1.1.64 — Base / HQ commanders are read-only viewers of every
+        // Wing-approved flight schedule across every squadron, sorted
+        // per squadron with the originating Sqn Cmdr name visible.
+        ...(canViewFinalSchedules(user.role, user.scope)
+          ? [{ path: "/dashboard/final-schedules", labelKey: "nav_final_schedules" as Key, icon: <ClipboardCheck className="h-4 w-4" /> }]
           : []),
         ...(canUseMessages(user.role, user.scope)
           ? [{ path: "/dashboard/messages", labelKey: "nav_messages" as Key, icon: <Mail className="h-4 w-4" /> }]

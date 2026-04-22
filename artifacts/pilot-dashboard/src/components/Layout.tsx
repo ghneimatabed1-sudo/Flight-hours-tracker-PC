@@ -23,8 +23,9 @@ import {
   Inbox as InboxIcon,
   Mail as MailIcon,
   Share2 as Share2Icon,
+  ClipboardCheck as ClipboardCheckIcon,
 } from "lucide-react";
-import { canUseMessages, canUseScheduleChain } from "@/lib/cross-pc";
+import { canUseMessages, canUseScheduleChain, canViewFinalSchedules } from "@/lib/cross-pc";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
 import { IncomingAlertWatcher } from "@/components/IncomingAlertWatcher";
 
@@ -36,6 +37,7 @@ const ITEMS: readonly Item[] = [
   { p: "/pending", k: "nav_pending" as TKey, I: InboxIcon },
   { p: "/external-pilots", k: "nav_externalpilots", I: UserPlusIcon },
   { p: "/schedule-chain", k: "nav_schedule_chain" as TKey, I: Share2Icon },
+  { p: "/final-schedules", k: "nav_final_schedules" as TKey, I: ClipboardCheckIcon },
   { p: "/messages", k: "nav_messages" as TKey, I: MailIcon },
   { p: "/roster", k: "nav_roster", I: Users },
   { p: "/currency", k: "nav_currency", I: BadgeCheck },
@@ -135,7 +137,12 @@ export default function Layout({ children }: { children: ReactNode }) {
               // the schedule chain (peer share with linked Flight Cmdrs
               // AND with the Squadron Cmdr, both directions). The label
               // is shown for every role canUseScheduleChain accepts.
-              return canUseScheduleChain(user?.role, undefined);
+              return canUseScheduleChain(user?.role, user?.scope);
+            }
+            if (p === "/final-schedules") {
+              // v1.1.64: Base + HQ Cmdrs see a read-only rollup of every
+              // Wing-approved flight schedule, sorted per squadron.
+              return canViewFinalSchedules(user?.role, user?.scope);
             }
             if (p === "/pending") return user?.role === "ops" || user?.role === "super_admin";
             return true;

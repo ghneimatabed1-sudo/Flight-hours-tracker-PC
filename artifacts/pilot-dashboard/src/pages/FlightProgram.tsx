@@ -208,17 +208,19 @@ export default function FlightProgram() {
           || p.id.startsWith(`${sqdnPrefix}#`),
         );
       }
-      // v1.1.63 — Squadron Commander targets are SQUADRON-INTERNAL ONLY:
+      // v1.1.64 — Squadron Commander targets:
       //   • Flight Commander PCs — return / share a program with a flight
       //   • The squadron's Ops Pilot PC — publish to the always-on desk
-      // Wing, Base, and HQ tiers are deliberately excluded; the daily
-      // flying programme never leaves the squadron.
+      //   • Wing Commander PCs — submit up the chain for Wing approval;
+      //     Wing-approved schedules then auto-flow to Base + HQ as
+      //     read-only finals (see canViewFinalSchedules).
+      // Base / HQ are read-only viewers, never direct recipients.
       if (isSquadronCmdr) {
-        return all.filter(p => p.tier === "flight" || p.tier === "squadron");
+        return all.filter(p => p.tier === "flight" || p.tier === "squadron" || p.tier === "wing");
       }
-      // v1.1.63 — Ops Pilot targets: same squadron-internal scope as
-      // the Squadron Commander. Ops publishes to its Flight Cmdrs and
-      // to the Sqn Cmdr PC; never up to wing/base/HQ.
+      // v1.1.64 — Ops Pilot targets: squadron-internal only. Ops
+      // publishes to its Flight Cmdrs and to the Sqn Cmdr PC; the
+      // Sqn Cmdr is the one who submits up to Wing for approval.
       if (user?.role === "ops") {
         return all.filter(p => p.tier === "flight" || p.tier === "squadron");
       }
@@ -277,7 +279,9 @@ export default function FlightProgram() {
       rows,
       targetPcId:   selectedTarget.id,
       targetPcName: selectedTarget.squadronName,
-      targetTier:   (selectedTarget.tier === "flight" ? "flight" : "squadron"),
+      targetTier:   (selectedTarget.tier === "flight" ? "flight"
+                    : selectedTarget.tier === "wing"   ? "wing"
+                    : "squadron"),
       submittedBy:  user?.username ?? "ops",
       program:      prog,
     });

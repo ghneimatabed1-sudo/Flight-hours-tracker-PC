@@ -1180,9 +1180,28 @@ function shareToRow(s: ScheduleShare): Record<string, unknown> {
   };
 }
 
-export function useScheduleShares(forPcId: string | null): UseQueryResult<ScheduleShare[]> & { data: ScheduleShare[] } {
+// v1.1.64 — `viewAllApproved` opens a read-only firehose: every share
+// whose status is "approved" AND whose latest "approved" history entry
+// was logged by a Wing-tier approver becomes visible regardless of
+// chainPcIds. This is exactly how the Base Cmdr / HQ Cmdr final-
+// schedules page populates its sorted-per-squadron rollup. It is
+// strictly a viewer flag — viewers still cannot mutate any share.
+export function isWingApprovedFinal(s: ScheduleShare): boolean {
+  if (s.status !== "approved") return false;
+  // Find the latest "approved" entry; the tier on that entry tells us
+  // who signed off. Wing approval is the release point to Base + HQ.
+  const approvals = s.history.filter(h => h.action === "approved");
+  if (approvals.length === 0) return false;
+  return approvals[approvals.length - 1].tier === "wing";
+}
+
+export function useScheduleShares(
+  forPcId: string | null,
+  opts?: { viewAllApproved?: boolean },
+): UseQueryResult<ScheduleShare[]> & { data: ScheduleShare[] } {
+  const viewAllApproved = !!opts?.viewAllApproved;
   const q = useQuery<ScheduleShare[]>({
-    queryKey: ["xpc", "schedule", forPcId ?? ""],
+    queryKey: ["xpc", "schedule", forPcId ?? "", viewAllApproved ? "all-approved" : "mine"],
     queryFn: async () => {
       // Visibility rules (applied client-side so the same logic is used
       // for both Supabase and local-fallback paths):
@@ -1193,7 +1212,13 @@ export function useScheduleShares(forPcId: string | null): UseQueryResult<Schedu
       //     touched the chain — but a PC that has rejected it in the past
       //     is excluded (we don't re-surface a stale rejected row when
       //     the originator later edits/resends/approves it).
+      //   - viewAllApproved (Base / HQ): see every Wing-approved final
+      //     regardless of chain membership. They never see drafts,
+      //     rejected cycles, or in-flight forwards.
       const visible = (s: ScheduleShare): boolean => {
+        if (viewAllApproved) {
+          return isWingApprovedFinal(s);
+        }
         if (!forPcId) return true;
         const isOrigin = s.originSquadronId === forPcId;
         const isCurrent = s.currentPcId === forPcId;
@@ -1217,7 +1242,12 @@ export function useScheduleShares(forPcId: string | null): UseQueryResult<Schedu
         return await liveOrLocal(
           async () => {
             let qry = supabase!.from("xpc_schedule_shares").select("*").order("flight_date", { ascending: false });
-            if (forPcId) {
+            if (viewAllApproved) {
+              // Base / HQ firehose: server-side narrow to status=approved.
+              // The client-side `visible()` filter then keeps only the
+              // Wing-signed finals (drops Sqn-only approvals).
+              qry = qry.eq("status", "approved");
+            } else if (forPcId) {
               // Server-side narrowing keeps payload small; the client-side
               // `visible()` filter then enforces the dismissal / rejecter
               // rules so the logic stays in one place.
@@ -1380,17 +1410,21 @@ export function useDecideSchedule() {
         cur.currentTier = "squadron";
         push("edited", input.note ?? "edits returned to originator");
       } else if (input.action === "forward") {
-        // v1.1.63: schedule sharing is strictly squadron-internal
-        // between Flight Cmdr, Squadron Cmdr, and Ops Pilot. The only
-        // valid forward is the lateral hand-off between flight and
-        // squadron tiers. Wing / Base / HQ are never recipients of a
-        // flight schedule and any attempt to forward there is a bug.
+        // v1.1.64 chain transitions:
+        //   flight    → squadron   (Flight Cmdr returns to Sqn for review)
+        //   squadron  → wing       (Sqn Cmdr submits up for Wing approval)
+        //   squadron  ↔ flight     (Sqn Cmdr peer-shares back to Flight)
+        // Wing-tier shares are never forwarded — Wing approves them
+        // and the approval makes them visible to Base + HQ via the
+        // canViewFinalSchedules / useScheduleShares viewAllApproved
+        // path. Base / HQ are read-only viewers, never recipients of
+        // an active forward.
         if (cur.currentTier === "flight") {
           cur.currentTier = "squadron";
         } else if (cur.currentTier === "squadron") {
-          cur.currentTier = "flight";
+          cur.currentTier = "wing";
         } else {
-          throw new Error("Schedule sharing is squadron-internal — wing/base tiers cannot receive a forward.");
+          throw new Error("Wing tier shares are terminal — use Approve to release the final to Base / HQ.");
         }
         cur.currentPcId = input.forwardPcId ?? null;
         cur.currentPcName = input.forwardPcName ?? null;
