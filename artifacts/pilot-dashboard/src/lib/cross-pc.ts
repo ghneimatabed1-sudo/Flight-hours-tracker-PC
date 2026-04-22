@@ -81,6 +81,16 @@ const REGISTRY_KEY = "rjaf.xpc.registry";
 // heartbeat is older than this window are considered offline (they still
 // stay in the registry — they just render without the green dot).
 const ONLINE_WINDOW_MS = 5 * 60_000;
+// Long-stale prune window — a registry row whose last_seen is older than
+// this is considered abandoned (PC reimaged, decommissioned, USB lost,
+// operator left the unit) and is opportunistically deleted from the
+// central xpc_registry + xpc_user_pcs tables. This keeps the registry
+// self-cleaning over the lifetime of the deployment so the table never
+// fills up with dead seats from years of personnel turnover. 30 days
+// is conservative — a deployed pilot returning from a 2-week leave
+// will not lose their seat; only PCs that have been silent for a full
+// month get pruned, and they re-register the moment they sign back in.
+const STALE_REGISTRY_MS = 30 * 24 * 60 * 60_000;
 
 // Tier of the PC in the Squadron → Wing → Base → HQ chain. The tier is
 // what the schedule-sharing chain enforces when picking forward targets:
@@ -541,8 +551,32 @@ export function useRegisteredPCs(): UseQueryResult<RegisteredPC[]> & { data: Reg
               .from("xpc_registry")
               .select("*")
               .order("last_seen", { ascending: false })
-              .limit(1000);
+              .limit(5000);
             if (error) throw error;
+            // Opportunistic prune of long-stale rows so the registry stays
+            // bounded over years of personnel turnover. Runs ~1 in 20
+            // fetches and is fully fire-and-forget — never blocks the UI
+            // and never throws into the query. Deletes from BOTH the
+            // registry and the per-user PC claims table so a reimaged or
+            // decommissioned PC vanishes completely from every other
+            // operator's pickers within a single refresh cycle.
+            if (Math.random() < 0.05) {
+              void (async () => {
+                try {
+                  const staleBefore = new Date(Date.now() - STALE_REGISTRY_MS).toISOString();
+                  const { data: deadIds } = await supabase!
+                    .from("xpc_registry")
+                    .select("id")
+                    .lt("last_seen", staleBefore)
+                    .limit(500);
+                  const ids = (deadIds ?? []).map((r: { id: string }) => r.id).filter(Boolean);
+                  if (ids.length > 0) {
+                    await supabase!.from("xpc_registry").delete().in("id", ids);
+                    await supabase!.from("xpc_user_pcs").delete().in("pc_id", ids);
+                  }
+                } catch { /* prune is best-effort */ }
+              })();
+            }
             return (data ?? []).map(rowToPc);
           },
           () => readRegistry(),

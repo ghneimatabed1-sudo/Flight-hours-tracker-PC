@@ -196,7 +196,7 @@ export default function LicenseKeys() {
   // flow but is applied locally: for Ops PCs it's baked into the auto-minted
   // license, for commander/HQ PCs it's stored as `rjaf.localExpiresAt` and
   // enforced on every launch (the app refuses to start past that date).
-  const [setupDuration, setSetupDuration] = useState<LicenseDuration | typeof CUSTOM_DURATION>("1y");
+  const [setupDuration, setSetupDuration] = useState<LicenseDuration | typeof CUSTOM_DURATION>("never");
   const [setupCustomDays, setSetupCustomDays] = useState<string>("30");
   function resolveSetupExpiry(issuedAt: string): { expiresAt: string | null; valid: boolean } {
     if (setupDuration === CUSTOM_DURATION) {
@@ -736,7 +736,7 @@ export default function LicenseKeys() {
   }
   const [genFor, setGenFor] = useState<string>("");
   const [genUsername, setGenUsername] = useState<string>("");
-  const [genDuration, setGenDuration] = useState<LicenseDuration | typeof CUSTOM_DURATION>("1y");
+  const [genDuration, setGenDuration] = useState<LicenseDuration | typeof CUSTOM_DURATION>("never");
   const [genCustomDays, setGenCustomDays] = useState<string>("5");
   // Pre-assigned role tier for the PC this key will activate. Only the
   // Super Admin chooses this here; the field operator can't override it
