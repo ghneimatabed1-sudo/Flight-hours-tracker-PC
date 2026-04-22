@@ -83,3 +83,9 @@ id = "J9zaqEThqnYdZwCWCjL7b"
 uri = "file://exports/hawkeye-pdf/HawkEye-Ecosystem.pdf"
 type = "pdf"
 title = "Hawk Eye Ecosystem (Apr 20)"
+
+[[outputs]]
+id = "EzMTV6FCkd2F4cB2gpbWx"
+uri = "file://artifacts/pilot-dashboard/release/HawkEye-1.1.71-win-x64.zip"
+type = "unspecified"
+title = "Hawk Eye v1.1.71 — Windows update bundle"

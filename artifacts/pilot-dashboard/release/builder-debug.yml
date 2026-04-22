@@ -98,8 +98,8 @@ nsis:
     !addincludedir "/home/runner/workspace/artifacts/pilot-dashboard/public/brand"
     !include "/home/runner/workspace/artifacts/pilot-dashboard/build/installer.nsh"
     !addplugindir /x86-unicode "/home/runner/workspace/.cache/electron-builder/nsis/nsis-resources-3.4.1/plugins/x86-unicode"
-    !include "/tmp/t-vW2sMD/0-messages.nsh"
-    !include "/tmp/t-vW2sMD/1-messages.nsh"
+    !include "/tmp/t-ebW75F/0-messages.nsh"
+    !include "/tmp/t-ebW75F/1-messages.nsh"
 
     Var newStartMenuLink
     Var oldStartMenuLink
