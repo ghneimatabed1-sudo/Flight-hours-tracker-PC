@@ -86,11 +86,12 @@ const ONLINE_WINDOW_MS = 5 * 60_000;
 // operator left the unit) and is opportunistically deleted from the
 // central xpc_registry + xpc_user_pcs tables. This keeps the registry
 // self-cleaning over the lifetime of the deployment so the table never
-// fills up with dead seats from years of personnel turnover. 30 days
-// is conservative — a deployed pilot returning from a 2-week leave
-// will not lose their seat; only PCs that have been silent for a full
-// month get pruned, and they re-register the moment they sign back in.
-const STALE_REGISTRY_MS = 30 * 24 * 60 * 60_000;
+// fills up with dead seats from years of personnel turnover. 90 days
+// is generous — a pilot on a long deployment, seasonal rotation, or
+// extended leave will not lose their seat; only PCs that have been
+// completely silent for a full quarter get pruned, and they re-register
+// automatically the moment that operator signs back in on any PC.
+const STALE_REGISTRY_MS = 90 * 24 * 60 * 60_000;
 
 // Tier of the PC in the Squadron → Wing → Base → HQ chain. The tier is
 // what the schedule-sharing chain enforces when picking forward targets:
