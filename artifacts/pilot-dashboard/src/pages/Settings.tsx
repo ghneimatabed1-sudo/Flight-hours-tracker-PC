@@ -454,7 +454,7 @@ function MobileDevicesCard() {
 
 export default function Settings() {
   const { t, lang, setLang } = useI18n();
-  const { squadron, configureSquadron, fingerprint, releaseLicense } = useAuth();
+  const { squadron, configureSquadron, fingerprint, releaseLicense, user } = useAuth();
   const [name, setName] = useState(squadron?.name || "");
   const [num, setNum] = useState(squadron?.number || "");
   const [base, setBase] = useState(squadron?.base || "");

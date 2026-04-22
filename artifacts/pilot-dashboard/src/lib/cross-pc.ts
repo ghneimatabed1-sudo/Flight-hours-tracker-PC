@@ -1487,6 +1487,37 @@ function purgeExpiredLocal(rows: PrivateMessage[]): PrivateMessage[] {
 export function useMessages(forPcId: string | null): {
   inbox: PrivateMessage[]; sent: PrivateMessage[]; history: PrivateMessage[];
 } & UseQueryResult<PrivateMessage[]> {
+  // v1.1.44: same logical-seat matching the Schedule Chain inbox uses
+  // (see ScheduleChain.tsx v1.1.40). Tier-prefixed PC ids carry a
+  // "#<deviceSuffix>" tail that regenerates whenever localStorage is
+  // cleared — so messages addressed to the OLD suffix become invisible
+  // to the same logical seat after a reimage. Match on "<TIER>:<base>"
+  // ignoring the suffix so the inbox catches its own mail. Also mirror
+  // Ops PC "<sqn>" with Sqn Cmdr "SQDNCMD:<sqn>" so private mail to
+  // either lands on both inboxes.
+  const logicalSeat = (() => {
+    if (!forPcId) return null;
+    const hashIdx = forPcId.indexOf("#");
+    if (hashIdx < 0) return null;
+    return forPcId.slice(0, hashIdx); // e.g. "FLIGHT:NO.8"
+  })();
+  const peerSquadronId = (() => {
+    if (!forPcId) return null;
+    if (forPcId.startsWith("SQDNCMD:")) return forPcId.slice("SQDNCMD:".length);
+    if (!forPcId.includes(":")) return `SQDNCMD:${forPcId}`;
+    return null;
+  })();
+  const matchesMe = (id: string | null | undefined): boolean => {
+    if (!id || !forPcId) return false;
+    if (id === forPcId) return true;
+    if (peerSquadronId !== null && id === peerSquadronId) return true;
+    if (logicalSeat !== null) {
+      const hashIdx = id.indexOf("#");
+      const otherSeat = hashIdx < 0 ? id : id.slice(0, hashIdx);
+      if (otherSeat === logicalSeat) return true;
+    }
+    return false;
+  };
   const q = useQuery<PrivateMessage[]>({
     queryKey: ["xpc", "messages", forPcId ?? ""],
     queryFn: async () => {
@@ -1495,7 +1526,7 @@ export function useMessages(forPcId: string | null): {
         const purged = purgeExpiredLocal(readMessages());
         writeMessages(purged);
         return purged
-          .filter(m => m.fromPcId === forPcId || m.toPcId === forPcId)
+          .filter(m => matchesMe(m.fromPcId) || matchesMe(m.toPcId))
           .sort((a, b) => b.sentAt.localeCompare(a.sentAt));
       };
       if (isLive()) {
@@ -1503,10 +1534,28 @@ export function useMessages(forPcId: string | null): {
           async () => {
             const days = getMessageRetentionDays();
             const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+            // Build an OR clause that covers strict id, peer-squadron
+            // mirror, and tier-prefix LIKE patterns. Supabase's PostgREST
+            // OR syntax requires comma-separated filters with no spaces.
+            const orParts: string[] = [
+              `from_pc_id.eq.${forPcId}`,
+              `to_pc_id.eq.${forPcId}`,
+            ];
+            if (peerSquadronId !== null) {
+              orParts.push(`from_pc_id.eq.${peerSquadronId}`, `to_pc_id.eq.${peerSquadronId}`);
+            }
+            if (logicalSeat !== null) {
+              orParts.push(
+                `from_pc_id.like.${logicalSeat}#*`,
+                `to_pc_id.like.${logicalSeat}#*`,
+                `from_pc_id.eq.${logicalSeat}`,
+                `to_pc_id.eq.${logicalSeat}`,
+              );
+            }
             const { data, error } = await supabase!
               .from("xpc_messages")
               .select("*")
-              .or(`from_pc_id.eq.${forPcId},to_pc_id.eq.${forPcId}`)
+              .or(orParts.join(","))
               .gte("sent_at", cutoff)
               .order("sent_at", { ascending: false });
             if (error) throw error;
@@ -1523,9 +1572,9 @@ export function useMessages(forPcId: string | null): {
   const all = q.data ?? [];
   return {
     ...q,
-    inbox: all.filter(m => m.toPcId === forPcId && !m.inHistory),
-    sent: all.filter(m => m.fromPcId === forPcId),
-    history: all.filter(m => m.toPcId === forPcId && m.inHistory),
+    inbox: all.filter(m => matchesMe(m.toPcId) && !m.inHistory),
+    sent: all.filter(m => matchesMe(m.fromPcId)),
+    history: all.filter(m => matchesMe(m.toPcId) && m.inHistory),
   } as ReturnType<typeof useMessages>;
 }
 
