@@ -10,6 +10,7 @@ import {
   useDismissScheduleShareForOriginator,
   useDeleteScheduleShare,
   useRegisteredPCs,
+  isPcActive,
   diffSchedule,
   canUseScheduleChain,
   getLocalPcId,
@@ -125,13 +126,12 @@ export default function ScheduleChain() {
   //   Wing tier     → forwards approved programmes to Base.
   //   Flight tier   → composes and submits back to Squadron.
   //   Base tier     → terminal.
-  // Hide PCs that haven't reported in 30 days from the composer dropdowns
-  // so the picker stays scannable at 100+ PC deployments where some rows
-  // are retired or reimaged. Linked-flight bindings bypass this filter
-  // (a freshly reimaged flight PC is never invisible to its squadron).
-  const STALE_CUTOFF_MS = Date.now() - 30 * 86_400_000;
-  const isFresh = (p: { lastSeen: string }) =>
-    new Date(p.lastSeen).getTime() >= STALE_CUTOFF_MS;
+  // Hide PCs whose heartbeat has lapsed so an operator can never forward
+  // a programme to a PC that's actually offline right now. The threshold
+  // (90 s) lives in cross-pc.ts as the single source of truth — see
+  // isPcActive(). Linked-flight bindings still bypass this filter so a
+  // freshly reimaged flight PC is never invisible to its squadron.
+  const isFresh = (p: { lastSeen: string }) => isPcActive(p);
   const sortByName = <T extends { deviceName?: string; squadronName: string }>(arr: T[]): T[] =>
     [...arr].sort((a, b) =>
       (a.deviceName || a.squadronName).localeCompare(b.deviceName || b.squadronName),
@@ -160,15 +160,12 @@ export default function ScheduleChain() {
   }, []);
   const flightPCs = useMemo(
     () => {
-      // v1.1.42: drop the linked-flight gate. Earlier we narrowed this
-      // to PCs the Sqn Cmdr explicitly linked at setup, but in the live
-      // deployment that setup step gets skipped — leaving the picker
-      // empty for the Sqn Cmdr. Show every fresh Flight PC the registry
-      // knows about, plus every linked Flight PC unconditionally (no
-      // staleness cutoff so a freshly-reimaged flight PC is visible
-      // immediately).
+      // v1.1.73: every Flight PC must pass the 90 s active gate — no
+      // exceptions. The earlier "linked-flight bypass" let an offline
+      // PC stay selectable as long as it had been bound at setup; per
+      // spec stale PCs cannot be selected, forwarded to, or messaged.
       const all = registry.data.filter(p => !p.isSelf && p.tier === "flight");
-      return sortByName(all.filter(p => linkedFlightPcIds.includes(p.id) || isFresh(p)));
+      return sortByName(all.filter(p => isFresh(p)));
     },
     [registry.data, linkedFlightPcIds],
   );
@@ -197,12 +194,14 @@ export default function ScheduleChain() {
   // tier so the operator can pick the right one anyway. Real-world
   // ops-room recovery: the Sqn Cmdr can still ship the schedule even
   // when the auto-classifier on his PC has lost track of who is who.
-  const composeTargetsFallback = useMemo(
-    () => sortByName(registry.data.filter(p => !p.isSelf)),
-    [registry.data],
-  );
-  const usingFallbackTargets = composeTargets.length === 0 && composeTargetsFallback.length > 0;
-  const effectiveTargets = usingFallbackTargets ? composeTargetsFallback : composeTargets;
+  // v1.1.73: the previous "show every non-self PC when the strict
+  // tier-based picker yields nothing" fallback is removed because it
+  // re-introduced offline PCs into the forward-target list. The
+  // active-PC rule is enforced uniformly through composeTargets and
+  // its underlying isFresh() = isPcActive() filter.
+  const composeTargetsFallback: typeof composeTargets = [];
+  const usingFallbackTargets = false;
+  const effectiveTargets = composeTargets;
 
   // The ScheduleTier wire enum has flight|squadron|wing|base only —
   // "ops" is a UI-only distinction (the Ops PC sits at squadron tier in
@@ -258,6 +257,17 @@ export default function ScheduleChain() {
     const realTarget = registry.data.find(p => p.id === submitTo);
     const seatTarget = logicalSeatTargets.find(s => s.id === submitTo);
     if (!realTarget && !seatTarget) { toast({ title: "Pick a recipient PC", variant: "destructive" }); return; }
+    // v1.1.73: belt-and-braces submit-time guard — even if a stale
+    // option made it into the dropdown via a race, the forward is
+    // rejected here so the schedule never lands at an offline PC.
+    if (realTarget && !isPcActive(realTarget)) {
+      toast({
+        title: "Recipient is offline",
+        description: "That PC has not sent a heartbeat in the last 90 seconds. Pick another recipient or use a 'By role' option.",
+        variant: "destructive",
+      });
+      return;
+    }
     const valid = draftRows.filter(r => r.ac.trim() || r.mission.trim());
     if (valid.length === 0) { toast({ title: "Add at least one row", variant: "destructive" }); return; }
     const targetId = realTarget?.id ?? seatTarget!.id;
@@ -368,7 +378,7 @@ export default function ScheduleChain() {
                 )}
                 <optgroup label={`Registered PCs (${effectiveTargets.length})`}>
                   {effectiveTargets.map(p => (
-                    <option key={p.id} value={p.id}>
+                    <option key={p.id} value={p.id} disabled={!isPcActive(p)}>
                       {p.deviceName || p.squadronName}
                       {p.tier === "flight"
                         ? " · Flight Cmdr"

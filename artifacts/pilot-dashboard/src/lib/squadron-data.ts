@@ -1626,12 +1626,44 @@ export function useCreateSquadronUser() {
       // it must run server-side. The provision-user edge function creates
       // the auth user (with squadron_id stamped into app_metadata) and the
       // matching row in public.users in one transaction-like step.
+      //
+      // Defence-in-depth error surfacing: when supabase.functions.invoke
+      // gets a non-2xx response it returns FunctionsHttpError whose
+      // .context.response holds the raw HTTP response. Reading that body
+      // gives us the structured `{ error, detail }` payload instead of
+      // the generic "Edge Function returned a non-2xx status code"
+      // message — without this, a "no_squadron_in_token" / "forbidden"
+      // / "invalid_input" reply from the edge function shows up as just
+      // "Server error" in the toast, which is impossible to triage.
       const { data, error } = await supabase!.functions.invoke("provision-user", {
         body: { username, password, role: "deputy" },
       });
-      if (error) throw error;
-      const payload = data as { ok?: boolean; error?: string; user?: { id: string } };
-      if (!payload?.ok) throw new Error(payload?.error ?? "provision_failed");
+      if (error) {
+        let detail = "";
+        const resp = (error as { context?: { response?: Response } })?.context?.response;
+        if (resp) {
+          try {
+            const txt = await resp.clone().text();
+            try {
+              const parsed = JSON.parse(txt) as { error?: string; detail?: string };
+              const parts = [parsed?.error, parsed?.detail].filter(Boolean);
+              detail = parts.length > 0
+                ? `${parts.join(" — ")} (HTTP ${resp.status})`
+                : `HTTP ${resp.status}: ${txt.slice(0, 240)}`;
+            } catch {
+              detail = `HTTP ${resp.status}: ${txt.slice(0, 240)}`;
+            }
+          } catch {
+            detail = `HTTP ${resp.status} (no body)`;
+          }
+        }
+        throw new Error(`Add user failed — ${detail || (error as Error).message || "edge function returned non-2xx"}`);
+      }
+      const payload = data as { ok?: boolean; error?: string; detail?: string; user?: { id: string } };
+      if (!payload?.ok) {
+        const parts = [payload?.error, payload?.detail].filter(Boolean);
+        throw new Error(`Add user failed — ${parts.length > 0 ? parts.join(" — ") : "provision_failed"}`);
+      }
       return {
         id: payload.user?.id ?? String(Date.now()),
         username,

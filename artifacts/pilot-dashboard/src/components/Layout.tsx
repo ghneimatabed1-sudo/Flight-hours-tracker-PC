@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth";
 import {
   LayoutDashboard, ListChecks, PlusCircle, Users, BadgeCheck,
   Trophy, CalendarRange, PalmtreeIcon, UserX, Calendar, ClipboardList,
-  ShieldAlert, FileText, Megaphone, Map, Tags, FileDown, UserCog, Settings,
+  ShieldAlert, FileText, Megaphone, Map, Tags, FileDown, Settings,
   Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle,
   Archive, Bell,
   // These five icons MUST be aliased (not imported under their original
@@ -57,7 +57,10 @@ const ITEMS: readonly Item[] = [
   { p: "/nav-routes", k: "nav_navroutes", I: Map },
   { p: "/units", k: "nav_units", I: Tags },
   { p: "/pdf", k: "nav_pdf", I: FileDown },
-  { p: "/users", k: "nav_users", I: UserCog },
+  // User Manager (/users) is intentionally hidden from every role's
+  // sidebar per CO request — the page, route and underlying provisioning
+  // code remain intact and reachable by direct URL.
+  // { p: "/users", k: "nav_users", I: UserCog },
   { p: "/reminders", k: "nav_reminders", I: Bell },
   { p: "/audit", k: "nav_audit", I: History },
   { p: "/import", k: "nav_import", I: Upload },

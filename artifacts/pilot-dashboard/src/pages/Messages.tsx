@@ -6,6 +6,7 @@ import {
   useSendMessage,
   useMarkMessageRead,
   useRegisteredPCs,
+  isPcActive,
   getMessageRetentionDays,
   setMessageRetentionDays,
   MESSAGE_RETENTION_MAX_DAYS,
@@ -112,20 +113,26 @@ export default function Messages() {
       // and would become unusable at 100+ deployments. Linked-flight PCs
       // bypass the staleness filter so a freshly-reimaged flight PC is
       // never invisible to its own squadron commander while it warms up.
-      const STALE_CUTOFF_MS = Date.now() - 30 * 86_400_000;
-      // v1.1.42: drop the "must be linked" gate that was hiding every
-      // Flight Cmdr PC from the Sqn Cmdr's recipient picker whenever
-      // the operator skipped the linked-flight setup step. Now any
-      // Flight/Squadron/Wing/Base PC in the registry is selectable;
-      // the staleness cutoff still trims unbounded growth in 100+
-      // deployments, and explicitly-linked Flight PCs still bypass it.
+      // v1.1.73: tighten the recipient picker to PCs whose heartbeat is
+      // within the 90 s active window — operators can never address a
+      // PC that has actually gone offline. Threshold lives in
+      // cross-pc.ts (see isPcActive()). Existing inbox / sent threads
+      // with now-inactive PCs keep rendering with an "Offline" badge —
+      // only the composer side is gated. Linked-flight bindings still
+      // bypass the active filter so a freshly reimaged flight PC stays
+      // addressable.
       const base = registry.data.filter(
         p => !p.isSelf && (
           p.tier === "squadron" || p.tier === "wing" || p.tier === "base" || p.tier === "flight"
         ),
       ).filter(p => {
-        if (p.tier === "flight" && linkedFlightPcIds.includes(p.id)) return true;
-        return new Date(p.lastSeen).getTime() >= STALE_CUTOFF_MS;
+        // v1.1.73: every recipient row must pass the 90 s active gate —
+        // no exceptions. Linked-flight bindings used to bypass this so
+        // a freshly reimaged flight PC stayed addressable, but per spec
+        // ("stale PCs cannot be selected, forwarded to, or messaged")
+        // we drop the bypass to remove the only remaining path that
+        // could surface an offline PC in the recipient picker.
+        return isPcActive(p);
       }).sort((a, b) => {
         // Sort by tier (base → wing → squadron → flight) then by displayed
         // name so finding a specific PC in a 100-row dropdown is fast.
@@ -181,17 +188,24 @@ export default function Messages() {
     },
     [registry.data, isFlightCmdr, flightBinding?.pcId, linkedFlightPcIds],
   );
-  // v1.1.42: forgiving fallback. If the strict tier filter yields zero
-  // recipients (registry rows are all stale, or the tier classifier on
-  // this PC has lost track of which is which), expose every non-self
-  // row so the operator can still pick someone manually. Mirrors the
-  // ScheduleChain composer's escape hatch.
-  const selectablePCsFallback = useMemo(
-    () => registry.data.filter(p => !p.isSelf),
+  // v1.1.73: previously a "show every non-self PC" fallback fired when
+  // the strict tier filter yielded zero rows, so an operator could
+  // still pick someone manually. That fallback is removed because it
+  // re-introduced offline PCs into the picker and violated the
+  // single-source active rule. With the picker empty, the operator
+  // must use a "By role" logical seat — those are virtual and route
+  // to whoever's actually online next.
+  const usingFallbackRecipients = false;
+  const effectiveSelectablePCs = selectablePCs;
+  // Set of every PC id the local registry currently considers active
+  // (heartbeat in the last 90 s). Passed into MessageList so existing
+  // threads with a now-inactive counterpart can render an "Offline"
+  // badge — the message itself is never hidden or removed on
+  // disconnect, only annotated.
+  const activePcIds = useMemo(
+    () => new Set(registry.data.filter(isPcActive).map(p => p.id)),
     [registry.data],
   );
-  const usingFallbackRecipients = selectablePCs.length === 0 && selectablePCsFallback.length > 0;
-  const effectiveSelectablePCs = usingFallbackRecipients ? selectablePCsFallback : selectablePCs;
 
   if (!allowed) {
     return (
@@ -235,6 +249,20 @@ export default function Messages() {
     if (!subject.trim() || !body.trim()) { toast({ title: "Subject and body required", variant: "destructive" }); return; }
     const realTarget = registry.data.find(p => p.id === composeTo);
     const seatTarget = logicalSeatTargets.find(s => s.id === composeTo);
+    // v1.1.73: belt-and-braces submit-time guard. The recipient is
+    // considered offline when its id is neither a logical seat nor in
+    // the active-PC set (server-side filter already trims stale rows
+    // out of registry, so a composeTo that refers to a PC missing
+    // from registry is necessarily offline — covers replies to a PC
+    // that has since dropped). Logical seats are virtual and bypass.
+    if (composeTo && !seatTarget && !activePcIds.has(composeTo)) {
+      toast({
+        title: "Recipient is offline",
+        description: "That PC has not sent a heartbeat in the last 90 seconds. Pick another recipient or use a 'By role' option.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!realTarget && !seatTarget) { toast({ title: "Recipient not found", variant: "destructive" }); return; }
     const target = realTarget ?? {
       id: seatTarget!.id,
@@ -332,9 +360,9 @@ export default function Messages() {
         ))}
       </div>
 
-      {tab === "inbox" && <MessageList items={inbox.inbox} onReply={startReply} onMark={(m) => markRead.mutateAsync({ id: m.id }).then(() => toast({ title: "Marked read" }))} myPcId={myPcId} kind="inbox" />}
-      {tab === "sent" && <MessageList items={inbox.sent} myPcId={myPcId} kind="sent" />}
-      {tab === "history" && <MessageList items={inbox.history} myPcId={myPcId} kind="history" />}
+      {tab === "inbox" && <MessageList items={inbox.inbox} onReply={startReply} onMark={(m) => markRead.mutateAsync({ id: m.id }).then(() => toast({ title: "Marked read" }))} myPcId={myPcId} kind="inbox" activePcIds={activePcIds} />}
+      {tab === "sent" && <MessageList items={inbox.sent} myPcId={myPcId} kind="sent" activePcIds={activePcIds} />}
+      {tab === "history" && <MessageList items={inbox.history} myPcId={myPcId} kind="history" activePcIds={activePcIds} />}
 
       {tab === "compose" && (
         <Card>
@@ -357,8 +385,8 @@ export default function Messages() {
                 )}
                 <optgroup label={`Registered PCs (${effectiveSelectablePCs.length})`}>
                   {effectiveSelectablePCs.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.deviceName || p.squadronName} · {p.tier}{p.online ? " · online" : " · offline (will deliver on reconnect)"}
+                    <option key={p.id} value={p.id} disabled={!isPcActive(p)}>
+                      {p.deviceName || p.squadronName} · {p.tier}{isPcActive(p) ? " · online" : " · offline"}
                     </option>
                   ))}
                 </optgroup>
@@ -380,11 +408,17 @@ export default function Messages() {
                 )}
               </p>
               {composeTo && (() => {
+                // Logical-seat targets ("any Sqn Cmdr in NO.8") are
+                // virtual — they always accept a send because whoever
+                // signs in next gets the message. Only direct PC ids
+                // need the active-window check.
+                const seat = logicalSeatTargets.find(s => s.id === composeTo);
+                if (seat) return null;
                 const sel = effectiveSelectablePCs.find(p => p.id === composeTo);
-                if (!sel || sel.online) return null;
+                if (sel && isPcActive(sel)) return null;
                 return (
                   <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1">
-                    This PC isn't connected right now. Send anyway — the message is stored on the network and the recipient sees it the moment Hawk Eye next syncs (usually within 30 seconds of them coming online).
+                    This PC is offline (no heartbeat in the last 90 s). Sending is disabled — pick another recipient or wait for it to reconnect, or use a "By role" option above so the message routes to whichever PC of that role next signs in.
                   </p>
                 );
               })()}
@@ -424,14 +458,29 @@ export default function Messages() {
               />
             </div>
             <div className="flex gap-2">
-              <button
-                onClick={submitSend}
-                disabled={send.isPending}
-                className="px-4 py-2 rounded-md bg-primary text-primary-foreground font-semibold inline-flex items-center gap-2 disabled:opacity-50"
-                data-testid="button-send"
-              >
-                <Send className="h-4 w-4" /> Send
-              </button>
+              {(() => {
+                // Block Send when the chosen recipient is a real PC
+                // whose heartbeat has lapsed (>90 s). Logical-seat
+                // targets are virtual and always allowed. The check
+                // runs against `activePcIds` rather than the picker's
+                // own selectable list so a Reply targeting a PC that
+                // has since dropped off the registry (server-side
+                // active-window filter excludes it) is still
+                // recognised as offline and the button stays disabled.
+                const seat = logicalSeatTargets.find(s => s.id === composeTo);
+                const recipientOffline = !!composeTo && !seat && !activePcIds.has(composeTo);
+                return (
+                  <button
+                    onClick={submitSend}
+                    disabled={send.isPending || recipientOffline}
+                    title={recipientOffline ? "Recipient PC is offline (no heartbeat in 90 s) — cannot send" : undefined}
+                    className="px-4 py-2 rounded-md bg-primary text-primary-foreground font-semibold inline-flex items-center gap-2 disabled:opacity-50"
+                    data-testid="button-send"
+                  >
+                    <Send className="h-4 w-4" /> Send
+                  </button>
+                );
+              })()}
               <button onClick={composeReset} className="px-4 py-2 rounded-md bg-secondary border border-border text-sm">Clear</button>
             </div>
           </div>
@@ -469,12 +518,17 @@ export default function Messages() {
   );
 }
 
-function MessageList({ items, onReply, onMark, myPcId, kind }: {
+function MessageList({ items, onReply, onMark, myPcId, kind, activePcIds }: {
   items: PrivateMessage[];
   onReply?: (m: PrivateMessage) => void;
   onMark?: (m: PrivateMessage) => void;
   myPcId: string | null;
   kind: "inbox" | "sent" | "history";
+  // Set of PC ids whose heartbeat is within the 90 s active window.
+  // Used to render an "Offline" badge on existing messages whose
+  // counterpart PC has gone quiet — the message itself stays visible
+  // and readable (read-only history, never deleted on disconnect).
+  activePcIds: ReadonlySet<string>;
 }) {
   if (items.length === 0) {
     return (
@@ -494,6 +548,13 @@ function MessageList({ items, onReply, onMark, myPcId, kind }: {
         // which PC. The username comes from the sender's own login.
         const fromLabel = `${m.fromUser} · ${m.fromPcName}`;
         const toLabel   = `${m.toPcName}`;
+        // The "counterpart" is whichever PC is on the other end of this
+        // message — for inbox/history rows that's the sender, for sent
+        // rows it's the recipient. If their heartbeat has lapsed we
+        // surface an "Offline" pill so the operator knows they can read
+        // the thread but cannot expect a live reply right now.
+        const counterpartId = kind === "sent" ? m.toPcId : m.fromPcId;
+        const counterpartOffline = !!counterpartId && !activePcIds.has(counterpartId);
         return (
           <Card key={m.id} className={`!p-3 border-l-4 ${
             m.priority === "urgent" ? "border-l-rose-400"
@@ -517,7 +578,16 @@ function MessageList({ items, onReply, onMark, myPcId, kind }: {
                   )}
                 </div>
               </div>
-              <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border ${priorityClasses[m.priority]}`}>{priorityLabels[m.priority]}</span>
+              <div className="flex items-center gap-1 shrink-0">
+                {counterpartOffline && (
+                  <span
+                    className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-zinc-500/40 bg-zinc-500/10 text-zinc-400"
+                    title="Counterpart PC has not sent a heartbeat in the last 90 seconds. The thread is still readable, but you cannot send to this PC right now."
+                    data-testid={`offline-${m.id}`}
+                  >Offline</span>
+                )}
+                <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border ${priorityClasses[m.priority]}`}>{priorityLabels[m.priority]}</span>
+              </div>
             </div>
             <div className="text-sm mt-2 whitespace-pre-wrap font-mono">{m.body}</div>
             {(onReply || onMark) && m.toPcId === myPcId && (

@@ -140,20 +140,33 @@ function nowIso(): string { return new Date().toISOString(); }
 // silently when the offline PC reconnects.
 const REGISTRY_KEY = "rjaf.xpc.registry";
 // Heartbeat written by the local PC on every signed-in render. PCs whose
-// heartbeat is older than this window are considered offline (they still
-// stay in the registry — they just render without the green dot).
-const ONLINE_WINDOW_MS = 5 * 60_000;
+// heartbeat is older than this window are considered INACTIVE — every
+// picker, dropdown, forward target and message recipient list across
+// the app must hide PCs whose last_seen is older than this. Threshold
+// kept deliberately tight (90 s) so an operator on PC A never sees a
+// "ghost" entry for PC B that was actually shut down two minutes ago,
+// which used to confuse forwarding and message addressing in real
+// production drills. The single source of truth for "is this PC live
+// right now" — do NOT introduce a different threshold per page; route
+// everything through getActivePCs / isPcActive below.
+const ONLINE_WINDOW_MS = 90_000;
+// Re-exported under a clearer name for new call sites. Same value —
+// "online" and "active" mean the same thing in this codebase: heartbeat
+// within the last 90 seconds. Existing call sites that read the
+// `online` boolean on RegisteredPC continue to work; new call sites
+// should prefer isPcActive() / getActivePCs().
+export const ACTIVE_WINDOW_MS = ONLINE_WINDOW_MS;
 // Long-stale prune window — a registry row whose last_seen is older than
-// this is considered abandoned (PC reimaged, decommissioned, USB lost,
-// operator left the unit) and is opportunistically deleted from the
-// central xpc_registry + xpc_user_pcs tables. This keeps the registry
-// self-cleaning over the lifetime of the deployment so the table never
-// fills up with dead seats from years of personnel turnover. 90 days
-// is generous — a pilot on a long deployment, seasonal rotation, or
-// extended leave will not lose their seat; only PCs that have been
-// completely silent for a full quarter get pruned, and they re-register
-// automatically the moment that operator signs back in on any PC.
-const STALE_REGISTRY_MS = 90 * 24 * 60 * 60_000;
+// this is considered abandoned. Tightened in v1.1.73 from 90 days to
+// 24 hours: with the active window now at 90 s, any row older than a
+// day is unambiguously stale (PC reimaged, decommissioned, USB lost,
+// operator off-shift) and would otherwise inflate every registry
+// query in 100+ deployments. Operators can re-register a PC at any
+// time — the prune is opportunistic and never blocks signup. Pruned
+// rows are deleted from the central xpc_registry + xpc_user_pcs
+// tables; an operator signing in on the same PC after a long absence
+// re-registers it automatically on the next heartbeat.
+const STALE_REGISTRY_MS = 24 * 60 * 60_000;
 // Schedule-shares + revoked-devices prune window — 6 months. The flight
 // already happened months ago and the local sortie log retains its own
 // permanent record, so the share itself doesn't need to live in the
@@ -679,9 +692,21 @@ export function useRegisteredPCs(): UseQueryResult<RegisteredPC[]> & { data: Reg
             // recently active PCs always make the cut. The schema has a
             // matching index (xpc_registry_last_seen_idx) so this is a
             // cheap index scan, not a sequential scan.
+            // v1.1.73: server-side enforce the 90 s active window. Every
+            // consumer of useRegisteredPCs() (Messages, ScheduleChain,
+            // FlightProgram, FinalSchedules, AddSortie, Overview,
+            // LicenseKeys, Commanders, Squadrons, ...) automatically
+            // sees only PCs whose heartbeat lands in the window — the
+            // single source of truth lives in ACTIVE_WINDOW_MS. Stale
+            // rows never cross the wire, so they cannot leak into any
+            // picker through a forgotten client filter. The
+            // isPcActive() / getActivePCs() helpers stay in place as
+            // defence-in-depth for any new call site.
+            const activeFloor = new Date(Date.now() - ACTIVE_WINDOW_MS).toISOString();
             const { data, error } = await supabase!
               .from("xpc_registry")
               .select("*")
+              .gte("last_seen", activeFloor)
               .order("last_seen", { ascending: false })
               .limit(5000);
             if (error) throw error;
@@ -762,6 +787,33 @@ export function useRegisteredPCs(): UseQueryResult<RegisteredPC[]> & { data: Reg
     retry: isLive() ? 1 : false,
   });
   return { ...q, data: q.data ?? [] } as UseQueryResult<RegisteredPC[]> & { data: RegisteredPC[] };
+}
+
+// Active-PC helpers — single source of truth for "is this PC live right
+// now". A PC is active iff its last heartbeat was within
+// ACTIVE_WINDOW_MS (90 s). Every cross-PC list, picker, dropdown,
+// forward-target and message-recipient surface MUST run through these
+// helpers so an operator can never select / forward to / message a PC
+// that has actually gone offline. Existing message threads with a now-
+// inactive PC keep rendering — only the composer / picker side is
+// gated. See `isPcActive(pc)` for ad-hoc checks and `getActivePCs(pcs)`
+// for filtering a list.
+export function isPcActive(pc: { lastSeen?: string; online?: boolean } | null | undefined): boolean {
+  if (!pc) return false;
+  if (typeof pc.online === "boolean") return pc.online;
+  if (!pc.lastSeen) return false;
+  return Date.now() - new Date(pc.lastSeen).getTime() <= ACTIVE_WINDOW_MS;
+}
+export function getActivePCs<T extends { lastSeen?: string; online?: boolean }>(rows: readonly T[]): T[] {
+  return rows.filter(isPcActive);
+}
+// Convenience: look up a single PC by id and return whether it's active.
+// Used by the Messages composer and the schedule forwarder to gate the
+// "Send" button when the selected counterpart's heartbeat has lapsed.
+export function isPcIdActive(rows: readonly { id: string; lastSeen?: string; online?: boolean }[], pcId: string | null | undefined): boolean {
+  if (!pcId) return false;
+  const row = rows.find(r => r.id === pcId);
+  return isPcActive(row);
 }
 
 // ── 2. Cross-squadron pending sortie approvals ──────────────────────────

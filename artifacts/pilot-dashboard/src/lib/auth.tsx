@@ -796,8 +796,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // every subsequent deputy hits role_locked because their JWT
         // carries "deputy" while the PC is pinned to "ops". Symptom field
         // ops reported as "second ops user can't log in".
-        const rawRole = ((data.user.app_metadata?.role as User["role"])
-          ?? (data.user.user_metadata?.role as User["role"])
+        // v1.1.73 — CB-1 root-cause self-heal. If the auth user has no
+        // squadron_id stamped into app_metadata (e.g. an account
+        // created before provision-user started doing the stamping, or
+        // restored from an older snapshot) the next call to any edge
+        // function that allow-lists by `app_metadata.squadron_id`
+        // returns "no_squadron_in_token" / "forbidden" — historically
+        // visible as "Add User → Server error". The 0030 backfill
+        // migration handles the bulk case server-side; this client
+        // self-heal closes the remaining gap whenever the SQL has not
+        // been applied yet by invoking heal-claims (a thin wrapper on
+        // the auth admin updateUser API). The call is best-effort and
+        // never blocks login; the operator can still sign in even if
+        // the heal fails (their squadron-scoped actions will simply
+        // fail with the now-improved error message until claims land).
+        const meta = (data.user.app_metadata ?? {}) as { squadron_id?: string; role?: string };
+        if (!meta.squadron_id || !meta.role) {
+          try {
+            await supabase.functions.invoke("heal-claims", { body: {} });
+            // Refresh the session so the new claims are visible to RLS
+            // and to subsequent edge-function calls in this tab.
+            await supabase.auth.refreshSession();
+          } catch { /* opportunistic — keep login flowing */ }
+        }
+        const refreshed = (await supabase.auth.getUser()).data.user ?? data.user;
+        const rawRole = ((refreshed.app_metadata?.role as User["role"])
+          ?? (refreshed.user_metadata?.role as User["role"])
           ?? "ops");
         const role: User["role"] = rawRole === "deputy" ? "ops" : rawRole;
         if (lock && role !== lock) {
