@@ -27,6 +27,7 @@ export default function PilotDetail() {
   const currencies = [
     { label: t("dayCurrency"), date: pilot.dayCurrencyDate },
     { label: t("nightCurrency"), date: pilot.nightCurrencyDate },
+    { label: t("nvgCurrency"), date: pilot.nvgCurrencyDate ?? "" },
     { label: t("irtCurrency"), date: pilot.irtCurrencyDate },
     { label: t("medicalCurrency"), date: pilot.medicalCurrencyDate },
   ];

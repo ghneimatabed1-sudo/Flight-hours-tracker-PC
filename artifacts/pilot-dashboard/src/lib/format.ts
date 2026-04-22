@@ -47,6 +47,7 @@ export function pilotWorstStatus(p: Pilot): CurrencyStatus {
   const all: CurrencyStatus[] = [
     currencyStatus(p.dayCurrencyDate),
     currencyStatus(p.nightCurrencyDate),
+    currencyStatus(p.nvgCurrencyDate ?? ""),
     currencyStatus(p.irtCurrencyDate),
     currencyStatus(p.medicalCurrencyDate),
   ];
@@ -59,6 +60,7 @@ export function pilotWorstDate(p: Pilot): string | null {
   const entries: { status: CurrencyStatus; date: string }[] = [
     { status: currencyStatus(p.dayCurrencyDate), date: p.dayCurrencyDate },
     { status: currencyStatus(p.nightCurrencyDate), date: p.nightCurrencyDate },
+    { status: currencyStatus(p.nvgCurrencyDate ?? ""), date: p.nvgCurrencyDate ?? "" },
     { status: currencyStatus(p.irtCurrencyDate), date: p.irtCurrencyDate },
     { status: currencyStatus(p.medicalCurrencyDate), date: p.medicalCurrencyDate },
   ];

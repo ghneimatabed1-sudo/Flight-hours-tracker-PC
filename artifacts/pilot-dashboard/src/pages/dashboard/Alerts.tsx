@@ -26,6 +26,7 @@ export default function Alerts() {
     const checks: Array<[string, string]> = [
       [t("dayCurrency"), p.dayCurrencyDate],
       [t("nightCurrency"), p.nightCurrencyDate],
+      [t("nvgCurrency"), p.nvgCurrencyDate ?? ""],
       [t("irtCurrency"), p.irtCurrencyDate],
       [t("medicalCurrency"), p.medicalCurrencyDate],
     ];

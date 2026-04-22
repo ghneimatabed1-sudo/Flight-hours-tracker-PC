@@ -29,7 +29,7 @@ function saveHidden(s: Set<string>) {
   localStorage.setItem(HIDE_KEY, JSON.stringify(Array.from(s)));
 }
 
-type SortKey = "callSign" | "fullName" | "squadron" | "day" | "nvg" | "irt" | "medical" | "worst";
+type SortKey = "callSign" | "fullName" | "squadron" | "day" | "night" | "nvg" | "irt" | "medical" | "worst";
 
 function rankStatus(s: CurrencyStatus): number {
   return { current: 0, unset: 1, warning: 2, expiringSoon: 3, critical: 4, expired: 5 }[s];
@@ -37,7 +37,8 @@ function rankStatus(s: CurrencyStatus): number {
 
 function pilotDate(p: Pilot, k: SortKey): string {
   if (k === "day") return p.dayCurrencyDate;
-  if (k === "nvg") return p.nightCurrencyDate;
+  if (k === "night") return p.nightCurrencyDate;
+  if (k === "nvg") return p.nvgCurrencyDate ?? "";
   if (k === "irt") return p.irtCurrencyDate;
   if (k === "medical") return p.medicalCurrencyDate;
   return "";
@@ -47,6 +48,7 @@ function pilotWorst(p: Pilot): { status: CurrencyStatus; date: string } {
   const checks: Array<[CurrencyStatus, string]> = [
     [currencyStatus(p.dayCurrencyDate), p.dayCurrencyDate],
     [currencyStatus(p.nightCurrencyDate), p.nightCurrencyDate],
+    [currencyStatus(p.nvgCurrencyDate ?? ""), p.nvgCurrencyDate ?? ""],
     [currencyStatus(p.irtCurrencyDate), p.irtCurrencyDate],
     [currencyStatus(p.medicalCurrencyDate), p.medicalCurrencyDate],
   ];
@@ -120,7 +122,7 @@ export default function Currencies() {
 
   const headers = [
     t("callSign"), t("name"), t("squadron"),
-    t("dayCurrency"), t("nvgCurrency"), t("irtCurrency"), t("medicalCurrency"),
+    t("dayCurrency"), t("nightCurrency"), t("nvgCurrency"), t("irtCurrency"), t("medicalCurrency"),
     t("status"),
   ];
 
@@ -134,6 +136,7 @@ export default function Currencies() {
         sqn ? (lang === "ar" ? sqn.nameAr : sqn.code) : "",
         p.dayCurrencyDate,
         p.nightCurrencyDate,
+        p.nvgCurrencyDate ?? "",
         p.irtCurrencyDate,
         p.medicalCurrencyDate,
         statusLabel(worst.status),
@@ -168,9 +171,10 @@ export default function Currencies() {
         [headers[2]]: sqn ? (lang === "ar" ? sqn.nameAr : sqn.code) : "",
         [headers[3]]: p.dayCurrencyDate,
         [headers[4]]: p.nightCurrencyDate,
-        [headers[5]]: p.irtCurrencyDate,
-        [headers[6]]: p.medicalCurrencyDate,
-        [headers[7]]: statusLabel(worst.status),
+        [headers[5]]: p.nvgCurrencyDate ?? "",
+        [headers[6]]: p.irtCurrencyDate,
+        [headers[7]]: p.medicalCurrencyDate,
+        [headers[8]]: statusLabel(worst.status),
       };
     });
     const wb = new ExcelJS.Workbook();
@@ -266,6 +270,7 @@ export default function Currencies() {
                   <Th onClick={() => setSort("fullName")}>{t("name")}</Th>
                   <Th onClick={() => setSort("squadron")}>{t("squadron")}</Th>
                   <Th onClick={() => setSort("day")}>{t("dayCurrency")}</Th>
+                  <Th onClick={() => setSort("night")}>{t("nightCurrency")}</Th>
                   <Th onClick={() => setSort("nvg")}>{t("nvgCurrency")}</Th>
                   <Th onClick={() => setSort("irt")}>{t("irtCurrency")}</Th>
                   <Th onClick={() => setSort("medical")}>{t("medicalCurrency")}</Th>
@@ -275,7 +280,7 @@ export default function Currencies() {
               </thead>
               <tbody>
                 {list.length === 0 && (
-                  <tr><td colSpan={9} className="py-8 text-center text-muted-foreground">{t("noResults")}</td></tr>
+                  <tr><td colSpan={10} className="py-8 text-center text-muted-foreground">{t("noResults")}</td></tr>
                 )}
                 {list.map(p => {
                   const sqn = squadrons.find(s => s.id === p.squadronId);
@@ -287,6 +292,7 @@ export default function Currencies() {
                       <td className="py-2 px-3 text-xs">{sqn ? (lang === "ar" ? sqn.nameAr : sqn.code) : ""}</td>
                       <td className="py-2 px-3"><StatusBadge status={currencyStatus(p.dayCurrencyDate)} date={p.dayCurrencyDate} /></td>
                       <td className="py-2 px-3"><StatusBadge status={currencyStatus(p.nightCurrencyDate)} date={p.nightCurrencyDate} /></td>
+                      <td className="py-2 px-3"><StatusBadge status={currencyStatus(p.nvgCurrencyDate ?? "")} date={p.nvgCurrencyDate ?? ""} /></td>
                       <td className="py-2 px-3"><StatusBadge status={currencyStatus(p.irtCurrencyDate)} date={p.irtCurrencyDate} /></td>
                       <td className="py-2 px-3"><StatusBadge status={currencyStatus(p.medicalCurrencyDate)} date={p.medicalCurrencyDate} /></td>
                       <td className="py-2 px-3"><StatusBadge status={worst.status} date={worst.date || undefined} /></td>

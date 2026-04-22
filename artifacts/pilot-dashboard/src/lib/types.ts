@@ -47,6 +47,9 @@ export interface Pilot {
   instrumentHours?: number;
   dayCurrencyDate: string;
   nightCurrencyDate: string;
+  // v1.1.69 — NVG is its own currency, fully independent from Night.
+  // Optional so older snapshots that predate the split still parse.
+  nvgCurrencyDate?: string;
   irtCurrencyDate: string;
   medicalCurrencyDate: string;
   // Pilot qualifications (e.g. "MTP", "QHI", "IP"). Manually entered by ops

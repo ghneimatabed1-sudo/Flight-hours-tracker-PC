@@ -64,11 +64,13 @@ export function adaptPilot(real: RealPilot, squadronId: string): DashPilot {
     captainHours: Number(real.totalCaptain ?? 0),
     instrumentHours: undefined,
     dayCurrencyDate: real.expiry?.day ?? "",
-    // The Commander roster column labelled "NVG" historically read from
-    // `nightCurrencyDate`. Since Night and NVG are separate currencies and
-    // the column the commander actually cares about is NVG, we wire
-    // nightCurrencyDate → expiry.nvg so the badge matches its label.
-    nightCurrencyDate: real.expiry?.nvg ?? real.expiry?.night ?? "",
+    // v1.1.69 — Night and NVG are fully independent currencies (per the
+    // April 2026 rebuild). Each maps to its own expiry slot. The old
+    // shortcut that aliased `nightCurrencyDate` to `expiry.nvg` was
+    // surfacing NVG dates under a "Night" label on Pilot Detail and the
+    // Alerts feed, exactly the bug reported by the field operator.
+    nightCurrencyDate: real.expiry?.night ?? "",
+    nvgCurrencyDate: real.expiry?.nvg ?? "",
     irtCurrencyDate: real.expiry?.irt ?? "",
     medicalCurrencyDate: real.expiry?.medical ?? "",
     qualifications: real.qualifications,
