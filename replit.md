@@ -41,6 +41,7 @@ time the rule shifts.
 Index of memory files:
 - `.local/memory/README.md` — index + update protocol
 - `.local/memory/currency-refresh.md` — Day/Night/NVG/IRT auto, Sim/Medical manual
+- `.local/memory/dual-hour-rules.md` — Six sortie types force co-pilot hours to Dual
 - `.local/memory/active-pc-visibility.md` — 90 s active window + offline messaging
 - `.local/memory/add-pilot-form.md` — six date fields, English rank, multi-segment qualification
 - `.local/memory/print-system.md` — global print rules + `data-print-area`
