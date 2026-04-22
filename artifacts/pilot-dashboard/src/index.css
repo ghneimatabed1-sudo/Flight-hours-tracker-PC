@@ -396,11 +396,13 @@ html, body, #root {
      kept below as a belt-and-braces fallback for pages that don't
      opt in with print-target / print-area. */
   body:has(.print-target) > *,
-  body:has(.print-area) > * {
+  body:has(.print-area) > *,
+  body:has([data-print-area]) > * {
     visibility: hidden !important;
   }
   body:has(.print-target) .print-target,
-  body:has(.print-area) .print-area {
+  body:has(.print-area) .print-area,
+  body:has([data-print-area]) [data-print-area] {
     visibility: visible !important;
     position: absolute !important;
     inset: 0 !important;
@@ -411,19 +413,49 @@ html, body, #root {
     box-shadow: none !important;
   }
   body:has(.print-target) .print-target *,
-  body:has(.print-area) .print-area * {
+  body:has(.print-area) .print-area *,
+  body:has([data-print-area]) [data-print-area] * {
     visibility: visible !important;
   }
   /* Keep the printable subtree contained — never let a child push
      past the page edge and trigger a second page. */
-  .print-target, .print-area {
-    overflow: hidden !important;
-    page-break-inside: avoid !important;
+  .print-target, .print-area, [data-print-area] {
+    overflow: visible !important;
   }
-  .print-target table, .print-area table {
-    table-layout: fixed !important;
+  .print-target table, .print-area table, [data-print-area] table {
+    table-layout: auto !important;
     word-wrap: break-word !important;
+    border-collapse: collapse !important;
   }
+  /* Repeat the table head on every printed page and never split a
+     row across pages. */
+  .print-target thead, .print-area thead, [data-print-area] thead {
+    display: table-header-group !important;
+  }
+  .print-target tr, .print-area tr, [data-print-area] tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* Shared print-only header — render-only-on-paper component used by
+     every printable page. Hidden on screen, visible on paper. */
+  .print-header {
+    margin-bottom: 8px;
+    color: #000 !important;
+    font-family: var(--app-font-sans);
+  }
+  .print-header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    font-size: 10px;
+  }
+  .print-header-sqn { font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+  .print-header-meta { text-align: right; font-size: 10px; line-height: 1.3; }
+  .print-header-title { text-align: center; font-weight: 700; font-size: 14px; margin-top: 2px; }
+  .print-header-sub { text-align: center; font-size: 11px; font-style: italic; }
+  .print-header-context { text-align: center; font-size: 10px; color: #333 !important; margin-top: 2px; }
+  .print-header-rule { border: 0; border-top: 1px solid #000; margin: 6px 0 8px; }
 
   /* Anything explicitly opted out of print. */
   .no-print { display: none !important; }

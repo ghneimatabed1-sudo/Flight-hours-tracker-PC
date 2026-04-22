@@ -8,7 +8,8 @@ import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 import { SortieDiffDialog } from "@/components/SortieDiffDialog";
 import { showUndo } from "@/lib/undo-store";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Filter, Pencil, Trash2, Lock, Unlock } from "lucide-react";
+import { Search, Filter, Pencil, Trash2, Lock, Unlock, Calendar, X as XIcon, Printer } from "lucide-react";
+import { PrintHeader } from "@/components/PrintHeader";
 import type { Pilot, Sortie } from "@/lib/mock";
 import { useFrozenAccess } from "@/lib/monthly-close";
 
@@ -17,6 +18,16 @@ export default function SortieLog() {
   const { user } = useAuth();
   const [q, setQ] = useState("");
   const [type, setType] = useState("All");
+  // Sortie date picker — defaults to today, blank means "all days".
+  // Operators flick this to review any past day's flying or to peek at
+  // pre-scheduled sorties on a future date.
+  const todayIso = useMemo(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }, []);
+  const [pickedDate, setPickedDate] = useState<string>(todayIso);
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [editing, setEditing] = useState<Sortie | null>(null);
   const [deleting, setDeleting] = useState<Sortie | null>(null);
   // Stage of the diff/undo flow once the inline edit form has been
@@ -55,6 +66,7 @@ export default function SortieLog() {
   const nameOf = (id: string, ext?: { name: string; squadron: string }) => ext ? `${ext.name}${ext.squadron ? ` (${ext.squadron})` : ""}` : (pilotMap[id] || "");
 
   const rows = SORTIES
+    .filter(s => !pickedDate || s.date === pickedDate)
     .filter(s => type === "All" || s.sortieType === type)
     .filter(s => !q || (nameOf(s.pilotId, s.pilotExternal) + " " + nameOf(s.coPilotId, s.coPilotExternal) + " " + s.acNumber + " " + s.name).toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => b.date.localeCompare(a.date));
@@ -171,23 +183,77 @@ export default function SortieLog() {
 
   return (
     <div>
-      <PageHead title={t("nav_sortielog")} subtitle={`${rows.length} flights`} actions={
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search className="h-3.5 w-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder={t("search")} className="pl-7 pr-2 py-1.5 rounded-md bg-input border border-border text-sm" />
+      <PageHead
+        title={t("nav_sortielog")}
+        subtitle={pickedDate ? `${rows.length} flights · ${pickedDate}` : `${rows.length} flights`}
+        actions={
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Calendar icon → opens an inline date picker. The chosen
+                date filters the table to sorties flown that day. */}
+            <div className="relative inline-flex items-center gap-1">
+              <button
+                onClick={() => setShowDatePicker(v => !v)}
+                className={`inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-sm border ${pickedDate ? "bg-primary/15 border-primary text-primary" : "bg-input border-border"}`}
+                title="Filter by date"
+                data-testid="button-sortie-date-toggle"
+              >
+                <Calendar className="h-3.5 w-3.5" />
+                <span className="font-mono text-xs">{pickedDate || "All days"}</span>
+              </button>
+              {showDatePicker && (
+                <div className="absolute z-30 top-full mt-1 right-0 bg-card border border-border rounded-md p-2 shadow-lg flex items-center gap-2">
+                  <DateInput
+                    value={pickedDate}
+                    onChange={(v) => setPickedDate(v)}
+                    className="px-2 py-1 rounded bg-input border border-border text-sm font-mono"
+                    data-testid="input-sortie-date"
+                  />
+                  <button
+                    onClick={() => { setPickedDate(todayIso); }}
+                    className="px-2 py-1 rounded text-xs bg-secondary border border-border hover:bg-secondary/70"
+                    data-testid="button-sortie-date-today"
+                  >Today</button>
+                  <button
+                    onClick={() => { setPickedDate(todayIso); }}
+                    className="px-2 py-1 rounded text-xs bg-secondary border border-border hover:bg-secondary/70"
+                    data-testid="button-sortie-date-clear"
+                    title="Reset to today"
+                  ><XIcon className="h-3 w-3" /></button>
+                </div>
+              )}
+            </div>
+            <div className="relative">
+              <Search className="h-3.5 w-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder={t("search")} className="pl-7 pr-2 py-1.5 rounded-md bg-input border border-border text-sm" />
+            </div>
+            <div className="relative">
+              <Filter className="h-3.5 w-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <select value={type} onChange={e => setType(e.target.value)} className="pl-7 pr-2 py-1.5 rounded-md bg-input border border-border text-sm">
+                {types.map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <button
+              onClick={() => window.print()}
+              className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90"
+              data-testid="button-sortielog-print"
+              title="Print"
+            >
+              <Printer className="h-3.5 w-3.5" /> {t("print")}
+            </button>
           </div>
-          <div className="relative">
-            <Filter className="h-3.5 w-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <select value={type} onChange={e => setType(e.target.value)} className="pl-7 pr-2 py-1.5 rounded-md bg-input border border-border text-sm">
-              {types.map(t => <option key={t}>{t}</option>)}
-            </select>
-          </div>
-        </div>
-      } />
+        }
+      />
 
       <DataUnavailableBanner queries={[pilotsQ, sortiesQ]} testId="banner-sortielog-unavailable" />
 
+      {/* PrintHeader must live INSIDE data-print-area so the global
+          print isolation rules keep it visible on paper. */}
+      <div data-print-area>
+      <PrintHeader
+        title={t("nav_sortielog")}
+        context={`${rows.length} flights${type !== "All" ? ` · ${type}` : ""}`}
+        dateRange={pickedDate || "All days"}
+      />
       <Card className="!p-0 overflow-hidden">
         <div className="overflow-x-auto">
           {/* Squadron Sortie Log — column layout mirrors the official RJAF
@@ -303,6 +369,7 @@ export default function SortieLog() {
           </table>
         </div>
       </Card>
+      </div>
 
       {editing && (
         <SortieEditDialog

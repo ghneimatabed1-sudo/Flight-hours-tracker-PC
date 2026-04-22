@@ -1,63 +1,88 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import DateInput from "@/components/DateInput";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots, useUpdatePilot, useCreatePilot, useDeletePilot, type Pilot } from "@/lib/squadron-data";
 import { getCurrencyWindow } from "@/lib/currency-settings";
 import { supabase, supabaseConfigured } from "@/lib/supabase";
-import { useQuery } from "@tanstack/react-query";
+import { fmtDateTimeDDMM } from "@/lib/format";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Plus, Search, Pencil, Trash2, X, Loader2, FileDown } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 
-// Per-pilot mobile sync status fetched from list_pilot_sync_status RPC.
-// Green  dot ─ seen within 24 h
-// Yellow dot ─ seen, but > 24 h ago  (phone linked but offline / stale)
-// Grey   dot ─ no row at all         (no phone linked yet)
-interface SyncStatusRow {
-  pilot_id:     string;
-  last_seen_at: string | null;
-  push_enabled: boolean;
-  has_token:    boolean;
+// Per-pilot phone-pair status sourced directly from `pilot_devices`.
+//
+// The dot is binary by design (per ops): GREEN means the pilot has at
+// least one active (revoked_at = null) device row — i.e. their phone
+// is paired right now. GRAY means no active pairing exists (never
+// paired, or every pairing has been revoked). The freshness/last-seen
+// nuance is intentionally NOT shown on the roster — that lives on the
+// pilot detail page. Realtime + 30 s polling fallback keep the dot
+// in sync without a manual refresh.
+interface PairRow {
+  pilot_id:  string;
+  linked_at: string | null;
 }
-function usePilotSyncStatus() {
-  return useQuery<Map<string, SyncStatusRow>>({
-    queryKey: ["pilot-sync-status"],
-    enabled: supabaseConfigured && !!supabase,
-    refetchInterval: 60_000, // a 1-minute refresh is enough for a "last sync" dot.
+function usePilotPairing() {
+  const qc = useQueryClient();
+  const enabled = supabaseConfigured && !!supabase;
+  const q = useQuery<Map<string, PairRow>>({
+    queryKey: ["pilot-pairing"],
+    enabled,
+    // 30-second polling fallback so a flaky realtime channel never
+    // leaves a paired phone showing gray for long.
+    refetchInterval: 30_000,
     queryFn: async () => {
       if (!supabase) return new Map();
-      const { data, error } = await supabase.rpc("list_pilot_sync_status");
+      const { data, error } = await supabase
+        .from("pilot_devices")
+        .select("pilot_id, linked_at")
+        .is("revoked_at", null);
       if (error || !Array.isArray(data)) return new Map();
-      const m = new Map<string, SyncStatusRow>();
-      for (const r of data as SyncStatusRow[]) m.set(r.pilot_id, r);
+      const m = new Map<string, PairRow>();
+      for (const r of data as PairRow[]) {
+        // Keep the most recent pairing per pilot (a pilot may have
+        // re-paired multiple devices over time).
+        const prev = m.get(r.pilot_id);
+        if (!prev || (r.linked_at ?? "") > (prev.linked_at ?? "")) {
+          m.set(r.pilot_id, r);
+        }
+      }
       return m;
     },
   });
+
+  // Realtime subscription — refresh the cache whenever a pilot_devices
+  // row is inserted, updated (e.g. revoked), or deleted. Cleaned up on
+  // unmount so we never leave a zombie channel behind.
+  useEffect(() => {
+    if (!enabled || !supabase) return;
+    const channel = supabase
+      .channel("roster-pilot-devices")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "pilot_devices" },
+        () => { qc.invalidateQueries({ queryKey: ["pilot-pairing"] }); },
+      )
+      .subscribe();
+    return () => { if (supabase) void supabase.removeChannel(channel); };
+  }, [enabled, qc]);
+
+  return q;
 }
-function syncDotInfo(row: SyncStatusRow | undefined):
+function pairDotInfo(row: PairRow | undefined):
   { color: string; label: string; tooltip: string } {
-  if (!row || !row.has_token) {
-    return { color: "bg-zinc-500", label: "No phone linked",
-      tooltip: "This pilot has not linked a phone yet." };
+  if (!row) {
+    return { color: "bg-zinc-500", label: "Not paired", tooltip: "Not paired" };
   }
-  if (!row.last_seen_at) {
-    return { color: "bg-zinc-500", label: "Never synced",
-      tooltip: "Phone is registered but has never reported in." };
-  }
-  const seen = new Date(row.last_seen_at).getTime();
-  const mins = Math.max(0, Math.round((Date.now() - seen) / 60_000));
-  const pretty =
-    mins < 60 ? `${mins} min ago` :
-    mins < 1440 ? `${Math.round(mins / 60)} h ago` :
-    `${Math.round(mins / 1440)} d ago`;
-  if (mins <= 24 * 60) {
-    return { color: "bg-emerald-500", label: "Synced",
-      tooltip: `Last sync: ${pretty}` };
-  }
-  return { color: "bg-amber-400", label: "Stale",
-    tooltip: `Last sync: ${pretty} — phone hasn't checked in for more than 24h.` };
+  const when = row.linked_at ? fmtDateTimeDDMM(row.linked_at) : "—";
+  return {
+    color: "bg-emerald-500",
+    label: "Paired",
+    tooltip: `Paired ${when}`,
+  };
 }
 
 export default function Roster() {
@@ -66,7 +91,7 @@ export default function Roster() {
   const [importedOnly, setImportedOnly] = useState(false);
   const pilotsQ = usePilots();
   const { data: PILOTS, isLoading, isFetching } = pilotsQ;
-  const syncQ = usePilotSyncStatus();
+  const syncQ = usePilotPairing();
   const updatePilot = useUpdatePilot();
   const createPilot = useCreatePilot();
   const deletePilot = useDeletePilot();
@@ -233,7 +258,7 @@ export default function Roster() {
                 </tr>
               )}
               {list.map((p: Pilot) => {
-                const dot = syncDotInfo(syncQ.data?.get(p.id));
+                const dot = pairDotInfo(syncQ.data?.get(p.id));
                 return (
                 <tr key={p.id} className="border-t border-border row-hover">
                   <td className="px-2 py-2 text-center" data-testid={`sync-dot-${p.id}`}>

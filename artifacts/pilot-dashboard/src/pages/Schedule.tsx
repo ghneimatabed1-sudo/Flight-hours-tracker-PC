@@ -2,6 +2,8 @@ import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { useSchedule } from "@/lib/squadron-data";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
+import { PrintHeader } from "@/components/PrintHeader";
+import { Printer } from "lucide-react";
 
 export default function Schedule() {
   const { t } = useI18n();
@@ -9,8 +11,25 @@ export default function Schedule() {
   const { data: MISSIONS } = scheduleQ;
   return (
     <div>
-      <PageHead title={t("nav_schedule")} subtitle="Daily flight schedule · RJAF format" />
+      <PageHead
+        title={t("nav_schedule")}
+        subtitle="Daily flight schedule · RJAF format"
+        actions={
+          <button
+            onClick={() => window.print()}
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90 no-print"
+            data-testid="button-schedule-print"
+            title="Print"
+          >
+            <Printer className="h-3.5 w-3.5" /> {t("print")}
+          </button>
+        }
+      />
       <DataUnavailableBanner queries={[scheduleQ]} testId="banner-schedule-unavailable" />
+      {/* The PrintHeader must live INSIDE the data-print-area so the
+          global print isolation rules keep it visible. */}
+      <div data-print-area>
+      <PrintHeader title={t("nav_schedule")} subtitle="Daily flight schedule · RJAF format" />
       <Card className="!p-0 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
@@ -46,6 +65,7 @@ export default function Schedule() {
           </tbody>
         </table>
       </Card>
+      </div>
     </div>
   );
 }

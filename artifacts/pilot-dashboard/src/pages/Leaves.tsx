@@ -4,7 +4,8 @@ import { Card, PageHead } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
 import { usePilots } from "@/lib/squadron-data";
-import { Plus, Trash2, Save, Settings as Cog, CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Save, Settings as Cog, CheckCircle2, ChevronLeft, ChevronRight, Printer } from "lucide-react";
+import { PrintHeader } from "@/components/PrintHeader";
 
 /**
  * Leaves (rebuilt — daily-first)
@@ -288,7 +289,7 @@ export default function Leaves() {
         title={t("nav_leaves")}
         subtitle="Daily availability · weekly & monthly totals"
         actions={
-          <div className="flex gap-2">
+          <div className="flex gap-2 no-print">
             <div className="inline-flex rounded-md border border-border overflow-hidden">
               <button
                 onClick={() => setView("daily")}
@@ -309,12 +310,32 @@ export default function Leaves() {
             <Button size="sm" variant="outline" onClick={() => setShowSettings(s => !s)} data-testid="button-leaves-types">
               <Cog className="h-4 w-4 me-1" /> Types
             </Button>
+            <Button
+              size="sm"
+              onClick={() => window.print()}
+              data-testid="button-leaves-print"
+              title="Print"
+            >
+              <Printer className="h-4 w-4 me-1" /> {t("print")}
+            </Button>
           </div>
         }
       />
 
+      <div data-print-area>
+      {/* The shared print header — visible only on paper. Must live
+          INSIDE data-print-area so the global print isolation rules
+          keep it visible. */}
+      <PrintHeader
+        title={t("nav_leaves")}
+        context={
+          view === "daily" ? `Day: ${dayIso}` :
+          view === "weekly" ? `Weekly · ${MONTHS[month]} ${year}` :
+          `Monthly · ${year}`
+        }
+      />
       {/* Top controls: time bucket selectors per view + legend */}
-      <div className="flex flex-wrap items-center gap-2 mb-3">
+      <div className="flex flex-wrap items-center gap-2 mb-3 no-print">
         {view === "daily" && (
           <>
             <button
@@ -612,6 +633,7 @@ export default function Leaves() {
           </table>
         </Card>
       )}
+      </div>
     </div>
   );
 }
