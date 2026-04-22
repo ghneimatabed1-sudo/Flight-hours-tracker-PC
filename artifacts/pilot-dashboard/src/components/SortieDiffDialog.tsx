@@ -94,8 +94,18 @@ export function SortieDiffDialog({ mode, before, after, onCancel, onConfirm, bus
         </div>
 
         {mode === "edit" && editChanges.length === 0 && (
-          <div className="text-sm text-muted-foreground italic py-6 text-center border border-border rounded-md" data-testid="diff-empty">
-            No changes detected.
+          // No-changes path doubles as a manual "rescue" for sorties that
+          // were saved on an older build whose side-effect chain (e.g. the
+          // IRT currency-refresh branch added later) wasn't yet wired in.
+          // Hitting Save here re-runs the full update path, which calls
+          // applyCurrencyRefresh — and bumpDate is monotonic so re-running
+          // it on a healthy sortie is a no-op. That's why the button stays
+          // enabled and is relabelled below.
+          <div className="text-sm text-muted-foreground italic py-4 text-center border border-border rounded-md space-y-1" data-testid="diff-empty">
+            <div>No changes detected.</div>
+            <div className="text-[11px] not-italic text-muted-foreground/80">
+              Click <span className="font-semibold text-foreground/80">Refresh currencies</span> below to re-run currency &amp; totals refresh on this sortie without editing it.
+            </div>
           </div>
         )}
 
@@ -156,13 +166,19 @@ export function SortieDiffDialog({ mode, before, after, onCancel, onConfirm, bus
           </button>
           <button
             onClick={onConfirm}
-            disabled={busy || (mode === "edit" && editChanges.length === 0)}
+            disabled={busy}
             className={`px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50 ${
               mode === "delete" ? "bg-destructive text-destructive-foreground" : "bg-primary text-primary-foreground"
             }`}
             data-testid="button-diff-confirm"
           >
-            {busy ? "…" : (mode === "delete" ? "Delete sortie" : "Save changes")}
+            {busy
+              ? "…"
+              : mode === "delete"
+                ? "Delete sortie"
+                : editChanges.length === 0
+                  ? "Refresh currencies"
+                  : "Save changes"}
           </button>
         </div>
       </DialogContent>
