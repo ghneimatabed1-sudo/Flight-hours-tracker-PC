@@ -247,7 +247,7 @@ export default function DutyWeek() {
   function printRoster() { window.print(); }
 
   return (
-    <div>
+    <div className="print-area">
       <PageHead title="مناوبات السرب" subtitle="جدول المناوبة الأسبوعي — قابل للطباعة والتعديل" />
 
       <div className="flex flex-wrap items-center gap-2 mb-3 print:hidden">

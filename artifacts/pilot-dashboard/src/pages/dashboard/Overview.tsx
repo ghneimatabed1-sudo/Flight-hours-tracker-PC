@@ -62,7 +62,7 @@ export default function CommanderOverview() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 print-area">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-xl font-bold">{t("overview")}</h2>
         <div className="flex items-center gap-2 no-print">

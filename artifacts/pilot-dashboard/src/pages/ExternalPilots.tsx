@@ -67,7 +67,7 @@ export default function ExternalPilots() {
   const totalFlights = filtered.reduce((n, g) => n + g.flights.length, 0);
 
   return (
-    <div>
+    <div className="print-area">
       <PageHead
         title={t("nav_externalpilots")}
         subtitle={`${filtered.length} ${t("externalPilotsCount")} · ${totalFlights} ${t("externalFlightsCount")}`}

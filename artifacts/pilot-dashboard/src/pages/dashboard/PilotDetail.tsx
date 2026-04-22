@@ -32,7 +32,7 @@ export default function PilotDetail() {
   ];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 print-area">
       <div className="flex items-center justify-between gap-2 no-print">
         <Link href="/dashboard/pilots" className="text-xs inline-flex items-center text-muted-foreground hover:text-foreground">
           <ChevronLeft className={`h-3 w-3 me-1 ${dir === "rtl" ? "rotate-180" : ""}`} />{t("back")}

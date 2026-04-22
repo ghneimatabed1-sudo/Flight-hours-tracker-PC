@@ -107,7 +107,7 @@ export default function MonthlyReport() {
   const nextMonthHeader = periodLabel(inputs.nextMonthPlanFor).toUpperCase();
 
   return (
-    <div className="monthly-report">
+    <div className="monthly-report print-area">
       <style>{`
         @media print {
           .no-print { display: none !important; }

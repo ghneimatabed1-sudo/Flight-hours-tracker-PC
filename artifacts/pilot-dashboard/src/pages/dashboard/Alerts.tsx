@@ -54,7 +54,7 @@ export default function Alerts() {
   const warning = items.filter(i => i.status === "warning" || i.status === "expiringSoon");
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 print-area">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-xl font-bold flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-500" />{t("alerts")}</h2>
         <Button size="sm" variant="outline" onClick={() => window.print()} data-testid="button-print-alerts" className="no-print">

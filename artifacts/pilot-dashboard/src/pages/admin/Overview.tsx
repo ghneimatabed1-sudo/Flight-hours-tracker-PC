@@ -26,7 +26,7 @@ export default function AdminOverview() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 print-area">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-xl font-bold">{t("systemOverview")}</h2>
         <Button size="sm" variant="outline" onClick={() => window.print()} data-testid="button-print-admin-overview" className="no-print">

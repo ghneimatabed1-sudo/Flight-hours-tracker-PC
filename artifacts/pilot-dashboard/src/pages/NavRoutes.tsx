@@ -131,7 +131,7 @@ export default function NavRoutes() {
   function flashSaved() { setSavedFlash(true); setTimeout(() => setSavedFlash(false), 1200); }
 
   return (
-    <div>
+    <div className="print-area">
       <PageHead
         title={t("nav_navroutes")}
         subtitle={`Manual route builder · up to ${MAX_ROUTES} routes`}
