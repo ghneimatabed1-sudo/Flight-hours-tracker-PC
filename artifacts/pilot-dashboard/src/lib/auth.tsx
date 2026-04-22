@@ -1212,12 +1212,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState(s => ({ ...s, user: null }));
     },
     releaseLicense: () => {
+      // v1.1.46: Release License must also DEREGISTER this PC from the
+      // central xpc_registry on Supabase, otherwise other PCs keep
+      // seeing this seat as "online" in their Messages and Schedule
+      // Chain pickers (the 30s heartbeat from this PC stops, but the
+      // last_seen row sits there until the cleanup window expires).
+      // Also wipe the local PC id + device suffix so the next setup
+      // gets a clean identity instead of inheriting the old one.
+      const myPcId = localStorage.getItem("rjaf.xpc.localId") ?? "";
+      if (supabase && myPcId) {
+        // Fire-and-forget — don't block the UI; if the network is down
+        // the row will time out via the registry's normal staleness
+        // window. Best-effort delete now is the right tradeoff.
+        void supabase.from("xpc_registry").delete().eq("id", myPcId).then(() => {});
+        void supabase.from("xpc_user_pcs").delete().eq("pc_id", myPcId).then(() => {});
+      }
       localStorage.removeItem("rjaf.licensed");
       localStorage.removeItem("rjaf.licenseKey");
       localStorage.removeItem("rjaf.licenseUser");
       localStorage.removeItem("rjaf.licenseBoundFp");
       localStorage.removeItem("rjaf.user");
       localStorage.removeItem("rjaf.squadronId");
+      localStorage.removeItem("rjaf.xpc.localId");
+      localStorage.removeItem("rjaf.deviceSuffix");
       updateAdminRecoveryRemaining(null);
       setState(s => ({ ...s, licensed: false, user: null }));
     },
