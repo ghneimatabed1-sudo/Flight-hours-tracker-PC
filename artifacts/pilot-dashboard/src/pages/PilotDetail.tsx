@@ -39,7 +39,9 @@ const cats = [
   { k: "nvg", label: "NVG" },
   { k: "irt", label: "IRT" },
   { k: "medical", label: "Medical" },
-  { k: "sim", label: "Sim" },
+  // Sim removed — not a currency. The pilot's last simulator date is a
+  // monitoring value (`pilot.lastSimDate`) shown elsewhere, never folded
+  // into the green/amber/red status grid.
 ] as const;
 type CurrencyKey = typeof cats[number]["k"];
 

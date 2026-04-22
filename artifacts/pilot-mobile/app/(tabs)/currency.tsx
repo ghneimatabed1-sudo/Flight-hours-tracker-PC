@@ -89,8 +89,35 @@ export default function CurrencyScreen() {
           <CurrencyRow key={item.key} item={item} />
         ))}
       </View>
+      {/* Last simulator session — monitoring date only, no expiry. Mirrors
+          the dashboard's commander-only field via PilotProfile.lastSimDate.
+          See `.local/memory/currency-refresh.md`. */}
+      <View
+        style={[
+          styles.simRow,
+          { backgroundColor: colors.muted, borderColor: colors.border, flexDirection: isRTL ? "row-reverse" : "row" },
+        ]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.simLabel, { color: colors.foreground, textAlign: isRTL ? "right" : "left" }]}>
+            {t("currency_sim")}
+          </Text>
+          <Text style={[styles.simHint, { color: colors.mutedForeground, textAlign: isRTL ? "right" : "left" }]}>
+            {t("sim_monitor_only")}
+          </Text>
+        </View>
+        <Text style={[styles.simDate, { color: colors.foreground }]}>
+          {snapshot.profile.lastSimDate ? formatSimDate(snapshot.profile.lastSimDate) : "—"}
+        </Text>
+      </View>
     </ScrollView>
   );
+}
+
+// Format an ISO yyyy-mm-dd into dd/mm/yyyy without timezone surprises.
+function formatSimDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
 }
 
 const styles = StyleSheet.create({
@@ -123,5 +150,27 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: 10,
+  },
+  simRow: {
+    marginTop: 6,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    gap: 12,
+  },
+  simLabel: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+  },
+  simHint: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    marginTop: 2,
+  },
+  simDate: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    fontVariant: ["tabular-nums"],
   },
 });

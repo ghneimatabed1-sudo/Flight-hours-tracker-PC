@@ -174,7 +174,9 @@ export function computeCurrencies(profile: PilotProfile): CurrencyItem[] {
     { key: "nvg", label: "NVG" },
     { key: "irt", label: "IRT" },
     { key: "medical", label: "Medical" },
-    { key: "sim", label: "Simulator" },
+    // Sim removed — not a currency. Dashboard treats it as a monitoring
+    // date only; mobile displays the value via PilotProfile.lastSimDate
+    // on the Currency screen footer. See `.local/memory/currency-refresh.md`.
   ];
 
   // Ops can mark a currency N/A for a pilot on the dashboard

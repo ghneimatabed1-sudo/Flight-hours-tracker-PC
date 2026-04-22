@@ -89,7 +89,9 @@ export default function Dashboard() {
 
   const expiring = PILOTS.flatMap(p => {
     const items: { pilot: string; type: string; date: string; status: "warn" | "bad" }[] = [];
-    (["day", "night", "irt", "medical", "sim"] as const).forEach(c => {
+    // Sim is monitor-only — never an "expiring" currency. See
+    // `.local/memory/currency-refresh.md`.
+    (["day", "night", "irt", "medical"] as const).forEach(c => {
       if (p.hiddenCurrencies?.includes(c)) return; // ops marked this currency N/A for this pilot
       const s = statusOf(p.expiry[c]);
       if (s !== "ok") items.push({ pilot: p.name, type: c.toUpperCase(), date: p.expiry[c], status: s });
@@ -240,7 +242,7 @@ export default function Dashboard() {
         />
         <div className="grid sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
           {PILOTS.map(p => {
-            const worst = (["day", "night", "irt", "medical", "sim"] as const)
+            const worst = (["day", "night", "irt", "medical"] as const)
               .map(c => statusOf(p.expiry[c]))
               .reduce<Severity>((acc, s) => (acc === "bad" || s === "bad" ? "bad" : (acc === "warn" || s === "warn" ? "warn" : "ok")), "ok");
             const initials = (p.name || "").split(" ").map(s => s[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();

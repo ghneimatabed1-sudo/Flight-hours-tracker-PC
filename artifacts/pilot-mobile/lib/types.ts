@@ -24,8 +24,16 @@ export interface PilotProfile {
     nvg: string;
     irt: string;
     medical: string;
+    // Kept on the type for back-compat with older snapshots, but the
+    // mobile UI no longer surfaces sim as a currency. The pilot's last
+    // simulator date lives in `lastSimDate` below — see
+    // `.local/memory/currency-refresh.md`.
     sim: string;
   };
+  // Last simulator session — monitoring date only, no currency window.
+  // Mirrors `pilot.lastSimDate` on the dashboard. Surfaced as an info row
+  // on the Currency screen so the pilot/commanders can see recency.
+  lastSimDate?: string;
   // Currencies the squadron ops lead has marked N/A for this pilot (e.g. a
   // pilot who is not NVG-qualified). Hidden currencies are omitted from the
   // mobile currency screen entirely so the pilot doesn't see a stale tile.

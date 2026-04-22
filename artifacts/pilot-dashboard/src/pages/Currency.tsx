@@ -12,13 +12,16 @@ import type { CurrencyKey } from "@/lib/mock";
 // soon it expires. Single source of truth: `pilots.expiry` on the live
 // pilots table; the same field that the mobile app reads and that the
 // pilot edit dialog writes. No separate currency table exists.
+// Sim is intentionally NOT in this list — it has no currency window per
+// `.local/memory/currency-refresh.md`. The squadron commander sees the
+// last-simulator date as a separate monitoring column rendered by
+// `LastSimColumn` (not subject to the green/amber/red status logic).
 const COLS: { k: CurrencyKey; label: string }[] = [
   { k: "day",     label: "Day"       },
   { k: "night",   label: "Night"     },
   { k: "nvg",     label: "NVG"       },
   { k: "irt",     label: "IRT"       },
   { k: "medical", label: "Medical"   },
-  { k: "sim",     label: "Simulator" },
 ];
 
 // Per-PC manual hide of pilots (e.g. transferred or on long leave). Kept

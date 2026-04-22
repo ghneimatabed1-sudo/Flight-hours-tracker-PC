@@ -146,6 +146,10 @@ function rowsToSnapshot(
       medical: str(expiry.medical) ?? "",
       sim: str(expiry.sim) ?? "",
     },
+    // Last simulator session — monitoring date sync from dashboard.
+    // The dashboard writes `data.lastSimDate`; we surface it on the mobile
+    // Currency screen as an info row (not a currency tile).
+    lastSimDate: typeof d.lastSimDate === "string" && d.lastSimDate.trim() ? d.lastSimDate : undefined,
     // Mirror ops's hide-currency selection from the dashboard so the mobile
     // currency screen omits N/A tiles (e.g. a non-NVG-qualified pilot will
     // not see an NVG tile at all).
