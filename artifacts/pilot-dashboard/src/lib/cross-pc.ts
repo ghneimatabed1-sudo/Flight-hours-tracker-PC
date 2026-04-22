@@ -1079,6 +1079,17 @@ export interface ScheduleShare {
   chainPcIds?: string[];
   approvedAt?: string;
   approvedBy?: string;
+  // PCs that have ever rejected this share. Captured at the moment of
+  // rejection (the rejecter's currentPcId, before the share is bounced
+  // back to the originator). Once a PC is in this list the share never
+  // re-appears on that PC's screen — even if the originator later edits,
+  // resends or self-approves it. Keeps rejecter inboxes clean without
+  // any manual cleanup.
+  rejectedByPcIds?: string[];
+  // Set when the originating PC clicks "Delete from my view". Hides the
+  // share from the originator's own screen only — every other PC that
+  // received, reviewed, edited or approved it keeps its copy intact.
+  originatorDismissedAt?: string;
 }
 
 function readShares(): ScheduleShare[] {
@@ -1108,6 +1119,8 @@ function rowToShare(r: Record<string, unknown>): ScheduleShare {
     chainPcIds: Array.isArray(r.chain_pc_ids) ? (r.chain_pc_ids as string[]) : undefined,
     approvedAt: r.approved_at ? String(r.approved_at) : undefined,
     approvedBy: r.approved_by ? String(r.approved_by) : undefined,
+    rejectedByPcIds: Array.isArray(r.rejected_by_pc_ids) ? (r.rejected_by_pc_ids as string[]) : undefined,
+    originatorDismissedAt: r.originator_dismissed_at ? String(r.originator_dismissed_at) : undefined,
   };
 }
 
@@ -1131,6 +1144,8 @@ function shareToRow(s: ScheduleShare): Record<string, unknown> {
     chain_pc_ids: s.chainPcIds ?? [],
     approved_at: s.approvedAt ?? null,
     approved_by: s.approvedBy ?? null,
+    rejected_by_pc_ids: s.rejectedByPcIds ?? [],
+    originator_dismissed_at: s.originatorDismissedAt ?? null,
     updated_at: nowIso(),
   };
 }
@@ -1139,15 +1154,33 @@ export function useScheduleShares(forPcId: string | null): UseQueryResult<Schedu
   const q = useQuery<ScheduleShare[]>({
     queryKey: ["xpc", "schedule", forPcId ?? ""],
     queryFn: async () => {
+      // Visibility rules (applied client-side so the same logic is used
+      // for both Supabase and local-fallback paths):
+      //   - Originator sees the share UNLESS they have dismissed it from
+      //     their own view (originatorDismissedAt set).
+      //   - Current holder always sees it (the ball is in their court).
+      //   - Approved-chain visibility shows the share to every PC that
+      //     touched the chain — but a PC that has rejected it in the past
+      //     is excluded (we don't re-surface a stale rejected row when
+      //     the originator later edits/resends/approves it).
+      const visible = (s: ScheduleShare): boolean => {
+        if (!forPcId) return true;
+        const isOrigin = s.originSquadronId === forPcId;
+        const isCurrent = s.currentPcId === forPcId;
+        const wasRejecter = (s.rejectedByPcIds ?? []).includes(forPcId);
+        if (isOrigin) {
+          if (s.originatorDismissedAt) return false;
+          return true;
+        }
+        if (isCurrent) return true;
+        if (s.status === "approved" && (s.chainPcIds ?? []).includes(forPcId) && !wasRejecter) {
+          return true;
+        }
+        return false;
+      };
       const localFallback = () => {
-        const all = readShares();
-        if (!forPcId) return all;
-        return all
-          .filter(s =>
-            s.currentPcId === forPcId
-            || s.originSquadronId === forPcId
-            || (s.status === "approved" && (s.chainPcIds ?? []).includes(forPcId))
-          )
+        return readShares()
+          .filter(visible)
           .sort((a, b) => b.date.localeCompare(a.date));
       };
       if (isLive()) {
@@ -1155,13 +1188,16 @@ export function useScheduleShares(forPcId: string | null): UseQueryResult<Schedu
           async () => {
             let qry = supabase!.from("xpc_schedule_shares").select("*").order("flight_date", { ascending: false });
             if (forPcId) {
+              // Server-side narrowing keeps payload small; the client-side
+              // `visible()` filter then enforces the dismissal / rejecter
+              // rules so the logic stays in one place.
               qry = qry.or(
                 `current_pc_id.eq.${forPcId},origin_squadron_id.eq.${forPcId},and(status.eq.approved,chain_pc_ids.cs.{${forPcId}})`,
               );
             }
             const { data, error } = await qry;
             if (error) throw error;
-            return (data ?? []).map(rowToShare);
+            return (data ?? []).map(rowToShare).filter(visible);
           },
           localFallback,
         );
@@ -1284,6 +1320,16 @@ export function useDecideSchedule() {
         cur.chainPcIds = Array.from(ids);
         push("approved", input.note);
       } else if (input.action === "reject") {
+        // Capture the rejecter's PC id BEFORE we bounce the share back to
+        // the originator. Anyone in this list will never see this share
+        // again — even if the originator later edits/resends/approves it.
+        // Keeps rejecter inboxes from filling up with stale rows the
+        // originator already actioned.
+        if (cur.currentPcId) {
+          const set = new Set<string>(cur.rejectedByPcIds ?? []);
+          set.add(cur.currentPcId);
+          cur.rejectedByPcIds = Array.from(set);
+        }
         cur.status = "rejected";
         cur.currentPcId = cur.originSquadronId;
         cur.currentPcName = cur.originSquadronName;
@@ -1346,6 +1392,43 @@ export function useDecideSchedule() {
         actor: input.by,
         detail: { id: cur.id, tier: input.tier },
       });
+      return cur;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["xpc", "schedule"] }),
+  });
+}
+
+// Originator-side "Delete from my view" — flips the originator-dismissed
+// flag on the share so it disappears from the originating PC's screen
+// only. Every other PC that received, reviewed, edited or approved the
+// share keeps its copy untouched and the central audit trail is fully
+// preserved. Strictly a per-creator hide, never a system-wide delete.
+export function useDismissScheduleShareForOriginator() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { id: string }) => {
+      let cur: ScheduleShare;
+      if (isLive()) {
+        const { data, error } = await supabase!.from("xpc_schedule_shares").select("*").eq("id", input.id).single();
+        if (error) throw error;
+        cur = rowToShare(data);
+      } else {
+        const all = readShares();
+        const found = all.find(s => s.id === input.id);
+        if (!found) throw new Error("Schedule not found");
+        cur = { ...found };
+      }
+      cur.originatorDismissedAt = nowIso();
+      if (isLive()) {
+        const { error } = await supabase!.from("xpc_schedule_shares")
+          .update(shareToRow(cur)).eq("id", cur.id);
+        if (error) throw error;
+      } else {
+        const all = readShares();
+        const idx = all.findIndex(s => s.id === cur.id);
+        if (idx >= 0) all[idx] = cur;
+        writeShares(all);
+      }
       return cur;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["xpc", "schedule"] }),

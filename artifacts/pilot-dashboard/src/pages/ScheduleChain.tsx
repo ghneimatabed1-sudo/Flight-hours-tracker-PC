@@ -7,6 +7,7 @@ import {
   useSubmitSchedule,
   useDecideSchedule,
   useAcceptScheduleEdit,
+  useDismissScheduleShareForOriginator,
   useRegisteredPCs,
   diffSchedule,
   canUseScheduleChain,
@@ -85,6 +86,7 @@ export default function ScheduleChain() {
   const submit = useSubmitSchedule();
   const decide = useDecideSchedule();
   const acceptEdits = useAcceptScheduleEdit();
+  const dismissMine = useDismissScheduleShareForOriginator();
   const pilotsQ = usePilots();
   // v1.1.35: pilot/co-pilot autofill in the schedule composer defaults
   // to the short Flight Name when the pilot has one set on the roster
@@ -720,8 +722,26 @@ export default function ScheduleChain() {
                     </button>
                   </div>
                 )}
-                <div className="mt-2 text-[10px] text-muted-foreground">
-                  History: {share.history.map(h => `${h.tier}/${h.action}`).join(" → ")}
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <div className="text-[10px] text-muted-foreground">
+                    History: {share.history.map(h => `${h.tier}/${h.action}`).join(" → ")}
+                  </div>
+                  {/* Delete from MY view only — receivers / reviewers /
+                      approvers keep their copies; central audit untouched.
+                      Only the originating PC ever sees this button (the
+                      Sent list is already filtered to matchesMe(origin)). */}
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm("Hide this schedule from your own screen only? Other PCs that received or approved it will keep their copy.")) return;
+                      await dismissMine.mutateAsync({ id: share.id });
+                      toast({ title: "Removed from your view" });
+                    }}
+                    className="px-2 py-1 rounded-md bg-secondary border border-border text-[11px] inline-flex items-center gap-1 text-muted-foreground hover:text-rose-200 hover:border-rose-400/40 no-print"
+                    data-testid={`dismiss-${share.id}`}
+                    title="Hide this schedule from your own screen. Receivers keep their copy."
+                  >
+                    <Trash2 className="h-3 w-3" /> Delete from my view
+                  </button>
                 </div>
               </div>
             ))}
