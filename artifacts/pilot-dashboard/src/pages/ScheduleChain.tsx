@@ -12,6 +12,7 @@ import {
   diffSchedule,
   canUseScheduleChain,
   getLocalPcId,
+  makePcMatcher,
   type ScheduleRow,
   type ScheduleShare,
   type ScheduleProgram,
@@ -274,50 +275,15 @@ export default function ScheduleChain() {
     setSubmitTo("");
   };
 
-  // v1.1.39: Ops PC (id = "<sqn>") and Sqn Cmdr PC (id = "SQDNCMD:<sqn>")
-  // are physically distinct but logically the same squadron. A schedule
-  // addressed to either id should surface on BOTH inboxes so the
-  // operator never has to guess which one was picked. Without this
-  // mirror, a Flight Cmdr submitting "to NO.8" lands the share on Ops
-  // only and the Sqn Cmdr never sees it (and vice-versa).
-  const peerSquadronId = useMemo<string | null>(() => {
-    if (!myPcId) return null;
-    if (myTier !== "squadron" && myTier !== "ops") return null;
-    if (myPcId.startsWith("SQDNCMD:")) {
-      // I am the Sqn Cmdr PC → my peer is the bare squadron-name Ops PC.
-      return myPcId.slice("SQDNCMD:".length);
-    }
-    if (!myPcId.includes(":")) {
-      // I am the Ops PC (canonical bare id) → my peer is SQDNCMD:<me>.
-      return `SQDNCMD:${myPcId}`;
-    }
-    return null;
-  }, [myPcId, myTier]);
-  // v1.1.40: tier-prefix-equivalent matcher. Flight, Wing, Base and
-  // Sqn Cmdr ids carry a "#<deviceSuffix>" tail to keep two PCs sharing
-  // the same account distinguishable in the registry. But the device
-  // suffix is regenerated whenever localStorage is cleared (reimage,
-  // browser cache flush, fresh install) — so a returned-edit addressed
-  // to the OLD suffix never lands on the same logical seat after the
-  // reset. Match by the seat's "<TIER>:<base>" prefix instead so the
-  // inbox catches its own work even when the suffix changes.
-  const myLogicalSeat = useMemo<string | null>(() => {
-    if (!myPcId) return null;
-    const hashIdx = myPcId.indexOf("#");
-    if (hashIdx < 0) return null; // bare squadron id has no suffix
-    return myPcId.slice(0, hashIdx); // e.g. "FLIGHT:NO.8"
-  }, [myPcId]);
-  const matchesMe = (id: string | null | undefined): boolean => {
-    if (!id || !myPcId) return false;
-    if (id === myPcId) return true;
-    if (peerSquadronId !== null && id === peerSquadronId) return true;
-    if (myLogicalSeat !== null) {
-      const hashIdx = id.indexOf("#");
-      const otherSeat = hashIdx < 0 ? id : id.slice(0, hashIdx);
-      if (otherSeat === myLogicalSeat) return true;
-    }
-    return false;
-  };
+  // v1.1.56: Ops PC <-> Sqn Cmdr peering and logical-seat (suffix-stripped)
+  // matching are now both folded into makePcMatcher in cross-pc.ts so
+  // the schedule inbox and the message inbox can never disagree about
+  // which incoming items belong to this seat. Previously two near-
+  // identical copies of this logic lived here and in useMessages.
+  // Two near-identical copies used to live here and there; consolidating
+  // them eliminates the drift risk where the message inbox and the
+  // schedule inbox could disagree about which items belong to this seat.
+  const matchesMe = useMemo(() => makePcMatcher(myPcId), [myPcId]);
   const incoming = sharesQ.data.filter(s => matchesMe(s.currentPcId));
   const sent = sharesQ.data.filter(s => matchesMe(s.originSquadronId) && !matchesMe(s.currentPcId));
 

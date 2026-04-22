@@ -1100,13 +1100,24 @@ function writeShares(rows: ScheduleShare[]) {
 }
 
 function rowToShare(r: Record<string, unknown>): ScheduleShare {
+  // Recover the flight tier from the current_pc_id prefix the same way
+  // rowToMessage does. Migration 0028 widens the DB constraint so new
+  // writes carry the canonical 'flight' tier directly, but rows written
+  // by older builds (which downgraded to 'squadron' to satisfy the old
+  // constraint) still need the prefix decode so flight commanders see
+  // their inbox correctly across mixed-version deployments.
+  const currentPcIdRaw = r.current_pc_id ? String(r.current_pc_id) : null;
+  const currentTier: ScheduleTier =
+    currentPcIdRaw && currentPcIdRaw.startsWith("FLIGHT:")
+      ? "flight"
+      : (r.current_tier as ScheduleTier);
   return {
     id: String(r.id),
     date: String(r.flight_date),
     originSquadronId: String(r.origin_squadron_id),
     originSquadronName: String(r.origin_squadron_name),
-    currentTier: r.current_tier as ScheduleTier,
-    currentPcId: r.current_pc_id ? String(r.current_pc_id) : null,
+    currentTier,
+    currentPcId: currentPcIdRaw,
     currentPcName: r.current_pc_name ? String(r.current_pc_name) : null,
     status: r.status as ScheduleStatus,
     rows: (r.rows ?? []) as ScheduleRow[],
@@ -1125,12 +1136,21 @@ function rowToShare(r: Record<string, unknown>): ScheduleShare {
 }
 
 function shareToRow(s: ScheduleShare): Record<string, unknown> {
+  // Defense-in-depth: migration 0028 widens the current_tier CHECK to
+  // accept 'flight', but if a PC ever talks to a Supabase project that
+  // hasn't applied 0028 yet (a stale dev DB, a future fork) the write
+  // would still fail with a constraint violation and the share would
+  // silently never reach the flight commander's inbox. Downgrade
+  // 'flight' to 'squadron' on the wire — the flight tier is fully
+  // recovered on read from the FLIGHT: id prefix in rowToShare, so the
+  // round-trip is lossless either way.
+  const currentTierDb = s.currentTier === "flight" ? "squadron" : s.currentTier;
   return {
     id: s.id,
     flight_date: s.date,
     origin_squadron_id: s.originSquadronId,
     origin_squadron_name: s.originSquadronName,
-    current_tier: s.currentTier,
+    current_tier: currentTierDb,
     current_pc_id: s.currentPcId,
     current_pc_name: s.currentPcName,
     status: s.status,
@@ -1647,22 +1667,57 @@ function purgeExpiredLocal(rows: PrivateMessage[]): PrivateMessage[] {
   return rows.filter(m => new Date(m.sentAt).getTime() >= cutoff);
 }
 
+// v1.1.56: extracted from useMessages so ScheduleChain.tsx can share the
+// exact same matcher. Two copies of this logic existed (here and in
+// ScheduleChain.tsx) and any future tweak to one would silently diverge
+// from the other — so a flight commander's message inbox and schedule
+// inbox could disagree about which incoming items belong to them.
+//
+// The matcher is a pure function of `forPcId` and accepts the candidate
+// id; it folds three identity rules into one predicate:
+//
+//   1. Exact match on the registry id.
+//   2. Ops PC <-> Squadron Cmdr peer match — "<sqn>" and "SQDNCMD:<sqn>"
+//      address the same logical seat for inbound mail/shares.
+//   3. Logical-seat match — any tier-prefixed id (FLIGHT:, SQDNCMD:,
+//      WING:, BASE:, HQ:) carries a "#<deviceSuffix>" tail that
+//      regenerates if localStorage is wiped (reimage, browser cache
+//      flush, fresh install). Compare on the prefix so the same seat
+//      keeps catching its own mail across suffix changes.
+export function makePcMatcher(
+  forPcId: string | null | undefined,
+): (id: string | null | undefined) => boolean {
+  if (!forPcId) return () => false;
+  const hashIdx = forPcId.indexOf("#");
+  const logicalSeat = hashIdx < 0 ? null : forPcId.slice(0, hashIdx);
+  const peerSquadronId = forPcId.startsWith("SQDNCMD:")
+    ? forPcId.slice("SQDNCMD:".length)
+    : (!forPcId.includes(":") ? `SQDNCMD:${forPcId}` : null);
+  return (id: string | null | undefined): boolean => {
+    if (!id) return false;
+    if (id === forPcId) return true;
+    if (peerSquadronId !== null && id === peerSquadronId) return true;
+    if (logicalSeat !== null) {
+      const i = id.indexOf("#");
+      const otherSeat = i < 0 ? id : id.slice(0, i);
+      if (otherSeat === logicalSeat) return true;
+    }
+    return false;
+  };
+}
+
 export function useMessages(forPcId: string | null): {
   inbox: PrivateMessage[]; sent: PrivateMessage[]; history: PrivateMessage[];
 } & UseQueryResult<PrivateMessage[]> {
-  // v1.1.44: same logical-seat matching the Schedule Chain inbox uses
-  // (see ScheduleChain.tsx v1.1.40). Tier-prefixed PC ids carry a
-  // "#<deviceSuffix>" tail that regenerates whenever localStorage is
-  // cleared — so messages addressed to the OLD suffix become invisible
-  // to the same logical seat after a reimage. Match on "<TIER>:<base>"
-  // ignoring the suffix so the inbox catches its own mail. Also mirror
-  // Ops PC "<sqn>" with Sqn Cmdr "SQDNCMD:<sqn>" so private mail to
-  // either lands on both inboxes.
+  const matchesMe = makePcMatcher(forPcId);
+  // Server-side OR-clause inputs — derived the same way makePcMatcher
+  // does so the live PostgREST query and the client-side matcher stay
+  // in lock-step (any drift would surface as messages visible in the
+  // local fallback path but missing from the live path or vice versa).
   const logicalSeat = (() => {
     if (!forPcId) return null;
-    const hashIdx = forPcId.indexOf("#");
-    if (hashIdx < 0) return null;
-    return forPcId.slice(0, hashIdx); // e.g. "FLIGHT:NO.8"
+    const i = forPcId.indexOf("#");
+    return i < 0 ? null : forPcId.slice(0, i);
   })();
   const peerSquadronId = (() => {
     if (!forPcId) return null;
@@ -1670,17 +1725,6 @@ export function useMessages(forPcId: string | null): {
     if (!forPcId.includes(":")) return `SQDNCMD:${forPcId}`;
     return null;
   })();
-  const matchesMe = (id: string | null | undefined): boolean => {
-    if (!id || !forPcId) return false;
-    if (id === forPcId) return true;
-    if (peerSquadronId !== null && id === peerSquadronId) return true;
-    if (logicalSeat !== null) {
-      const hashIdx = id.indexOf("#");
-      const otherSeat = hashIdx < 0 ? id : id.slice(0, hashIdx);
-      if (otherSeat === logicalSeat) return true;
-    }
-    return false;
-  };
   const q = useQuery<PrivateMessage[]>({
     queryKey: ["xpc", "messages", forPcId ?? ""],
     queryFn: async () => {
