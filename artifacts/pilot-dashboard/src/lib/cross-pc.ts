@@ -92,6 +92,13 @@ const ONLINE_WINDOW_MS = 5 * 60_000;
 // completely silent for a full quarter get pruned, and they re-register
 // automatically the moment that operator signs back in on any PC.
 const STALE_REGISTRY_MS = 90 * 24 * 60 * 60_000;
+// Schedule-shares + revoked-devices prune window — 6 months. The flight
+// already happened months ago and the local sortie log retains its own
+// permanent record, so the share itself doesn't need to live in the
+// central xpc_schedule_shares table forever. Same for pilot_devices
+// rows whose `revoked_at` is older than this — the unlink already
+// happened, the row is just dead weight after half a year.
+const STALE_SHARE_MS = 180 * 24 * 60 * 60_000;
 
 // Tier of the PC in the Squadron → Wing → Base → HQ chain. The tier is
 // what the schedule-sharing chain enforces when picking forward targets:
@@ -575,6 +582,31 @@ export function useRegisteredPCs(): UseQueryResult<RegisteredPC[]> & { data: Reg
                     await supabase!.from("xpc_registry").delete().in("id", ids);
                     await supabase!.from("xpc_user_pcs").delete().in("pc_id", ids);
                   }
+                } catch { /* prune is best-effort */ }
+                // Also prune long-stale schedule shares — flights that
+                // already happened more than 6 months ago. Local sortie
+                // logs keep the permanent record; the central share row
+                // exists only so the chain (squadron→wing→base→HQ) can
+                // review and approve in near-real-time. After 6 months
+                // it has served its purpose.
+                try {
+                  const sharesBefore = new Date(Date.now() - STALE_SHARE_MS).toISOString().slice(0, 10);
+                  await supabase!
+                    .from("xpc_schedule_shares")
+                    .delete()
+                    .lt("flight_date", sharesBefore);
+                } catch { /* prune is best-effort */ }
+                // And prune long-revoked mobile devices — once a phone
+                // has been "Unlinked" for 6+ months, the row is dead
+                // weight (it can never be reactivated, only re-paired
+                // fresh). Keeps the pilot_devices table from bloating
+                // over years of personnel turnover at 15+ squadrons.
+                try {
+                  const revokedBefore = new Date(Date.now() - STALE_SHARE_MS).toISOString();
+                  await supabase!
+                    .from("pilot_devices")
+                    .delete()
+                    .lt("revoked_at", revokedBefore);
                 } catch { /* prune is best-effort */ }
               })();
             }

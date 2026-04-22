@@ -344,6 +344,17 @@ export function useDeletePilot() {
 // mirror, anything an ops officer logged offline (a sortie, an edit, a
 // delete) lived only in this module's memory and was wiped on hard refresh.
 const MOCK_SORTIES_KEY = "rjaf.mock.sorties";
+// Archive bucket for sorties older than the retention window. Kept in
+// localStorage on the same PC (per the operator's explicit instruction:
+// nothing about historical sortie data goes to the central Supabase, it
+// stays on the originating PC). Read-on-demand via `loadArchivedSorties()`.
+const MOCK_SORTIES_ARCHIVE_KEY = "rjaf.mock.sorties.archive";
+// Hot-set retention — sorties older than this slide into the archive
+// bucket so the active list (which gets serialised to localStorage on
+// every write) stays small even after years of daily flying. 3 years
+// covers every operationally-meaningful currency window (NVG, IRT, day,
+// night, medical) with a wide safety margin.
+const SORTIE_HOT_RETENTION_MS = 3 * 365 * 24 * 60 * 60_000;
 let mockSortiesList: Sortie[] | null = null;
 function loadMockSortiesFromStorage(): Sortie[] | null {
   try {
@@ -363,11 +374,63 @@ function saveMockSorties(): void {
     localStorage.setItem(MOCK_SORTIES_KEY, JSON.stringify(mockSortiesList ?? []));
   } catch { /* quota / private mode */ }
 }
+
+// Read the on-disk archive bucket. Returns [] on first call. Used by any
+// future "historical report" UI that needs to look beyond the 3-year hot
+// window — does NOT touch the in-memory list, so loading the archive
+// never bloats the working set.
+export function loadArchivedSorties(): Sortie[] {
+  try {
+    if (typeof localStorage === "undefined") return [];
+    const raw = localStorage.getItem(MOCK_SORTIES_ARCHIVE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as Sortie[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+// Move sorties older than the hot-retention window from the active list
+// into the archive bucket. Pure local — never talks to Supabase. Runs
+// once per app boot (lazy, on first call to getMockSorties) and is a no-op
+// when nothing is old enough to archive, so the cost is one date compare
+// per sortie on app startup.
+function archiveStaleSorties(active: Sortie[]): Sortie[] {
+  try {
+    const cutoff = Date.now() - SORTIE_HOT_RETENTION_MS;
+    const stale: Sortie[] = [];
+    const fresh: Sortie[] = [];
+    for (const s of active) {
+      const t = +new Date(s.date);
+      if (Number.isFinite(t) && t < cutoff) stale.push(s);
+      else fresh.push(s);
+    }
+    if (stale.length === 0) return active;
+    // Merge into the existing archive bucket, dedup by id (defensive in
+    // case the same sortie was somehow archived twice on different runs).
+    const existing = loadArchivedSorties();
+    const byId = new Map<string, Sortie>();
+    for (const s of existing) byId.set(s.id, s);
+    for (const s of stale) byId.set(s.id, s);
+    const merged = Array.from(byId.values()).sort((a, b) => (a.date < b.date ? 1 : -1));
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(MOCK_SORTIES_ARCHIVE_KEY, JSON.stringify(merged));
+    }
+    return fresh;
+  } catch {
+    return active; // archive best-effort — never lose hot data
+  }
+}
+
 function getMockSorties(): Sortie[] {
   if (!mockSortiesList) {
     const fromStorage = loadMockSortiesFromStorage();
-    mockSortiesList = fromStorage ?? [...MOCK_SORTIES];
-    if (!fromStorage) saveMockSorties();
+    const initial = fromStorage ?? [...MOCK_SORTIES];
+    // Lazy archive sweep on first read per session. Subsequent calls hit
+    // the cached list and pay nothing.
+    mockSortiesList = archiveStaleSorties(initial);
+    saveMockSorties();
   }
   return mockSortiesList;
 }

@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useSquadrons } from "@/lib/squadron-store";
 import type { LicenseKey, LicenseDuration } from "@/lib/types";
 import { addDuration, addDays } from "@/lib/types";
-import { listLicenseKeys, registerLicenseKey, updateLicenseKey, removeLicenseKey } from "@/lib/license-registry";
+import { listLicenseKeys, registerLicenseKey, updateLicenseKey, removeLicenseKey, syncLicenseRegistryFromSupabase } from "@/lib/license-registry";
 import { registerLicenseRemote, provisionCommanderRemote, storeSupabaseCreds, clearSupabaseCreds, supabaseConfigured } from "@/lib/supabase";
 import { createCommander, deleteCommander, listCommanders, resetCommanderPassword, generateInitialPassword, type AccountRole, type CommanderRecord } from "@/lib/commander-store";
 import type { CommanderScope } from "@/lib/types";
@@ -95,6 +95,16 @@ export default function LicenseKeys() {
   const auth = useAuth();
   const squadrons = useSquadrons();
   const [keys, setKeys] = useState<LicenseKey[]>(() => listLicenseKeys());
+  // One-shot pull from the central license_registry mirror on mount, so a
+  // fresh super-admin install (new browser, OS reinstall, swapped laptop)
+  // recovers the full key history that earlier admins issued. Local rows
+  // win on conflict; this only adds rows the local copy never had.
+  useEffect(() => {
+    void syncLicenseRegistryFromSupabase().then(() => {
+      setKeys(() => listLicenseKeys());
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Live list of every PC that has registered into the cross-PC ecosystem.
   // We filter to squadron-tier entries when populating the setup-time
   // pickers so commanders are only ever bound to real ops squadron PCs.

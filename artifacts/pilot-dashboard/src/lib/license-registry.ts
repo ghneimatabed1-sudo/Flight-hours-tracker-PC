@@ -5,9 +5,18 @@
 // In production these checks happen server-side via validate-license; this
 // registry exists so the demo mode is faithful: a key issued for "Muhammad"
 // must NOT unlock when "Ali" types the same string.
+//
+// v1.1.53: every write is also mirrored to the central `license_registry`
+// table on Supabase, fire-and-forget, so the registry survives a super-admin
+// browser cache wipe / OS reinstall / laptop swap. On startup we
+// opportunistically pull the central ledger back down so a fresh super-admin
+// install gets the full history without manual export/import.
 
 import type { LicenseKey } from "./types";
 import { licenseKeys as SEED_KEYS } from "./mockData";
+import { supabase, supabaseConfigured } from "./supabase";
+
+const isLive = () => supabaseConfigured && supabase !== null;
 
 const STORAGE_KEY = "rjaf.licenseRegistry";
 
@@ -46,6 +55,86 @@ export interface IssuedKeyRecord {
   meta: LicenseKey;
 }
 
+// ─── Supabase mirror ────────────────────────────────────────────────────
+// All three writers (register/update/remove) push their change to the
+// central table fire-and-forget. Failures (offline, RLS, schema drift) are
+// swallowed silently — the localStorage write is the source of truth, the
+// central mirror is a survivability layer.
+
+function mirrorUpsert(rec: IssuedKeyRecord): void {
+  if (!isLive() || !supabase) return;
+  void (async () => {
+    try {
+      await supabase!.from("license_registry").upsert(
+        {
+          id: rec.meta.id,
+          full_key: rec.fullKey,
+          meta: rec.meta as unknown as Record<string, unknown>,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" },
+      );
+    } catch { /* mirror is best-effort */ }
+  })();
+}
+
+function mirrorPatch(id: string, patch: Partial<LicenseKey>): void {
+  if (!isLive() || !supabase) return;
+  void (async () => {
+    try {
+      // Read current meta, apply patch, write back. Two roundtrips but only
+      // on revoke/release flows which are rare admin actions.
+      const { data } = await supabase!
+        .from("license_registry")
+        .select("meta")
+        .eq("id", id)
+        .maybeSingle();
+      const current = (data?.meta ?? {}) as Record<string, unknown>;
+      const next = { ...current, ...patch };
+      await supabase!
+        .from("license_registry")
+        .update({ meta: next, updated_at: new Date().toISOString() })
+        .eq("id", id);
+    } catch { /* mirror is best-effort */ }
+  })();
+}
+
+function mirrorDelete(id: string): void {
+  if (!isLive() || !supabase) return;
+  void (async () => {
+    try {
+      await supabase!.from("license_registry").delete().eq("id", id);
+    } catch { /* mirror is best-effort */ }
+  })();
+}
+
+// One-shot pull on first super-admin login per browser: read the central
+// ledger and merge into local storage, so a fresh install instantly
+// recovers the full key history. Safe to call repeatedly — local rows
+// take precedence on `id` conflict (the local copy may have edits that
+// haven't been mirrored yet because the writer was offline).
+export async function syncLicenseRegistryFromSupabase(): Promise<void> {
+  if (!isLive() || !supabase) return;
+  try {
+    const { data, error } = await supabase
+      .from("license_registry")
+      .select("id, full_key, meta")
+      .order("updated_at", { ascending: false })
+      .limit(5000);
+    if (error || !data) return;
+    ensureSeeded();
+    const local = loadRegistry() as Array<LicenseKey & { _fullKey?: string }>;
+    const localById = new Map(local.map(k => [k.id, k]));
+    const merged: Array<LicenseKey & { _fullKey?: string }> = [...local];
+    for (const row of data) {
+      if (localById.has(row.id)) continue;
+      const meta = (row.meta ?? {}) as LicenseKey;
+      merged.push({ ...meta, id: row.id, _fullKey: row.full_key });
+    }
+    saveRegistry(merged);
+  } catch { /* sync is best-effort */ }
+}
+
 // Persist a freshly minted key. The registry stores the full key string so we
 // can match exactly on activation; the LicenseKey row stored alongside is the
 // same one shown in the admin table (it carries `keyPreview` etc).
@@ -57,6 +146,7 @@ export function registerLicenseKey(rec: IssuedKeyRecord): void {
   // only ever shows the preview).
   const stored = { ...rec.meta, _fullKey: rec.fullKey } as LicenseKey & { _fullKey: string };
   saveRegistry([stored, ...list]);
+  mirrorUpsert(rec);
 }
 
 // Update an existing key's status/lock fields. Used by revoke/release flows so
@@ -66,6 +156,7 @@ export function updateLicenseKey(id: string, patch: Partial<LicenseKey>): void {
   const list = loadRegistry();
   const next = list.map(k => k.id === id ? { ...k, ...patch } : k);
   saveRegistry(next);
+  mirrorPatch(id, patch);
 }
 
 // Hard-delete a license key from the registry. Super-admin only — used when
@@ -77,6 +168,7 @@ export function removeLicenseKey(id: string): void {
   const list = loadRegistry();
   const next = list.filter(k => k.id !== id);
   saveRegistry(next);
+  mirrorDelete(id);
 }
 
 export interface LookupResult {
