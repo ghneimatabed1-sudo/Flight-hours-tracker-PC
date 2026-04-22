@@ -105,7 +105,15 @@ export function missionBucket(s: Sortie): MissionBucket {
   if (/COURSE|\bCRS\b/.test(t)) return "COURSES";
   if (/FORM|NAV/.test(t)) return "FORM_NAV";
   if (/\bNF\b|\bNVG\b|NIGHT FLIGHT/.test(t)) return "NF_NVG";
-  if (/^IF\b|INSTRUMENT/.test(t)) return "IF";
+  // IF (Instrument Flight) bucket — must catch:
+  //   • the literal sortie type "IRT" (RJAF shorthand for Instrument
+  //     Rating Training, what operators actually pick from the dropdown)
+  //   • any "IF" / "INSTRUMENT" mention anywhere in the type+name string
+  //   • a sortie whose `instrumentFlight` flag is on, even if the type
+  //     itself is something else (e.g. a Day sortie with the Instrument
+  //     box ticked still belongs under IF on Forms 2 + 3)
+  if (s.instrumentFlight === true) return "IF";
+  if (/\bIRT\b|\bIF\b|INSTRUMENT/.test(t)) return "IF";
   if (/\bGH\b|GENERAL HANDLING/.test(t)) return "GH";
   if (/\bMSN\b|MISSION/.test(t)) return "MSN";
   return "OTHER";
