@@ -1433,6 +1433,32 @@ export function useDecideSchedule() {
 // only. Every other PC that received, reviewed, edited or approved the
 // share keeps its copy untouched and the central audit trail is fully
 // preserved. Strictly a per-creator hide, never a system-wide delete.
+// v1.1.60: hard-delete a schedule share. Removes the row from
+// xpc_schedule_shares so it disappears from EVERY PC (originator,
+// chain holders, downstream reviewers). RLS (migration 0029) permits
+// any participating PC to delete — same authority model as
+// reject/edit/forward elsewhere in the chain. Strong confirm in the
+// UI gates accidental clicks.
+export function useDeleteScheduleShare() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { id: string }) => {
+      if (isLive()) {
+        const { error } = await supabase!
+          .from("xpc_schedule_shares")
+          .delete()
+          .eq("id", input.id);
+        if (error) throw error;
+      } else {
+        const all = readShares().filter(s => s.id !== input.id);
+        writeShares(all);
+      }
+      return { id: input.id };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["xpc", "schedule"] }),
+  });
+}
+
 export function useDismissScheduleShareForOriginator() {
   const qc = useQueryClient();
   return useMutation({

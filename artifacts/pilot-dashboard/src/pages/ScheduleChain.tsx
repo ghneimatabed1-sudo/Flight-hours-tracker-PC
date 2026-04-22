@@ -8,6 +8,7 @@ import {
   useDecideSchedule,
   useAcceptScheduleEdit,
   useDismissScheduleShareForOriginator,
+  useDeleteScheduleShare,
   useRegisteredPCs,
   diffSchedule,
   canUseScheduleChain,
@@ -88,6 +89,7 @@ export default function ScheduleChain() {
   const decide = useDecideSchedule();
   const acceptEdits = useAcceptScheduleEdit();
   const dismissMine = useDismissScheduleShareForOriginator();
+  const deleteShare = useDeleteScheduleShare();
   const pilotsQ = usePilots();
   // v1.1.35: pilot/co-pilot autofill in the schedule composer defaults
   // to the short Flight Name when the pilot has one set on the roster
@@ -563,6 +565,22 @@ export default function ScheduleChain() {
                         >
                           <X className="h-3 w-3" /> Reject
                         </button>
+                        {/* v1.1.60 hard delete — wipes the share from EVERY
+                            PC. Available to every role on every inbox card
+                            (RLS migration 0029 grants delete to any
+                            participating PC, mirroring update authority). */}
+                        <button
+                          onClick={async () => {
+                            if (!window.confirm("Delete this flight schedule from EVERY PC?\n\nThis is permanent. Originator, reviewers, approvers — everyone loses their copy. Cannot be undone.")) return;
+                            await deleteShare.mutateAsync({ id: share.id });
+                            toast({ title: "Schedule deleted from every PC" });
+                          }}
+                          className="px-3 py-1.5 rounded-md bg-rose-700/30 border border-rose-500/60 text-rose-50 text-xs font-semibold inline-flex items-center gap-1"
+                          data-testid={`delete-${share.id}`}
+                          title="Permanent delete — removes this schedule from every PC in the chain"
+                        >
+                          <Trash2 className="h-3 w-3" /> Delete
+                        </button>
                         <button
                           onClick={async () => {
                             await decide.mutateAsync({ id: share.id, action: "hold", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined });
@@ -692,22 +710,37 @@ export default function ScheduleChain() {
                   <div className="text-[10px] text-muted-foreground">
                     History: {share.history.map(h => `${h.tier}/${h.action}`).join(" → ")}
                   </div>
-                  {/* Delete from MY view only — receivers / reviewers /
-                      approvers keep their copies; central audit untouched.
-                      Only the originating PC ever sees this button (the
-                      Sent list is already filtered to matchesMe(origin)). */}
-                  <button
-                    onClick={async () => {
-                      if (!window.confirm("Hide this schedule from your own screen only? Other PCs that received or approved it will keep their copy.")) return;
-                      await dismissMine.mutateAsync({ id: share.id });
-                      toast({ title: "Removed from your view" });
-                    }}
-                    className="px-2 py-1 rounded-md bg-secondary border border-border text-[11px] inline-flex items-center gap-1 text-muted-foreground hover:text-rose-200 hover:border-rose-400/40 no-print"
-                    data-testid={`dismiss-${share.id}`}
-                    title="Hide this schedule from your own screen. Receivers keep their copy."
-                  >
-                    <Trash2 className="h-3 w-3" /> Delete from my view
-                  </button>
+                  {/* Two delete options on the Sent card:
+                      • "Delete from my view" — local hide only, receivers
+                        keep their copy (legacy v1.1.54 behaviour).
+                      • "Delete everywhere" — v1.1.60 hard delete that
+                        wipes the share from every PC in the chain. */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm("Hide this schedule from your own screen only? Other PCs that received or approved it will keep their copy.")) return;
+                        await dismissMine.mutateAsync({ id: share.id });
+                        toast({ title: "Removed from your view" });
+                      }}
+                      className="px-2 py-1 rounded-md bg-secondary border border-border text-[11px] inline-flex items-center gap-1 text-muted-foreground hover:text-rose-200 hover:border-rose-400/40 no-print"
+                      data-testid={`dismiss-${share.id}`}
+                      title="Hide this schedule from your own screen. Receivers keep their copy."
+                    >
+                      <Trash2 className="h-3 w-3" /> Delete from my view
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm("Delete this flight schedule from EVERY PC?\n\nThis is permanent. Originator, reviewers, approvers — everyone loses their copy. Cannot be undone.")) return;
+                        await deleteShare.mutateAsync({ id: share.id });
+                        toast({ title: "Schedule deleted from every PC" });
+                      }}
+                      className="px-2 py-1 rounded-md bg-rose-700/30 border border-rose-500/60 text-rose-50 text-[11px] font-semibold inline-flex items-center gap-1 no-print"
+                      data-testid={`delete-sent-${share.id}`}
+                      title="Permanent delete — removes this schedule from every PC in the chain"
+                    >
+                      <Trash2 className="h-3 w-3" /> Delete everywhere
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
