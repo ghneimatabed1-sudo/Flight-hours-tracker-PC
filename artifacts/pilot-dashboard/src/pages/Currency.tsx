@@ -76,7 +76,7 @@ function cellTextClass(s: ReturnType<typeof statusOf>) {
 }
 
 export default function Currency() {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const pilotsQ = usePilots();
   const { data: PILOTS } = pilotsQ;
 
@@ -111,7 +111,7 @@ export default function Currency() {
         const cls = s.cls === "status-bad" ? "bad" : s.cls === "status-warn" ? "warn" : "ok";
         return `<td class="${cls}"><div class="d">${date}</div><div class="s">${s.lbl}</div></td>`;
       }).join("");
-      return `<tr><td class="name">${p.rank} ${p.name}</td>${tds}</tr>`;
+      return `<tr><td class="name">${rankOf(p)} ${p.name}</td>${tds}</tr>`;
     }).join("");
     const cols = visibleCols.length + 1;
     const html = `<!doctype html><html><head><meta charset="utf-8">
@@ -324,7 +324,7 @@ export default function Currency() {
               )}
               {rows.map(({ p, cells, pilotHidden }) => (
                 <tr key={p.id} className={`border-t border-border row-hover ${pilotHidden ? "opacity-50" : ""}`}>
-                  <td className="px-3 py-2 whitespace-nowrap">{p.rank} {p.name}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{rankOf(p)} {p.name}</td>
                   {cells.map(({ col, na, s, date }) => (
                     <td key={col.k} className="px-3 py-2 whitespace-nowrap" data-testid={`cell-${p.id}-${col.k}`}>
                       {na ? (

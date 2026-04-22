@@ -15,7 +15,7 @@ const SORTS = [
 ] as const;
 
 export default function Rankings() {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   type SortKey = typeof SORTS[number]["k"];
   const [sortKey, setSortKey] = useState<SortKey>("totalNvg");
   const { data: PILOTS } = usePilots();
@@ -66,7 +66,7 @@ export default function Rankings() {
                 return (
                   <tr key={p.id} className="border-t border-border row-hover">
                     <td className="px-3 py-2 font-mono">{i + 1}{i === 0 && <Trophy className="inline h-3.5 w-3.5 ml-1 text-amber-400" />}</td>
-                    <td className="px-3 py-2">{p.rank} {p.name}</td>
+                    <td className="px-3 py-2">{rankOf(p)} {p.name}</td>
                     <td className="px-3 py-2 text-right font-mono">{tot.monthDay.toFixed(1)}</td>
                     <td className="px-3 py-2 text-right font-mono">{tot.monthNight.toFixed(1)}</td>
                     <td className="px-3 py-2 text-right font-mono text-rose-300">{tot.monthNvg.toFixed(1)}</td>

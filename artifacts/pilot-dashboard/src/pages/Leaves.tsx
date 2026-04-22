@@ -86,7 +86,7 @@ function fmtIso(d: Date): string {
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 export default function Leaves() {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const pilotsQ = usePilots();
   const PILOTS = pilotsQ.data;
 
@@ -477,7 +477,7 @@ export default function Leaves() {
                   <tr key={p.id} className="border-t border-border align-middle">
                     <td className="px-3 py-2">
                       <div className="font-medium">{p.name}</div>
-                      <div className="text-[11px] text-muted-foreground font-mono">{p.rank} · {p.militaryNumber ?? "—"}</div>
+                      <div className="text-[11px] text-muted-foreground font-mono">{rankOf(p)} · {p.militaryNumber ?? "—"}</div>
                     </td>
                     <td className="px-3 py-2">
                       {existing ? (

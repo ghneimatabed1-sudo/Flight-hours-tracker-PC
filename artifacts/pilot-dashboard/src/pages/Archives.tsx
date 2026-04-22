@@ -10,7 +10,7 @@ import {
 import type { Sortie, Pilot } from "@/lib/mock";
 
 export default function Archives() {
-  const { t, lang } = useI18n();
+  const { t, lang, rankOf } = useI18n();
   const [tick, setTick] = useState(0);
   const [editing, setEditing] = useState<string | null>(null);
   const items = useMemo(() => listArchives(), [tick]);
@@ -103,7 +103,7 @@ export default function Archives() {
 }
 
 function ArchiveEditor({ period, onClose }: { period: string; onClose: () => void }) {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const initial = useMemo(() => getArchive(period), [period]);
   const [pilots, setPilots] = useState<Pilot[]>(() => initial?.pilots ?? []);
   const [sorties, setSorties] = useState<Sortie[]>(() => initial?.sorties ?? []);
@@ -187,7 +187,7 @@ function ArchiveEditor({ period, onClose }: { period: string; onClose: () => voi
                       onChange={e => updatePilot(p.id, e.target.value)}
                       className="flex-1 bg-background border border-border rounded px-2 py-1 text-sm"
                       data-testid={`input-archive-pilot-name-${p.id}`} />
-                    <span className="text-xs text-muted-foreground w-20 truncate">{p.rank}</span>
+                    <span className="text-xs text-muted-foreground w-20 truncate">{rankOf(p)}</span>
                   </div>
                 ))}
               </div>

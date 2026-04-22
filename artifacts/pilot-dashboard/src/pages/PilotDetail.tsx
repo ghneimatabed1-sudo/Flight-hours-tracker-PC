@@ -51,7 +51,7 @@ function statusInfo(dateStr: string) {
 }
 
 export default function PilotDetail() {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const [, params] = useRoute<{ id: string }>("/pilot/:id");
   const { data: PILOTS } = usePilots();
   const { data: SORTIES } = useSorties();
@@ -65,7 +65,7 @@ export default function PilotDetail() {
 
   return (
     <div>
-      <PageHead title={`${p.rank} ${p.name}`} subtitle={`${p.arabicName} · ${t("militaryNumber")}: ${p.militaryNumber || p.id} · ${p.unit}`} actions={
+      <PageHead title={`${rankOf(p)} ${p.name}`} subtitle={`${p.arabicName} · ${t("militaryNumber")}: ${p.militaryNumber || p.id} · ${p.unit}`} actions={
         <Link href="/roster" className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-secondary inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" />Back</Link>
       } />
 
@@ -147,7 +147,7 @@ export default function PilotDetail() {
 }
 
 function CurrenciesCard({ pilot }: { pilot: Pilot }) {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const update = useUpdatePilot();
   const hidden = pilot.hiddenCurrencies ?? [];
 
@@ -248,7 +248,7 @@ function statusBadge(t: ReturnType<typeof useI18n>["t"], status: PilotLinkStatus
 }
 
 function MobileAccessCard({ pilotId }: { pilotId: string }) {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const { user } = useAuth();
   const issue = useIssueLinkCode();
   const revoke = useRevokePilotDevices();

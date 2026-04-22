@@ -10,6 +10,7 @@ import {
 } from "@/lib/cross-pc";
 import { useToast } from "@/hooks/use-toast";
 import { usePilots } from "@/lib/squadron-data";
+import { useI18n } from "@/lib/i18n";
 import { fmtDateTimeDDMM } from "@/lib/format";
 import { matchGuestPilot } from "@/lib/match-guest-pilot";
 import { ArrowLeft, Inbox, Save, HelpCircle, Search } from "lucide-react";
@@ -22,6 +23,7 @@ import { ArrowLeft, Inbox, Save, HelpCircle, Search } from "lucide-react";
 // guest) or mark it explicitly unknown — both paths replace name-only
 // matching with an auditable decision.
 export default function GuestBackfill() {
+  const { rankOf } = useI18n();
   const { user, squadron } = useAuth();
   const { toast } = useToast();
   const homeSquadronId = squadron?.name ?? null;
@@ -46,7 +48,7 @@ export default function GuestBackfill() {
     return PILOTS
       .filter(p => {
         if (!p.militaryNumber) return false;
-        const hay = `${p.rank ?? ""} ${p.name}`.toLowerCase();
+        const hay = `${rankOf(p)} ${p.name}`.toLowerCase();
         return n.some(tok => tok.length >= 2 && hay.includes(tok));
       })
       .slice(0, 6);
@@ -151,7 +153,7 @@ export default function GuestBackfill() {
                             className="text-xs px-2 py-1 rounded-md bg-secondary border border-border hover:bg-secondary/80"
                             data-testid={`suggest-${row.id}-${p.id}`}
                           >
-                            {p.rank} {p.name} · #{p.militaryNumber}
+                            {rankOf(p)} {p.name} · #{p.militaryNumber}
                           </button>
                         ))}
                       </div>

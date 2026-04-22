@@ -19,6 +19,7 @@
 
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { supabase, supabaseConfigured, recordAuditEvent } from "./supabase";
+import { lookupRankEn } from "./ranks";
 import {
   isFrozenMonth,
   monthOf,
@@ -62,6 +63,16 @@ function rowToPilot(r: Record<string, unknown>): Pilot {
     arabicName: String(r.arabic_name ?? data.arabicName ?? ""),
     militaryNumber: data.militaryNumber ? String(data.militaryNumber) : undefined,
     rank: String(r.rank ?? data.rank ?? ""),
+    // English rank: prefer the explicit `rank_en` column (added in
+    // migration 0030), fall back to the JSONB `data.rankEn` mirror,
+    // then to the RJAF lookup so older rows that haven't been re-saved
+    // yet still resolve to a clean English value at render time. The
+    // next operator save persists the authoritative column value.
+    rankEn: r.rank_en
+      ? String(r.rank_en)
+      : (data.rankEn
+          ? String(data.rankEn)
+          : (lookupRankEn(String(r.rank ?? data.rank ?? "")) || undefined)),
     phone: String(r.phone ?? data.phone ?? ""),
     address: String(data.address ?? ""),
     unit: (r.unit as Pilot["unit"]) ?? data.unit ?? "SQDN",
@@ -90,9 +101,18 @@ function rowToPilot(r: Record<string, unknown>): Pilot {
       irt: data.expiry?.irt ?? "",
       medical: data.expiry?.medical ?? "",
       sim: data.expiry?.sim ?? "",
+      missionQual: data.expiry?.missionQual ? String(data.expiry.missionQual) : undefined,
     },
     hiddenCurrencies: Array.isArray(data.hiddenCurrencies) ? data.hiddenCurrencies : undefined,
-    qualifications: Array.isArray(data.qualifications) ? data.qualifications : undefined,
+    // Qualifications round-trip: prefer the joined `qualification`
+    // string (the format the operator chose with `/` or `-`), fall
+    // back to the legacy array. The chip array is derived from the
+    // string when present so render sites keep working unchanged.
+    qualifications: typeof data.qualification === "string" && data.qualification.trim().length
+      ? data.qualification.split(/\s*[/\-,|]\s*/).map((s: string) => s.trim()).filter(Boolean)
+      : (Array.isArray(data.qualifications) ? data.qualifications : undefined),
+    qualification: typeof data.qualification === "string" ? data.qualification : undefined,
+    qualificationSeparator: data.qualificationSeparator === "-" ? "-" : (data.qualificationSeparator === "/" ? "/" : undefined),
     lastSimDate: data.lastSimDate ? String(data.lastSimDate) : undefined,
     // Other-aircraft experience (April 2026): list of airframes flown
     // outside the squadron's primary type. Persisted inside the JSONB
@@ -170,6 +190,7 @@ export function useUpdatePilot() {
         name: p.name,
         arabic_name: p.arabicName,
         rank: p.rank,
+        rank_en: p.rankEn ?? null,
         phone: p.phone,
         unit: p.unit,
         available: p.available,
@@ -202,7 +223,10 @@ export function useUpdatePilot() {
           totalCaptain: p.totalCaptain,
           expiry: p.expiry,
           hiddenCurrencies: p.hiddenCurrencies,
+          rankEn: p.rankEn,
           qualifications: p.qualifications,
+          qualification: p.qualification,
+          qualificationSeparator: p.qualificationSeparator,
           lastSimDate: p.lastSimDate,
           otherAircraft: p.otherAircraft,
         },
@@ -243,6 +267,7 @@ export function useCreatePilot() {
         name: p.name,
         arabic_name: p.arabicName,
         rank: p.rank,
+        rank_en: p.rankEn ?? null,
         phone: p.phone,
         unit: p.unit,
         available: p.available,
@@ -273,7 +298,10 @@ export function useCreatePilot() {
           totalCaptain: p.totalCaptain,
           expiry: p.expiry,
           hiddenCurrencies: p.hiddenCurrencies,
+          rankEn: p.rankEn,
           qualifications: p.qualifications,
+          qualification: p.qualification,
+          qualificationSeparator: p.qualificationSeparator,
           lastSimDate: p.lastSimDate,
           otherAircraft: p.otherAircraft,
         },
@@ -639,7 +667,10 @@ async function applyCurrencyRefresh(
           totalSim: p.totalSim, totalCaptain: p.totalCaptain,
           expiry: p.expiry,
           hiddenCurrencies: p.hiddenCurrencies,
+          rankEn: p.rankEn,
           qualifications: p.qualifications,
+          qualification: p.qualification,
+          qualificationSeparator: p.qualificationSeparator,
           lastSimDate: p.lastSimDate,
           otherAircraft: p.otherAircraft,
         },
@@ -936,7 +967,10 @@ function pilotDataPayload(p: Pilot) {
     totalCaptain: p.totalCaptain,
     expiry: p.expiry,
     hiddenCurrencies: p.hiddenCurrencies,
+    rankEn: p.rankEn,
     qualifications: p.qualifications,
+    qualification: p.qualification,
+    qualificationSeparator: p.qualificationSeparator,
     lastSimDate: p.lastSimDate,
     otherAircraft: p.otherAircraft,
   };
@@ -979,7 +1013,7 @@ export function useRestoreSortie() {
       // Live: restore pilots one by one, then upsert the sortie.
       for (const p of pilots) {
         const { error } = await supabase!.from("pilots").update({
-          name: p.name, arabic_name: p.arabicName, rank: p.rank, phone: p.phone,
+          name: p.name, arabic_name: p.arabicName, rank: p.rank, rank_en: p.rankEn ?? null, phone: p.phone,
           unit: p.unit, available: p.available, data: pilotDataPayload(p),
         }).eq("id", p.id);
         if (error) throw error;
@@ -1746,6 +1780,7 @@ export function useImportHistory() {
       // row violates a constraint the whole batch is rejected.
       const pilotRows = taggedPilots.map(p => ({
         id: p.id, name: p.name, arabic_name: p.arabicName, rank: p.rank,
+        rank_en: p.rankEn ?? null,
         phone: p.phone, unit: p.unit, available: p.available,
         data: { ...p, imported: true, importedAt: stamp },
       }));

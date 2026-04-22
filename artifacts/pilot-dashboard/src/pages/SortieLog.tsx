@@ -14,7 +14,7 @@ import type { Pilot, Sortie } from "@/lib/mock";
 import { useFrozenAccess } from "@/lib/monthly-close";
 
 export default function SortieLog() {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const { user } = useAuth();
   const [q, setQ] = useState("");
   const [type, setType] = useState("All");
@@ -374,7 +374,7 @@ export default function SortieLog() {
       {editing && (
         <SortieEditDialog
           sortie={editing}
-          pilots={PILOTS.map(p => ({ id: p.id, label: `${p.rank} ${p.name}` }))}
+          pilots={PILOTS.map(p => ({ id: p.id, label: `${rankOf(p)} ${p.name}` }))}
           busy={updateMut.isPending}
           onCancel={() => setEditing(null)}
           onSave={(next) => {
@@ -441,7 +441,7 @@ interface SortieEditDialogProps {
   onSave: (next: Sortie) => void;
 }
 function SortieEditDialog({ sortie, pilots, busy, onCancel, onSave }: SortieEditDialogProps) {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const [form, setForm] = useState<Sortie>(sortie);
   const set = <K extends keyof Sortie>(k: K, v: Sortie[K]) => setForm(f => ({ ...f, [k]: v }));
   const num = (v: string) => Number.isFinite(Number(v)) ? Number(v) : 0;

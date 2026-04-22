@@ -5,7 +5,7 @@ import { usePilots, type Pilot } from "@/lib/squadron-data";
 const CATS: Pilot["unit"][] = ["SQDN", "HQ Attached", "Other", "UH-60M", "UH-60AIL", "Both", "RCN"];
 
 export default function Units() {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const { data: PILOTS } = usePilots();
   const grouped = CATS.map(c => ({ c, list: PILOTS.filter(p => p.unit === c) }));
   return (
@@ -20,7 +20,7 @@ export default function Units() {
             </div>
             <div className="space-y-1 max-h-[60vh] overflow-y-auto">
               {list.map(p => (
-                <div key={p.id} className="text-sm py-1.5 px-2 rounded hover:bg-secondary cursor-pointer">{p.rank} {p.name}</div>
+                <div key={p.id} className="text-sm py-1.5 px-2 rounded hover:bg-secondary cursor-pointer">{rankOf(p)} {p.name}</div>
               ))}
               {list.length === 0 && <div className="text-xs text-muted-foreground">Empty</div>}
             </div>

@@ -8,7 +8,7 @@ const CATS = [
 ] as const;
 
 export default function ExpiredAfter() {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const { data: PILOTS } = usePilots();
   return (
     <div>
@@ -29,7 +29,7 @@ export default function ExpiredAfter() {
                 {exp.length === 0 && <div className="text-xs text-muted-foreground">None expired</div>}
                 {exp.map(p => (
                   <div key={p.id} className="flex items-center justify-between text-sm">
-                    <div className="truncate">{p.rank} {p.name}</div>
+                    <div className="truncate">{rankOf(p)} {p.name}</div>
                     <div className="text-[11px] font-mono text-rose-300 shrink-0">{p.expiry[c.k]}</div>
                   </div>
                 ))}

@@ -118,7 +118,7 @@ function programToShareRows(p: ScheduleProgram) {
 }
 
 export default function FlightProgram() {
-  const { t, lang, dir } = useI18n();
+  const { t, lang, dir, rankOf } = useI18n();
   const pilotsQ = usePilots();
   const PILOTS  = pilotsQ.data;
   const { user, squadron } = useAuth();
@@ -161,7 +161,7 @@ export default function FlightProgram() {
   useEffect(() => { setProg(loadProgram(date, defaults)); }, [date, defaults]);
 
   const pilotOptions = useMemo(
-    () => PILOTS.map(p => ({ value: p.name, label: `${p.rank} ${p.name}` })),
+    () => PILOTS.map(p => ({ value: p.name, label: `${rankOf(p)} ${p.name}` })),
     [PILOTS],
   );
 
@@ -549,6 +549,7 @@ export default function FlightProgram() {
    ScheduleChain.tsx — same mutations, same RLS authority. */
 function FlightProgramShareInbox() {
   const { user } = useAuth();
+  const { rankOf } = useI18n();
   // v1.1.70 — `makePcMatcher` returns a plain `(id) => boolean` predicate
   // (see lib/cross-pc.ts:1789). The previous call site invoked it with no
   // argument and then accessed `.matchesMe(...)` on the result, which is
@@ -574,7 +575,7 @@ function FlightProgramShareInbox() {
   // schedule before stamping it.
   const { data: PILOTS = [] } = usePilots();
   const pilotOptions = useMemo(
-    () => PILOTS.map(p => ({ value: p.name, label: `${p.rank} ${p.name}` })),
+    () => PILOTS.map(p => ({ value: p.name, label: `${rankOf(p)} ${p.name}` })),
     [PILOTS],
   );
   const [viewingId, setViewingId] = useState<string | null>(null);

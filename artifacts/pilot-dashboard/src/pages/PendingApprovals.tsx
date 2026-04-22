@@ -8,6 +8,7 @@ import {
 } from "@/lib/cross-pc";
 import { useToast } from "@/hooks/use-toast";
 import { useCreateSortie, usePilots } from "@/lib/squadron-data";
+import { useI18n } from "@/lib/i18n";
 import { fmtDateTimeDDMM } from "@/lib/format";
 import { matchGuestPilot, guestMilitaryNumberHasNoMatch } from "@/lib/match-guest-pilot";
 import { Inbox, Check, X, PauseCircle, Pencil, AlertTriangle, History } from "lucide-react";
@@ -19,6 +20,7 @@ import { useGuestEntriesNeedingBackfill, isGuestMilUnknown } from "@/lib/cross-p
 // through the local calc engine via useCreateSortie; reject / hold / edit
 // propagate the decision back through the cross-PC layer.
 export default function PendingApprovals() {
+  const { rankOf } = useI18n();
   const { user, squadron } = useAuth();
   const { toast } = useToast();
   // The local PC's "home squadron id" is the configured squadron's name —
@@ -48,7 +50,7 @@ export default function PendingApprovals() {
       // Show the military number alongside the name so the ops officer can
       // tell apart roster pilots that share a name (e.g. multiple "Ahmad
       // Khalil"s) at a glance from the dropdown.
-      label: `${p.rank} ${p.name}${p.militaryNumber ? ` · #${p.militaryNumber}` : ""}`,
+      label: `${rankOf(p)} ${p.name}${p.militaryNumber ? ` · #${p.militaryNumber}` : ""}`,
     })),
     [PILOTS],
   );

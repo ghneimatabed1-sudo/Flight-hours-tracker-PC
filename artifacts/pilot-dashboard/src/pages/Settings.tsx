@@ -476,6 +476,7 @@ function InactivityTimeoutSection() {
 
 function MobileDevicesCard() {
   const { user } = useAuth();
+  const { rankOf } = useI18n();
   const pilotsQ = usePilots();
   const devicesQ = useAllLinkedDevices();
   const revoke = useRevokePilotDevices();
@@ -557,7 +558,7 @@ function MobileDevicesCard() {
               <div key={dev.pilotId} className="flex items-center justify-between px-3 py-2.5 bg-card">
                 <div>
                   <div className="text-sm font-medium">
-                    {pilot ? `${pilot.rank} ${pilot.name}` : <span className="text-amber-300">Pilot not in roster</span>}
+                    {pilot ? `${rankOf(pilot)} ${pilot.name}` : <span className="text-amber-300">Pilot not in roster</span>}
                     <span className="ms-2 text-xs text-muted-foreground font-mono">({dev.pilotId})</span>
                   </div>
                   <div className="text-[11px] text-muted-foreground mt-0.5">
@@ -611,7 +612,7 @@ function MobileDevicesCard() {
 }
 
 export default function Settings() {
-  const { t, lang, setLang } = useI18n();
+  const { t, lang, setLang, rankOf } = useI18n();
   const { squadron, configureSquadron, fingerprint, releaseLicense, resetThisPC, user } = useAuth();
   const [name, setName] = useState(squadron?.name || "");
   const [num, setNum] = useState(squadron?.number || "");

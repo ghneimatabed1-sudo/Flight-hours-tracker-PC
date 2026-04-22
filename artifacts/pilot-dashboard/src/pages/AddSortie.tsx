@@ -125,7 +125,7 @@ const blankForm = (): FormState => ({
 });
 
 export default function AddSortie() {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const { toast } = useToast();
   const { data: PILOTS } = usePilots();
   const { data: SORTIES } = useSorties();
@@ -173,7 +173,7 @@ export default function AddSortie() {
   const pilotOpts = useMemo(
     () => PILOTS.map(p => ({
       value: p.id,
-      label: p.flightName?.trim() || `${p.rank} ${p.name}`,
+      label: p.flightName?.trim() || `${rankOf(p)} ${p.name}`,
     })),
     [PILOTS],
   );
@@ -554,7 +554,7 @@ export default function AddSortie() {
     if (ext?.name) return ext.name;
     const p = pilotById(id);
     if (!p) return id || "—";
-    return p.flightName?.trim() || `${p.rank} ${p.name}`;
+    return p.flightName?.trim() || `${rankOf(p)} ${p.name}`;
   };
 
   return (
@@ -809,7 +809,7 @@ export default function AddSortie() {
           pilotName={(id) => {
             const p = pilotById(id);
             if (!p) return id;
-            return p.flightName?.trim() || `${p.rank} ${p.name}`;
+            return p.flightName?.trim() || `${rankOf(p)} ${p.name}`;
           }}
         />
       )}
@@ -825,7 +825,7 @@ export default function AddSortie() {
           pilotName={(id) => {
             const p = pilotById(id);
             if (!p) return id;
-            return p.flightName?.trim() || `${p.rank} ${p.name}`;
+            return p.flightName?.trim() || `${rankOf(p)} ${p.name}`;
           }}
         />
       )}

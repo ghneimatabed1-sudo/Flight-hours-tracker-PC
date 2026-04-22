@@ -21,6 +21,12 @@ export interface Pilot {
   // the Add Sortie form so they can confirm they chose the right person.
   militaryNumber?: string;
   rank: string;
+  // Optional English equivalent of the Arabic `rank`. Auto-filled from
+  // the RJAF rank lookup on the Add/Edit Pilot form, but the operator
+  // can override. Every English UI render site reads this (with a
+  // tolerant fallback to the lookup table) via `pilotRank()` so the
+  // roster shows "Maj" instead of "رائد طيار" in English mode.
+  rankEn?: string;
   phone: string;
   address: string;
   unit: "SQDN" | "HQ Attached" | "Other" | "UH-60M" | "UH-60AIL" | "Both" | "RCN";
@@ -48,6 +54,13 @@ export interface Pilot {
     irt: string;
     medical: string;
     sim: string;
+    // Mission qualification expiry — recurrent mission-set check that
+    // RJAF SOP tracks per pilot (e.g. CAS, NVG mountain, SAR). Stored
+    // alongside the other expiry slots in the JSONB `data` blob; no
+    // schema migration required. The Add Pilot form replaced the
+    // old "Last Medical" entry with this so the form's six "Last X
+    // flown" cells align with what the operator actually tracks.
+    missionQual?: string;
   };
   // Currencies the ops officer has marked as not applicable for this pilot
   // (e.g. a pilot who only flies NVG and has no night currency to track).
@@ -60,6 +73,16 @@ export interface Pilot {
   // Pilot qualifications (e.g. "MTP", "QHI", "IP"). Manually entered by ops
   // officer; reflected on commander / HQ dashboards.
   qualifications?: string[];
+  // v1.1.74 — joined qualification string (the "existing qualification
+  // column" in storage terms). Persisted alongside the array so the
+  // Add Pilot multi-segment input can round-trip the operator's chosen
+  // separator (`/` or `-`) without a schema change. Read sites continue
+  // to use `qualifications` (array of chips); writes set both.
+  qualification?: string;
+  // The separator the operator picked in the Add Pilot multi-segment
+  // input. Defaults to `/`. Persisted so re-opening the form restores
+  // the same look the operator chose last time.
+  qualificationSeparator?: "/" | "-";
   // Date of the pilot's most recent simulator session. Visible only to the
   // squadron commander on the dashboard.
   lastSimDate?: string;

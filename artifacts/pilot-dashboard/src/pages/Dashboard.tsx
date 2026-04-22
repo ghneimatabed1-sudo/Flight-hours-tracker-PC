@@ -30,7 +30,7 @@ function statusOf(dateStr: string): Severity {
 
 /** Isolated clock — re-renders only this little strip, not the whole dashboard. */
 function LiveClockStrip({ lang }: { lang: "en" | "ar" }) {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | undefined;
@@ -64,7 +64,7 @@ function LiveClockStrip({ lang }: { lang: "en" | "ar" }) {
 }
 
 export default function Dashboard() {
-  const { t, lang } = useI18n();
+  const { t, lang, rankOf } = useI18n();
   const { user, squadron } = useAuth();
   const pilotsQ = usePilots();
   const sortiesQ = useSorties();
@@ -251,7 +251,7 @@ export default function Dashboard() {
                     {initials || "—"}
                   </div>
                   <div className="leading-tight min-w-0 flex-1">
-                    <div className="text-sm font-semibold truncate">{p.rank} {p.name}</div>
+                    <div className="text-sm font-semibold truncate">{rankOf(p)} {p.name}</div>
                     <div className="stencil mt-0.5">{p.unit} · {p.id}</div>
                   </div>
                   <span

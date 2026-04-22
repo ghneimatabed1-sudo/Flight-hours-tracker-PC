@@ -3,6 +3,7 @@ import autoTable from "jspdf-autotable";
 // @ts-expect-error - arabic-reshaper ships only a CommonJS factory with no types.
 import ArabicReshaper from "arabic-reshaper";
 import type { Pilot, Sortie } from "./mock";
+import { pilotRank } from "./ranks";
 
 export type PdfLang = "en" | "ar";
 
@@ -195,7 +196,7 @@ function pilotName(p: Pilot, lang: PdfLang): string {
     // some squadrons use the same Arabic rank text everywhere.
     return shape(p.arabicName || p.name);
   }
-  return `${p.rank} ${p.name}`;
+  return `${pilotRank(p, "en")} ${p.name}`;
 }
 
 // ---------- Header / Footer ----------

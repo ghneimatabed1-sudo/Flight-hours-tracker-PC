@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import DateInput from "@/components/DateInput";
+import MultiSegmentField, { splitQualificationSegments, joinQualificationSegments } from "@/components/MultiSegmentField";
+import { RJAF_RANKS, lookupRankEn } from "@/lib/ranks";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots, useUpdatePilot, useCreatePilot, useDeletePilot, type Pilot } from "@/lib/squadron-data";
@@ -86,7 +88,7 @@ function pairDotInfo(row: PairRow | undefined):
 }
 
 export default function Roster() {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const [q, setQ] = useState("");
   const [importedOnly, setImportedOnly] = useState(false);
   const pilotsQ = usePilots();
@@ -112,6 +114,7 @@ export default function Roster() {
       arabicName: "",
       militaryNumber: "",
       rank: "",
+      rankEn: "",
       phone: "",
       address: "",
       unit: "SQDN",
@@ -157,7 +160,7 @@ export default function Roster() {
       x => x.id !== next.id && (x.militaryNumber ?? "").trim().toLowerCase() === lower,
     );
     if (dup) {
-      return `${t("err_militaryNumberDuplicate")} (${dup.rank} ${dup.name} · ${dup.id})`;
+      return `${t("err_militaryNumberDuplicate")} (${rankOf(dup)} ${dup.name} · ${dup.id})`;
     }
     return null;
   };
@@ -269,7 +272,7 @@ export default function Roster() {
                     />
                   </td>
                   <td className="px-3 py-2 font-mono">{p.militaryNumber || p.id}</td>
-                  <td className="px-3 py-2">{p.rank}</td>
+                  <td className="px-3 py-2">{rankOf(p)}</td>
                   <td className="px-3 py-2"><Link href={`/pilot/${p.id}`} className="hover:text-primary">{p.name}</Link></td>
                   <td className="px-3 py-2 text-right rtl:text-left">{p.arabicName}</td>
                   <td className="px-3 py-2"><span className="text-[11px] px-2 py-0.5 rounded-full bg-secondary border border-border">{p.unit}</span></td>
@@ -358,23 +361,38 @@ function fmtDate(iso: string): string {
   return `${d}/${m}/${y}`;
 }
 
-interface LastFlown { day: string; night: string; nvg: string; irt: string; medical: string; sim: string; }
+// Six "Last X flown" cells the operator agreed to lock the Add Pilot
+// form to (Day / Night / NVG / Simulator + Instrument + Mission Qual).
+// `irt` is the canonical key for the instrument check; `missionQual`
+// is a new optional expiry slot persisted in the JSONB blob (see
+// PilotExpiry in src/lib/mock.ts). Medical is still tracked elsewhere
+// in the system but no longer edited from this form per task #108.
+interface LastFlown { day: string; night: string; nvg: string; irt: string; missionQual: string; sim: string; }
 
 function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pilot; onClose: () => void; onSave: (p: Pilot) => void; saving: boolean; isNew?: boolean }) {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const [p, setP] = useState<Pilot>(pilot);
+  // Qualification editor state — segmented input replaces the legacy
+  // comma-separated text box. We keep it in local state so the operator
+  // can add/remove boxes and toggle the separator without touching the
+  // pilot record until save. The separator is purely a display choice;
+  // the underlying tags array stays the same.
+  const [qualSegments, setQualSegments] = useState<string[]>(() =>
+    splitQualificationSegments(pilot.qualifications),
+  );
+  const [qualSep, setQualSep] = useState<"/" | "-">(pilot.qualificationSeparator ?? "/");
   const currencyWin = getCurrencyWindow();
 
   // lastFlown is the UI state — what the operator types. On save we convert
   // to expiry dates (lastFlown + window) before passing to onSave, so the
   // rest of the system (auto-bump, Currency page, Reminders) is unchanged.
   const [lastFlown, setLastFlown] = useState<LastFlown>(() => ({
-    day:     computeLastFlown(pilot.expiry.day,     currencyWin.day),
-    night:   computeLastFlown(pilot.expiry.night,   currencyWin.night),
-    nvg:     computeLastFlown(pilot.expiry.nvg,     currencyWin.nvg),
-    irt:     computeLastFlown(pilot.expiry.irt,     currencyWin.instrument),
-    medical: computeLastFlown(pilot.expiry.medical, currencyWin.medical),
-    sim:     computeLastFlown(pilot.expiry.sim,     currencyWin.day),
+    day:         computeLastFlown(pilot.expiry.day,                 currencyWin.day),
+    night:       computeLastFlown(pilot.expiry.night,               currencyWin.night),
+    nvg:         computeLastFlown(pilot.expiry.nvg,                 currencyWin.nvg),
+    irt:         computeLastFlown(pilot.expiry.irt,                 currencyWin.instrument),
+    missionQual: computeLastFlown(pilot.expiry.missionQual ?? "",   currencyWin.instrument),
+    sim:         computeLastFlown(pilot.expiry.sim,                 currencyWin.day),
   }));
 
   // Functional updater — without this, rapid keystrokes can read a stale `p`
@@ -388,14 +406,29 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
     e.preventDefault();
     // Convert last-flown dates → expiry dates using the configured windows.
     const expiry = {
-      day:     computeExpiry(lastFlown.day,     currencyWin.day),
-      night:   computeExpiry(lastFlown.night,   currencyWin.night),
-      nvg:     computeExpiry(lastFlown.nvg,     currencyWin.nvg),
-      irt:     computeExpiry(lastFlown.irt,     currencyWin.instrument),
-      medical: computeExpiry(lastFlown.medical, currencyWin.medical),
-      sim:     computeExpiry(lastFlown.sim,     currencyWin.day),
+      day:         computeExpiry(lastFlown.day,         currencyWin.day),
+      night:       computeExpiry(lastFlown.night,       currencyWin.night),
+      nvg:         computeExpiry(lastFlown.nvg,         currencyWin.nvg),
+      irt:         computeExpiry(lastFlown.irt,         currencyWin.instrument),
+      // Medical is no longer edited from this form (task #108 swapped
+      // the slot for Mission Qual). Preserve whatever value the pilot
+      // already had so currency/reminders stay accurate.
+      medical:     pilot.expiry.medical ?? "",
+      sim:         computeExpiry(lastFlown.sim,         currencyWin.day),
+      missionQual: computeExpiry(lastFlown.missionQual, currencyWin.instrument),
     };
-    onSave({ ...p, expiry });
+    // Fold the segmented qualification editor back into both shapes:
+    // - `qualifications` (string[]) keeps every render site working.
+    // - `qualification`  (joined string with the operator's chosen
+    //   separator) is the canonical persisted value per task #108.
+    // - `qualificationSeparator` round-trips the toggle choice.
+    const qualifications = joinQualificationSegments(qualSegments);
+    const qualification = qualifications.join(` ${qualSep} `);
+    // The dedicated "Last Sim" currency input (one of the 6) doubles as
+    // the commander-only `lastSimDate` field — keep them in sync on save
+    // so the visibility-restricted view still has a value.
+    const lastSimDate = lastFlown.sim || p.lastSimDate || "";
+    onSave({ ...p, expiry, qualifications, qualification, qualificationSeparator: qualSep, lastSimDate });
   };
   return (
     // NOTE: no backdrop-blur. Chromium's backdrop-filter on Windows w/ HW
@@ -418,7 +451,48 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
             <Field label={t("name")} value={p.name} onChange={v => set("name", v)} testId="input-name" />
             <Field label={t("arabicName")} value={p.arabicName} onChange={v => set("arabicName", v)} testId="input-arabicName" />
             <Field label={`${t("militaryNumber")} *`} value={p.militaryNumber || ""} onChange={v => set("militaryNumber", v)} testId="input-militaryNumber" required />
-            <Field label={t("rank")} value={p.rank} onChange={v => set("rank", v)} testId="input-rank" />
+            <label className="block text-xs">
+              <span className="text-muted-foreground">{t("rank")} (AR)</span>
+              <input
+                type="text"
+                list="rjaf-rank-list-ar"
+                // CRITICAL: bind to the canonical Arabic rank, not the
+                // English render value. `rankOf(p)` resolves to the
+                // English string in EN mode; using it here would cause
+                // typing in this box to overwrite `p.rank` with English
+                // text and corrupt the canonical Arabic rank column.
+                value={p.rank}
+                onChange={e => {
+                  const next = e.target.value;
+                  setP(prev => {
+                    const auto = lookupRankEn(next);
+                    // Only auto-fill English rank when (a) the AR rank
+                    // resolves to a known English value, AND (b) the
+                    // operator hasn't customised the English rank yet
+                    // (or the previous English value was the auto-fill
+                    // for the previous AR rank). Prevents wiping a
+                    // manual override when the operator tabs through
+                    // the form.
+                    const prevAuto = lookupRankEn(prev.rank);
+                    const englishLooksAuto = !prev.rankEn || prev.rankEn === prevAuto;
+                    return {
+                      ...prev,
+                      rank: next,
+                      rankEn: englishLooksAuto && auto ? auto : (prev.rankEn ?? ""),
+                    };
+                  });
+                }}
+                placeholder="رائد طيار"
+                data-testid="input-rank"
+                className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm"
+              />
+              <datalist id="rjaf-rank-list-ar">
+                {RJAF_RANKS.map(r => (
+                  <option key={r.ar} value={r.ar}>{r.en}</option>
+                ))}
+              </datalist>
+            </label>
+            <Field label={`${t("rank")} (EN)`} value={p.rankEn || ""} onChange={v => set("rankEn", v)} testId="input-rankEn" />
             <Field label={t("phone")} value={p.phone} onChange={v => set("phone", v)} testId="input-phone" />
             <label className="block text-xs col-span-2">
               <span className="text-muted-foreground">Unit</span>
@@ -435,21 +509,35 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
             <Field label={t("address")} value={p.address || ""} onChange={v => set("address", v)} testId="input-address" />
             <Field label={t("doctorNote")} value={p.doctorNote || ""} onChange={v => set("doctorNote", v)} testId="input-doctorNote" />
             <label className="block text-xs col-span-2">
-              <span className="text-muted-foreground">{t("qualifications")}</span>
-              <input
-                type="text"
-                value={(p.qualifications || []).join(", ")}
-                onChange={e => {
-                  const tags = e.target.value
-                    .split(",")
-                    .map(s => s.trim().toUpperCase())
-                    .filter(Boolean);
-                  set("qualifications", Array.from(new Set(tags)));
-                }}
-                placeholder="MTP, QHI, IP"
-                data-testid="input-qualifications"
-                className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm font-mono tracking-wider"
-              />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">{t("qualifications")}</span>
+                <div className="inline-flex items-center gap-1 text-[10px]">
+                  <span className="text-muted-foreground">Separator:</span>
+                  <button
+                    type="button"
+                    onClick={() => setQualSep("/")}
+                    aria-pressed={qualSep === "/"}
+                    data-testid="qual-sep-slash"
+                    className={`px-2 py-0.5 rounded font-mono border ${qualSep === "/" ? "bg-primary text-primary-foreground border-primary" : "bg-secondary border-border text-muted-foreground"}`}
+                  >/</button>
+                  <button
+                    type="button"
+                    onClick={() => setQualSep("-")}
+                    aria-pressed={qualSep === "-"}
+                    data-testid="qual-sep-dash"
+                    className={`px-2 py-0.5 rounded font-mono border ${qualSep === "-" ? "bg-primary text-primary-foreground border-primary" : "bg-secondary border-border text-muted-foreground"}`}
+                  >-</button>
+                </div>
+              </div>
+              <div className="mt-1">
+                <MultiSegmentField
+                  value={qualSegments}
+                  onChange={setQualSegments}
+                  separator={qualSep}
+                  testIdPrefix="input-qualification"
+                  placeholder="AC"
+                />
+              </div>
               <span className="block mt-1 text-[10px] text-muted-foreground">{t("qualificationsHelp")}</span>
             </label>
           </div>
@@ -463,16 +551,16 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
               <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Last Currency Flown</div>
               <div className="text-[11px] text-muted-foreground mt-1">
                 Enter the <strong>date the check/flight was last performed</strong>. The expiry is calculated automatically
-                using the currency windows configured in Settings (Day: {currencyWin.day}d · Night: {currencyWin.night}d · NVG: {currencyWin.nvg}d · IRT: {currencyWin.instrument}d · Medical: {currencyWin.medical}d).
+                using the currency windows configured in Settings (Day: {currencyWin.day}d · Night: {currencyWin.night}d · NVG: {currencyWin.nvg}d · Sim: {currencyWin.day}d · Instrument: {currencyWin.instrument}d · Mission Qual: {currencyWin.instrument}d).
               </div>
             </div>
             {([ 
               { label: "Last Day flown",     k: "day"     as const, days: currencyWin.day        },
               { label: "Last Night flown",   k: "night"   as const, days: currencyWin.night      },
               { label: "Last NVG flown",     k: "nvg"     as const, days: currencyWin.nvg        },
-              { label: "Last IRT",           k: "irt"     as const, days: currencyWin.instrument },
-              { label: "Last Medical",       k: "medical" as const, days: currencyWin.medical    },
-              { label: "Last Sim",           k: "sim"     as const, days: currencyWin.day        },
+              { label: "Last Simulator",     k: "sim"         as const, days: currencyWin.day        },
+              { label: "Last Instrument",    k: "irt"         as const, days: currencyWin.instrument },
+              { label: "Last Mission Qual",  k: "missionQual" as const, days: currencyWin.instrument },
             ] as { label: string; k: keyof LastFlown; days: number }[]).map(({ label, k, days }) => {
               const expiry = computeExpiry(lastFlown[k], days);
               return (
@@ -495,19 +583,8 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
               );
             })}
           </div>
-          <div className="grid grid-cols-3 gap-3 pt-2 border-t border-border">
-            <label className="block text-xs col-span-3 sm:col-span-1">
-              <span className="text-muted-foreground">{t("lastSimDate")}</span>
-              <DateInput
-                value={p.lastSimDate || ""}
-                onChange={(v) => set("lastSimDate", v)}
-                data-testid="input-lastSimDate"
-                className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm font-mono"
-              />
-            </label>
-            <div className="col-span-3 sm:col-span-2 text-[11px] text-muted-foreground self-end pb-2">
-              {t("lastSimDateHelp")} · <span className="italic">{t("lastSimDateVisibility")}</span>
-            </div>
+          <div className="text-[11px] text-muted-foreground -mt-1">
+            {t("lastSimDateHelp")} · <span className="italic">{t("lastSimDateVisibility")}</span>
           </div>
           <div className="flex items-center justify-end gap-2 pt-3 border-t border-border">
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-md bg-secondary border border-border text-sm">{t("cancel")}</button>

@@ -34,7 +34,7 @@ import FlightScheduleSheet from "@/components/FlightScheduleSheet";
 import { Button } from "@/components/ui/button";
 
 export default function FinalSchedules() {
-  const { lang } = useI18n();
+  const { lang, rankOf } = useI18n();
   const { user } = useAuth();
   const dir = lang === "ar" ? "rtl" : "ltr";
   const allowed = canViewFinalSchedules(user?.role, user?.scope);
@@ -56,7 +56,7 @@ export default function FinalSchedules() {
   // viewer expands an approved schedule.
   const { data: PILOTS } = usePilots();
   const pilotOptions = useMemo(
-    () => PILOTS.map(p => ({ value: p.name, label: `${p.rank} ${p.name}` })),
+    () => PILOTS.map(p => ({ value: p.name, label: `${rankOf(p)} ${p.name}` })),
     [PILOTS],
   );
 

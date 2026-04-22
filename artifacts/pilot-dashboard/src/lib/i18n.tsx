@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
+import { pilotRank } from "./ranks";
 
 export type Lang = "en" | "ar";
 
@@ -1600,6 +1601,12 @@ interface I18nCtx {
   setLang: (l: Lang) => void;
   t: (k: Key) => string;
   dir: "ltr" | "rtl";
+  // Render the rank for the current UI language. English mode prefers
+  // the explicit `rankEn` (auto-filled from the RJAF lookup on the
+  // Add/Edit Pilot form), then falls back to the lookup table for
+  // legacy pilots that have no explicit English rank, and finally to
+  // the Arabic rank. Arabic mode always returns the Arabic rank.
+  rankOf: (p: { rank: string; rankEn?: string | null } | null | undefined) => string;
 }
 
 const Ctx = createContext<I18nCtx | null>(null);
@@ -1618,6 +1625,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     setLang,
     dir: lang === "ar" ? "rtl" : "ltr",
     t: (k: Key) => (dict[lang] as Dict)[k] ?? (dict.en[k] as string) ?? String(k),
+    rankOf: (p) => pilotRank(p ?? { rank: "" }, lang),
   }), [lang]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

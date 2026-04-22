@@ -10,7 +10,7 @@ import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 function rng(seed: number) { let s = seed; return () => (s = (s * 9301 + 49297) % 233280) / 233280; }
 
 export default function Cycle() {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const pilotsQ = usePilots();
   const sortiesQ = useSorties();
   const { data: PILOTS } = pilotsQ;
@@ -74,7 +74,7 @@ export default function Cycle() {
                 if (!tot) return null;
                 return (
                   <tr key={p.id} className="border-t border-border row-hover">
-                    <td className="px-3 py-2">{p.rank} {p.name}</td>
+                    <td className="px-3 py-2">{rankOf(p)} {p.name}</td>
                     <td className="px-2 py-2 text-right font-mono">{formatHours(tot.h1.day)}</td>
                     <td className="px-2 py-2 text-right font-mono">{formatHours(tot.h1.night)}</td>
                     <td className="px-2 py-2 text-right font-mono text-rose-300">{formatHours(tot.h1.nvg)}</td>
@@ -117,7 +117,7 @@ export default function Cycle() {
             )}
             {PILOTS.map(p => (
               <tr key={p.id} className="border-t border-border">
-                <td className="px-3 py-2 sticky left-0 bg-card">{p.rank} {p.name}</td>
+                <td className="px-3 py-2 sticky left-0 bg-card">{rankOf(p)} {p.name}</td>
                 {SIX_MONTH_TASKS.map(task => {
                   const s = statusOf(p.id, task);
                   return (

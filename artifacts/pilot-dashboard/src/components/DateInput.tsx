@@ -113,6 +113,22 @@ export default function DateInput({
     setText(isoToDDMMYYYY(iso));
   };
 
+  // Live DD/MM/YYYY mask: the operator just types digits and the slashes
+  // appear automatically in the right places. Backspace removes the
+  // previous digit (skipping back over slashes). Anything that isn't a
+  // digit is dropped silently. Result is always shaped DD, DD/M, DD/MM,
+  // DD/MM/Y…YYYY so the cursor never has to navigate over a separator.
+  const formatMask = (raw: string): string => {
+    const digits = raw.replace(/\D/g, "").slice(0, 8);
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`;
+  };
+
+  const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setText(formatMask(e.target.value));
+  };
+
   const openPicker = () => {
     if (disabled) return;
     const el = hiddenRef.current;
@@ -145,7 +161,7 @@ export default function DateInput({
         autoComplete="off"
         spellCheck={false}
         value={text}
-        onChange={e => setText(e.target.value)}
+        onChange={onInputChange}
         onBlur={e => commit(e.target.value)}
         onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commit((e.target as HTMLInputElement).value); } }}
         placeholder={placeholder}

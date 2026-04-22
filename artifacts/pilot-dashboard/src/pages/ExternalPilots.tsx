@@ -31,13 +31,13 @@ function sortieHours(s: Sortie): number {
 }
 
 export default function ExternalPilots() {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const { data: SORTIES } = useSorties();
   const { data: PILOTS } = usePilots();
   const [q, setQ] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  const pilotMap = useMemo(() => Object.fromEntries(PILOTS.map(p => [p.id, `${p.rank} ${p.name}`])), [PILOTS]);
+  const pilotMap = useMemo(() => Object.fromEntries(PILOTS.map(p => [p.id, `${rankOf(p)} ${p.name}`])), [PILOTS]);
 
   const groups: GuestRow[] = useMemo(() => {
     const map = new Map<string, GuestRow>();

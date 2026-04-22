@@ -33,7 +33,7 @@ import {
 // the ops officer writes to. Search, month calendar, and day view keep the
 // commander one click away from any sortie without scrubbing dates.
 export default function FlightRecords() {
-  const { t, lang } = useI18n();
+  const { t, lang, rankOf } = useI18n();
   const qc = useQueryClient();
   const pilotsQ = usePilots();
   const sortiesQ = useSorties();
@@ -53,7 +53,7 @@ export default function FlightRecords() {
   const [demoLoaded, setDemoLoaded] = useState<boolean>(() => isDemoSeedLoaded());
 
   const pilotMap = useMemo(
-    () => Object.fromEntries(PILOTS.map((p) => [p.id, `${p.rank} ${p.name}`])),
+    () => Object.fromEntries(PILOTS.map((p) => [p.id, `${rankOf(p)} ${p.name}`])),
     [PILOTS],
   );
 

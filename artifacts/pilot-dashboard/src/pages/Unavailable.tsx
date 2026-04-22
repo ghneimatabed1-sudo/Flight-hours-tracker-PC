@@ -9,7 +9,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 
 export default function Unavailable() {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const { toast } = useToast();
   const pilotsQ = usePilots();
   const unavailQ = useUnavailable();
@@ -89,7 +89,7 @@ export default function Unavailable() {
             <div className="text-sm font-semibold">Mark Unavailable</div>
             <label className="block text-xs"><span className="text-muted-foreground">Pilot</span>
               <select value={pid} onChange={e=>setPid(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm">
-                {PILOTS.map(p => <option key={p.id} value={p.id}>{p.rank} {p.name}</option>)}
+                {PILOTS.map(p => <option key={p.id} value={p.id}>{rankOf(p)} {p.name}</option>)}
               </select>
             </label>
             <div className="grid grid-cols-2 gap-2">

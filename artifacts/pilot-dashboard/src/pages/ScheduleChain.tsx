@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import DateInput from "@/components/DateInput";
 import { Card, PageHead } from "@/components/Layout";
 import { useAuth } from "@/lib/auth";
+import { useI18n } from "@/lib/i18n";
 import {
   useScheduleShares,
   useSubmitSchedule,
@@ -58,6 +59,7 @@ const blankRow = (): ScheduleRow => ({
 
 export default function ScheduleChain() {
   const { user, squadron } = useAuth();
+  const { rankOf } = useI18n();
   const { toast } = useToast();
   const allowed = canUseScheduleChain(user?.role, user?.scope);
   // v1.0.45: "flight" is now a first-class schedule-chain tier so a
@@ -103,7 +105,7 @@ export default function ScheduleChain() {
   const pilotOptions = useMemo(
     () => pilotsQ.data.map(p => ({
       value: p.name,
-      label: p.flightName?.trim() || `${p.rank} ${p.name}`,
+      label: p.flightName?.trim() || `${rankOf(p)} ${p.name}`,
     })),
     [pilotsQ.data],
   );

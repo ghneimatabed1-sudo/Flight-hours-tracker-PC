@@ -76,7 +76,7 @@ function csvEscape(v: string): string {
 }
 
 export default function Reminders() {
-  const { t } = useI18n();
+  const { t, rankOf } = useI18n();
   const { data: pilots } = usePilots();
   const { data: prefs, isLoading } = useReminderOverview();
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -87,7 +87,7 @@ export default function Reminders() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return joined.filter(({ pilot, prefs, soonestDays }) => {
-      if (q && !`${pilot.rank} ${pilot.name} ${pilot.arabicName}`.toLowerCase().includes(q)) {
+      if (q && !`${rankOf(pilot)} ${pilot.name} ${pilot.arabicName}`.toLowerCase().includes(q)) {
         return false;
       }
       if (filter === "no_prefs") {
@@ -121,7 +121,7 @@ export default function Reminders() {
       "Last reminder threshold",
     ];
     const rows = filtered.map(({ pilot, prefs, soonestDays, soonestKey }) => [
-      `${pilot.rank} ${pilot.name}`,
+      `${rankOf(pilot)} ${pilot.name}`,
       prefs?.pushEnabled ? "on" : "off",
       prefs?.platform ?? "",
       formatThresholds(prefs?.thresholds ?? {}),
@@ -263,7 +263,7 @@ export default function Reminders() {
                   data-testid={`row-pilot-${pilot.id}`}
                 >
                   <td className="px-3 py-2">
-                    <div>{pilot.rank} {pilot.name}</div>
+                    <div>{rankOf(pilot)} {pilot.name}</div>
                     <div className="text-xs text-muted-foreground">{pilot.arabicName}</div>
                   </td>
                   <td className="px-3 py-2">
