@@ -28,6 +28,8 @@ import {
   type ScheduleShare,
 } from "@/lib/cross-pc";
 import { usePilots } from "@/lib/squadron-data";
+import { useDashPilots } from "@/lib/dash-pilots";
+import { pilotWorstStatus, isRedStatus } from "@/lib/format";
 import FlightScheduleSheet from "@/components/FlightScheduleSheet";
 import { Button } from "@/components/ui/button";
 
@@ -43,6 +45,11 @@ export default function FinalSchedules() {
   const myPcId = getLocalPcId();
   const { data: shares = [] } = useScheduleShares(myPcId, { viewAllApproved: allowed });
   const registry = useRegisteredPCs();
+  // Cross-squadron pilot roster (already populated by the dashboard
+  // sync layer on Base / HQ PCs). We use it to derive at-a-glance
+  // currency-at-risk counts per squadron for the "Connected Squadrons"
+  // strip — no extra fetch required.
+  const dashPilots = useDashPilots();
   // usePilots returns a query object — we want the .data array (which
   // already defaults to []). Going through the query handle keeps the
   // FlightScheduleSheet's pilot picker labelled correctly when the
@@ -118,6 +125,118 @@ export default function FinalSchedules() {
     return reg?.squadronName ?? s.originSquadronName;
   };
 
+  // ────────────────────────────────────────────────────────────────────
+  // v1.1.66 — "Connected Squadrons" overview strip.
+  //
+  // This is the at-a-glance row that sits above the per-squadron cards
+  // so a Base / HQ commander can scan a network of 15-20 squadrons in
+  // one glance and pick out who needs attention. We deliberately keep
+  // it to four numbers per tile (Pilots / At-risk / Week / Last) so
+  // it's never overwhelming.
+  //
+  // Source-of-truth for the squadron list is the UNION of:
+  //   • squadrons that have shipped at least one Wing-approved final
+  //   • squadrons whose Sqn-Cmdr or Ops PC is registered in xpc_registry
+  //
+  // That way a brand-new squadron that just powered on its PC for the
+  // first time appears immediately as "Awaiting first schedule" — no
+  // setup step on Base / HQ side.
+  // ────────────────────────────────────────────────────────────────────
+  const squadronEntries = useMemo(() => {
+    type Entry = {
+      sqnId: string;
+      name: string;
+      online: boolean;
+      lastSeen: string | null;
+      pilotCount: number;
+      atRisk: number;
+      finalsCount: number;
+      weekFinals: number;
+      lastFinalDate: string | null;
+    };
+    const map = new Map<string, Entry>();
+
+    // Seed from squadrons that have shipped finals.
+    for (const g of grouped) {
+      map.set(g.sqnId, {
+        sqnId: g.sqnId,
+        name: g.sqnName,
+        online: false,
+        lastSeen: null,
+        pilotCount: 0,
+        atRisk: 0,
+        finalsCount: g.shares.length,
+        weekFinals: 0,
+        lastFinalDate: g.latest,
+      });
+    }
+
+    // Merge in registered PCs so newly-connected squadrons show up
+    // before they ship their first final. The Sqn-Cmdr PC id has
+    // shape "SQDNCMD:<code>#<suffix>" — peel off the squadron code
+    // so it collapses onto the same entry as the Ops PC ("<code>").
+    for (const pc of registry.data) {
+      if (!pc.squadronName) continue;
+      let sqnId = pc.id;
+      const m = /^[A-Z]+CMD:([^#]+)/.exec(pc.id);
+      if (m) sqnId = m[1];
+      if (!sqnId) continue;
+      const existing = map.get(sqnId);
+      if (existing) {
+        if (pc.online) existing.online = true;
+        if (pc.lastSeen && (!existing.lastSeen || pc.lastSeen > existing.lastSeen)) {
+          existing.lastSeen = pc.lastSeen;
+        }
+      } else {
+        map.set(sqnId, {
+          sqnId,
+          name: pc.squadronName,
+          online: !!pc.online,
+          lastSeen: pc.lastSeen ?? null,
+          pilotCount: 0,
+          atRisk: 0,
+          finalsCount: 0,
+          weekFinals: 0,
+          lastFinalDate: null,
+        });
+      }
+    }
+
+    // Pilot roster + currency-at-risk tally per squadron.
+    for (const entry of map.values()) {
+      const sqnPilots = dashPilots.filter(p => p.squadronId === entry.sqnId);
+      entry.pilotCount = sqnPilots.length;
+      entry.atRisk = sqnPilots.filter(p => isRedStatus(pilotWorstStatus(p))).length;
+    }
+
+    // Week-over-week finals counter.
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    for (const s of shares) {
+      if (!s.program || !s.approvedAt) continue;
+      if (new Date(s.approvedAt).getTime() < weekAgo) continue;
+      const e = map.get(s.originSquadronId);
+      if (e) e.weekFinals += 1;
+    }
+
+    // Online-first, then alphabetical — keeps the squadrons that are
+    // actually operating right now at the top of the strip.
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.online !== b.online) return a.online ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [grouped, registry.data, dashPilots, shares]);
+
+  // Click a tile in the strip → expand that squadron's card below
+  // and scroll it into view. Smooth, single-action navigation.
+  const focusSquadron = (sqnId: string) => {
+    setOpenSquadron(sqnId);
+    setOpenShareId(null);
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-testid="final-sched-sqn-${sqnId}"]`);
+      el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
   return (
     <div className="p-4 space-y-3" dir={dir}>
       <div className="flex items-baseline justify-between gap-3 flex-wrap">
@@ -138,6 +257,79 @@ export default function FinalSchedules() {
           {shares.filter(s => s.program).length} {lang === "ar" ? "برنامج" : "schedules"}
         </div>
       </div>
+
+      {/* v1.1.66 — Connected Squadrons strip. At-a-glance overview that
+          stays compact even with 20+ squadrons; sorted online-first so
+          today's active operations are right at the top. */}
+      {squadronEntries.length > 0 && (
+        <div className="rounded-md border border-border bg-card p-3" data-testid="connected-squadrons">
+          <div className="flex items-baseline justify-between gap-2 mb-2">
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+              {lang === "ar" ? "الأسراب المتصلة" : "Connected Squadrons"}
+            </div>
+            <div className="text-[10px] tabular-nums text-muted-foreground">
+              <span className="text-emerald-300 font-semibold">
+                {squadronEntries.filter(s => s.online).length}
+              </span>
+              <span className="opacity-60">
+                {" / "}{squadronEntries.length} {lang === "ar" ? "متصل الآن" : "online now"}
+              </span>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-2">
+            {squadronEntries.map(s => {
+              const pal = squadronColor(s.sqnId);
+              return (
+                <button
+                  key={s.sqnId}
+                  type="button"
+                  onClick={() => focusSquadron(s.sqnId)}
+                  className="text-start rounded-md border border-border bg-background/40 hover-elevate active-elevate-2 px-2.5 py-2 flex gap-2 overflow-hidden"
+                  data-testid={`sqn-tile-${s.sqnId}`}
+                >
+                  <div className={`w-1 shrink-0 rounded-sm ${pal.stripe}`} aria-hidden="true" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span
+                        className={`inline-block h-1.5 w-1.5 rounded-full shrink-0 ${
+                          s.online ? "bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.6)]" : "bg-muted-foreground/30"
+                        }`}
+                        title={s.online
+                          ? (lang === "ar" ? "متصل" : "Online")
+                          : (lang === "ar" ? "غير متصل" : "Offline")}
+                      />
+                      <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-semibold truncate ${pal.badge}`}>
+                        {s.name}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 grid grid-cols-3 gap-1">
+                      <Stat
+                        label={lang === "ar" ? "طيار" : "Pilots"}
+                        value={s.pilotCount}
+                      />
+                      <Stat
+                        label={lang === "ar" ? "تنبيه" : "At-risk"}
+                        value={s.atRisk}
+                        tone={s.atRisk > 0 ? "danger" : "muted"}
+                      />
+                      <Stat
+                        label={lang === "ar" ? "أسبوع" : "Week"}
+                        value={s.weekFinals}
+                        tone={s.weekFinals > 0 ? "good" : "muted"}
+                      />
+                    </div>
+                    <div className="mt-1.5 text-[10px] text-muted-foreground truncate">
+                      {s.lastFinalDate
+                        ? `${lang === "ar" ? "آخر برنامج" : "Last final"}: ${relTime(s.lastFinalDate, lang)}`
+                        : (lang === "ar" ? "بانتظار أول برنامج" : "Awaiting first schedule")}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {grouped.length === 0 && (
         <div className="rounded-md border border-border bg-card p-6 text-center text-xs text-muted-foreground">
@@ -266,4 +458,50 @@ function prettyDate(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+}
+
+// Compact one-number stat used inside the Connected Squadrons tiles.
+// Three tones: muted (zero / neutral), good (green), danger (amber/red).
+function Stat({
+  label,
+  value,
+  tone = "muted",
+}: {
+  label: string;
+  value: number;
+  tone?: "muted" | "good" | "danger";
+}): JSX.Element {
+  const valueClass =
+    tone === "danger" ? "text-amber-300" :
+    tone === "good"   ? "text-emerald-300" :
+                        "text-foreground/80";
+  return (
+    <div className="flex flex-col items-center justify-center rounded bg-secondary/30 px-1 py-1 leading-tight">
+      <div className={`text-sm font-semibold tabular-nums ${valueClass}`}>{value}</div>
+      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
+    </div>
+  );
+}
+
+// Short relative-time formatter: "2h ago", "3d ago", "just now".
+// Falls back to a yyyy-mm-dd if the input doesn't parse.
+function relTime(iso: string, lang: "en" | "ar"): string {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return iso;
+  const diffMs = Date.now() - t;
+  const m = Math.round(diffMs / 60_000);
+  const h = Math.round(diffMs / 3_600_000);
+  const d = Math.round(diffMs / 86_400_000);
+  if (lang === "ar") {
+    if (m < 1)  return "الآن";
+    if (m < 60) return `قبل ${m} د`;
+    if (h < 24) return `قبل ${h} س`;
+    if (d < 30) return `قبل ${d} يوم`;
+    return new Date(iso).toLocaleDateString();
+  }
+  if (m < 1)  return "just now";
+  if (m < 60) return `${m}m ago`;
+  if (h < 24) return `${h}h ago`;
+  if (d < 30) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString();
 }
