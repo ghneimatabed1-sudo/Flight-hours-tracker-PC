@@ -221,26 +221,52 @@ export default function ScheduleChain() {
     setDraftRows(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
   const removeRow = (id: string) => setDraftRows(rs => rs.filter(r => r.id !== id));
 
+  // v1.1.45: virtual logical-seat targets. The Sqn Cmdr (and Wing/Base/Ops)
+  // can ship a schedule to a TIER+SQUADRON seat directly — e.g. "Any
+  // Flight Cmdr in NO.8" — even when no Flight Cmdr PC has registered
+  // itself in xpc_registry yet, OR when the registry on this PC just
+  // hasn't synced. The share is sent with currentPcId = "FLIGHT:NO.8"
+  // (no suffix). On the receiving Flight Cmdr PC the v1.1.40 logical-seat
+  // matcher catches it because their myLogicalSeat is "FLIGHT:NO.8"
+  // (stripped from "FLIGHT:NO.8#xyz"). This makes registry presence
+  // optional — one PC can address another by role, not by hardware id.
+  const sqName = squadron?.name ?? "";
+  const logicalSeatTargets = useMemo(() => {
+    if (!sqName) return [] as Array<{ id: string; label: string; tier: "flight"|"squadron"|"wing"|"base" }>;
+    const out: Array<{ id: string; label: string; tier: "flight"|"squadron"|"wing"|"base" }> = [];
+    if (myTier === "squadron" || myTier === "ops" || myTier === "wing" || myTier === "base") {
+      out.push({ id: `FLIGHT:${sqName}`, label: `Any Flight Cmdr in ${sqName}`, tier: "flight" });
+    }
+    if (myTier === "flight" || myTier === "ops") {
+      out.push({ id: `SQDNCMD:${sqName}`, label: `Squadron Cmdr of ${sqName}`, tier: "squadron" });
+      // Bare squadron id reaches the Ops PC of this squadron.
+      out.push({ id: sqName, label: `Squadron Ops PC (${sqName})`, tier: "squadron" });
+    }
+    return out;
+  }, [sqName, myTier]);
+
   const submitDraft = async () => {
-    const target = registry.data.find(p => p.id === submitTo);
-    if (!target) { toast({ title: "Pick a recipient PC", variant: "destructive" }); return; }
+    // Resolve target: either a real registry row, or one of the virtual
+    // logical-seat options injected above.
+    const realTarget = registry.data.find(p => p.id === submitTo);
+    const seatTarget = logicalSeatTargets.find(s => s.id === submitTo);
+    if (!realTarget && !seatTarget) { toast({ title: "Pick a recipient PC", variant: "destructive" }); return; }
     const valid = draftRows.filter(r => r.ac.trim() || r.mission.trim());
     if (valid.length === 0) { toast({ title: "Add at least one row", variant: "destructive" }); return; }
-    // IMPORTANT: pass the chosen target's actual tier so the recipient's
-    // inbox filter (incoming where current_tier === their tier) lights up
-    // the share. Previously this defaulted to "wing", which hid
-    // squadron→flight shares from Flight Commanders.
+    const targetId = realTarget?.id ?? seatTarget!.id;
+    const targetName = realTarget?.squadronName ?? seatTarget!.label;
+    const targetTier = (realTarget?.tier ?? seatTarget!.tier) as "flight" | "squadron" | "wing" | "base";
     await submit.mutateAsync({
       date: draftDate,
       originSquadronId: myPcId ?? "self",
       originSquadronName: myPcName,
       rows: valid,
-      targetPcId: target.id,
-      targetPcName: target.squadronName,
-      targetTier: target.tier as "flight" | "squadron" | "wing" | "base",
+      targetPcId: targetId,
+      targetPcName: targetName,
+      targetTier,
       submittedBy: user?.username ?? "ops",
     });
-    toast({ title: `Schedule sent to ${target.squadronName}` });
+    toast({ title: `Schedule sent to ${targetName}` });
     setDraftRows([blankRow()]);
     setSubmitTo("");
   };
@@ -322,24 +348,33 @@ export default function ScheduleChain() {
               <select value={submitTo} onChange={e => setSubmitTo(e.target.value)} className="w-full mt-1 px-3 py-1.5 rounded-md bg-input border border-border text-sm" data-testid="select-target">
                 <option value="">
                   {myTier === "flight"
-                    ? "— pick a registered Squadron PC —"
+                    ? "— pick a Squadron PC or seat —"
                     : myTier === "ops"
-                    ? "— pick a Flight Cmdr or Squadron Cmdr PC —"
-                    : "— pick a registered Wing or Flight PC —"}
+                    ? "— pick a Flight Cmdr / Sqn Cmdr PC or seat —"
+                    : "— pick a registered PC or logical seat —"}
                 </option>
-                {effectiveTargets.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.deviceName || p.squadronName}
-                    {p.tier === "flight"
-                      ? " · Flight Cmdr"
-                      : p.tier === "squadron"
-                      ? " · Squadron Cmdr"
-                      : p.tier === "wing" && p.wing
-                      ? ` · ${p.wing}`
-                      : ""}
-                    {p.online ? " · online" : " · offline"}
-                  </option>
-                ))}
+                {logicalSeatTargets.length > 0 && (
+                  <optgroup label="By role (delivers to whoever is signed in)">
+                    {logicalSeatTargets.map(s => (
+                      <option key={s.id} value={s.id}>{s.label}</option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label={`Registered PCs (${effectiveTargets.length})`}>
+                  {effectiveTargets.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.deviceName || p.squadronName}
+                      {p.tier === "flight"
+                        ? " · Flight Cmdr"
+                        : p.tier === "squadron"
+                        ? " · Squadron Cmdr"
+                        : p.tier === "wing" && p.wing
+                        ? ` · ${p.wing}`
+                        : ""}
+                      {p.online ? " · online" : " · offline"}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
               {usingFallbackTargets && (
                 <p className="text-[10px] text-amber-300 mt-1">
@@ -348,9 +383,15 @@ export default function ScheduleChain() {
               )}
               {effectiveTargets.length === 0 && (
                 <p className="text-[10px] text-amber-300 mt-1">
-                  Registry is empty on this PC. The other PC(s) must sign in once with internet so this PC can see them.
+                  No other PC has registered yet on this network. Use a "By role" option above — the share will deliver the moment that role's PC comes online.
                 </p>
               )}
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Registry on this PC: {registry.data.length} PC(s) total
+                {registry.data.length > 0 && (
+                  <> · {registry.data.filter(p => p.tier === "flight").length} flight, {registry.data.filter(p => p.tier === "squadron").length} squadron, {registry.data.filter(p => p.tier === "wing").length} wing, {registry.data.filter(p => p.tier === "base").length} base</>
+                )}
+              </p>
             </div>
           </div>
           <div className="overflow-x-auto">

@@ -210,16 +210,42 @@ export default function Messages() {
     setComposeTo(""); setSubject(""); setBody(""); setPriority("normal"); setReplyTo(null);
   };
 
+  // v1.1.45: virtual logical-seat recipients. The operator can address
+  // a TIER+SQUADRON seat (e.g. "Any Flight Cmdr in NO.8") even when no
+  // such PC has registered itself yet. The message ships with toPcId =
+  // "FLIGHT:<sqn>" (no suffix) and the v1.1.44 logical-seat matcher on
+  // the receiving PC catches it because their myLogicalSeat strips the
+  // "#<deviceSuffix>" tail.
+  const sqName = squadron?.name ?? "";
+  const logicalSeatTargets = useMemo(() => {
+    if (!sqName) return [] as Array<{ id: string; label: string; tier: "flight"|"squadron"|"wing"|"base" }>;
+    const out: Array<{ id: string; label: string; tier: "flight"|"squadron"|"wing"|"base" }> = [];
+    if (myTier === "squadron" || myTier === "wing" || myTier === "base") {
+      out.push({ id: `FLIGHT:${sqName}`, label: `Any Flight Cmdr in ${sqName}`, tier: "flight" });
+    }
+    if (myTier === "flight") {
+      out.push({ id: `SQDNCMD:${sqName}`, label: `Squadron Cmdr of ${sqName}`, tier: "squadron" });
+      out.push({ id: sqName, label: `Squadron Ops PC (${sqName})`, tier: "squadron" });
+    }
+    return out;
+  }, [sqName, myTier]);
+
   const submitSend = async () => {
     if (!composeTo) { toast({ title: "Pick a recipient PC", variant: "destructive" }); return; }
     if (!subject.trim() || !body.trim()) { toast({ title: "Subject and body required", variant: "destructive" }); return; }
-    const target = registry.data.find(p => p.id === composeTo);
-    if (!target) { toast({ title: "Recipient not found", variant: "destructive" }); return; }
+    const realTarget = registry.data.find(p => p.id === composeTo);
+    const seatTarget = logicalSeatTargets.find(s => s.id === composeTo);
+    if (!realTarget && !seatTarget) { toast({ title: "Recipient not found", variant: "destructive" }); return; }
+    const target = realTarget ?? {
+      id: seatTarget!.id,
+      squadronName: seatTarget!.label,
+      tier: seatTarget!.tier,
+    } as { id: string; squadronName: string; tier: "flight"|"squadron"|"wing"|"base" };
     if (target.tier !== "squadron" && target.tier !== "wing" && target.tier !== "base" && target.tier !== "flight") {
       toast({ title: "Messages restricted to Flt/Sqn/Wing/Base only", variant: "destructive" });
       return;
     }
-    if (isFlightCmdr && flightBinding) {
+    if (isFlightCmdr && flightBinding && !seatTarget) {
       // v1.1.31: Flight Cmdr may message the bound Ops PC OR any
       // squadron-tier PC inside the same squadron (the Squadron Cmdr
       // PC). Anything outside that scope (other squadrons, wing/base,
@@ -321,12 +347,21 @@ export default function Messages() {
                 className="w-full mt-1 px-3 py-1.5 rounded-md bg-input border border-border text-sm"
                 data-testid="select-recipient"
               >
-                <option value="">— pick a registered PC —</option>
-                {effectiveSelectablePCs.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.deviceName || p.squadronName} · {p.tier}{p.online ? " · online" : " · offline (will deliver on reconnect)"}
-                  </option>
-                ))}
+                <option value="">— pick a registered PC or logical seat —</option>
+                {logicalSeatTargets.length > 0 && (
+                  <optgroup label="By role (delivers to whoever is signed in)">
+                    {logicalSeatTargets.map(s => (
+                      <option key={s.id} value={s.id}>{s.label}</option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label={`Registered PCs (${effectiveSelectablePCs.length})`}>
+                  {effectiveSelectablePCs.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.deviceName || p.squadronName} · {p.tier}{p.online ? " · online" : " · offline (will deliver on reconnect)"}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
               {usingFallbackRecipients && (
                 <p className="text-[11px] text-amber-300 mt-1">
@@ -335,9 +370,15 @@ export default function Messages() {
               )}
               {effectiveSelectablePCs.length === 0 && (
                 <p className="text-[11px] text-amber-300 mt-1">
-                  Registry is empty on this PC. Sign in once on the recipient PC with internet so this PC can see it.
+                  No other PC has registered yet on this network. Use a "By role" option above — the message will deliver the moment that role's PC comes online.
                 </p>
               )}
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Registry on this PC: {registry.data.length} PC(s) total
+                {registry.data.length > 0 && (
+                  <> · {registry.data.filter(p => p.tier === "flight").length} flight, {registry.data.filter(p => p.tier === "squadron").length} squadron, {registry.data.filter(p => p.tier === "wing").length} wing, {registry.data.filter(p => p.tier === "base").length} base</>
+                )}
+              </p>
               {composeTo && (() => {
                 const sel = effectiveSelectablePCs.find(p => p.id === composeTo);
                 if (!sel || sel.online) return null;
