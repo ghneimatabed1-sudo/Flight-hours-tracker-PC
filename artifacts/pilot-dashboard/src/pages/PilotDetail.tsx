@@ -83,7 +83,7 @@ export default function PilotDetail() {
         </Card>
         <Card>
           <div className="text-sm font-semibold mb-2">Grand Totals</div>
-          <Stat k="Day" v={totals.totalDay} /><Stat k="Night" v={totals.totalNight} /><Stat k="NVG" v={totals.totalNvg} accent="text-rose-300" /><Stat k="Sim" v={totals.totalSim} /><Stat k="Captain" v={totals.totalCaptain} />
+          <Stat k="Day" v={totals.totalDay} /><Stat k="Night" v={totals.totalNight} /><Stat k="NVG" v={totals.totalNvg} accent="text-rose-300" /><Stat k="Sim" v={totals.totalSim} /><Stat k="Captain" v={totals.totalCaptain} /><Stat k="Instrument" v={p.initialHours?.instrument ?? 0} />
         </Card>
         <CurrenciesCard pilot={p} />
       </div>

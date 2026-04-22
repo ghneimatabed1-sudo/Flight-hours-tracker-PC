@@ -123,17 +123,21 @@ export const EMPTY_INITIAL_HOURS: InitialHours = {
   captain: 0, instrument: 0,
 };
 
-// Sum of all eleven baseline buckets. Used by the Add/Edit Pilot form's
-// collapsible header ("Initial Hours (904.7 h)") and by the first-time
-// confirmation dialog before the operator commits a baseline edit.
+// v1.1.80 — Sum the NINE time-buckets that actually add to lifetime
+// flight time: Day (1st/2nd/Dual) + Night (1st/2nd/Dual) + NVG
+// (1st/2nd/Dual). Captain and Instrument are OVERLAY labels — a captain
+// hour is also a Day or Night hour, an instrument hour is also a Day or
+// Night hour. They're stored and shown separately as overlays, but they
+// must not be added a second time into the baseline sum or the lifetime
+// Grand Total. This matches the legacy NO.8 SQDN log convention. See
+// `.local/memory/initial-hours.md`.
 export function sumInitialHours(ih: InitialHours | undefined): number {
   if (!ih) return 0;
   const n = (v: unknown) => (Number.isFinite(v as number) ? Number(v) : 0);
   return +(
     n(ih.day1) + n(ih.day2) + n(ih.dayDual) +
     n(ih.night1) + n(ih.night2) + n(ih.nightDual) +
-    n(ih.nvg1) + n(ih.nvg2) + n(ih.nvgDual) +
-    n(ih.captain) + n(ih.instrument)
+    n(ih.nvg1) + n(ih.nvg2) + n(ih.nvgDual)
   ).toFixed(1);
 }
 

@@ -722,7 +722,7 @@ function InitialHoursSection({
       >
         <div>
           <div className="text-xs uppercase tracking-wider font-semibold text-muted-foreground">Initial Hours</div>
-          <div className="text-[10px] text-muted-foreground/80">Pre-Hawk-Eye lifetime hours · adds to totals · does not affect currency or Monthly Report</div>
+          <div className="text-[10px] text-muted-foreground/80">Pre-Hawk-Eye lifetime flight time (Day + Night + NVG) · CAP and Instrument are overlay labels, shown separately · does not affect currency or Monthly Report</div>
         </div>
         <div className="flex items-center gap-2">
           <span className="font-mono text-sm tabular-nums text-emerald-300" data-testid="text-initial-hours-total">
