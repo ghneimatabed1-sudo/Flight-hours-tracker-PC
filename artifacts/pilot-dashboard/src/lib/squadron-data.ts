@@ -211,7 +211,12 @@ export function useUpdatePilot() {
         saveMockPilots();
         return p;
       }
-      const { data, error } = await supabase!.from("pilots").update({
+      // Defensive: some squadron DBs may not have run migration 0031 yet
+      // (rank_en column). If the schema cache rejects the column we retry
+      // without it so the rest of the pilot row still saves. The JSONB
+      // `data.rankEn` mirror keeps the English rank readable until the
+      // migration is applied. See `.local/memory/multi-squadron.md`.
+      const updatePayload: Record<string, unknown> = {
         name: p.name,
         arabic_name: p.arabicName,
         rank: p.rank,
@@ -256,12 +261,39 @@ export function useUpdatePilot() {
           otherAircraft: p.otherAircraft,
           initialHours: p.initialHours,
         },
-      }).eq("id", p.id).select().single();
+      };
+      let { data, error } = await supabase!.from("pilots").update(updatePayload).eq("id", p.id).select().single();
+      if (error && isMissingColumnError(error, "rank_en")) {
+        const { rank_en: _drop, ...without } = updatePayload as { rank_en?: unknown } & Record<string, unknown>;
+        void _drop;
+        // eslint-disable-next-line no-console
+        console.warn("[pilots.update] retrying without rank_en — DB missing migration 0031_pilots_rank_en");
+        ({ data, error } = await supabase!.from("pilots").update(without).eq("id", p.id).select().single());
+      }
       if (error) throw error;
       return rowToPilot(data);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pilots"] }),
   });
+}
+
+// Detect a Supabase/PostgREST schema-cache error for a specific column.
+// Symptom in production: a deployed squadron forgot to run a column-add
+// migration; every save fails with "Could not find the 'X' column of
+// 'pilots' in the schema cache" and the operator sees the entire row
+// (military number, name, hours) appear to vanish on edit because the
+// UPDATE rolled back. We retry without the offending column so the rest
+// of the row still saves; the missing-column data lives on the JSONB
+// `data` mirror until the migration is applied.
+function isMissingColumnError(err: { message?: string; code?: string } | null | undefined, column: string): boolean {
+  if (!err) return false;
+  const msg = String(err.message ?? "").toLowerCase();
+  return (
+    err.code === "PGRST204" ||
+    msg.includes(`'${column}' column`) ||
+    msg.includes(`column "${column}"`) && msg.includes("does not exist") ||
+    msg.includes(`could not find the '${column}'`)
+  );
 }
 
 export function useCreatePilot() {
@@ -352,11 +384,22 @@ export function useCreatePilot() {
 
       let attemptId = p.id;
       for (let attempt = 0; attempt < 10; attempt++) {
-        const { data, error } = await supabase!
+        const payload = buildPayload(attemptId);
+        let { data, error } = await supabase!
           .from("pilots")
-          .insert(buildPayload(attemptId))
+          .insert(payload)
           .select()
           .single();
+        // Defensive: same fallback as updatePilot for squadrons whose DB
+        // hasn't run migration 0031 (rank_en column). See
+        // `.local/memory/multi-squadron.md`.
+        if (error && isMissingColumnError(error, "rank_en")) {
+          const { rank_en: _drop, ...without } = payload as { rank_en?: unknown } & Record<string, unknown>;
+          void _drop;
+          // eslint-disable-next-line no-console
+          console.warn("[pilots.insert] retrying without rank_en — DB missing migration 0031_pilots_rank_en");
+          ({ data, error } = await supabase!.from("pilots").insert(without).select().single());
+        }
         if (!error) return rowToPilot(data);
         // 23505 = unique_violation. Only retry if it's the primary-key
         // collision we know how to recover from; surface anything else

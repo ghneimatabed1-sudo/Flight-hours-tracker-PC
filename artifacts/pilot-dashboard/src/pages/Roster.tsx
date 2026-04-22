@@ -362,13 +362,14 @@ function fmtDate(iso: string): string {
   return `${d}/${m}/${y}`;
 }
 
-// Six "Last X flown" cells the operator agreed to lock the Add Pilot
-// form to (Day / Night / NVG / Simulator + Instrument + Mission Qual).
-// `irt` is the canonical key for the instrument check; `missionQual`
-// is a new optional expiry slot persisted in the JSONB blob (see
-// PilotExpiry in src/lib/mock.ts). Medical is still tracked elsewhere
-// in the system but no longer edited from this form per task #108.
-interface LastFlown { day: string; night: string; nvg: string; irt: string; missionQual: string; sim: string; }
+// Six "Last X flown" cells the operator edits on Add/Edit Pilot:
+//   Day / Night / NVG / Simulator (informational, no expiry window)
+//   + Instrument (IRT, 365d) + Medical (365d).
+// `irt` is the canonical key for the instrument check; `medical` is
+// the canonical key for the annual medical exam. The `sim` slot is
+// kept as a date input so squadron commanders can monitor simulator
+// recency, but it has NO currency window — see `.local/memory/currency-refresh.md`.
+interface LastFlown { day: string; night: string; nvg: string; irt: string; medical: string; sim: string; }
 
 function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pilot; onClose: () => void; onSave: (p: Pilot) => void; saving: boolean; isNew?: boolean }) {
   const { t, rankOf } = useI18n();
@@ -407,8 +408,11 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
     night:       computeLastFlown(pilot.expiry.night,               currencyWin.night),
     nvg:         computeLastFlown(pilot.expiry.nvg,                 currencyWin.nvg),
     irt:         computeLastFlown(pilot.expiry.irt,                 currencyWin.instrument),
-    missionQual: computeLastFlown(pilot.expiry.missionQual ?? "",   currencyWin.instrument),
-    sim:         computeLastFlown(pilot.expiry.sim,                 currencyWin.day),
+    medical:     computeLastFlown(pilot.expiry.medical,             currencyWin.medical),
+    // Sim is informational only — store the raw last-flown date directly
+    // (no window subtraction) so the round-trip preserves what the
+    // commander typed.
+    sim:         pilot.lastSimDate ?? "",
   }));
 
   // Functional updater — without this, rapid keystrokes can read a stale `p`
@@ -421,17 +425,17 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     // Convert last-flown dates → expiry dates using the configured windows.
+    // Sim has NO currency window — operator-only monitoring date that
+    // round-trips through pilot.lastSimDate (set further down). The
+    // legacy `missionQual` slot was retired in v1.1.77 in favour of the
+    // proper Medical currency.
     const expiry = {
       day:         computeExpiry(lastFlown.day,         currencyWin.day),
       night:       computeExpiry(lastFlown.night,       currencyWin.night),
       nvg:         computeExpiry(lastFlown.nvg,         currencyWin.nvg),
       irt:         computeExpiry(lastFlown.irt,         currencyWin.instrument),
-      // Medical is no longer edited from this form (task #108 swapped
-      // the slot for Mission Qual). Preserve whatever value the pilot
-      // already had so currency/reminders stay accurate.
-      medical:     pilot.expiry.medical ?? "",
-      sim:         computeExpiry(lastFlown.sim,         currencyWin.day),
-      missionQual: computeExpiry(lastFlown.missionQual, currencyWin.instrument),
+      medical:     computeExpiry(lastFlown.medical,     currencyWin.medical),
+      sim:         "",
     };
     // Fold the segmented qualification editor back into both shapes:
     // - `qualifications` (string[]) keeps every render site working.
@@ -443,7 +447,9 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
     // The dedicated "Last Sim" currency input (one of the 6) doubles as
     // the commander-only `lastSimDate` field — keep them in sync on save
     // so the visibility-restricted view still has a value.
-    const lastSimDate = lastFlown.sim || p.lastSimDate || "";
+    // Sim is now a pure monitoring date — operator's input lives only in
+    // p.lastSimDate (commander-only view), never in expiry.sim.
+    const lastSimDate = lastFlown.sim || "";
     // First-time baseline confirmation gate. We block the actual save and
     // surface the warning dialog. The operator confirms (or cancels) and
     // then submit() runs again with `baselineConfirmed === true`.
@@ -611,18 +617,22 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
               <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Last Currency Flown</div>
               <div className="text-[11px] text-muted-foreground mt-1">
                 Enter the <strong>date the check/flight was last performed</strong>. The expiry is calculated automatically
-                using the currency windows configured in Settings (Day: {currencyWin.day}d · Night: {currencyWin.night}d · NVG: {currencyWin.nvg}d · Sim: {currencyWin.day}d · Instrument: {currencyWin.instrument}d · Mission Qual: {currencyWin.instrument}d).
+                using the currency windows configured in Settings (Day: {currencyWin.day}d · Night: {currencyWin.night}d · NVG: {currencyWin.nvg}d · Instrument: {currencyWin.instrument}d · Medical: {currencyWin.medical}d). Simulator is monitored only — no window.
               </div>
             </div>
-            {([ 
+            {([
               { label: "Last Day flown",     k: "day"     as const, days: currencyWin.day        },
               { label: "Last Night flown",   k: "night"   as const, days: currencyWin.night      },
               { label: "Last NVG flown",     k: "nvg"     as const, days: currencyWin.nvg        },
-              { label: "Last Simulator",     k: "sim"         as const, days: currencyWin.day        },
-              { label: "Last Instrument",    k: "irt"         as const, days: currencyWin.instrument },
-              { label: "Last Mission Qual",  k: "missionQual" as const, days: currencyWin.instrument },
+              { label: "Last Simulator",     k: "sim"     as const, days: 0                      },
+              { label: "Last Instrument",    k: "irt"     as const, days: currencyWin.instrument },
+              { label: "Last Medical",       k: "medical" as const, days: currencyWin.medical    },
             ] as { label: string; k: keyof LastFlown; days: number }[]).map(({ label, k, days }) => {
-              const expiry = computeExpiry(lastFlown[k], days);
+              // Sim has no expiry — surface only the raw date and a
+              // "monitor only" hint. Every other slot computes its
+              // expiry from the configured window.
+              const isMonitorOnly = k === "sim";
+              const expiry = isMonitorOnly ? "" : computeExpiry(lastFlown[k], days);
               return (
                 <label key={k} className="block text-xs" data-testid={`field-currency-${k}`}>
                   <span className="text-muted-foreground">{label}</span>
@@ -632,7 +642,11 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
                     data-testid={`input-lastFlown-${k}`}
                     className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm"
                   />
-                  {expiry ? (
+                  {isMonitorOnly ? (
+                    <span className="block mt-0.5 text-[10px] text-muted-foreground/70 italic">
+                      Monitor only — no currency window
+                    </span>
+                  ) : expiry ? (
                     <span className="block mt-0.5 text-[10px] text-emerald-400">
                       → Expires: {fmtDate(expiry)} ({days}d window)
                     </span>
