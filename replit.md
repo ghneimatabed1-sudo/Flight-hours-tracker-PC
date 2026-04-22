@@ -30,18 +30,34 @@ magick public/brand/hawkeye-logo.png -background none \
   \( -clone 0 -resize 256x256 \) -delete 0 build/icon.ico
 ```
 
-# Domain Logic Memory
+# Domain Logic Memory  ← READ FIRST, EVERY SESSION
 
-Canonical rules for every big domain decision live in
-**`.local/memory/`**. Read the matching file BEFORE touching any
-of these areas — never re-ask the operator about settled
-decisions. Update the file (and append a Change Log entry) every
-time the rule shifts.
+Canonical rules for every settled feature in this app live in
+**`.local/memory/`**. This is the operator's long-term memory of
+how the app should behave. **Mandatory protocol:**
+
+1. **Before touching ANY area listed in the index below, READ the
+   matching memory file.** No exceptions. Even for "small" tweaks
+   like a label change or a number adjustment. The memory file is
+   the source of truth — never re-ask the operator about settled
+   decisions, never guess from the code alone.
+2. **After making a change, UPDATE the matching memory file** —
+   adjust the rules in the body if behaviour shifted, and append
+   a one-line Change Log entry at the bottom with the date and
+   what changed.
+3. **When the operator settles a new rule, CREATE a new memory
+   file** (even for small features) and add it to the index in
+   `.local/memory/README.md` AND to the index below in this
+   `replit.md` so it loads with my context every session.
+4. The operator may instruct me to remove a memory file once a
+   feature is fully stable and unlikely to change. Until then,
+   keep them all.
 
 Index of memory files:
 - `.local/memory/README.md` — index + update protocol
 - `.local/memory/currency-refresh.md` — Day/Night/NVG/IRT auto, Sim/Medical manual
 - `.local/memory/dual-hour-rules.md` — Six sortie types force co-pilot hours to Dual
+- `.local/memory/initial-hours.md` — Pre-Hawk-Eye baseline hours; lifetime totals only, not currency or Monthly Report
 - `.local/memory/active-pc-visibility.md` — 90 s active window + offline messaging
 - `.local/memory/add-pilot-form.md` — six date fields, English rank, multi-segment qualification
 - `.local/memory/print-system.md` — global print rules + `data-print-area`

@@ -117,13 +117,24 @@ export function computePilotTotals(pilot: Pilot, allSorties: Sortie[]): PilotTot
     }
   }
 
-  const totalDay = n(pilot.openingDay) + aDay;
-  const totalNight = n(pilot.openingNight) + aNight;
-  const totalNvg = n(pilot.openingNvg) + aNvg;
+  // INITIAL HOURS (baseline) — pre-Hawk-Eye lifetime hours the operator
+  // entered when adding the pilot mid-career. Each bucket folds into the
+  // matching lifetime total. NEVER touches monthly/half-year buckets and
+  // NEVER affects currency/expiry — see `.local/memory/initial-hours.md`.
+  const ih = pilot.initialHours;
+  const ihDay   = ih ? n(ih.day1)   + n(ih.day2)   + n(ih.dayDual)   : 0;
+  const ihNight = ih ? n(ih.night1) + n(ih.night2) + n(ih.nightDual) : 0;
+  const ihNvg   = ih ? n(ih.nvg1)   + n(ih.nvg2)   + n(ih.nvgDual)   : 0;
+  const ihCap   = ih ? n(ih.captain) : 0;
+
+  const totalDay = n(pilot.openingDay) + aDay + ihDay;
+  const totalNight = n(pilot.openingNight) + aNight + ihNight;
+  const totalNvg = n(pilot.openingNvg) + aNvg + ihNvg;
   // Web `Pilot` has no opening Sim/Captain field, so totals start at the
-  // sortie-derived numbers. Matches the seed data convention.
+  // sortie-derived numbers + the captain baseline. Matches the seed data
+  // convention.
   const totalSim = aSim;
-  const totalCaptain = aCap;
+  const totalCaptain = aCap + ihCap;
 
   return {
     monthDay: +mDay.toFixed(1),

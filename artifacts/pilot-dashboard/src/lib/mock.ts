@@ -92,6 +92,49 @@ export interface Pilot {
   // section on the pilot detail page so commanders can see the wider
   // background at a glance.
   otherAircraft?: OtherAircraftEntry[];
+  // INITIAL HOURS (baseline) — pre-Hawk-Eye lifetime hours the operator
+  // enters once when adding a pilot mid-career. Folded into lifetime
+  // totals (Ranking & Totals, Individual Pilot Record PDF) but DELIBERATELY
+  // excluded from currency/expiry calculations and from Monthly Report
+  // (Forms 1–4) — see `.local/memory/initial-hours.md` for the canonical
+  // rule. Eleven independent buckets matching what the rest of the app
+  // already tracks per sortie, so totals add cleanly.
+  initialHours?: InitialHours;
+}
+
+export interface InitialHours {
+  day1: number;
+  day2: number;
+  dayDual: number;
+  night1: number;
+  night2: number;
+  nightDual: number;
+  nvg1: number;
+  nvg2: number;
+  nvgDual: number;
+  captain: number;
+  instrument: number;
+}
+
+export const EMPTY_INITIAL_HOURS: InitialHours = {
+  day1: 0, day2: 0, dayDual: 0,
+  night1: 0, night2: 0, nightDual: 0,
+  nvg1: 0, nvg2: 0, nvgDual: 0,
+  captain: 0, instrument: 0,
+};
+
+// Sum of all eleven baseline buckets. Used by the Add/Edit Pilot form's
+// collapsible header ("Initial Hours (904.7 h)") and by the first-time
+// confirmation dialog before the operator commits a baseline edit.
+export function sumInitialHours(ih: InitialHours | undefined): number {
+  if (!ih) return 0;
+  const n = (v: unknown) => (Number.isFinite(v as number) ? Number(v) : 0);
+  return +(
+    n(ih.day1) + n(ih.day2) + n(ih.dayDual) +
+    n(ih.night1) + n(ih.night2) + n(ih.nightDual) +
+    n(ih.nvg1) + n(ih.nvg2) + n(ih.nvgDual) +
+    n(ih.captain) + n(ih.instrument)
+  ).toFixed(1);
 }
 
 export interface OtherAircraftEntry {

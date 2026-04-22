@@ -1137,6 +1137,28 @@ export async function exportIndividualPilotRecord(
     body: [
       [shape(tr("bucket_opening", lang)), pilot.openingDay.toFixed(1), pilot.openingNight.toFixed(1),
        pilot.openingNvg.toFixed(1), "—", "—"],
+      // INITIAL HOURS (baseline) — pre-Hawk-Eye lifetime hours. Shown as a
+      // separate row so the operator can see exactly what the baseline
+      // contributes to the lifetime totals beneath it. Only printed when
+      // a baseline exists. See `.local/memory/initial-hours.md`.
+      // Skip the row entirely when every baseline bucket is zero — avoids
+      // a noisy "0.0  0.0  0.0  —  0.0" line on legacy pilots whose JSONB
+      // happens to carry an all-zero `initialHours` object.
+      ...(pilot.initialHours && (
+        (pilot.initialHours.day1 ?? 0) + (pilot.initialHours.day2 ?? 0) + (pilot.initialHours.dayDual ?? 0) +
+        (pilot.initialHours.night1 ?? 0) + (pilot.initialHours.night2 ?? 0) + (pilot.initialHours.nightDual ?? 0) +
+        (pilot.initialHours.nvg1 ?? 0) + (pilot.initialHours.nvg2 ?? 0) + (pilot.initialHours.nvgDual ?? 0) +
+        (pilot.initialHours.captain ?? 0) + (pilot.initialHours.instrument ?? 0)
+      ) > 0
+        ? [[
+            lang === "ar" ? "الساعات الأولية" : "Initial (baseline)",
+            ((pilot.initialHours.day1 ?? 0) + (pilot.initialHours.day2 ?? 0) + (pilot.initialHours.dayDual ?? 0)).toFixed(1),
+            ((pilot.initialHours.night1 ?? 0) + (pilot.initialHours.night2 ?? 0) + (pilot.initialHours.nightDual ?? 0)).toFixed(1),
+            ((pilot.initialHours.nvg1 ?? 0) + (pilot.initialHours.nvg2 ?? 0) + (pilot.initialHours.nvgDual ?? 0)).toFixed(1),
+            "—",
+            (pilot.initialHours.captain ?? 0).toFixed(1),
+          ]]
+        : []),
       [shape(tr("bucket_month", lang)), pilot.monthDay.toFixed(1), pilot.monthNight.toFixed(1),
        pilot.monthNvg.toFixed(1), pilot.monthSim.toFixed(1), pilot.monthCaptain.toFixed(1)],
       [shape(tr("bucket_total", lang)), pilot.totalDay.toFixed(1), pilot.totalNight.toFixed(1),

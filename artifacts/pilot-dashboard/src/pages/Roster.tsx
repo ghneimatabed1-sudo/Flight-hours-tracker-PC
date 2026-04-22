@@ -5,8 +5,9 @@ import { RJAF_RANKS, lookupRankEn } from "@/lib/ranks";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots, useUpdatePilot, useCreatePilot, useDeletePilot, type Pilot } from "@/lib/squadron-data";
+import { EMPTY_INITIAL_HOURS, sumInitialHours, type InitialHours } from "@/lib/mock";
 import { getCurrencyWindow } from "@/lib/currency-settings";
-import { supabase, supabaseConfigured } from "@/lib/supabase";
+import { supabase, supabaseConfigured, recordAuditEvent } from "@/lib/supabase";
 import { fmtDateTimeDDMM } from "@/lib/format";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
@@ -381,6 +382,21 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
     splitQualificationSegments(pilot.qualifications),
   );
   const [qualSep, setQualSep] = useState<"/" | "-">(pilot.qualificationSeparator ?? "/");
+  // INITIAL HOURS — eleven-bucket baseline of pre-Hawk-Eye lifetime hours.
+  // See `.local/memory/initial-hours.md` for the canonical rule. Folds into
+  // lifetime totals only — never touches currency or Monthly Report.
+  const [initialHours, setInitialHours] = useState<InitialHours>(
+    pilot.initialHours ?? { ...EMPTY_INITIAL_HOURS },
+  );
+  const [ihExpanded, setIhExpanded] = useState<boolean>(false);
+  // First-time confirmation: when the operator changes any baseline value
+  // for the first time on this open, we hold submit and show a dialog
+  // making the consequences explicit ("This adds NNN.N h to lifetime
+  // totals; currency and Monthly Report are NOT affected"). Once they
+  // confirm, subsequent saves on the same open skip the dialog.
+  const baselineDirty = JSON.stringify(initialHours) !== JSON.stringify(pilot.initialHours ?? EMPTY_INITIAL_HOURS);
+  const [baselineConfirmed, setBaselineConfirmed] = useState<boolean>(false);
+  const [pendingBaselineConfirm, setPendingBaselineConfirm] = useState<boolean>(false);
   const currencyWin = getCurrencyWindow();
 
   // lastFlown is the UI state — what the operator types. On save we convert
@@ -428,7 +444,35 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
     // the commander-only `lastSimDate` field — keep them in sync on save
     // so the visibility-restricted view still has a value.
     const lastSimDate = lastFlown.sim || p.lastSimDate || "";
-    onSave({ ...p, expiry, qualifications, qualification, qualificationSeparator: qualSep, lastSimDate });
+    // First-time baseline confirmation gate. We block the actual save and
+    // surface the warning dialog. The operator confirms (or cancels) and
+    // then submit() runs again with `baselineConfirmed === true`.
+    if (baselineDirty && !baselineConfirmed) {
+      setPendingBaselineConfirm(true);
+      return;
+    }
+    // Only persist initialHours if it has any non-zero value; an all-zero
+    // baseline is functionally identical to "not set" and we'd rather not
+    // pollute the JSONB with empty objects on every plain-edit save.
+    const ihToPersist = sumInitialHours(initialHours) > 0 ? initialHours : undefined;
+    // Audit log — `.local/memory/initial-hours.md` requires every baseline
+    // edit to write a `pilot:initial_hours` audit row capturing actor and
+    // before/after. Fire-and-forget; the save itself shouldn't block on
+    // the audit insert.
+    if (baselineDirty) {
+      void recordAuditEvent({
+        type: "pilot:initial_hours",
+        actor: undefined,
+        detail: {
+          pilotId: p.id,
+          pilotName: p.name,
+          before: pilot.initialHours ?? null,
+          after: ihToPersist ?? null,
+          deltaHours: +(sumInitialHours(initialHours) - sumInitialHours(pilot.initialHours)).toFixed(1),
+        },
+      }).catch(() => { /* swallow — audit is best-effort */ });
+    }
+    onSave({ ...p, expiry, qualifications, qualification, qualificationSeparator: qualSep, lastSimDate, initialHours: ihToPersist });
   };
   return (
     // NOTE: no backdrop-blur. Chromium's backdrop-filter on Windows w/ HW
@@ -541,11 +585,27 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
               <span className="block mt-1 text-[10px] text-muted-foreground">{t("qualificationsHelp")}</span>
             </label>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <NumField label={t("openingDay")} value={p.openingDay} onChange={v => set("openingDay", v)} testId="input-openingDay" />
-            <NumField label={t("openingNight")} value={p.openingNight} onChange={v => set("openingNight", v)} testId="input-openingNight" />
-            <NumField label={t("openingNvg")} value={p.openingNvg} onChange={v => set("openingNvg", v)} testId="input-openingNvg" />
-          </div>
+          <InitialHoursSection
+            value={initialHours}
+            onChange={setInitialHours}
+            expanded={ihExpanded}
+            onToggle={() => setIhExpanded(v => !v)}
+          />
+          {/* Legacy "Opening" hours — only shown when an existing pilot has
+              non-zero values. New pilots use the richer Initial Hours
+              section above; this block stays visible for back-compat so
+              existing data can still be edited / zeroed-out without losing
+              the entry point. */}
+          {(p.openingDay || p.openingNight || p.openingNvg) ? (
+            <div className="grid grid-cols-3 gap-3 pt-2 border-t border-border">
+              <div className="col-span-3 text-[11px] text-amber-300/80">
+                Legacy opening hours (pre-baseline). Move these into Initial Hours above and zero them out, or leave as-is — both add to lifetime totals.
+              </div>
+              <NumField label={t("openingDay")} value={p.openingDay} onChange={v => set("openingDay", v)} testId="input-openingDay" />
+              <NumField label={t("openingNight")} value={p.openingNight} onChange={v => set("openingNight", v)} testId="input-openingNight" />
+              <NumField label={t("openingNvg")} value={p.openingNvg} onChange={v => set("openingNvg", v)} testId="input-openingNvg" />
+            </div>
+          ) : null}
           <div className="grid grid-cols-3 gap-3 pt-2 border-t border-border">
             <div className="col-span-3">
               <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Last Currency Flown</div>
@@ -593,6 +653,158 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
             </button>
           </div>
         </form>
+      </div>
+      {pendingBaselineConfirm && (
+        <BaselineConfirmDialog
+          delta={sumInitialHours(initialHours) - sumInitialHours(pilot.initialHours)}
+          newTotal={sumInitialHours(initialHours)}
+          onCancel={() => setPendingBaselineConfirm(false)}
+          onConfirm={() => {
+            setBaselineConfirmed(true);
+            setPendingBaselineConfirm(false);
+            // Re-trigger the form submit now that the gate is open. We
+            // call submit directly with a synthetic event to skip having
+            // to round-trip through the DOM.
+            setTimeout(() => submit({ preventDefault: () => {} } as React.FormEvent), 0);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Initial Hours collapsible section ─────────────────────────────
+// Pre-Hawk-Eye baseline hours per pilot. Folds into lifetime totals
+// only — never into currency or Monthly Report.
+// See `.local/memory/initial-hours.md` for the canonical rule.
+function InitialHoursSection({
+  value,
+  onChange,
+  expanded,
+  onToggle,
+}: {
+  value: InitialHours;
+  onChange: (v: InitialHours) => void;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const total = sumInitialHours(value);
+  const dayHours   = (value.day1 ?? 0)   + (value.day2 ?? 0)   + (value.dayDual ?? 0);
+  const nightHours = (value.night1 ?? 0) + (value.night2 ?? 0) + (value.nightDual ?? 0);
+  const nvgHours   = (value.nvg1 ?? 0)   + (value.nvg2 ?? 0)   + (value.nvgDual ?? 0);
+  const plt1 = (value.day1 ?? 0) + (value.night1 ?? 0) + (value.nvg1 ?? 0);
+  const plt2 = (value.day2 ?? 0) + (value.night2 ?? 0) + (value.nvg2 ?? 0);
+  const set = <K extends keyof InitialHours>(k: K, v: number) =>
+    onChange({ ...value, [k]: v });
+
+  return (
+    <div className="pt-2 border-t border-border" data-testid="section-initial-hours">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="w-full flex items-center justify-between gap-2 text-left px-2 py-2 rounded-md hover:bg-secondary/40"
+        data-testid="toggle-initial-hours"
+      >
+        <div>
+          <div className="text-xs uppercase tracking-wider font-semibold text-muted-foreground">Initial Hours</div>
+          <div className="text-[10px] text-muted-foreground/80">Pre-Hawk-Eye lifetime hours · adds to totals · does not affect currency or Monthly Report</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-sm tabular-nums text-emerald-300" data-testid="text-initial-hours-total">
+            {total.toFixed(1)} h
+          </span>
+          <span className="text-muted-foreground text-xs">{expanded ? "▾" : "▸"}</span>
+        </div>
+      </button>
+      {expanded && (
+        <div className="mt-2 space-y-3 pl-2 pr-1">
+          {/* Live derived summary — mirrors the operator's previous mobile
+              app screen so the numbers feel familiar. */}
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-[11px] font-mono px-2 py-2 rounded-md bg-secondary/30 border border-border/60">
+            <div className="flex justify-between"><span className="text-muted-foreground">Total Flight Hours</span><span className="text-emerald-300">{total.toFixed(1)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">CAP (Captain)</span><span>{(value.captain ?? 0).toFixed(1)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Day Hours</span><span>{dayHours.toFixed(1)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Night Hours</span><span>{nightHours.toFixed(1)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">NVG Hours</span><span>{nvgHours.toFixed(1)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Instrument Hours</span><span>{(value.instrument ?? 0).toFixed(1)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">1st PLT Hours</span><span>{plt1.toFixed(1)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">2nd PLT Hours</span><span>{plt2.toFixed(1)}</span></div>
+          </div>
+          {/* Day group */}
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Day</div>
+            <div className="grid grid-cols-3 gap-3">
+              <NumField label="Day 1st PLT" value={value.day1} onChange={v => set("day1", v)} testId="input-ih-day1" />
+              <NumField label="Day 2nd PLT" value={value.day2} onChange={v => set("day2", v)} testId="input-ih-day2" />
+              <NumField label="Dual Day" value={value.dayDual} onChange={v => set("dayDual", v)} testId="input-ih-dayDual" />
+            </div>
+          </div>
+          {/* Night group */}
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Night</div>
+            <div className="grid grid-cols-3 gap-3">
+              <NumField label="Night 1st PLT" value={value.night1} onChange={v => set("night1", v)} testId="input-ih-night1" />
+              <NumField label="Night 2nd PLT" value={value.night2} onChange={v => set("night2", v)} testId="input-ih-night2" />
+              <NumField label="Dual Night" value={value.nightDual} onChange={v => set("nightDual", v)} testId="input-ih-nightDual" />
+            </div>
+          </div>
+          {/* NVG group */}
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">NVG</div>
+            <div className="grid grid-cols-3 gap-3">
+              <NumField label="NVG 1st PLT" value={value.nvg1} onChange={v => set("nvg1", v)} testId="input-ih-nvg1" />
+              <NumField label="NVG 2nd PLT" value={value.nvg2} onChange={v => set("nvg2", v)} testId="input-ih-nvg2" />
+              <NumField label="Dual NVG" value={value.nvgDual} onChange={v => set("nvgDual", v)} testId="input-ih-nvgDual" />
+            </div>
+          </div>
+          {/* Specials */}
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Specials</div>
+            <div className="grid grid-cols-2 gap-3">
+              <NumField label="CAP (Captain Hours)" value={value.captain} onChange={v => set("captain", v)} testId="input-ih-captain" />
+              <NumField label="Instrument Hours" value={value.instrument} onChange={v => set("instrument", v)} testId="input-ih-instrument" />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// First-time confirmation dialog the operator sees the first time they
+// touch any baseline value on a given open of the Edit Pilot dialog.
+function BaselineConfirmDialog({
+  delta,
+  newTotal,
+  onCancel,
+  onConfirm,
+}: {
+  delta: number;
+  newTotal: number;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const sign = delta >= 0 ? "+" : "−";
+  const magnitude = Math.abs(delta).toFixed(1);
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4" onClick={onCancel} data-testid="overlay-baseline-confirm">
+      <div className="bg-card border border-border rounded-lg shadow-2xl w-full max-w-md p-5 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="text-base font-semibold gold-grad">Confirm baseline change</div>
+        <div className="text-sm space-y-2">
+          <p>
+            This will <strong>{sign}{magnitude} h</strong> the pilot's baseline.
+            New baseline: <span className="font-mono text-emerald-300">{newTotal.toFixed(1)} h</span>.
+          </p>
+          <p className="text-muted-foreground text-xs">
+            Baseline hours add to lifetime totals (Ranking & Totals, the pilot's printed record).
+            They do <strong>NOT</strong> affect currency dates and they are <strong>NOT</strong> included in the Monthly Report.
+          </p>
+        </div>
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-md bg-secondary border border-border text-sm" data-testid="button-baseline-cancel">Cancel</button>
+          <button type="button" onClick={onConfirm} className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium" data-testid="button-baseline-confirm">Continue</button>
+        </div>
       </div>
     </div>
   );

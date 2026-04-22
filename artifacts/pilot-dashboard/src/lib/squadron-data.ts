@@ -120,6 +120,31 @@ function rowToPilot(r: Record<string, unknown>): Pilot {
     otherAircraft: Array.isArray(data.otherAircraft)
       ? (data.otherAircraft as Pilot["otherAircraft"])
       : undefined,
+    // INITIAL HOURS — read the eleven-bucket baseline from JSONB. No
+    // schema migration needed; lives inside `data`. Auto-migration:
+    // if the operator never opened the new form but has legacy
+    // openingDay/Night/Nvg values from the old simple form, surface
+    // those as 1st-PLT baseline so totals stay identical.
+    initialHours: (() => {
+      const ih = (data as Partial<Pilot>).initialHours;
+      const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+      if (ih && typeof ih === "object") {
+        return {
+          day1: num(ih.day1),
+          day2: num(ih.day2),
+          dayDual: num(ih.dayDual),
+          night1: num(ih.night1),
+          night2: num(ih.night2),
+          nightDual: num(ih.nightDual),
+          nvg1: num(ih.nvg1),
+          nvg2: num(ih.nvg2),
+          nvgDual: num(ih.nvgDual),
+          captain: num(ih.captain),
+          instrument: num(ih.instrument),
+        };
+      }
+      return undefined;
+    })(),
   };
 }
 
@@ -229,6 +254,7 @@ export function useUpdatePilot() {
           qualificationSeparator: p.qualificationSeparator,
           lastSimDate: p.lastSimDate,
           otherAircraft: p.otherAircraft,
+          initialHours: p.initialHours,
         },
       }).eq("id", p.id).select().single();
       if (error) throw error;
@@ -304,6 +330,7 @@ export function useCreatePilot() {
           qualificationSeparator: p.qualificationSeparator,
           lastSimDate: p.lastSimDate,
           otherAircraft: p.otherAircraft,
+          initialHours: p.initialHours,
         },
       });
 
@@ -704,6 +731,7 @@ async function applyCurrencyRefresh(
           qualificationSeparator: p.qualificationSeparator,
           lastSimDate: p.lastSimDate,
           otherAircraft: p.otherAircraft,
+          initialHours: p.initialHours,
         },
       }).eq("id", p.id);
       if (error) throw error;
@@ -1004,6 +1032,7 @@ function pilotDataPayload(p: Pilot) {
     qualificationSeparator: p.qualificationSeparator,
     lastSimDate: p.lastSimDate,
     otherAircraft: p.otherAircraft,
+    initialHours: p.initialHours,
   };
 }
 
