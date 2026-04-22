@@ -1946,12 +1946,15 @@ export function useSquadronSnapshot(
 }
 
 // Role helper: which roles are allowed to use the messages UI at all.
-// Commanders only — Squadron / Wing / Base. The squadron Ops Pilot
-// (role="ops"), Ops Pilot deputies (role="deputy") and Flight Cmdrs
-// are explicitly excluded: messages are a commander-tier channel, not
-// an ops-floor tool.
+// Commanders (Flight / Squadron / Wing / Base) AND the squadron Ops
+// Pilot. v1.1.58: Ops is included because in the live deployment the
+// Ops PC is the squadron's always-on desk and routinely receives
+// messages addressed to the squadron — without the inbox UI the
+// operator could see notifications arriving but had no way to open or
+// reply to them. Deputies remain excluded.
 export function canUseMessages(role: string | undefined, scope: string | undefined): boolean {
   if (role === "super_admin") return true;
+  if (role === "ops") return true;
   if (role === "commander") {
     return scope === "flight" || scope === "squadron" || scope === "wing" || scope === "base";
   }
