@@ -107,6 +107,18 @@ function rowsToSnapshot(
 ): PilotSnapshot {
   const d = pilot.data ?? {};
   const expiry = (d.expiry as Record<string, string> | undefined) ?? {};
+  // INITIAL HOURS — the PC dashboard now records an eleven-bucket pre-Hawk-Eye
+  // baseline per pilot under `data.initialHours`. The mobile app's calculation
+  // engine only understands the legacy single `openingDay/Night/Nvg/Captain`
+  // numbers, so we fold the matching baseline buckets into those fields here.
+  // That way a pilot's lifetime totals on the phone match the PC byte-for-byte
+  // without rewriting the mobile calc engine. See
+  // `.local/memory/initial-hours.md` for the canonical contract.
+  const ih = (d.initialHours as Record<string, unknown> | undefined) ?? undefined;
+  const ihDay     = ih ? num(ih.day1)   + num(ih.day2)   + num(ih.dayDual)   : 0;
+  const ihNight   = ih ? num(ih.night1) + num(ih.night2) + num(ih.nightDual) : 0;
+  const ihNvg     = ih ? num(ih.nvg1)   + num(ih.nvg2)   + num(ih.nvgDual)   : 0;
+  const ihCaptain = ih ? num(ih.captain) : 0;
   const profile: PilotProfile = {
     id: pilot.id,
     // Real military number lives inside the JSON `data` blob (the dashboard
@@ -119,10 +131,10 @@ function rowsToSnapshot(
     unit: pilot.unit ?? "",
     squadron: squadron ? `${squadron.number} ${squadron.name}` : "",
     phone: pilot.phone ?? undefined,
-    openingDay: num(d.openingDay),
-    openingNight: num(d.openingNight),
-    openingNvg: num(d.openingNvg),
-    openingCaptain: num(d.openingCaptain),
+    openingDay: num(d.openingDay) + ihDay,
+    openingNight: num(d.openingNight) + ihNight,
+    openingNvg: num(d.openingNvg) + ihNvg,
+    openingCaptain: num(d.openingCaptain) + ihCaptain,
     openingSim: num(d.openingSim),
     expiry: {
       day: str(expiry.day) ?? "",
