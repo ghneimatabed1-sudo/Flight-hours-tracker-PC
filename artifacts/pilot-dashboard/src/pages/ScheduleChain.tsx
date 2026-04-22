@@ -14,6 +14,7 @@ import {
   canUseScheduleChain,
   getLocalPcId,
   makePcMatcher,
+  squadronColor,
   type ScheduleRow,
   type ScheduleShare,
   type ScheduleProgram,
@@ -286,8 +287,42 @@ export default function ScheduleChain() {
   // them eliminates the drift risk where the message inbox and the
   // schedule inbox could disagree about which items belong to this seat.
   const matchesMe = useMemo(() => makePcMatcher(myPcId), [myPcId]);
-  const incoming = sharesQ.data.filter(s => matchesMe(s.currentPcId));
+  const incomingAll = sharesQ.data.filter(s => matchesMe(s.currentPcId));
   const sent = sharesQ.data.filter(s => matchesMe(s.originSquadronId) && !matchesMe(s.currentPcId));
+
+  // v1.1.65 — Wing-Cmdr inbox triage. With 15-20+ squadrons feeding
+  // up the chain the flat list is overwhelming, so the wing operator
+  // gets two simple controls: a "filter by squadron" chip row and a
+  // sort selector. State is local-only — no persistence needed.
+  const [wingSquadronFilter, setWingSquadronFilter] = useState<string | null>(null);
+  const [wingSort, setWingSort] = useState<"squadron" | "newest" | "oldest">("squadron");
+  const wingSquadronCounts = useMemo(() => {
+    if (myTier !== "wing") return [] as Array<{ id: string; name: string; count: number }>;
+    const m = new Map<string, { id: string; name: string; count: number }>();
+    for (const s of incomingAll) {
+      const cur = m.get(s.originSquadronId) ?? { id: s.originSquadronId, name: s.originSquadronName, count: 0 };
+      cur.count += 1;
+      m.set(s.originSquadronId, cur);
+    }
+    return Array.from(m.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [myTier, incomingAll]);
+  const incoming = useMemo(() => {
+    if (myTier !== "wing") return incomingAll;
+    let list = incomingAll;
+    if (wingSquadronFilter) list = list.filter(s => s.originSquadronId === wingSquadronFilter);
+    const copy = [...list];
+    if (wingSort === "squadron") {
+      copy.sort((a, b) =>
+        a.originSquadronName.localeCompare(b.originSquadronName) ||
+        b.date.localeCompare(a.date)
+      );
+    } else if (wingSort === "newest") {
+      copy.sort((a, b) => b.date.localeCompare(a.date));
+    } else {
+      copy.sort((a, b) => a.date.localeCompare(b.date));
+    }
+    return copy;
+  }, [myTier, incomingAll, wingSquadronFilter, wingSort]);
 
   return (
     <div>
@@ -461,18 +496,97 @@ export default function ScheduleChain() {
 
       {/* Incoming for this PC */}
       <Card className="mb-3">
-        <div className="text-sm font-semibold mb-2">Incoming · awaiting your action ({incoming.length})</div>
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+          <div className="text-sm font-semibold">
+            Incoming · awaiting your action ({incoming.length}
+            {wingSquadronFilter ? ` of ${incomingAll.length}` : ""})
+          </div>
+          {/* v1.1.65 — Wing-Cmdr triage controls. Shown only when the
+              wing operator is signed in; squadron / flight / ops / base
+              tiers don't see enough volume to warrant sorting controls. */}
+          {myTier === "wing" && incomingAll.length > 1 && (
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="text-muted-foreground uppercase tracking-wider">Sort</span>
+              <select
+                value={wingSort}
+                onChange={e => setWingSort(e.target.value as "squadron" | "newest" | "oldest")}
+                className="px-2 py-1 rounded bg-input border border-border"
+                data-testid="wing-sort"
+              >
+                <option value="squadron">By squadron (A→Z)</option>
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+              </select>
+            </div>
+          )}
+        </div>
+
+        {/* Squadron filter chips for the Wing Cmdr — one chip per
+            squadron with a pending count, plus an "All" reset chip.
+            Each chip is colour-coded with the same palette used on the
+            badge inside each row, so the wing operator builds an
+            instinctive colour memory for each squadron. */}
+        {myTier === "wing" && wingSquadronCounts.length > 1 && (
+          <div className="flex flex-wrap gap-1.5 mb-3 pb-2 border-b border-border">
+            <button
+              type="button"
+              onClick={() => setWingSquadronFilter(null)}
+              className={`text-[11px] px-2 py-1 rounded border ${
+                wingSquadronFilter === null
+                  ? "bg-foreground/10 border-foreground/40 text-foreground font-semibold"
+                  : "bg-secondary/40 border-border text-muted-foreground hover:bg-secondary"
+              }`}
+              data-testid="wing-filter-all"
+            >
+              All ({incomingAll.length})
+            </button>
+            {wingSquadronCounts.map(s => {
+              const pal = squadronColor(s.id);
+              const active = wingSquadronFilter === s.id;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setWingSquadronFilter(active ? null : s.id)}
+                  className={`text-[11px] px-2 py-1 rounded border inline-flex items-center gap-1.5 ${pal.badge} ${
+                    active ? "ring-2 ring-offset-1 ring-offset-background ring-foreground/40 font-semibold" : "opacity-90 hover:opacity-100"
+                  }`}
+                  data-testid={`wing-filter-${s.id}`}
+                >
+                  <span className={`inline-block h-1.5 w-1.5 rounded-full ${pal.stripe}`} />
+                  {s.name}
+                  <span className="tabular-nums opacity-80">· {s.count}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {incoming.length === 0 ? (
           <div className="text-xs text-muted-foreground py-3">Nothing waiting.</div>
         ) : (
           <div className="space-y-2">
             {incoming.map(share => {
               const open = reviewing === share.id;
+              // v1.1.65 — colour the squadron badge + a 4px left stripe
+              // with this squadron's deterministic palette so a Wing Cmdr
+              // scanning many rows can pick out a specific squadron at
+              // a glance without reading the name first.
+              const pal = squadronColor(share.originSquadronId);
               return (
-                <div key={share.id} className="border border-border rounded-md" data-testid={`incoming-${share.id}`}>
+                <div
+                  key={share.id}
+                  className="border border-border rounded-md overflow-hidden flex"
+                  data-testid={`incoming-${share.id}`}
+                >
+                  <div className={`w-1 shrink-0 ${pal.stripe}`} aria-hidden="true" />
+                  <div className="flex-1 min-w-0">
                   <button type="button" onClick={() => setReviewing(open ? null : share.id)} className="w-full px-3 py-2 flex items-center justify-between hover:bg-secondary/30 text-left">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-[10px] uppercase tracking-wider px-2 py-1 rounded bg-sky-500/20 text-sky-200 border border-sky-400/30 font-semibold whitespace-nowrap" data-testid={`origin-sqn-${share.id}`}>
+                      <span
+                        className={`text-[10px] uppercase tracking-wider px-2 py-1 rounded border font-semibold whitespace-nowrap ${pal.badge}`}
+                        data-testid={`origin-sqn-${share.id}`}
+                      >
                         {share.originSquadronName}
                       </span>
                       <div className="min-w-0">
@@ -656,6 +770,7 @@ export default function ScheduleChain() {
                       </div>
                     </div>
                   )}
+                  </div>
                 </div>
               );
             })}

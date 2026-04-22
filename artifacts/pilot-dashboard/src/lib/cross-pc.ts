@@ -357,6 +357,40 @@ function writeRegistry(rows: SquadronPC[]) {
 function localPcId(): string {
   return localStorage.getItem("rjaf.xpc.localId") ?? "";
 }
+// v1.1.65 — squadronColor returns a stable, deterministic Tailwind
+// palette per squadron id so 15-20+ squadrons stay visually distinct
+// at a glance on the Wing / Base / HQ commander surfaces. The hash is
+// intentionally simple (sum of char codes) — same id → same colour
+// every render, every PC, no server round-trip required.
+export interface SquadronPalette {
+  /** Subtle pill background, e.g. for inline badges. */
+  badge: string;
+  /** Solid coloured stripe / left border for cards. */
+  stripe: string;
+  /** Plain hex for inline styles when Tailwind classes can't reach. */
+  hex: string;
+}
+const SQUADRON_PALETTES: SquadronPalette[] = [
+  { badge: "bg-sky-500/15 text-sky-200 border-sky-400/40",         stripe: "bg-sky-400",     hex: "#38bdf8" },
+  { badge: "bg-emerald-500/15 text-emerald-200 border-emerald-400/40", stripe: "bg-emerald-400", hex: "#34d399" },
+  { badge: "bg-amber-500/15 text-amber-200 border-amber-400/40",   stripe: "bg-amber-400",   hex: "#fbbf24" },
+  { badge: "bg-violet-500/15 text-violet-200 border-violet-400/40", stripe: "bg-violet-400",  hex: "#a78bfa" },
+  { badge: "bg-rose-500/15 text-rose-200 border-rose-400/40",      stripe: "bg-rose-400",    hex: "#fb7185" },
+  { badge: "bg-cyan-500/15 text-cyan-200 border-cyan-400/40",      stripe: "bg-cyan-400",    hex: "#22d3ee" },
+  { badge: "bg-fuchsia-500/15 text-fuchsia-200 border-fuchsia-400/40", stripe: "bg-fuchsia-400", hex: "#e879f9" },
+  { badge: "bg-lime-500/15 text-lime-200 border-lime-400/40",      stripe: "bg-lime-400",    hex: "#a3e635" },
+  { badge: "bg-orange-500/15 text-orange-200 border-orange-400/40", stripe: "bg-orange-400", hex: "#fb923c" },
+  { badge: "bg-teal-500/15 text-teal-200 border-teal-400/40",      stripe: "bg-teal-400",    hex: "#2dd4bf" },
+  { badge: "bg-indigo-500/15 text-indigo-200 border-indigo-400/40", stripe: "bg-indigo-400", hex: "#818cf8" },
+  { badge: "bg-pink-500/15 text-pink-200 border-pink-400/40",      stripe: "bg-pink-400",    hex: "#f472b6" },
+];
+export function squadronColor(squadronId: string): SquadronPalette {
+  if (!squadronId) return SQUADRON_PALETTES[0];
+  let h = 0;
+  for (let i = 0; i < squadronId.length; i++) h = (h * 31 + squadronId.charCodeAt(i)) >>> 0;
+  return SQUADRON_PALETTES[h % SQUADRON_PALETTES.length];
+}
+
 export function getLocalPcId(): string {
   return localPcId();
 }

@@ -24,6 +24,7 @@ import {
   useRegisteredPCs,
   canViewFinalSchedules,
   getLocalPcId,
+  squadronColor,
   type ScheduleShare,
 } from "@/lib/cross-pc";
 import { usePilots } from "@/lib/squadron-data";
@@ -150,12 +151,20 @@ export default function FinalSchedules() {
         {grouped.map(({ sqnId, sqnName, latest, shares: sqnShares }) => {
           const expanded = openSquadron === sqnId;
           const cmdrName = sqnCommanderFor(sqnShares[0]);
+          // v1.1.65 — colour each squadron card with its deterministic
+          // palette: a 4px left stripe + a colour-matched name pill.
+          // Same colours as the Wing-Cmdr inbox, so a Base / HQ
+          // operator who's been talking to the wing about a squadron
+          // recognises it instantly here.
+          const pal = squadronColor(sqnId);
           return (
             <div
               key={sqnId}
-              className="rounded-md border border-border bg-card overflow-hidden"
+              className="rounded-md border border-border bg-card overflow-hidden flex"
               data-testid={`final-sched-sqn-${sqnId}`}
             >
+              <div className={`w-1 shrink-0 ${pal.stripe}`} aria-hidden="true" />
+              <div className="flex-1 min-w-0">
               {/* Squadron header row — click to expand the schedule list. */}
               <button
                 onClick={() => {
@@ -169,8 +178,12 @@ export default function FinalSchedules() {
                     ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
                     : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
                   <div className="min-w-0">
-                    <div className="text-sm font-semibold truncate">{sqnName}</div>
-                    <div className="text-[11px] text-muted-foreground truncate">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border font-semibold ${pal.badge}`}>
+                        {sqnName}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-muted-foreground truncate mt-0.5">
                       {lang === "ar" ? "قائد السرب: " : "Sqn Cmdr: "}
                       <span className="text-foreground/80">{cmdrName}</span>
                     </div>
@@ -239,6 +252,7 @@ export default function FinalSchedules() {
                   })}
                 </div>
               )}
+              </div>
             </div>
           );
         })}
