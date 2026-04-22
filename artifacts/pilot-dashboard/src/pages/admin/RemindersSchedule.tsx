@@ -14,8 +14,46 @@ import {
   loadReminderSession, saveReminderSession, clearReminderSession,
 } from "@/lib/reminder-session";
 import {
-  AlarmClock, RefreshCw, Power, PowerOff, ListChecks, AlertTriangle, Lock, Play,
+  AlarmClock, RefreshCw, Power, PowerOff, ListChecks, AlertTriangle, Lock, Play, ChevronDown, ChevronRight,
 } from "lucide-react";
+
+// Jordan is UTC+3 year-round (no daylight saving). The pg_cron schedule
+// is stored in UTC, so we translate the operator's local clock time to
+// UTC when writing and back to local when reading. If the operator is
+// somewhere else, change this constant — the rest of the math follows.
+const LOCAL_TZ_OFFSET_HOURS = 3;
+const LOCAL_TZ_LABEL = "Jordan time (UTC+3)";
+
+// Build the daily cron expression `M H * * *` from a local-time HH:MM.
+// Returns the expression in UTC because pg_cron / Supabase Cron run in
+// UTC and that's what the edge function expects.
+function localTimeToCron(hhmm: string): string {
+  const [hStr, mStr] = hhmm.split(":");
+  const h = Math.max(0, Math.min(23, parseInt(hStr, 10) || 0));
+  const m = Math.max(0, Math.min(59, parseInt(mStr, 10) || 0));
+  // Jordan local hour - 3 = UTC hour. Wrap with +24 then mod 24 for
+  // any negative result (e.g. local 02:00 -> UTC 23:00 of previous day).
+  const utcH = (h - LOCAL_TZ_OFFSET_HOURS + 24) % 24;
+  return `${m} ${utcH} * * *`;
+}
+
+// Inverse: parse `M H * * *` (UTC) and return the equivalent local
+// HH:MM. Returns null when the cron is anything other than a plain
+// daily expression — in that case the UI falls back to the advanced
+// (raw cron) editor instead of lying about what time it'll fire.
+function cronToLocalTime(cron: string | undefined): string | null {
+  if (!cron) return null;
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const [mStr, hStr, dom, mon, dow] = parts;
+  if (dom !== "*" || mon !== "*" || dow !== "*") return null;
+  const m = parseInt(mStr, 10);
+  const h = parseInt(hStr, 10);
+  if (Number.isNaN(m) || Number.isNaN(h)) return null;
+  if (m < 0 || m > 59 || h < 0 || h > 23) return null;
+  const localH = (h + LOCAL_TZ_OFFSET_HOURS) % 24;
+  return `${String(localH).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
 
 interface ScheduleRun {
   runid: number;
@@ -56,6 +94,12 @@ export default function RemindersSchedule() {
   const [status, setStatus] = useState<ScheduleStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cronInput, setCronInput] = useState(DEFAULT_CRON);
+  // Friendly local-time editor sits in front of the raw cron field.
+  // It is the SOURCE OF TRUTH for the operator; cronInput is what gets
+  // sent to the backend. We keep them in sync via the helpers above.
+  // Default 06:00 UTC -> 09:00 Jordan, matching the existing default.
+  const [localTime, setLocalTime] = useState<string>(() => cronToLocalTime(DEFAULT_CRON) ?? "09:00");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [pwd, setPwd] = useState("");
@@ -103,7 +147,15 @@ export default function RemindersSchedule() {
     }
     const s = res.data.status as ScheduleStatus;
     setStatus(s);
-    if (s.schedule) setCronInput(s.schedule);
+    if (s.schedule) {
+      setCronInput(s.schedule);
+      // Try to reflect the server's current schedule back into the
+      // friendly time picker. If it's a non-daily cron (weekly, ranges,
+      // etc.) the helper returns null and we leave the picker alone —
+      // the operator will see the raw cron in the Advanced section.
+      const localT = cronToLocalTime(s.schedule);
+      if (localT) setLocalTime(localT);
+    }
   }
 
   // Auto-refresh on mount if a session is already cached.
@@ -333,15 +385,59 @@ export default function RemindersSchedule() {
           </div>
 
           <div className="space-y-2 pt-1">
-            <label className="text-sm font-medium">{t("cronExpression")}</label>
-            <Input
-              value={cronInput}
-              onChange={(e) => setCronInput(e.target.value)}
-              placeholder={DEFAULT_CRON}
-              className="font-mono max-w-xs"
-              data-testid="input-cron"
-            />
-            <p className="text-[11px] text-muted-foreground">{t("cronExpressionHint")}</p>
+            <label className="text-sm font-medium">Notification time</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="time"
+                value={localTime}
+                onChange={(e) => {
+                  // Keep both states in sync. Local time is what the
+                  // operator sees and edits; cronInput is what we send
+                  // to the backend on Enable / re-apply.
+                  const v = e.target.value || "09:00";
+                  setLocalTime(v);
+                  setCronInput(localTimeToCron(v));
+                }}
+                className="font-mono w-32"
+                data-testid="input-local-time"
+              />
+              <span className="text-xs text-muted-foreground">{LOCAL_TZ_LABEL}</span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Pilots will receive currency-expiry reminders every day at this time. Press
+              {" "}<strong>{status?.enabled ? "Re-apply" : "Enable schedule"}</strong> for the change to take effect.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((v) => !v)}
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mt-1"
+              data-testid="button-toggle-advanced"
+            >
+              {advancedOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              Advanced (raw cron expression)
+            </button>
+            {advancedOpen && (
+              <div className="space-y-1 pl-4 border-s border-border">
+                <label className="text-xs font-medium text-muted-foreground">{t("cronExpression")}</label>
+                <Input
+                  value={cronInput}
+                  onChange={(e) => {
+                    // Power users can type a custom cron (e.g. weekly,
+                    // weekdays only). When they do, the friendly picker
+                    // can no longer represent it accurately, so we hide
+                    // its sync — but the cron field itself drives Enable.
+                    setCronInput(e.target.value);
+                    const t = cronToLocalTime(e.target.value);
+                    if (t) setLocalTime(t);
+                  }}
+                  placeholder={DEFAULT_CRON}
+                  className="font-mono max-w-xs"
+                  data-testid="input-cron"
+                />
+                <p className="text-[11px] text-muted-foreground">{t("cronExpressionHint")}</p>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap gap-2 pt-2">
