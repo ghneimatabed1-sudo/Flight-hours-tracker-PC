@@ -354,7 +354,7 @@ export default function MonthlyReport() {
       {/* ───────── FORM 1 ───────── */}
       <section className="form-page" data-testid="form1">
         <div className="form-meta">
-          <div><b>ORFG RCN FORM 1</b><br/>ORFG HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div><b>QRFG RCN FORM 1</b><br/>QRFG HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
           <div className="text-center">
             <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
             <div className="form-sub">INDIVIDUAL PILOT ACHIEVEMENTS</div>
@@ -435,7 +435,7 @@ export default function MonthlyReport() {
       {/* ───────── FORM 2 ───────── */}
       <section className="form-page" data-testid="form2">
         <div className="form-meta">
-          <div><b>ORFG RCN FORM 2</b><br/>ORFG HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div><b>QRFG RCN FORM 2</b><br/>QRFG HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
           <div className="text-center">
             <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
             <div className="form-sub">INDIVIDUAL PILOT ACHIEVEMENTS</div>
@@ -503,7 +503,7 @@ export default function MonthlyReport() {
       {/* ───────── FORM 3 ───────── */}
       <section className="form-page" data-testid="form3">
         <div className="form-meta">
-          <div><b>ORFG RCN FORM 3</b><br/>ORFG HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div><b>QRFG RCN FORM 3</b><br/>QRFG HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
           <div className="text-center">
             <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
             <div className="form-sub">MONTHLY PLANNED FLYING TASKS</div>
@@ -603,7 +603,7 @@ export default function MonthlyReport() {
       {/* ───────── FORM 4 ───────── */}
       <section className="form-page" data-testid="form4">
         <div className="form-meta">
-          <div><b>ORFG RCN FORM 4</b><br/>MONTH : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div><b>QRFG RCN FORM 4</b><br/>MONTH : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
           <div className="text-center">
             <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
             <div className="form-sub">MONTHLY PLANNED FLYING TASKS</div>

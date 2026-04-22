@@ -125,7 +125,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               return user?.role === "ops";
             }
             if (p === "/monthly-report") {
-              // Monthly Report (ORFG RCN Forms 1-4 + Arabic roster) is owned
+              // Monthly Report (QRFG RCN Forms 1-4 + Arabic roster) is owned
               // by the squadron ops officer.
               return user?.role === "ops";
             }

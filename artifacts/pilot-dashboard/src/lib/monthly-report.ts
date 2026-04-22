@@ -1,4 +1,4 @@
-// Monthly Report engine — computes ORFG RCN Forms 1, 2, 3, 4 and the
+// Monthly Report engine — computes QRFG RCN Forms 1, 2, 3, 4 and the
 // Arabic roster sheet from existing pilot + sortie data, leaving only the
 // values that genuinely change month-to-month (squadron strength,
 // discipline morale, planned sorties, lecture hours, etc.) for the ops
