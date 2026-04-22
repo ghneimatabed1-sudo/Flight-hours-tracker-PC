@@ -579,17 +579,25 @@ export function useSorties(): UseQueryResult<Sortie[]> & { data: Sortie[] } {
   return { ...q, data: q.data ?? fallback } as UseQueryResult<Sortie[]> & { data: Sortie[] };
 }
 
-// Currency auto-refresh: when a Day/Night/NVG sortie is logged, push the
-// affected pilots' expiry dates forward to sortie-date + N days (per the
+// Currency auto-refresh: when a sortie is logged, push the affected
+// pilots' expiry dates forward to sortie-date + N days (per the
 // per-currency window configured under Settings). Never moves an expiry
 // backwards — if the pilot already has a later date on record (from a more
 // recent sortie), we keep the later one. Applies to both P1 and P2.
 //
-// CRITICAL: Day/Night/NVG are FULLY INDEPENDENT — a Night sortie refreshes
-// `expiry.night` only; an NVG sortie refreshes `expiry.nvg` only. Neither
-// bumps the other. The old "Night and NVG share a currency" shortcut was
-// retired in the April 2026 rebuild because it caused pilots to look
-// current on NVG without ever actually flying it.
+// CANONICAL RULES (see replit.md → "Domain Logic — Currency Refresh
+// Rules" — do not change these without operator sign-off):
+//   - Day sortie       → bumps expiry.day   only (window: w.day, default 30 d)
+//   - Night sortie     → bumps expiry.night only (window: w.night, default 30 d)
+//   - NVG sortie       → bumps expiry.nvg   only (window: w.nvg, default 30 d)
+//   - IRT/instrument   → bumps expiry.irt   only (window: w.instrument, 365 d)
+//                        Triggered when sortieType === "IRT" OR
+//                        instrumentFlight === true.
+//   - Simulator        → MANUAL ONLY, never auto-bumped here. Sim is an
+//                        overseas training event that the operator types
+//                        in by hand on the pilot form.
+//   - Medical          → MANUAL ONLY (doctor visit, not a flight).
+// Day/Night/NVG/IRT are FULLY INDEPENDENT — flying one never bumps another.
 import { getCurrencyWindow } from "./currency-settings";
 function bumpDate(current: string, sortieDate: string, days: number): string {
   const d = new Date(sortieDate);
@@ -600,12 +608,28 @@ function bumpDate(current: string, sortieDate: string, days: number): string {
   return iso > current ? iso : current;
 }
 
+interface RefreshSortie {
+  date: string;
+  pilotId: string;
+  coPilotId: string;
+  condition?: "Day" | "Night" | "NVG";
+  // IRT signal — either the dedicated checkbox is on, OR the operator
+  // chose "IRT" as the sortie type. Either one refreshes IRT currency.
+  instrumentFlight?: boolean;
+  sortieType?: string;
+}
+
 async function refreshCurrenciesForSortie(
-  s: { date: string; pilotId: string; coPilotId: string; condition?: "Day" | "Night" | "NVG" },
+  s: RefreshSortie,
   getPilot: (id: string) => Pilot | undefined,
   persist: (p: Pilot) => Promise<void>,
 ) {
-  if (!s.condition) return;
+  // IRT credit fires from EITHER signal — the dedicated Instrument
+  // checkbox or selecting "IRT" as the sortie type. RJAF practice
+  // treats both as the same training event.
+  const isIrt = !!s.instrumentFlight || (s.sortieType ?? "").trim().toUpperCase() === "IRT";
+  // Skip only when there's nothing to refresh at all.
+  if (!s.condition && !isIrt) return;
   const w = getCurrencyWindow();
   const ids = [s.pilotId, s.coPilotId].filter(Boolean);
   for (const id of ids) {
@@ -616,24 +640,31 @@ async function refreshCurrenciesForSortie(
       next.day = bumpDate(p.expiry.day, s.date, w.day);
     } else if (s.condition === "Night") {
       next.night = bumpDate(p.expiry.night, s.date, w.night);
-    } else {
+    } else if (s.condition === "NVG") {
       // NVG only — never touches `night`.
       next.nvg = bumpDate(p.expiry.nvg, s.date, w.nvg);
+    }
+    if (isIrt) {
+      // IRT runs in addition to Day/Night/NVG — a Day-condition IRT
+      // sortie bumps both Day and IRT.
+      next.irt = bumpDate(p.expiry.irt, s.date, w.instrument);
     }
     if (
       next.day === p.expiry.day &&
       next.night === p.expiry.night &&
-      next.nvg === p.expiry.nvg
+      next.nvg === p.expiry.nvg &&
+      next.irt === p.expiry.irt
     ) continue;
     await persist({ ...p, expiry: next });
   }
 }
 
 async function applyCurrencyRefresh(
-  s: { date: string; pilotId: string; coPilotId: string; condition?: "Day" | "Night" | "NVG" },
+  s: RefreshSortie,
   qc: ReturnType<typeof useQueryClient>,
 ) {
-  if (!s.condition) return;
+  const isIrt = !!s.instrumentFlight || (s.sortieType ?? "").trim().toUpperCase() === "IRT";
+  if (!s.condition && !isIrt) return;
   if (!isLive()) {
     const arr = getMockPilots();
     await refreshCurrenciesForSortie(
