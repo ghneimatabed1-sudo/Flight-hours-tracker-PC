@@ -3,6 +3,7 @@ import { useIsFetching, useIsMutating } from "@tanstack/react-query";
 import { CircleDot, Loader2, AlertTriangle } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { getLastDataErrorAt, subscribeDataErrors, clearDataError } from "@/lib/query-client";
+import { getHeartbeatStatus, subscribeHeartbeatStatus } from "@/lib/cross-pc";
 
 // A tiny three-state pill that lives in the sidebar/topbar:
 //  • green idle — nothing in flight, no recent error
@@ -17,11 +18,19 @@ export function LiveDataIndicator({ compact = false }: { compact?: boolean }) {
   const mutating = useIsMutating();
   const [, setTick] = useState(0);
   const lastErr = getLastDataErrorAt();
+  const heartbeat = getHeartbeatStatus();
 
-  useEffect(() => subscribeDataErrors(() => setTick(x => x + 1)), []);
+  useEffect(() => {
+    const u1 = subscribeDataErrors(() => setTick(x => x + 1));
+    const u2 = subscribeHeartbeatStatus(() => setTick(x => x + 1));
+    return () => { u1(); u2(); };
+  }, []);
 
   const busy = fetching > 0 || mutating > 0;
-  const errored = lastErr !== null;
+  // Treat a stuck heartbeat as an error even if no other mutation has
+  // failed, so a Flight/Squadron PC whose only failing call is the
+  // 30s heartbeat upsert still flips the indicator red.
+  const errored = lastErr !== null || heartbeat.errorMsg !== null;
 
   let label: string;
   let cls: string;
@@ -40,11 +49,18 @@ export function LiveDataIndicator({ compact = false }: { compact?: boolean }) {
     Icon = CircleDot;
   }
 
+  // Hover tooltip: when there's a heartbeat error, surface the exact
+  // message so the operator (or a developer doing remote support) can
+  // see WHY the cross-PC sync is failing without opening the console.
+  const tooltip = heartbeat.errorMsg
+    ? `${label} — ${heartbeat.errorMsg}`
+    : label;
+
   return (
     <button
       type="button"
-      onClick={errored ? clearDataError : undefined}
-      title={label}
+      onClick={errored ? () => { clearDataError(); setTick(x => x + 1); } : undefined}
+      title={tooltip}
       data-testid="indicator-live-data"
       className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border ${cls}`}
     >

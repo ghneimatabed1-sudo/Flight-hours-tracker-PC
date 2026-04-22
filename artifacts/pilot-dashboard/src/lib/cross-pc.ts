@@ -22,8 +22,59 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import type { Sortie } from "./mock";
 import { supabase, supabaseConfigured, recordAuditEvent } from "./supabase";
+import { recordDataError } from "./query-client";
 
 const isLive = () => supabaseConfigured && supabase !== null;
+
+// ---------------------------------------------------------------------
+// Heartbeat status — surfaces silent xpc_registry/xpc_user_pcs upsert
+// failures to the operator. Before this existed, a Flight or Squadron
+// PC could show the green "Live" indicator (auth session OK, reads
+// working) while every 30s heartbeat write was being rejected by RLS,
+// so the PC never appeared in any other operator's picker. Now any
+// failed heartbeat tick flips the existing red data-error indicator
+// AND emits a toast (deduped by message so a stable failure does not
+// spam every 30s).
+// ---------------------------------------------------------------------
+let lastHeartbeatErrorMsg: string | null = null;
+let lastHeartbeatErrorAt: number | null = null;
+let lastHeartbeatOkAt: number | null = null;
+const heartbeatListeners = new Set<() => void>();
+
+function notifyHeartbeat() { for (const fn of heartbeatListeners) fn(); }
+
+function reportHeartbeatError(msg: string) {
+  lastHeartbeatErrorAt = Date.now();
+  // Always log to the console so a developer pulling logs from a remote
+  // PC can see every tick's failure, not just the first one.
+  console.warn("[xpc heartbeat]", msg);
+  // Only flip the global red pill / fire a toast when the message
+  // CHANGES — otherwise a stable failure (e.g. "RLS denied") would
+  // produce a destructive toast every 30s and make the UI unusable.
+  if (msg !== lastHeartbeatErrorMsg) {
+    lastHeartbeatErrorMsg = msg;
+    recordDataError(`Cross-PC heartbeat failed: ${msg}`);
+  }
+  notifyHeartbeat();
+}
+
+function clearHeartbeatError() {
+  lastHeartbeatOkAt = Date.now();
+  if (lastHeartbeatErrorMsg !== null) {
+    lastHeartbeatErrorMsg = null;
+    lastHeartbeatErrorAt = null;
+    notifyHeartbeat();
+  }
+}
+
+export function getHeartbeatStatus(): { errorMsg: string | null; errorAt: number | null; okAt: number | null } {
+  return { errorMsg: lastHeartbeatErrorMsg, errorAt: lastHeartbeatErrorAt, okAt: lastHeartbeatOkAt };
+}
+
+export function subscribeHeartbeatStatus(fn: () => void): () => void {
+  heartbeatListeners.add(fn);
+  return () => heartbeatListeners.delete(fn);
+}
 
 // PostgREST returns PGRST205 when a table referenced in code does not yet
 // exist in the central Supabase schema (i.e. migrations 0011/0012/0013
@@ -485,18 +536,33 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
   const idx = rows.findIndex(r => r.id === o.id);
   if (idx >= 0) rows[idx] = { ...rows[idx], ...entry }; else rows.push(entry);
   writeRegistry(rows);
-  // Fire-and-forget upsert into the shared registry. Failures are silent
-  // — this runs every 30s anyway so a flaky write recovers on its own.
-  // The PC-claim in xpc_user_pcs is now handled by ensureMyPcClaim()
-  // with retry semantics, since it's the gate for every cross-PC RLS
-  // policy (a missed claim = every send/receive fails with code 42501
-  // "row violates row-level security policy").
+  // Heartbeat write path. We MUST do these two upserts in sequence and
+  // both must succeed, or this PC will be invisible to every other
+  // operator in the ecosystem:
+  //   1. xpc_user_pcs  — claims `o.id` for the current auth.uid so RLS
+  //                      lets the PC publish on cross-PC tables.
+  //   2. xpc_registry  — publishes "this PC is alive at <last_seen>"
+  //                      so other operators' pickers can see it.
+  //
+  // Historically these were both fire-and-forget with empty catch
+  // blocks. A Flight or Squadron Commander PC would sign in, the
+  // registry SELECT would succeed (so the green "Live" pill lit up),
+  // but the registry UPSERT would silently fail under RLS — leaving
+  // the PC invisible to everyone else. The new path captures the
+  // error and surfaces it through the existing data-error indicator.
   if (isLive()) {
-    void ensureMyPcClaim(o.id);
     void (async () => {
+      const claimOk = await ensureMyPcClaim(o.id);
+      if (!claimOk) {
+        reportHeartbeatError(
+          `Could not claim PC "${o.id}" — cloud sign-in may not have completed yet. ` +
+          `If this persists, sign out and sign back in.`,
+        );
+        return;
+      }
       try {
         const dbTier = o.tier === "flight" ? "squadron" : o.tier;
-        await supabase!.from("xpc_registry").upsert({
+        const { error } = await supabase!.from("xpc_registry").upsert({
           id: o.id,
           squadron_name: o.displayName,
           tier: dbTier,
@@ -505,8 +571,17 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
           device_name: deviceName ?? null,
           last_seen: entry.lastSeen,
         }, { onConflict: "id" });
-      } catch {
-        // Silent. Local mirror is authoritative until migrations land.
+        if (error) {
+          reportHeartbeatError(
+            `Registry upsert rejected for "${o.id}" (${error.code ?? "?"}): ${error.message}`,
+          );
+          return;
+        }
+        clearHeartbeatError();
+      } catch (e) {
+        reportHeartbeatError(
+          `Registry upsert threw for "${o.id}": ${(e as Error)?.message ?? String(e)}`,
+        );
       }
     })();
   }
