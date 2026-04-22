@@ -549,12 +549,24 @@ export default function FlightProgram() {
    ScheduleChain.tsx — same mutations, same RLS authority. */
 function FlightProgramShareInbox() {
   const { user } = useAuth();
-  const { data: shares = [] } = useScheduleShares();
+  // v1.1.70 — `makePcMatcher` returns a plain `(id) => boolean` predicate
+  // (see lib/cross-pc.ts:1789). The previous call site invoked it with no
+  // argument and then accessed `.matchesMe(...)` on the result, which is
+  // undefined: the moment any program-style share appeared in the inbox
+  // the filter callbacks crashed with "matcher.matchesMe is not a
+  // function" and the inbox silently rendered nothing. Now mirrors
+  // ScheduleChain.tsx exactly.
+  const me = getLocalPcId();
+  const matchesMe = useMemo(() => makePcMatcher(me), [me]);
+  // v1.1.70 — `useScheduleShares` requires the PC id so the query key is
+  // scoped per-PC and RLS-driven invalidation hits the right cache. The
+  // older zero-arg call defaulted `forPcId` to `undefined`, which made
+  // every PC share the same query slot and corrupted invalidation
+  // boundaries between Squadron / Flight / Wing PCs.
+  const { data: shares = [] } = useScheduleShares(me);
   const decide = useDecideSchedule();
   const deleteShare = useDeleteScheduleShare();
   const { toast } = useToast();
-  const me = getLocalPcId();
-  const matcher = useMemo(() => makePcMatcher(), [me]);
   // v1.1.68 — let Ops Pilot (and any viewer of this inbox) actually
   // OPEN an incoming or sent flight schedule paper inline, instead of
   // only being offered Approve / Reject / Delete buttons. Without this
@@ -573,12 +585,12 @@ function FlightProgramShareInbox() {
     [shares],
   );
   const incoming = useMemo(
-    () => programShares.filter(s => matcher.matchesMe(s.currentPcId) && !matcher.matchesMe(s.originSquadronId)),
-    [programShares, matcher],
+    () => programShares.filter(s => matchesMe(s.currentPcId) && !matchesMe(s.originSquadronId)),
+    [programShares, matchesMe],
   );
   const sent = useMemo(
-    () => programShares.filter(s => matcher.matchesMe(s.originSquadronId) && !s.originatorDismissedAt),
-    [programShares, matcher],
+    () => programShares.filter(s => matchesMe(s.originSquadronId) && !s.originatorDismissedAt),
+    [programShares, matchesMe],
   );
   const wireTier: "flight" | "squadron" | "wing" | "base" =
     user?.scope === "wing" ? "wing"

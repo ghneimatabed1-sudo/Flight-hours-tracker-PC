@@ -66,6 +66,11 @@ const STR = {
   no: { en: "No", ar: "لا" },
   exp_day: { en: "Day", ar: "نهار" },
   exp_night: { en: "Night", ar: "ليل" },
+  // v1.1.69 — NVG is its own currency, fully independent from Night.
+  // Previously absent from STR which forced PDF exports to fall back to
+  // a "col_nvg" column header and silently omitted NVG from the
+  // "Pilot Data Pages" report entirely.
+  exp_nvg: { en: "NVG", ar: "NVG" },
   exp_irt: { en: "IRT", ar: "IRT" },
   exp_medical: { en: "Medical", ar: "طبي" },
   exp_sim: { en: "Sim", ar: "محاكي" },
@@ -347,10 +352,10 @@ export async function exportPilotDataPages(sqdn: SquadronInfo, pilots: Pilot[], 
     autoTable(doc, {
       startY: y2 + 2,
       head: [[
-        shape(tr("exp_day", lang)), shape(tr("exp_night", lang)), shape(tr("exp_irt", lang)),
-        shape(tr("exp_medical", lang)), shape(tr("exp_sim", lang)),
+        shape(tr("exp_day", lang)), shape(tr("exp_night", lang)), shape(tr("exp_nvg", lang)),
+        shape(tr("exp_irt", lang)), shape(tr("exp_medical", lang)), shape(tr("exp_sim", lang)),
       ]],
-      body: [[p.expiry.day, p.expiry.night, p.expiry.irt, p.expiry.medical, p.expiry.sim]],
+      body: [[p.expiry.day, p.expiry.night, p.expiry.nvg, p.expiry.irt, p.expiry.medical, p.expiry.sim]],
       styles: { fontSize: 9, cellPadding: 2, ...tableStyles(lang) },
       headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
       margin: { left: 8, right: 8 },
@@ -1147,12 +1152,7 @@ export async function exportIndividualPilotRecord(
   const expiryKeys: ExpiryKey[] = ["day", "night", "nvg", "irt", "medical", "sim"];
   autoTable(doc, {
     startY: y + 2,
-    head: [expiryKeys.map((k) => {
-      // STR has exp_day / exp_night / exp_irt / exp_medical / exp_sim but
-      // no exp_nvg, so fall back to col_nvg for that one column header.
-      const key = k === "nvg" ? "col_nvg" : `exp_${k}`;
-      return shape(tr(key as keyof typeof STR, lang));
-    })],
+    head: [expiryKeys.map((k) => shape(tr(`exp_${k}` as keyof typeof STR, lang)))],
     body: [expiryKeys.map((k) => fmtDate(pilot.expiry[k]))],
     didParseCell: (data) => {
       if (data.section !== "body") return;

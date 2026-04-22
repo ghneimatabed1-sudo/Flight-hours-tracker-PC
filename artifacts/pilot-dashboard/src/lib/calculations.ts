@@ -107,7 +107,11 @@ export function computePilotTotals(pilot: Pilot, allSorties: Sortie[]): PilotTot
         bucket.nvg += c.nvg;
         bucket.sim += c.sim;
         bucket.captain += cap;
-        bucket.total += c.day + c.night;
+        // v1.1.69 — Half-year `total` previously summed only Day + Night,
+        // so commanders saw H1/H2 totals that hid NVG and Sim hours and
+        // never matched the pilot's grand total. Now mirrors the full
+        // bucket so totals reconcile across every report.
+        bucket.total += c.day + c.night + c.nvg + c.sim;
         bucket.sorties += 1;
       }
     }

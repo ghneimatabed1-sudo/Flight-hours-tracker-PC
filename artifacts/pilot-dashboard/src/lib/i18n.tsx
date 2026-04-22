@@ -5,6 +5,11 @@ export type Lang = "en" | "ar";
 const dict = {
   en: {
     nav_flight_program: "Flight Schedule",
+    nav_sticky: "Sticky Notes",
+    lockScreen: "Lock screen",
+    lockScreenAria: "Lock the screen",
+    lockScreenLocked: "Screen locked",
+    lockScreenWake: "Click anywhere or press any key to unlock",
     saved: "Saved",
     appName: "RJAF Squadron Ops",
     appTag: "Royal Jordanian Air Force — Squadron Management System",
@@ -794,6 +799,11 @@ const dict = {
   },
   ar: {
     nav_flight_program: "جدول الطيران",
+    nav_sticky: "ملاحظات لاصقة",
+    lockScreen: "قفل الشاشة",
+    lockScreenAria: "قفل الشاشة",
+    lockScreenLocked: "الشاشة مقفلة",
+    lockScreenWake: "اضغط في أي مكان أو على أي مفتاح لإلغاء القفل",
     saved: "تم الحفظ",
     appName: "أسراب عمليات سلاح الجو الملكي",
     appTag: "سلاح الجو الملكي الأردني — نظام إدارة الأسراب",

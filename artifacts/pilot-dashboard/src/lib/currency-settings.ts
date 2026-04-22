@@ -7,6 +7,10 @@ import { useEffect, useState } from "react";
 
 export interface CurrencyWindow {
   day: number;
+  // v1.1.69 — Night and NVG are fully independent currencies, each with
+  // its own refresh window. Previously the interface omitted `night` so
+  // TS silently allowed cross-aliasing in setters.
+  night: number;
   nvg: number;
   instrument: number;
   medical: number;
@@ -37,9 +41,11 @@ export function getCurrencyWindow(): CurrencyWindow {
     const p = JSON.parse(raw) as Partial<CurrencyWindow>;
     return {
       day: clamp(Number(p.day ?? DEFAULT_CURRENCY_WINDOW.day), DEFAULT_CURRENCY_WINDOW.day),
-      // Legacy v1 had no separate `night`; fall back to its single `nvg`
-      // value so existing squadrons don't reset to defaults on upgrade.
-      night: clamp(Number(p.night ?? p.nvg ?? DEFAULT_CURRENCY_WINDOW.night), DEFAULT_CURRENCY_WINDOW.night),
+      // v1.1.69 — Night and NVG are independent. Do NOT cross-fall-back
+      // between them, even for legacy migration: a squadron whose old
+      // settings only stored `nvg` will simply pick up the 30-day Night
+      // default rather than silently inheriting the NVG window.
+      night: clamp(Number(p.night ?? DEFAULT_CURRENCY_WINDOW.night), DEFAULT_CURRENCY_WINDOW.night),
       nvg: clamp(Number(p.nvg ?? DEFAULT_CURRENCY_WINDOW.nvg), DEFAULT_CURRENCY_WINDOW.nvg),
       instrument: clamp(Number(p.instrument ?? DEFAULT_CURRENCY_WINDOW.instrument), DEFAULT_CURRENCY_WINDOW.instrument),
       medical: clamp(Number(p.medical ?? DEFAULT_CURRENCY_WINDOW.medical), DEFAULT_CURRENCY_WINDOW.medical),

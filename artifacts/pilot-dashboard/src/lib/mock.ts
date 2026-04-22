@@ -112,6 +112,14 @@ export interface Sortie {
   night2: number;
   nightDual: number;
   nvg: number;
+  // v1.1.70 — NVG sorties follow the same 9-bucket scheme as Day and Night
+  // (1st seat / 2nd seat / Dual). The legacy single `nvg` field is kept as
+  // the canonical total for backwards compatibility, while these per-seat
+  // buckets carry the breakdown so the totals engine can credit each pilot
+  // correctly. Optional because pre-rebuild records didn't have them.
+  nvg1?: number;
+  nvg2?: number;
+  nvgDual?: number;
   sim: number;
   actual: number;
   // Primary flight condition selected by the ops officer. Independent from

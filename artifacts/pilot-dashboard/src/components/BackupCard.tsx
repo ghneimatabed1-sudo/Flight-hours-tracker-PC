@@ -14,6 +14,7 @@ import {
   Clock,
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
+import { fmtDateTimeDDMM } from "@/lib/format";
 import {
   exportBackup,
   decodeBackup,

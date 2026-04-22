@@ -95,7 +95,7 @@ export default function PilotsTable() {
     const headers = [
       t("callSign"), t("name"), t("squadron"),
       t("nvgTotal"), t("monthlyHours"), t("grandTotal"),
-      t("dayCurrency"), t("nightCurrency"), t("irtCurrency"), t("medicalCurrency"),
+      t("dayCurrency"), t("nightCurrency"), t("nvgCurrency"), t("irtCurrency"), t("medicalCurrency"),
       t("status"),
     ];
     const rows = list.map(p => {
@@ -109,6 +109,7 @@ export default function PilotsTable() {
         String(p.grandTotalHours),
         p.dayCurrencyDate,
         p.nightCurrencyDate,
+        p.nvgCurrencyDate ?? "",
         p.irtCurrencyDate,
         p.medicalCurrencyDate,
         statusLabel(pilotWorstStatus(p)),
@@ -139,7 +140,7 @@ export default function PilotsTable() {
     const headers = [
       t("callSign"), t("name"), t("squadron"),
       t("nvgTotal"), t("monthlyHours"), t("grandTotal"),
-      t("dayCurrency"), t("nightCurrency"), t("irtCurrency"), t("medicalCurrency"),
+      t("dayCurrency"), t("nightCurrency"), t("nvgCurrency"), t("irtCurrency"), t("medicalCurrency"),
       t("status"),
     ];
     const rows = list.map(p => {
@@ -153,9 +154,10 @@ export default function PilotsTable() {
         [headers[5]]: p.grandTotalHours,
         [headers[6]]: p.dayCurrencyDate,
         [headers[7]]: p.nightCurrencyDate,
-        [headers[8]]: p.irtCurrencyDate,
-        [headers[9]]: p.medicalCurrencyDate,
-        [headers[10]]: statusLabel(pilotWorstStatus(p)),
+        [headers[8]]: p.nvgCurrencyDate ?? "",
+        [headers[9]]: p.irtCurrencyDate,
+        [headers[10]]: p.medicalCurrencyDate,
+        [headers[11]]: statusLabel(pilotWorstStatus(p)),
       };
     });
     const wb = new ExcelJS.Workbook();
