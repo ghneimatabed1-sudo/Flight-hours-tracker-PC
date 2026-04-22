@@ -278,14 +278,21 @@ export default function FlightProgram() {
   };
 
   if (!canAccess) {
+    // v1.1.62 — every PC's role is fixed at PC setup, so a program
+    // sheet may land on a PC whose role can't author programs (Ops,
+    // Wing, Base, HQ). Those PCs still need to act on it. Render the
+    // inbox panel above the access-gate so every role can
+    // Approve / Reject / Delete incoming program shares; the composer
+    // below the gate stays restricted to flight/squadron commanders.
     return (
-      <div className="p-6" dir={dir}>
+      <div className="p-6 space-y-4" dir={dir}>
+        <FlightProgramShareInbox />
         <div className="rounded-md border border-border bg-card p-6 max-w-xl">
           <div className="text-sm font-semibold mb-1">{t("nav_flight_program")}</div>
           <div className="text-xs text-muted-foreground leading-relaxed">
             {lang === "ar"
-              ? "هذه الصفحة متاحة فقط لضابط عمليات السرب وقائد السرب."
-              : "This page is available only to the squadron ops officer and the squadron commander."}
+              ? "تأليف برنامج طيران جديد متاح فقط لضابط عمليات السرب وقائد السرب. الإجراءات على البرامج الواردة متاحة لكل دور أعلاه."
+              : "Authoring a new flight program is available only to the squadron ops officer and the squadron commander. Actions on incoming programs above are available to every role."}
           </div>
         </div>
       </div>
