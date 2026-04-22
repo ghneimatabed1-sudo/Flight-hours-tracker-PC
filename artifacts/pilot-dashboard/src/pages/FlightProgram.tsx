@@ -160,16 +160,45 @@ export default function FlightProgram() {
   // PCs that can receive a flight schedule. The squadron sends to its
   // monitoring Wing PC, but ops officers also share peer-to-peer for
   // visibility — so we list every registered PC that is not us. The
-  // Flight Commander PC is locked to its bound Squadron Commander only:
-  // the picker shrinks to that single PC and is auto-selected.
+  // Flight Commander PC is scoped to its bound squadron — but the
+  // squadron has TWO physical PCs (Ops and Sqn Cmdr) that both need to
+  // be addressable. v1.1.57: expand the lock to include both peer PCs
+  // of the bound squadron so flight commanders can pick either one
+  // from the dropdown (defaults to the bound PC, but switchable).
   const flightBinding = isFlightCmdr ? getFlightBinding() : null;
   const isSquadronCmdr = user?.role === "commander" && user?.scope === "squadron";
+  // Squadron base name extracted from the bound PC id. Bound id is
+  // either the bare squadron name (Ops PC, e.g. "NO.8") or a
+  // SQDNCMD:<sqn>#<suffix> form (Sqn Cmdr PC). Either way, the base is
+  // the squadron name itself — that's the join key that lets us pull
+  // both peer PCs out of the registry.
+  const boundSquadronBase = useMemo<string | null>(() => {
+    if (!flightBinding?.pcId) return null;
+    const id = flightBinding.pcId;
+    if (id.startsWith("SQDNCMD:")) {
+      const after = id.slice("SQDNCMD:".length);
+      const hashIdx = after.indexOf("#");
+      return hashIdx < 0 ? after : after.slice(0, hashIdx);
+    }
+    if (!id.includes(":")) return id; // Ops PC bare-name id
+    return null;
+  }, [flightBinding?.pcId]);
   const targets = useMemo(
     () => {
       const all = registry.data.filter(p => !p.isSelf);
-      // Flight Commander → locked to their bound Squadron Commander.
-      if (isFlightCmdr && flightBinding) {
-        return all.filter(p => p.id === flightBinding.pcId);
+      // Flight Commander → scoped to all PCs of the bound squadron.
+      // That means the bare-name Ops PC ("NO.8") AND any Sqn Cmdr PC
+      // for the same squadron ("SQDNCMD:NO.8#<suffix>"). Both surfaces
+      // need to be selectable so the operator can pick whichever desk
+      // is staffed at the time.
+      if (isFlightCmdr && boundSquadronBase) {
+        const opsId = boundSquadronBase;
+        const sqdnPrefix = `SQDNCMD:${boundSquadronBase}`;
+        return all.filter(p =>
+          p.id === opsId
+          || p.id === sqdnPrefix
+          || p.id.startsWith(`${sqdnPrefix}#`),
+        );
       }
       // Squadron Commander has TWO valid Submit targets:
       //   1. Flight Commander PCs — to share / return a program back
