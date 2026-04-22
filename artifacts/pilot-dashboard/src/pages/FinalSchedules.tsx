@@ -42,7 +42,11 @@ export default function FinalSchedules() {
   const myPcId = getLocalPcId();
   const { data: shares = [] } = useScheduleShares(myPcId, { viewAllApproved: allowed });
   const registry = useRegisteredPCs();
-  const PILOTS = usePilots();
+  // usePilots returns a query object — we want the .data array (which
+  // already defaults to []). Going through the query handle keeps the
+  // FlightScheduleSheet's pilot picker labelled correctly when the
+  // viewer expands an approved schedule.
+  const { data: PILOTS } = usePilots();
   const pilotOptions = useMemo(
     () => PILOTS.map(p => ({ value: p.name, label: `${p.rank} ${p.name}` })),
     [PILOTS],
@@ -96,14 +100,18 @@ export default function FinalSchedules() {
     return out;
   }, [shares]);
 
-  // Map squadron-id → the most recent display name we know for the
-  // person who submitted the schedule (i.e. the Sqn Cmdr who pushed it
-  // up to Wing). Pull the "submitted" entry from history; that author
-  // is the Sqn Cmdr operator name that the Base / HQ operator wants
-  // to see on the card.
+  // Map squadron-id → the operator name of the Sqn Cmdr who pushed
+  // the latest approved version up to Wing. We walk the history from
+  // newest-first so a re-submission after edits / a rejected cycle
+  // shows the person who actually owns the current Wing-approved
+  // version, not whoever first started the chain weeks ago.
   const sqnCommanderFor = (s: ScheduleShare): string => {
-    const sub = s.history.find(h => h.action === "submitted" && h.tier === "squadron");
-    if (sub?.by) return sub.by;
+    for (let i = s.history.length - 1; i >= 0; i--) {
+      const h = s.history[i];
+      if (h.action === "submitted" && h.tier === "squadron" && h.by) {
+        return h.by;
+      }
+    }
     // Fallback to the registry display name for the squadron PC.
     const reg = registry.data.find(p => p.id === s.originSquadronId);
     return reg?.squadronName ?? s.originSquadronName;

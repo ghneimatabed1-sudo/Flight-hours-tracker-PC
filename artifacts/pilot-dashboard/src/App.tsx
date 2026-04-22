@@ -203,6 +203,10 @@ function CommanderRoutes() {
       <Route path="/dashboard/unavailable" component={CommanderUnavailableGate} />
       <Route path="/dashboard/sticky" component={StickyNotes} />
       <Route path="/dashboard/schedule-chain" component={ScheduleChain} />
+      {/* v1.1.64 — Wing-approved finals rollup. Mounted under the
+          commander shell so Base + HQ Cmdrs (who use HQLayout) reach
+          it from their sidebar. The page itself enforces canViewFinalSchedules. */}
+      <Route path="/dashboard/final-schedules" component={FinalSchedules} />
       <Route path="/dashboard/messages" component={Messages} />
       {/* Settings (auto-updater toggle + "Check for app update" button) is
           available to every commander scope so flight / wing / base / HQ
