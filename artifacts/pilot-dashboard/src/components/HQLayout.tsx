@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2, Bell, ClipboardCheck, Settings as SettingsIcon } from "lucide-react";
 import { canUseMessages, canUseScheduleChain, canViewFinalSchedules } from "@/lib/cross-pc";
 import { FlightBindingGate, FlightBindingBadge } from "@/components/FlightBindingGate";
+import { LiveDataIndicator } from "@/components/LiveDataIndicator";
 import emblem from "@assets/rjaf_emblem.png";
 import { RecoveryCodesLowBanner } from "@/components/RecoveryCodesLowBanner";
 
@@ -126,7 +127,13 @@ export function HQLayout({ children }: { children: ReactNode }) {
                 <> · {t(("scope" + user.scope.charAt(0).toUpperCase() + user.scope.slice(1)) as Key)}</>
               )}
             </p>
-            <div className="mt-1"><FlightBindingBadge /></div>
+            {/* v1.1.67 — surface the same live-sync pill (green/amber/red)
+                that Sqn / Wing operators see, so Base & HQ commanders can
+                tell at a glance whether their PC is talking to the cloud. */}
+            <div className="mt-1 flex items-center gap-2 flex-wrap">
+              <LiveDataIndicator />
+              <FlightBindingBadge />
+            </div>
           </div>
           <Button
             variant="ghost"
