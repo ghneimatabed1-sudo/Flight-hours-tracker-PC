@@ -1,6 +1,0 @@
-owner: ghneimatabed1-sudo
-repo: Flight-hours-tracker-Releases
-provider: github
-releaseType: release
-vPrefixedTagName: true
-updaterCacheDirName: '@workspacepilot-dashboard-updater'
