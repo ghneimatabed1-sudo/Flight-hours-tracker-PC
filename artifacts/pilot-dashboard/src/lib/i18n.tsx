@@ -724,7 +724,7 @@ const dict = {
     printedOn: "Printed",
     pilotReport: "Pilot Currency Report",
     allSquadrons: "All Squadrons",
-    hqAppName: "Eagle Eye HQ",
+    hqAppName: "Hawk Eye HQ",
     langToggle: "العربية",
     creditsTitle: "Credits",
     creditsDeveloper: "Developed by",

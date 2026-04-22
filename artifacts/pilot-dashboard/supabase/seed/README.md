@@ -2,7 +2,7 @@
 
 This folder contains the demo seed for a freshly provisioned Supabase
 project. Running it gives the app the same baseline data the in-memory
-preview shows **across four demo squadrons** so Eagle Eye HQ commanders
+preview shows **across four demo squadrons** so Hawk Eye HQ commanders
 can immediately compare squadrons on the cross-squadron pilot table and
 dashboards. Per squadron: 16 pilots, 80 sorties, 240 currencies, 16
 annual-leave rows, 5 duty days, 2 unavailability windows, 3 NOTAMs, and

@@ -4,7 +4,7 @@
 
 -- This seed populates 4 demo squadrons with realistic data so a
 -- freshly provisioned project loads with the same baseline the in-memory
--- preview shows AND Eagle Eye HQ commanders can immediately compare
+-- preview shows AND Hawk Eye HQ commanders can immediately compare
 -- squadrons side-by-side on the cross-squadron pilot table and dashboards.
 --
 -- It must run with the SERVICE ROLE (or as the postgres superuser) because

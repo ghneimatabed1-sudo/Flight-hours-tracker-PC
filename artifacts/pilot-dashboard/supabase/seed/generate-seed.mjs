@@ -11,7 +11,7 @@
 //
 // Multi-squadron seed: the first squadron is the original "7th Squadron"
 // fixture (IDs / license key unchanged for backward compatibility). Three
-// additional demo squadrons are generated so Eagle Eye HQ commanders have
+// additional demo squadrons are generated so Hawk Eye HQ commanders have
 // realistic cross-squadron data (overview cards, cross-squadron pilot
 // table) the moment the database is seeded. Each squadron uses its own
 // RNG seed, pilot-ID prefix, license key, and admin auth user, so data
@@ -414,7 +414,7 @@ lines.push(`-- Generated at: ${new Date().toISOString()}`);
 lines.push(``);
 lines.push(`-- This seed populates ${SQUADRONS.length} demo squadrons with realistic data so a`);
 lines.push(`-- freshly provisioned project loads with the same baseline the in-memory`);
-lines.push(`-- preview shows AND Eagle Eye HQ commanders can immediately compare`);
+lines.push(`-- preview shows AND Hawk Eye HQ commanders can immediately compare`);
 lines.push(`-- squadrons side-by-side on the cross-squadron pilot table and dashboards.`);
 lines.push(`--`);
 lines.push(`-- It must run with the SERVICE ROLE (or as the postgres superuser) because`);
