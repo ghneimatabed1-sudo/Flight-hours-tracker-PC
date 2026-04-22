@@ -1997,24 +1997,41 @@ export function canUseMessages(role: string | undefined, scope: string | undefin
 
 // Role helper: which roles see the schedule chain / flight program UI.
 //
-// v1.1.63 — final scope per design owner: schedule sharing is strictly
-// a SQUADRON-internal flow between three roles only:
+// v1.1.64 — final scope per design owner:
 //
-//   Flight Cmdr  ⇄ Squadron Cmdr   (peer share + approve/reject)
-//   Flight Cmdr  ⇄ Ops Pilot       (peer share within the squadron)
-//   Squadron Cmdr ⇄ Ops Pilot      (peer share within the squadron)
+// AUTHORING (compose, edit, peer-share within the squadron):
+//   Flight Cmdr  ⇄ Squadron Cmdr   (peer + approve/reject)
+//   Flight Cmdr  ⇄ Ops Pilot
+//   Squadron Cmdr ⇄ Ops Pilot
 //
-// Wing Cmdr, Base Cmdr, and HQ never see, create, receive, approve,
-// reject, or delete a flight schedule. They have their own dashboards
-// (squadron rollups, hours analytics, messaging) but the daily flying
-// programme is squadron business and stays within the squadron.
+// APPROVAL UP THE CHAIN:
+//   Squadron Cmdr → Wing Cmdr      (Wing reviews + Approve/Reject)
 //
-// super_admin keeps access for diagnostics only.
+// DOWNSTREAM DISTRIBUTION (read-only, sorted per squadron):
+//   Wing-approved final → Base Cmdr + HQ Cmdr
+//   Base + HQ get a separate clean read-only page (FinalSchedules);
+//   they never see in-flight drafts, never see rejected/edited cycles,
+//   and never act on a schedule. They see only what Wing has signed
+//   off as the final flying programme for that day.
+//
+// canUseScheduleChain controls who sees the active /schedule-chain
+// review page. Base + HQ are NOT here — they have their own
+// /final-schedules page (see canViewFinalSchedules below).
 export function canUseScheduleChain(role: string | undefined, scope: string | undefined): boolean {
   if (role === "super_admin") return true;
   if (role === "ops") return true; // Ops Pilot's PC — squadron-tier peer
   if (role === "commander") {
-    return scope === "flight" || scope === "squadron";
+    return scope === "flight" || scope === "squadron" || scope === "wing";
   }
+  return false;
+}
+
+// v1.1.64 — read-only final-schedule viewers. Base Cmdr and HQ Cmdr
+// PCs see every Wing-approved flight schedule from every registered
+// squadron, sorted by squadron with the latest update on top. They
+// have no action buttons.
+export function canViewFinalSchedules(role: string | undefined, scope: string | undefined): boolean {
+  if (role === "super_admin") return true;
+  if (role === "commander" && (scope === "base" || scope === "hq")) return true;
   return false;
 }
