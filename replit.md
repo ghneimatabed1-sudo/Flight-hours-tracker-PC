@@ -55,7 +55,10 @@ how the app should behave. **Mandatory protocol:**
 
 Index of memory files:
 - `.local/memory/README.md` — index + update protocol
-- `.local/memory/currency-refresh.md` — Day/Night/NVG/IRT auto, Sim/Medical manual
+- `.local/memory/multi-squadron.md` — **READ EVERY SESSION.** Long-term design contract: app must work across 15-20+ squadrons on different code builds, with all five command tiers (squadron/flight/wing/base/HQ) seeing the same synchronized data and zero ongoing intervention from the operator. Defines the additive-only change discipline, defensive write pattern, tier-consistency rule, squadron-agnostic copy rule, and the rollout checklist that runs before EVERY commit.
+- `.local/memory/release-process.md` — one build per push (path-filter on `main` OR `v*` tag), bump dashboard `package.json` and mobile `app.json` every release.
+- `.local/memory/supabase-admin.md` — apply migrations directly via the Management API, never ask the operator to open the SQL editor.
+- `.local/memory/currency-refresh.md` — Day/Night/NVG/IRT auto, Sim monitor-only, Medical manual
 - `.local/memory/dual-hour-rules.md` — Six sortie types force co-pilot hours to Dual
 - `.local/memory/initial-hours.md` — Pre-Hawk-Eye baseline hours; lifetime totals only, not currency or Monthly Report
 - `.local/memory/active-pc-visibility.md` — 90 s active window + offline messaging
