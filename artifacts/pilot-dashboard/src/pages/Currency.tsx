@@ -106,6 +106,7 @@ export default function Currency() {
     const head = `<tr>
       <th>Pilot</th>
       ${visibleCols.map(c => `<th>${c.label}</th>`).join("")}
+      <th>Last Sim</th>
     </tr>`;
     const body = rows.filter(r => !r.pilotHidden).map(({ p, cells }) => {
       const tds = cells.map(({ na, s, date }) => {
@@ -114,9 +115,11 @@ export default function Currency() {
         const cls = s.cls === "status-bad" ? "bad" : s.cls === "status-warn" ? "warn" : "ok";
         return `<td class="${cls}"><div class="d">${date}</div><div class="s">${s.lbl}</div></td>`;
       }).join("");
-      return `<tr><td class="name">${rankOf(p)} ${p.name}</td>${tds}</tr>`;
+      // Last simulator session — monitoring only, no status coloring.
+      const sim = p.lastSimDate ? `<td class="empty"><div class="d">${p.lastSimDate}</div></td>` : `<td class="empty">—</td>`;
+      return `<tr><td class="name">${rankOf(p)} ${p.name}</td>${tds}${sim}</tr>`;
     }).join("");
-    const cols = visibleCols.length + 1;
+    const cols = visibleCols.length + 2;
     const html = `<!doctype html><html><head><meta charset="utf-8">
       <title>Squadron Currencies — ${today}</title>
       <style>
@@ -314,13 +317,20 @@ export default function Currency() {
                     </button>
                   </th>
                 ))}
+                {/* Last simulator session — monitoring column. No green/amber/red
+                    status (sim has no currency window per
+                    `.local/memory/currency-refresh.md`). Visible to every
+                    commander tier so monitoring roles can see recency. */}
+                <th className="px-3 py-2 text-left whitespace-nowrap" title="Last simulator session date — monitoring only">
+                  Last Sim
+                </th>
                 <th className="px-3 py-2 text-right w-10"></th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={visibleCols.length + 2} className="px-3 py-6 text-center text-xs text-muted-foreground" data-testid="empty-currency">
+                  <td colSpan={visibleCols.length + 3} className="px-3 py-6 text-center text-xs text-muted-foreground" data-testid="empty-currency">
                     {pilotsQ.isError ? "—" : t("no_records")}
                   </td>
                 </tr>
@@ -342,6 +352,10 @@ export default function Currency() {
                       )}
                     </td>
                   ))}
+                  {/* Last simulator session — monitoring only, no expiry colors. */}
+                  <td className="px-3 py-2 whitespace-nowrap" data-testid={`cell-${p.id}-lastsim`}>
+                    <span className="font-mono text-xs text-muted-foreground">{p.lastSimDate || "—"}</span>
+                  </td>
                   <td className="px-3 py-2 text-right">
                     <button
                       onClick={() => togglePilot(p.id)}

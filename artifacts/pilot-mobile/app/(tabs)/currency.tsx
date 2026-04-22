@@ -95,8 +95,15 @@ export default function CurrencyScreen() {
       <View
         style={[
           styles.simRow,
-          { backgroundColor: colors.muted, borderColor: colors.border, flexDirection: isRTL ? "row-reverse" : "row" },
+          {
+            backgroundColor: colors.muted,
+            borderColor: colors.border,
+            flexDirection: isRTL ? "row-reverse" : "row",
+          },
         ]}
+        // Last simulator session — monitoring row, no currency status.
+        // Always rendered so the pilot (and any commander reviewing on
+        // mobile) can see the recency. Empty value renders as em-dash.
       >
         <View style={{ flex: 1 }}>
           <Text style={[styles.simLabel, { color: colors.foreground, textAlign: isRTL ? "right" : "left" }]}>
@@ -106,7 +113,10 @@ export default function CurrencyScreen() {
             {t("sim_monitor_only")}
           </Text>
         </View>
-        <Text style={[styles.simDate, { color: colors.foreground }]}>
+        <Text
+          style={[styles.simDate, { color: colors.foreground }]}
+          accessibilityLabel={`Last simulator date ${snapshot.profile.lastSimDate ?? "not recorded"}`}
+        >
           {snapshot.profile.lastSimDate ? formatSimDate(snapshot.profile.lastSimDate) : "—"}
         </Text>
       </View>

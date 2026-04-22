@@ -39,9 +39,9 @@ const cats = [
   { k: "nvg", label: "NVG" },
   { k: "irt", label: "IRT" },
   { k: "medical", label: "Medical" },
-  // Sim removed — not a currency. The pilot's last simulator date is a
-  // monitoring value (`pilot.lastSimDate`) shown elsewhere, never folded
-  // into the green/amber/red status grid.
+  // Sim is NOT a currency (no expiry window). The pilot's last simulator
+  // date renders as a separate monitoring row below the currency grid so
+  // commanders can still see it without it triggering false-red status.
 ] as const;
 type CurrencyKey = typeof cats[number]["k"];
 
@@ -171,6 +171,18 @@ function CurrenciesCard({ pilot }: { pilot: Pilot }) {
             {hidden.length} {t("currencyHiddenBadge")}
           </span>
         ) : null}
+      </div>
+      {/* Last simulator session — monitoring row, no expiry status. Visible
+          to every commander tier so monitoring roles can see recency.
+          Sim has no currency window; see `.local/memory/currency-refresh.md`. */}
+      <div className="flex items-center justify-between py-1.5 border-b border-border text-sm" data-testid="row-last-sim">
+        <span>Last Simulator</span>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs text-muted-foreground">{pilot.lastSimDate || "—"}</span>
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-secondary border border-border text-muted-foreground">
+            monitor
+          </span>
+        </div>
       </div>
       {cats.map(c => {
         const isHidden = hidden.includes(c.k);

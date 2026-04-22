@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hawk Eye",
     "slug": "pilot-mobile",
-    "version": "1.0.7",
+    "version": "1.0.8",
     "orientation": "portrait",
     "icon": "./assets/images/emblem.png",
     "scheme": "pilot-mobile",
