@@ -4,7 +4,7 @@ import { useI18n } from "@/lib/i18n";
 import { usePilots } from "@/lib/squadron-data";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
-import { Printer, Save, Settings, Send, X as CloseIcon, Check, X, Trash2 } from "lucide-react";
+import { Printer, Save, Settings, Send, X as CloseIcon, Check, X, Trash2, Eye, EyeOff } from "lucide-react";
 import FlightScheduleSheet, { emptyProgramRow } from "@/components/FlightScheduleSheet";
 import {
   type ScheduleProgram,
@@ -555,6 +555,17 @@ function FlightProgramShareInbox() {
   const { toast } = useToast();
   const me = getLocalPcId();
   const matcher = useMemo(() => makePcMatcher(), [me]);
+  // v1.1.68 — let Ops Pilot (and any viewer of this inbox) actually
+  // OPEN an incoming or sent flight schedule paper inline, instead of
+  // only being offered Approve / Reject / Delete buttons. Without this
+  // the inbox is a blind decision: you have no way to read the
+  // schedule before stamping it.
+  const { data: PILOTS = [] } = usePilots();
+  const pilotOptions = useMemo(
+    () => PILOTS.map(p => ({ value: p.name, label: `${p.rank} ${p.name}` })),
+    [PILOTS],
+  );
+  const [viewingId, setViewingId] = useState<string | null>(null);
   // Only program-style (paper sheet) shares belong on this page; the
   // compact-rows shares stay on Schedule Chain so we don't double up.
   const programShares = useMemo(
@@ -584,50 +595,76 @@ function FlightProgramShareInbox() {
           <div className="text-xs font-semibold text-amber-200">
             Incoming flight programs awaiting your action ({incoming.length})
           </div>
-          {incoming.map(share => (
-            <div key={share.id} className="flex items-center justify-between gap-2 border border-border bg-background/50 rounded p-2">
-              <div className="text-xs">
-                <div className="font-semibold">{share.date}</div>
-                <div className="text-[11px] text-muted-foreground">
-                  From {share.originSquadronName} · {share.status}
+          {incoming.map(share => {
+            const isOpen = viewingId === share.id;
+            return (
+              <div key={share.id} className="border border-border bg-background/50 rounded">
+                <div className="flex items-center justify-between gap-2 p-2">
+                  <div className="text-xs">
+                    <div className="font-semibold">{share.date}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      From {share.originSquadronName} · {share.status}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {/* v1.1.68 — View toggles the read-only flight schedule
+                        paper open inline so the operator can actually read
+                        what they're about to approve / reject. */}
+                    <button
+                      onClick={() => setViewingId(isOpen ? null : share.id)}
+                      className="px-2 py-1 rounded bg-sky-500/20 border border-sky-400/40 text-sky-100 text-[11px] font-semibold inline-flex items-center gap-1"
+                      data-testid={`fp-view-${share.id}`}
+                    >
+                      {isOpen ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                      {isOpen ? "Hide" : "View"}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        await decide.mutateAsync({ id: share.id, action: "approve", by: user?.username ?? "ops", tier: wireTier });
+                        toast({ title: "Approved" });
+                      }}
+                      className="px-2 py-1 rounded bg-emerald-500/20 border border-emerald-400/40 text-emerald-100 text-[11px] font-semibold inline-flex items-center gap-1"
+                      data-testid={`fp-approve-${share.id}`}
+                    >
+                      <Check className="h-3 w-3" /> Approve
+                    </button>
+                    <button
+                      onClick={async () => {
+                        await decide.mutateAsync({ id: share.id, action: "reject", by: user?.username ?? "ops", tier: wireTier });
+                        toast({ title: "Rejected" });
+                      }}
+                      className="px-2 py-1 rounded bg-rose-500/20 border border-rose-400/40 text-rose-100 text-[11px] font-semibold inline-flex items-center gap-1"
+                      data-testid={`fp-reject-${share.id}`}
+                    >
+                      <X className="h-3 w-3" /> Reject
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm("Delete this flight schedule from EVERY PC?\n\nThis is permanent. Originator, reviewers, approvers — everyone loses their copy. Cannot be undone.")) return;
+                        await deleteShare.mutateAsync({ id: share.id });
+                        toast({ title: "Schedule deleted from every PC" });
+                      }}
+                      className="px-2 py-1 rounded bg-rose-700/30 border border-rose-500/60 text-rose-50 text-[11px] font-semibold inline-flex items-center gap-1"
+                      data-testid={`fp-delete-${share.id}`}
+                      title="Permanent delete — removes this schedule from every PC in the chain"
+                    >
+                      <Trash2 className="h-3 w-3" /> Delete
+                    </button>
+                  </div>
                 </div>
+                {isOpen && share.program && (
+                  <div className="border-t border-border p-2 bg-background/40">
+                    <FlightScheduleSheet
+                      prog={share.editedProgram ?? share.program}
+                      pilotOptions={pilotOptions}
+                      approvedAt={share.approvedAt}
+                      approvedBy={share.approvedBy}
+                    />
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <button
-                  onClick={async () => {
-                    await decide.mutateAsync({ id: share.id, action: "approve", by: user?.username ?? "ops", tier: wireTier });
-                    toast({ title: "Approved" });
-                  }}
-                  className="px-2 py-1 rounded bg-emerald-500/20 border border-emerald-400/40 text-emerald-100 text-[11px] font-semibold inline-flex items-center gap-1"
-                  data-testid={`fp-approve-${share.id}`}
-                >
-                  <Check className="h-3 w-3" /> Approve
-                </button>
-                <button
-                  onClick={async () => {
-                    await decide.mutateAsync({ id: share.id, action: "reject", by: user?.username ?? "ops", tier: wireTier });
-                    toast({ title: "Rejected" });
-                  }}
-                  className="px-2 py-1 rounded bg-rose-500/20 border border-rose-400/40 text-rose-100 text-[11px] font-semibold inline-flex items-center gap-1"
-                  data-testid={`fp-reject-${share.id}`}
-                >
-                  <X className="h-3 w-3" /> Reject
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!window.confirm("Delete this flight schedule from EVERY PC?\n\nThis is permanent. Originator, reviewers, approvers — everyone loses their copy. Cannot be undone.")) return;
-                    await deleteShare.mutateAsync({ id: share.id });
-                    toast({ title: "Schedule deleted from every PC" });
-                  }}
-                  className="px-2 py-1 rounded bg-rose-700/30 border border-rose-500/60 text-rose-50 text-[11px] font-semibold inline-flex items-center gap-1"
-                  data-testid={`fp-delete-${share.id}`}
-                  title="Permanent delete — removes this schedule from every PC in the chain"
-                >
-                  <Trash2 className="h-3 w-3" /> Delete
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
       {sent.length > 0 && (
@@ -635,28 +672,53 @@ function FlightProgramShareInbox() {
           <div className="text-xs font-semibold text-muted-foreground">
             Flight programs you sent ({sent.length})
           </div>
-          {sent.map(share => (
-            <div key={share.id} className="flex items-center justify-between gap-2 border border-border bg-background/50 rounded p-2">
-              <div className="text-xs">
-                <div className="font-semibold">{share.date}</div>
-                <div className="text-[11px] text-muted-foreground">
-                  Now at {share.currentPcName ?? "—"} · {share.status}
+          {sent.map(share => {
+            const isOpen = viewingId === share.id;
+            return (
+              <div key={share.id} className="border border-border bg-background/50 rounded">
+                <div className="flex items-center justify-between gap-2 p-2">
+                  <div className="text-xs">
+                    <div className="font-semibold">{share.date}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      Now at {share.currentPcName ?? "—"} · {share.status}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      onClick={() => setViewingId(isOpen ? null : share.id)}
+                      className="px-2 py-1 rounded bg-sky-500/20 border border-sky-400/40 text-sky-100 text-[11px] font-semibold inline-flex items-center gap-1"
+                      data-testid={`fp-sent-view-${share.id}`}
+                    >
+                      {isOpen ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                      {isOpen ? "Hide" : "View"}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm("Delete this flight schedule from EVERY PC?\n\nThis is permanent. Originator, reviewers, approvers — everyone loses their copy. Cannot be undone.")) return;
+                        await deleteShare.mutateAsync({ id: share.id });
+                        toast({ title: "Schedule deleted from every PC" });
+                      }}
+                      className="px-2 py-1 rounded bg-rose-700/30 border border-rose-500/60 text-rose-50 text-[11px] font-semibold inline-flex items-center gap-1"
+                      data-testid={`fp-sent-delete-${share.id}`}
+                      title="Permanent delete — removes this schedule from every PC in the chain"
+                    >
+                      <Trash2 className="h-3 w-3" /> Delete everywhere
+                    </button>
+                  </div>
                 </div>
+                {isOpen && share.program && (
+                  <div className="border-t border-border p-2 bg-background/40">
+                    <FlightScheduleSheet
+                      prog={share.editedProgram ?? share.program}
+                      pilotOptions={pilotOptions}
+                      approvedAt={share.approvedAt}
+                      approvedBy={share.approvedBy}
+                    />
+                  </div>
+                )}
               </div>
-              <button
-                onClick={async () => {
-                  if (!window.confirm("Delete this flight schedule from EVERY PC?\n\nThis is permanent. Originator, reviewers, approvers — everyone loses their copy. Cannot be undone.")) return;
-                  await deleteShare.mutateAsync({ id: share.id });
-                  toast({ title: "Schedule deleted from every PC" });
-                }}
-                className="px-2 py-1 rounded bg-rose-700/30 border border-rose-500/60 text-rose-50 text-[11px] font-semibold inline-flex items-center gap-1"
-                data-testid={`fp-sent-delete-${share.id}`}
-                title="Permanent delete — removes this schedule from every PC in the chain"
-              >
-                <Trash2 className="h-3 w-3" /> Delete everywhere
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
