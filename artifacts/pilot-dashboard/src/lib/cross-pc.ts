@@ -1251,10 +1251,10 @@ export function useSubmitSchedule() {
       // Wing PC that should review next.
       targetPcId: string;
       targetPcName: string;
-      // Tier of the recipient — defaults to wing for legacy callers but
-      // the FlightProgram Submit dialog passes the actual tier of the
-      // chosen PC (squadron / wing / base) so the recipient sees the
-      // share land in their inbox regardless of the chain step.
+      // Tier of the recipient. v1.1.63: schedule sharing is squadron-
+      // internal only — the FlightProgram Submit dialog passes
+      // "flight" or "squadron". Default falls back to "squadron"
+      // (Ops PC tier) for any legacy caller that forgets to set it.
       targetTier?: ScheduleTier;
       submittedBy: string;
       // Optional full sheet snapshot — when present the recipient
@@ -1268,7 +1268,7 @@ export function useSubmitSchedule() {
         date: input.date,
         originSquadronId: input.originSquadronId,
         originSquadronName: input.originSquadronName,
-        currentTier: input.targetTier ?? "wing",
+        currentTier: input.targetTier ?? "squadron",
         currentPcId: input.targetPcId,
         currentPcName: input.targetPcName,
         status: "submitted",
@@ -1380,19 +1380,17 @@ export function useDecideSchedule() {
         cur.currentTier = "squadron";
         push("edited", input.note ?? "edits returned to originator");
       } else if (input.action === "forward") {
-        // Upward chain: Squadron → Wing → Base (no skipping).
-        // Lateral chain: Flight ↔ Squadron (either end may forward back
-        // to the other). Base is terminal.
-        if (cur.currentTier === "wing") {
-          cur.currentTier = "base";
-        } else if (cur.currentTier === "squadron") {
-          cur.currentTier = "wing";
-        } else if (cur.currentTier === "flight") {
-          // A flight-tier share forwards back to its originating
-          // squadron for action.
+        // v1.1.63: schedule sharing is strictly squadron-internal
+        // between Flight Cmdr, Squadron Cmdr, and Ops Pilot. The only
+        // valid forward is the lateral hand-off between flight and
+        // squadron tiers. Wing / Base / HQ are never recipients of a
+        // flight schedule and any attempt to forward there is a bug.
+        if (cur.currentTier === "flight") {
           cur.currentTier = "squadron";
+        } else if (cur.currentTier === "squadron") {
+          cur.currentTier = "flight";
         } else {
-          throw new Error("Already at base — nowhere to forward.");
+          throw new Error("Schedule sharing is squadron-internal — wing/base tiers cannot receive a forward.");
         }
         cur.currentPcId = input.forwardPcId ?? null;
         cur.currentPcName = input.forwardPcName ?? null;
@@ -1997,30 +1995,26 @@ export function canUseMessages(role: string | undefined, scope: string | undefin
   return false;
 }
 
-// Role helper: which roles see the schedule chain UI.
+// Role helper: which roles see the schedule chain / flight program UI.
 //
-// v1.1.28 widening: the Ops Pilot is now a first-class participant
-// in the schedule chain so the operations desk can both publish the
-// daily flight programme to the linked Flight Commanders and to the
-// Squadron Commander, AND receive returned/edited programmes back from
-// either side. The Ops PC sits at "squadron" tier in the registry but
-// has its own canonical id (= squadron code), so shares route to it
-// exactly like to any other PC.
+// v1.1.63 — final scope per design owner: schedule sharing is strictly
+// a SQUADRON-internal flow between three roles only:
 //
-// The schedule sharing channels are:
-//   Ops Pilot   ⇄ Flight Cmdr     (peer share within the squadron)
-//   Ops Pilot   ⇄ Squadron Cmdr   (peer share within the squadron)
-//   Flight Cmdr ─▶ Squadron Cmdr  (approve / reject)
-//   Squadron Cmdr ─▶ Wing Cmdr    (approve / reject; on approve the
-//                                  share auto-forwards down to Base)
-//   Base Cmdr   (read-only, terminal recipient)
-// HQ tier never participates.
+//   Flight Cmdr  ⇄ Squadron Cmdr   (peer share + approve/reject)
+//   Flight Cmdr  ⇄ Ops Pilot       (peer share within the squadron)
+//   Squadron Cmdr ⇄ Ops Pilot      (peer share within the squadron)
+//
+// Wing Cmdr, Base Cmdr, and HQ never see, create, receive, approve,
+// reject, or delete a flight schedule. They have their own dashboards
+// (squadron rollups, hours analytics, messaging) but the daily flying
+// programme is squadron business and stays within the squadron.
+//
+// super_admin keeps access for diagnostics only.
 export function canUseScheduleChain(role: string | undefined, scope: string | undefined): boolean {
   if (role === "super_admin") return true;
   if (role === "ops") return true; // Ops Pilot's PC — squadron-tier peer
   if (role === "commander") {
-    return scope === "flight" || scope === "squadron"
-        || scope === "wing"   || scope === "base";
+    return scope === "flight" || scope === "squadron";
   }
   return false;
 }

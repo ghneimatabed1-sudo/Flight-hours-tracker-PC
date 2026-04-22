@@ -133,9 +133,13 @@ export default function FlightProgram() {
   // Schedule sharing is strictly between Flight Commanders and their
   // related Squadron Commander. Every other tier (wing / base / HQ) and
   // the Ops Pilot's PC are intentionally excluded.
+  // v1.1.63: schedule authoring (and the page itself) is open to the
+  // three squadron-internal roles that participate in schedule
+  // sharing — Flight Cmdr, Squadron Cmdr, and Ops Pilot. Wing / Base /
+  // HQ never compose or receive flight schedules.
   const canAccess =
-    user?.role === "commander" &&
-    (user?.scope === "flight" || user?.scope === "squadron");
+    user?.role === "ops"
+    || (user?.role === "commander" && (user?.scope === "flight" || user?.scope === "squadron"));
   const canPrint = canAccess;
   const isFlightCmdr = user?.role === "commander" && user?.scope === "flight";
 
@@ -204,14 +208,19 @@ export default function FlightProgram() {
           || p.id.startsWith(`${sqdnPrefix}#`),
         );
       }
-      // Squadron Commander has TWO valid Submit targets:
-      //   1. Flight Commander PCs — to share / return a program back
-      //      to a flight (the vice-versa of flight → squadron).
-      //   2. Wing Commander PCs — to push the program up the chain;
-      //      on wing approval it auto-forwards to base.
-      // Wing / Base / HQ tiers other than these are excluded.
+      // v1.1.63 — Squadron Commander targets are SQUADRON-INTERNAL ONLY:
+      //   • Flight Commander PCs — return / share a program with a flight
+      //   • The squadron's Ops Pilot PC — publish to the always-on desk
+      // Wing, Base, and HQ tiers are deliberately excluded; the daily
+      // flying programme never leaves the squadron.
       if (isSquadronCmdr) {
-        return all.filter(p => p.tier === "flight" || p.tier === "wing");
+        return all.filter(p => p.tier === "flight" || p.tier === "squadron");
+      }
+      // v1.1.63 — Ops Pilot targets: same squadron-internal scope as
+      // the Squadron Commander. Ops publishes to its Flight Cmdrs and
+      // to the Sqn Cmdr PC; never up to wing/base/HQ.
+      if (user?.role === "ops") {
+        return all.filter(p => p.tier === "flight" || p.tier === "squadron");
       }
       return all;
     },
@@ -268,7 +277,7 @@ export default function FlightProgram() {
       rows,
       targetPcId:   selectedTarget.id,
       targetPcName: selectedTarget.squadronName,
-      targetTier:   selectedTarget.tier as "squadron" | "wing" | "base",
+      targetTier:   (selectedTarget.tier === "flight" ? "flight" : "squadron"),
       submittedBy:  user?.username ?? "ops",
       program:      prog,
     });
@@ -277,22 +286,30 @@ export default function FlightProgram() {
     setSubmitTo("");
   };
 
+  // v1.1.63 — schedule sharing is squadron-internal: Flight Cmdr,
+  // Squadron Cmdr, and Ops Pilot only. Wing / Base / HQ never see the
+  // page or its inbox. Composer authoring stays restricted to the two
+  // commander scopes; Ops Pilot uses the inbox panel below to act on
+  // shares addressed to the ops desk.
+  const canSeeShareInbox =
+    user?.role === "super_admin"
+    || user?.role === "ops"
+    || (user?.role === "commander" && (user?.scope === "flight" || user?.scope === "squadron"));
+
   if (!canAccess) {
-    // v1.1.62 — every PC's role is fixed at PC setup, so a program
-    // sheet may land on a PC whose role can't author programs (Ops,
-    // Wing, Base, HQ). Those PCs still need to act on it. Render the
-    // inbox panel above the access-gate so every role can
-    // Approve / Reject / Delete incoming program shares; the composer
-    // below the gate stays restricted to flight/squadron commanders.
     return (
       <div className="p-6 space-y-4" dir={dir}>
-        <FlightProgramShareInbox />
+        {canSeeShareInbox && <FlightProgramShareInbox />}
         <div className="rounded-md border border-border bg-card p-6 max-w-xl">
           <div className="text-sm font-semibold mb-1">{t("nav_flight_program")}</div>
           <div className="text-xs text-muted-foreground leading-relaxed">
-            {lang === "ar"
-              ? "تأليف برنامج طيران جديد متاح فقط لضابط عمليات السرب وقائد السرب. الإجراءات على البرامج الواردة متاحة لكل دور أعلاه."
-              : "Authoring a new flight program is available only to the squadron ops officer and the squadron commander. Actions on incoming programs above are available to every role."}
+            {canSeeShareInbox
+              ? (lang === "ar"
+                  ? "تأليف برنامج طيران جديد متاح فقط لقائد السرب وقائد الرحلة. الإجراءات على البرامج الواردة متاحة لضابط العمليات أعلاه."
+                  : "Authoring a new flight program is available only to the squadron and flight commanders. Actions on incoming programs are available to the ops pilot above.")
+              : (lang === "ar"
+                  ? "هذه الصفحة متاحة فقط لضابط عمليات السرب وقائد السرب وقائد الرحلة."
+                  : "This page is available only to the squadron ops pilot, the squadron commander, and the flight commander.")}
           </div>
         </div>
       </div>
