@@ -51,33 +51,56 @@ jobs:
           api="https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query"
           auth_header="Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}"
 
-          # Verify the ledger table exists; if not, this is the first
-          # run on a brand-new project and we will let the migrations
-          # create it themselves.
-          ledger_check=$(curl -sS -X POST "$api" \
-            -H "$auth_header" \
-            -H "Content-Type: application/json" \
-            -d '{"query":"select to_regclass('"'"'public._migration_ledger'"'"') as t"}')
-          echo "ledger check: $ledger_check"
+          # Helper: POST a query, return body on success, exit 1 on
+          # non-2xx so partial failures stop the workflow loudly.
+          run_query() {
+            local q_payload="$1"
+            local label="$2"
+            local code
+            code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -X POST "$api" \
+              -H "$auth_header" -H "Content-Type: application/json" \
+              -d "$q_payload")
+            if [ "$code" != "200" ] && [ "$code" != "201" ]; then
+              echo "::error::$label failed (HTTP $code)"
+              cat /tmp/resp.json
+              exit 1
+            fi
+            cat /tmp/resp.json
+          }
 
-          # Pull the list of already-applied filenames into a set.
-          applied_json=$(curl -sS -X POST "$api" \
-            -H "$auth_header" \
-            -H "Content-Type: application/json" \
-            -d '{"query":"select coalesce(json_agg(filename), '"'"'[]'"'"'::json) as f from public._migration_ledger"}' \
-            || echo '[{"f":[]}]')
-          echo "applied list response: $applied_json"
+          # Step 1: does the ledger exist? If not, applied_set is empty
+          # and the next migration that creates it will populate itself.
+          ledger_resp=$(curl -sS -X POST "$api" \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d '{"query":"select to_regclass('"'"'public._migration_ledger'"'"')::text as t"}')
+          echo "ledger existence check: $ledger_resp"
 
-          applied_set=$(node -e "
-            const r = JSON.parse(process.argv[1]);
-            const list = (Array.isArray(r) && r[0] && r[0].f) ? r[0].f : [];
-            console.log(list.join('|'));
-          " "$applied_json" || echo "")
+          ledger_exists=$(node -e "
+            try {
+              const r = JSON.parse(process.argv[1]);
+              const t = Array.isArray(r) && r[0] ? r[0].t : null;
+              console.log(t ? 'yes' : 'no');
+            } catch(e) { console.log('no'); }
+          " "$ledger_resp")
+          echo "ledger_exists=$ledger_exists"
+
+          if [ "$ledger_exists" = "yes" ]; then
+            applied_resp=$(run_query \
+              '{"query":"select coalesce(json_agg(filename), '"'"'[]'"'"'::json) as f from public._migration_ledger"}' \
+              "applied-list query")
+            applied_set=$(node -e "
+              const r = JSON.parse(process.argv[1]);
+              const list = (Array.isArray(r) && r[0] && r[0].f) ? r[0].f : [];
+              console.log(list.join('|'));
+            " "$applied_resp")
+          else
+            applied_set=""
+          fi
 
           shopt -s nullglob
           for f in $(ls "$MIGRATIONS_DIR"/*.sql | sort); do
             fn=$(basename "$f")
-            if echo "|$applied_set|" | grep -q "|$fn|"; then
+            if [ -n "$applied_set" ] && echo "|$applied_set|" | grep -q "|$fn|"; then
               echo "skip $fn (already applied)"
               continue
             fi
@@ -90,8 +113,7 @@ jobs:
             " "$f" > "$payload_file"
 
             http_code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -X POST "$api" \
-              -H "$auth_header" \
-              -H "Content-Type: application/json" \
+              -H "$auth_header" -H "Content-Type: application/json" \
               --data-binary @"$payload_file")
 
             if [ "$http_code" != "200" ] && [ "$http_code" != "201" ]; then
@@ -101,17 +123,15 @@ jobs:
             fi
 
             sha=$(sha256sum "$f" | awk '{print $1}')
-            curl -sS -X POST "$api" \
-              -H "$auth_header" \
-              -H "Content-Type: application/json" \
-              -d "$(node -e "
-                const o = {
-                  query: \"insert into public._migration_ledger (filename, applied_by, sha256) values (\" +
-                         \"'\" + process.argv[1] + \"', 'github-actions', '\" + process.argv[2] + \"') \" +
-                         \"on conflict (filename) do update set sha256 = excluded.sha256, applied_at = now()\"
-                };
-                process.stdout.write(JSON.stringify(o));
-              " "$fn" "$sha")" > /dev/null
+            ledger_payload=$(node -e "
+              const o = {
+                query: \"insert into public._migration_ledger (filename, applied_by, sha256) values (\" +
+                       \"'\" + process.argv[1] + \"', 'github-actions', '\" + process.argv[2] + \"') \" +
+                       \"on conflict (filename) do update set sha256 = excluded.sha256, applied_at = now()\"
+              };
+              process.stdout.write(JSON.stringify(o));
+            " "$fn" "$sha")
+            run_query "$ledger_payload" "ledger insert for $fn" > /dev/null
 
             echo "✓ applied $fn"
           done
