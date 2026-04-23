@@ -212,6 +212,34 @@ export default function ScheduleChain() {
     () => sortByName(registry.data.filter(p => !p.isSelf && p.tier === "squadron" && isFresh(p))),
     [registry.data],
   );
+  // v1.1.103 — carve out the Sqn Cmdr PCs (id prefix SQDNCMD:) from the
+  // broader squadron-tier list so the Flight Cmdr's approve-and-forward
+  // picker can aim specifically at the Sqn Cmdr desk instead of also
+  // offering the Ops PC (which is tier="squadron" but a peer, not an
+  // upstream approver).
+  const sqnCmdrPCs = useMemo(
+    () => squadronPCs.filter(p => p.id.startsWith("SQDNCMD:")),
+    [squadronPCs],
+  );
+  // Flight Cmdr forward targets on approve. Prefer Sqn Cmdr PCs when
+  // they exist. When the squadron has no Sqn Cmdr PC yet (common at a
+  // new install — operator hasn't provisioned that desk), fall through
+  // to Wing Cmdr so the chain still flows up instead of dead-ending at
+  // the Flight tier. Operator can still pick "Approve only" if they
+  // want to stop the chain here.
+  const flightApproveForwardTargets = useMemo(
+    () => sqnCmdrPCs.length > 0 ? sqnCmdrPCs : wingPCs,
+    [sqnCmdrPCs, wingPCs],
+  );
+  // Am I running on a Sqn Cmdr PC? Ops and Sqn Cmdr both resolve to
+  // myTier === "squadron", but only the Sqn Cmdr's canonical id carries
+  // the SQDNCMD: prefix. Used to gate the squadron→wing auto-forward so
+  // the Ops PC (which never approves up-chain) doesn't get a false
+  // forward dropdown.
+  const isSqnCmdrPc = useMemo(
+    () => (canonicalId || fallbackId).startsWith("SQDNCMD:"),
+    [canonicalId, fallbackId],
+  );
   // Which PCs may this tier address on the composer? Squadron composers
   // see both Wing (up-chain) and Flight (down-chain). Flight composers
   // see Squadron PCs.
@@ -721,6 +749,40 @@ export default function ScheduleChain() {
                             </select>
                           </div>
                         )}
+                        {/* v1.1.103 Flight tier: Flight Cmdr approves and
+                            auto-forwards up-chain. Prefers a Sqn Cmdr PC
+                            when one exists; falls through to Wing Cmdr
+                            when the squadron hasn't provisioned a Sqn
+                            Cmdr desk yet — so the chain still flows up
+                            instead of dead-ending here. */}
+                        {share.currentTier === "flight" && myTier === "flight" && flightApproveForwardTargets.length > 0 && (
+                          <div>
+                            <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                              On approve, send to {sqnCmdrPCs.length > 0 ? "Squadron Cmdr" : "Wing Cmdr"}
+                            </label>
+                            <select value={forwardTo || flightApproveForwardTargets[0]?.id || ""} onChange={e => setForwardTo(e.target.value)} className="px-2 py-1 rounded bg-input border border-border text-xs" data-testid={`forward-target-${share.id}`}>
+                              {flightApproveForwardTargets.map(p => (
+                                <option key={p.id} value={p.id}>{p.deviceName || p.squadronName}{p.online ? " · online" : " · offline"}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                        {/* v1.1.103 Sqn Cmdr tier: when the Sqn Cmdr
+                            approves a share sitting at squadron tier,
+                            auto-forward up to Wing. Only fires on an
+                            actual Sqn Cmdr PC (id prefix SQDNCMD:) —
+                            Ops PC shares this tier but never approves
+                            up-chain. */}
+                        {share.currentTier === "squadron" && myTier === "squadron" && isSqnCmdrPc && wingPCs.length > 0 && (
+                          <div>
+                            <label className="text-[10px] uppercase tracking-wider text-muted-foreground">On approve, send to Wing Cmdr</label>
+                            <select value={forwardTo || wingPCs[0]?.id || ""} onChange={e => setForwardTo(e.target.value)} className="px-2 py-1 rounded bg-input border border-border text-xs" data-testid={`forward-target-${share.id}`}>
+                              {wingPCs.map(p => (
+                                <option key={p.id} value={p.id}>{p.deviceName || p.squadronName}{p.online ? " · online" : " · offline"}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                         <input
                           value={decisionNote}
                           onChange={e => setDecisionNote(e.target.value)}
@@ -748,6 +810,42 @@ export default function ScheduleChain() {
                                 note: decisionNote || undefined,
                               });
                               toast({ title: `Approved · sent to ${baseTarget.squadronName}` });
+                            } else if (myTier === "flight" && share.currentTier === "flight" && flightApproveForwardTargets.length > 0) {
+                              // v1.1.103 Flight Cmdr approves → forward up-
+                              // chain. Target is the first Sqn Cmdr PC when
+                              // present, otherwise a Wing PC (graceful
+                              // skip for squadrons without a Sqn Cmdr
+                              // desk). Derived next-tier from the id prefix
+                              // so the approval event lands with the right
+                              // wire tier.
+                              const targetId = forwardTo || flightApproveForwardTargets[0].id;
+                              const target = flightApproveForwardTargets.find(p => p.id === targetId) ?? flightApproveForwardTargets[0];
+                              const nextTier: "squadron" | "wing" = target.id.startsWith("SQDNCMD:") ? "squadron" : "wing";
+                              await decide.mutateAsync({
+                                id: share.id, action: "forward", by: approver, tier: wireTier,
+                                forwardPcId: target.id, forwardPcName: target.squadronName,
+                              });
+                              await decide.mutateAsync({
+                                id: share.id, action: "approve", by: approver, tier: nextTier,
+                                note: decisionNote || undefined,
+                              });
+                              toast({ title: `Approved · sent to ${target.squadronName}` });
+                            } else if (myTier === "squadron" && isSqnCmdrPc && share.currentTier === "squadron" && wingPCs.length > 0) {
+                              // v1.1.103 Sqn Cmdr approves → forward to
+                              // Wing. Mirror of Wing→Base: forward first,
+                              // approve second so the approval event lands
+                              // at the right current_pc_id.
+                              const wingId = forwardTo || wingPCs[0].id;
+                              const wingTarget = wingPCs.find(p => p.id === wingId) ?? wingPCs[0];
+                              await decide.mutateAsync({
+                                id: share.id, action: "forward", by: approver, tier: wireTier,
+                                forwardPcId: wingTarget.id, forwardPcName: wingTarget.squadronName,
+                              });
+                              await decide.mutateAsync({
+                                id: share.id, action: "approve", by: approver, tier: "wing",
+                                note: decisionNote || undefined,
+                              });
+                              toast({ title: `Approved · sent to ${wingTarget.squadronName}` });
                             } else {
                               await decide.mutateAsync({ id: share.id, action: "approve", by: approver, tier: wireTier, note: decisionNote || undefined });
                               toast({ title: "Approved" });
@@ -760,7 +858,11 @@ export default function ScheduleChain() {
                           <Check className="h-3 w-3" />
                           {myTier === "wing" && share.currentTier === "wing" && basePCs.length > 0
                             ? "Approve & send to Base"
-                            : "Approve"}
+                            : myTier === "flight" && share.currentTier === "flight" && flightApproveForwardTargets.length > 0
+                              ? `Approve & send to ${sqnCmdrPCs.length > 0 ? "Sqn Cmdr" : "Wing"}`
+                              : myTier === "squadron" && isSqnCmdrPc && share.currentTier === "squadron" && wingPCs.length > 0
+                                ? "Approve & send to Wing"
+                                : "Approve"}
                         </button>
                         <button
                           onClick={async () => {
