@@ -1641,12 +1641,22 @@ export function useDecideSchedule() {
         // canViewFinalSchedules / useScheduleShares viewAllApproved
         // path. Base / HQ are read-only viewers, never recipients of
         // an active forward.
+        // v1.1.96 chain transitions per operator-stated contract (DOMAIN §7.1):
+        //   flight    → squadron   (Flight Cmdr returns to Sqn for review)
+        //   squadron  → wing       (Sqn Cmdr submits up for Wing approval)
+        //   wing      → base       (Wing Cmdr forwards for final archive — NEW)
+        // Wing approve WITHOUT a base forward also remains valid: it stores
+        // for that day for that squadron (operator: "if the wing commander
+        // didn't want to send it to the base commander, it's OK").
+        // Base is the terminal tier — final archive is on Base.approve.
         if (cur.currentTier === "flight") {
           cur.currentTier = "squadron";
         } else if (cur.currentTier === "squadron") {
           cur.currentTier = "wing";
+        } else if (cur.currentTier === "wing") {
+          cur.currentTier = "base";
         } else {
-          throw new Error("Wing tier shares are terminal — use Approve to release the final to Base / HQ.");
+          throw new Error("Base tier is the final archive — there is no further forward step.");
         }
         cur.currentPcId = input.forwardPcId ?? null;
         cur.currentPcName = input.forwardPcName ?? null;

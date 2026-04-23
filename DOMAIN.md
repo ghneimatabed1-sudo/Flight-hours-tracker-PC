@@ -196,10 +196,13 @@ The current `useDecideSchedule` enforces a **4-tier** chain `flight | squadron |
 - **Wing tier is terminal** — Wing's Approve releases the sheet to Base/HQ as **read-only viewers** via `canViewFinalSchedules`. Base does not have a separate Approve action.
 - **There is no separate "ops" tier**: Ops officers operate the squadron-tier PC. Edit-bounces from Sqn Cmdr land on the squadron PC where the Ops officer sits.
 
-**Open gaps vs. §7.1** (to be reconciled in a future migration after operator answers the structural questions):
-1. Whether Ops needs its own tier or is correctly modelled as the squadron-PC operator.
-2. Adding the Wing → Base forward hop and Base's Approve action.
-3. Moving final-archive trigger from Wing.approve to Base.approve.
+**Reconciled in v1.1.96 — operator confirmed:**
+1. **Ops is NOT a separate tier** — one Officer PC per squadron, the Ops officer sits there.
+2. **Wing → Base forward + Base Approve = final archive — WIRED** (cross-pc.ts:1659; UI was already present at ScheduleChain.tsx:651-700, only the throw was blocking it).
+3. **Wing.approve without Base forward also stays valid** — operator: "if the wing commander didn't want to send it to the base commander, it's OK; it will be saved on that day for that specific squadron."
+4. **Wing edit-bounce → Sqn Cmdr** — verified live; root cause of the persistent 42501 was the `audit_log` policy (not the schedule policy), fixed in migration 0036.
+
+**Live-verified end-to-end (5/5) on v1.1.96:** ops submit → sqn→wing → wing→base → base.approve → ops sees final approval.
 
 ### 7.3 Common rules at every tier
 
