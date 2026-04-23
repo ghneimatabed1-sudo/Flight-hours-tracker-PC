@@ -19,7 +19,9 @@ export default function Users() {
       await create.mutateAsync({ username: u, password: pw || `Tmp-${Date.now()}` });
       setU(""); setPw("");
       toast({ title: t("userCreated") });
-    } catch { /* surfaced */ }
+    } catch (e) {
+      toast({ title: "Could not create user", description: (e as Error).message, variant: "destructive" });
+    }
   };
   return (
     <div>

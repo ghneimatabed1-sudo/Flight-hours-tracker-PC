@@ -15,7 +15,7 @@
    No Approve / Reject / Edit / Delete — viewers only. The composer
    stays on the squadron PCs.
    ──────────────────────────────────────────────────────────────────── */
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { markFinalSchedulesSeen } from "@/lib/sidebar-badges";
 import { ChevronDown, ChevronRight, ClipboardCheck, FileText, Printer } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
@@ -480,7 +480,7 @@ function Stat({
   label: string;
   value: number;
   tone?: "muted" | "good" | "danger";
-}): JSX.Element {
+}): React.ReactElement {
   const valueClass =
     tone === "danger" ? "text-amber-300" :
     tone === "good"   ? "text-emerald-300" :

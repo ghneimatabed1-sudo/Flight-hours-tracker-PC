@@ -72,7 +72,9 @@ export default function NotamsPage() {
       setText("");
       setPriority("normal");
       toast({ title: t("notamPublished") });
-    } catch { /* surfaced by global error toast */ }
+    } catch (e) {
+      toast({ title: "Could not publish NOTAM", description: (e as Error).message, variant: "destructive" });
+    }
   };
 
   const startEdit = (n: NotamRow) => {
@@ -86,7 +88,9 @@ export default function NotamsPage() {
       await update.mutateAsync({ ...n, text: editText, priority: editPriority });
       setEditingId(null);
       toast({ title: t("savedTitle") });
-    } catch { /* surfaced */ }
+    } catch (e) {
+      toast({ title: "Could not save NOTAM", description: (e as Error).message, variant: "destructive" });
+    }
   };
 
   const onWithdraw = async () => {
@@ -95,7 +99,9 @@ export default function NotamsPage() {
       await remove.mutateAsync(confirmDelete);
       setConfirmDelete(null);
       toast({ title: t("notamWithdrawn") });
-    } catch { /* surfaced */ }
+    } catch (e) {
+      toast({ title: "Could not withdraw NOTAM", description: (e as Error).message, variant: "destructive" });
+    }
   };
 
   return (

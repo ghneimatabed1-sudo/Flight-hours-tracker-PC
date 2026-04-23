@@ -137,8 +137,8 @@ export default function DateInput({
     // browsers. Falls back to a focus+click which still pops the picker
     // on most platforms.
     try {
-      // @ts-expect-error showPicker is not in older lib.dom typings.
-      if (typeof el.showPicker === "function") el.showPicker();
+      const picker = (el as HTMLInputElement & { showPicker?: () => void }).showPicker;
+      if (typeof picker === "function") picker.call(el);
       else { el.focus(); el.click(); }
     } catch {
       el.focus(); el.click();

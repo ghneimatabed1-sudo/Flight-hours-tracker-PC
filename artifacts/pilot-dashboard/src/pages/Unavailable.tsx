@@ -30,7 +30,9 @@ export default function Unavailable() {
       await create.mutateAsync({ pilotId: pid, from, to, reason: reason || "—" });
       setReason("");
       toast({ title: t("unavailAdded") });
-    } catch { /* surfaced */ }
+    } catch (e) {
+      toast({ title: "Could not mark unavailable", description: (e as Error).message, variant: "destructive" });
+    }
   };
 
   const onRemove = async () => {
@@ -39,7 +41,9 @@ export default function Unavailable() {
       await remove.mutateAsync(confirmRemove.id);
       setConfirmRemove(null);
       toast({ title: t("unavailRemoved") });
-    } catch { /* surfaced */ }
+    } catch (e) {
+      toast({ title: "Could not remove", description: (e as Error).message, variant: "destructive" });
+    }
   };
 
   const pname = (id: string) => PILOTS.find(p => p.id === id)?.name || id;

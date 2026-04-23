@@ -40,7 +40,7 @@ const FACTORY_EXERCISES = ["GH", "IF", "NVG", "NIGHT", "CONTINUATION TRNG", "MTF
 /**
  * Aircraft models the squadron operates. Task #137 (zero-trouble
  * multi-squadron install): factory ships EMPTY so a fresh PC running the
- * Setup Wizard fills in its own airframes — no NO.8 / UH-60M leakage
+ * Setup Wizard fills in its own airframes — no example-squadron leakage
  * onto unrelated squadrons. The wizard writes the per-squadron list to
  * the `squadrons.default_aircraft` jsonb column added by migration 0039,
  * and `loadSquadronDefaults()` overlays a per-PC localStorage cache for
@@ -77,10 +77,10 @@ export interface SquadronDefaults {
    *  other regulators may differ — operator edits per squadron. */
   minSixMonthHours: number;
   /** Higher-echelon name printed at the top of every Monthly Report sheet
-   *  (above the squadron). For NO.8 SQDN this is "QUICK REACTION FORCE
-   *  GROUP". Other RJAF squadrons sit under different parents (e.g. an
-   *  AH-1F squadron under "ATTACK HELICOPTER GROUP"); editing this once
-   *  per APK install retitles the whole packet. */
+   *  (above the squadron). For a UH-60 squadron this might be "QUICK
+   *  REACTION FORCE GROUP"; for an attack squadron, "ATTACK HELICOPTER
+   *  GROUP". Editing this once per APK install retitles the whole
+   *  packet. */
   groupName: string;
   /** Acronym for the parent group, used as the prefix on every form name
    *  ("QRFG RCN FORM 1", "QRFG FUEL", "QRFG AUTHORIZATION", etc.) and on
@@ -95,8 +95,9 @@ export interface SquadronDefaults {
   /** All aircraft models the squadron operates, in the order they should
    *  appear in dropdowns. Drives the A/C Type select on Add Sortie, the
    *  Sortie Log edit form, and the seed value on every new Flight Program
-   *  row. NO.8 SQDN flies UH-60M / UH-60L / UH-60AIL plus AS332 as a
-   *  crossover; an AH-1F squadron would replace the list entirely. */
+   *  row. A UH-60 squadron might fly UH-60M / UH-60L / UH-60AIL plus
+   *  AS332 as a crossover; an attack squadron would replace the list
+   *  entirely. */
   airframes: string[];
   /** Air base name as captured by the Setup Wizard (e.g. "Main Air Base").
    *  Mirrors `squadrons.base` for offline reads. */
@@ -110,10 +111,9 @@ export interface SquadronDefaults {
    *  full chain-of-command labels without hitting the central server. */
   wing?: string;
   /** Short label shown on the Sortie Log header on Add Sortie
-   *  ("QREG · 2026-04-23 · UH-60M"). NO.8 SQDN uses "QREG" (Quick
-   *  Reaction Group) — other squadrons may use "SQNREG", "FLTLOG",
-   *  or any short tag of their choice. Editing this once per APK
-   *  install retitles the daily log header. */
+   *  ("SQNLOG · 2026-04-23 · UH-60M"). Squadrons may use "QREG",
+   *  "SQNREG", "FLTLOG", or any short tag of their choice. Editing
+   *  this once per APK install retitles the daily log header. */
   sortieLogLabel: string;
 }
 
@@ -129,8 +129,8 @@ export function factoryDefaults(): SquadronDefaults {
     autoSuggestRemarks: true,
     minSixMonthHours: 30,
     // Task #137: factory text is now neutral so a fresh PC doesn't show
-    // a NO.8-flavoured group / acronym / log label until the squadron's
-    // Setup Wizard fills them in.
+    // a leaked group / acronym / log label until the squadron's Setup
+    // Wizard fills them in.
     groupName: "",
     groupAcronym: "",
     primaryAirframe: "",

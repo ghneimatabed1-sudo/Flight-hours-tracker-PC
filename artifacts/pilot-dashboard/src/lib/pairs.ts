@@ -197,7 +197,15 @@ export interface IssueCodeArgs {
 
 export async function issuePairCode(args: IssueCodeArgs): Promise<PairCode> {
   if (!live() || !supabase) throw new Error("Supabase is not configured.");
-  // Up to 3 attempts to dodge a rare collision in the 5-min window.
+  // Up to 3 attempts. Retries on:
+  //   • 23505 (unique-violation) — extremely rare 6-digit collision in
+  //     the 5-min window; just regenerate.
+  //   • Any other transient error (PostgREST schema-cache miss right
+  //     after a migration, momentary network blip, 503 from PgBouncer).
+  // Each retry waits an exponential backoff (120ms, 360ms) so a brief
+  // outage isn't surfaced to the operator as "Failed to issue pairing
+  // code." when the very next attempt would have succeeded.
+  let lastError: { code?: string; message?: string } | null = null;
   for (let i = 0; i < 3; i++) {
     const code = generateCode();
     const expires = new Date(Date.now() + 5 * 60_000).toISOString();
@@ -231,10 +239,18 @@ export async function issuePairCode(args: IssueCodeArgs): Promise<PairCode> {
         consumedAt: data.consumed_at,
       };
     }
-    if (error?.code === "23505") continue; // unique-violation, retry
-    throw new Error(error?.message ?? "Failed to issue pairing code.");
+    lastError = error ?? null;
+    // RLS denial (42501) and matrix-violation are NOT transient — bail
+    // out immediately so the operator sees the real reason.
+    if (error?.code === "42501") {
+      throw new Error(error.message);
+    }
+    // Backoff before the next attempt (skipped on the final iteration).
+    if (i < 2) {
+      await new Promise(r => setTimeout(r, 120 * Math.pow(3, i)));
+    }
   }
-  throw new Error("Could not generate a unique pairing code. Try again.");
+  throw new Error(lastError?.message ?? "Could not issue a pairing code after 3 attempts. Try again in a few seconds.");
 }
 
 export async function lookupPairCode(rawCode: string): Promise<PairCode | null> {
@@ -415,17 +431,38 @@ export async function setPairPermanent(aPcId: string, bPcId: string, permanent: 
   if (error) throw new Error(error.message);
 }
 
-export async function resetRegisteredPc(pcId: string, _byUserId: string | null, reason?: string): Promise<{ revokedPairCount: number }> {
+export async function resetRegisteredPc(
+  pcId: string,
+  _byUserId: string | null,
+  reason?: string,
+  force?: boolean,
+): Promise<{ revokedPairCount: number }> {
   if (!live() || !supabase) throw new Error("Supabase is not configured.");
   // Atomic reset: server-side RPC revokes every active pair, deletes
   // the registry row + user_pcs claims, and writes the audit row in
   // ONE transaction. If any step throws the whole thing rolls back —
   // there is no half-reset state and no silent failure mode.
+  //
+  // `force` is a belt-and-braces follow-up that explicitly removes the
+  // registry row even if the PC has no active pairs / claims. It's only
+  // exposed in the UI when the heartbeat is stale, but the API allows
+  // it unconditionally so a script can clean up stuck rows without
+  // first inspecting state.
   const { data, error } = await supabase.rpc("xpc_admin_reset_pc", {
     p_pc_id: pcId,
     p_reason: reason ?? null,
   });
   if (error) throw new Error(error.message);
+  if (force) {
+    // Best-effort secondary delete in case the RPC's idempotency left
+    // a stale registry row behind. RLS on the table only allows
+    // super-admins; an RLS denial is safely swallowed because the row
+    // is already gone for non-super-admins.
+    const del = await supabase.from("xpc_pcs").delete().eq("id", pcId);
+    if (del.error && del.error.code !== "PGRST116" && del.error.code !== "42501") {
+      throw new Error(del.error.message);
+    }
+  }
   return { revokedPairCount: Number(data ?? 0) };
 }
 
@@ -501,20 +538,34 @@ export function useAllPairs(): UseQueryResult<PairLink[]> & { data: PairLink[] }
   return { ...q, data: q.data ?? [] } as UseQueryResult<PairLink[]> & { data: PairLink[] };
 }
 
-export function usePairAudit(limit: number = 200): UseQueryResult<PairAuditEntry[]> & { data: PairAuditEntry[] } {
-  const q = useQuery<PairAuditEntry[]>({
+export interface PairAuditResult {
+  entries: PairAuditEntry[];
+  rlsDenied: boolean;
+}
+
+export function usePairAudit(limit: number = 200): UseQueryResult<PairAuditResult> & { data: PairAuditResult } {
+  const q = useQuery<PairAuditResult>({
     queryKey: [...KEY_AUDIT, limit],
     enabled: live(),
     refetchInterval: 10_000,
     queryFn: async () => {
-      if (!live() || !supabase) return [];
+      if (!live() || !supabase) return { entries: [], rlsDenied: false };
       const { data, error } = await supabase
         .from("xpc_pair_audit")
         .select("*")
         .order("at", { ascending: false })
         .limit(limit);
-      if (error) throw new Error(error.message);
-      return (data as Array<{
+      if (error) {
+        // PostgREST returns 42501 when RLS rejects the SELECT — every
+        // non-super-admin caller hits this on the audit table. Don't
+        // throw: surface the denial as a flag so the page can render
+        // an info card instead of a destructive toast.
+        if (error.code === "42501" || /permission denied|rls/i.test(error.message)) {
+          return { entries: [], rlsDenied: true };
+        }
+        throw new Error(error.message);
+      }
+      const entries = (data as Array<{
         id: string; action: string; target_pc_a: string | null; target_pc_b: string | null;
         by_user_label: string | null; kind: string | null; justification: string | null;
         detail: Record<string, unknown> | null; at: string;
@@ -524,9 +575,11 @@ export function usePairAudit(limit: number = 200): UseQueryResult<PairAuditEntry
         byUserLabel: r.by_user_label, kind: r.kind,
         justification: r.justification, detail: r.detail, at: r.at,
       }));
+      return { entries, rlsDenied: false };
     },
   });
-  return { ...q, data: q.data ?? [] } as UseQueryResult<PairAuditEntry[]> & { data: PairAuditEntry[] };
+  const fallback: PairAuditResult = { entries: [], rlsDenied: false };
+  return { ...q, data: q.data ?? fallback } as UseQueryResult<PairAuditResult> & { data: PairAuditResult };
 }
 
 // Long-poll for a fresh pair created against my PC id (host modal closes
@@ -642,8 +695,8 @@ export function useSetPairPermanent() {
 export function useResetRegisteredPc() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { pcId: string; byUserId: string | null }) =>
-      resetRegisteredPc(args.pcId, args.byUserId),
+    mutationFn: (args: { pcId: string; byUserId: string | null; force?: boolean }) =>
+      resetRegisteredPc(args.pcId, args.byUserId, undefined, args.force),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY_LINKS });
       qc.invalidateQueries({ queryKey: KEY_AUDIT });

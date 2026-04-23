@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useI18n } from "@/lib/i18n";
 import { useAuth, type PcRoleLock } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,7 +21,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 // One-shot Check-for-Updates control rendered next to the Setup error block.
 // Lets an operator stuck on a broken installer pull the latest build without
 // leaving the modal. No-op outside packaged Electron.
-function SetupUpdateButton({ lang }: { lang: "en" | "ar" }): JSX.Element | null {
+function SetupUpdateButton({ lang }: { lang: "en" | "ar" }): React.ReactElement | null {
   type Bridge = {
     checkForUpdates?: () => Promise<{ ok: boolean; version?: string | null; reason?: string }>;
     installUpdateNow?: () => Promise<boolean>;

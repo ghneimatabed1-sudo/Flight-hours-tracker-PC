@@ -35,7 +35,13 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { AlertTriangle, History, Link2, Link2Off, Loader2, Pin, PinOff, RefreshCw, RotateCcw, Search, ShieldAlert, Trash2, Wand2 } from "lucide-react";
+import { AlertTriangle, History, Info, Link2, Link2Off, Loader2, Pin, PinOff, RefreshCw, RotateCcw, Search, ShieldAlert, Trash2, Wand2 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+
+// How fresh a registry row's heartbeat must be to count as "live".
+// When a row is older than this we surface a "force delete from registry"
+// option in the Reset PC dialog.
+const RESET_LIVE_HEARTBEAT_MS = 5 * 60 * 1000;
 
 type PcRow = {
   id: string;
@@ -44,7 +50,14 @@ type PcRow = {
   display: string | null;
   seat: string | null;
   online: boolean;
+  lastSeen: string;
 };
+
+// Canonical squadron key — same shape used elsewhere to detect "NO.8" vs
+// "no 8" vs "8 SQN" as the same squadron.
+function canonSquadron(s: string | null | undefined): string {
+  return (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
 
 function rowsFromRegistry(pcs: RegisteredPC[]): PcRow[] {
   return pcs.map(p => ({
@@ -54,6 +67,7 @@ function rowsFromRegistry(pcs: RegisteredPC[]): PcRow[] {
     display: p.deviceName ?? p.squadronName ?? null,
     seat: null,
     online: !!p.online,
+    lastSeen: p.lastSeen ?? "",
   }));
 }
 
@@ -72,6 +86,7 @@ export default function ConnectionMap() {
   const [selectedA, setSelectedA] = useState<string | null>(null);
   const [selectedB, setSelectedB] = useState<string | null>(null);
   const [pairOpen, setPairOpen] = useState(false);
+  const [resetTarget, setResetTarget] = useState<string | null>(null);
 
   const allPcs = useMemo(() => rowsFromRegistry(registry.data), [registry.data]);
   const filteredPcs = useMemo(() => {
@@ -249,16 +264,8 @@ export default function ConnectionMap() {
             <div className="mt-3 pt-3 border-t border-border/40">
               <Button size="sm" variant="destructive" className="w-full"
                 disabled={reset.isPending}
-                onClick={async () => {
-                  if (!confirm(`RESET PC ${selectedA}?\n\nThis revokes EVERY active pair the PC participates in and removes its registry + claim entries. Use this when hardware is replaced or a PC must re-onboard from scratch. The PC re-registers on next launch.`)) return;
-                  try {
-                    await reset.mutateAsync({ pcId: selectedA, byUserId: user?.id ?? null });
-                    toast({ title: "PC reset", description: selectedA });
-                    setSelectedA(null); setSelectedB(null);
-                  } catch (e) {
-                    toast({ title: "Reset failed", description: (e as Error).message, variant: "destructive" });
-                  }
-                }}
+                onClick={() => setResetTarget(selectedA)}
+                data-testid="button-reset-pc"
               >
                 <Trash2 className="h-3.5 w-3.5 mr-1" /> Reset selected PC
               </Button>
@@ -343,9 +350,18 @@ export default function ConnectionMap() {
             <div className="flex items-center text-sm text-muted-foreground py-4">
               <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" /> Loading…
             </div>
+          ) : audit.data.rlsDenied ? (
+            <div className="p-3 rounded bg-muted/30 border border-border/40 text-xs text-muted-foreground flex gap-2">
+              <Info className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+              <div>
+                The audit table is restricted to super-admins. Sign in with a
+                super-admin account to view pair history. Other panels above
+                continue to work as normal.
+              </div>
+            </div>
           ) : (
             <ol className="divide-y divide-border/40 max-h-[640px] overflow-auto text-xs">
-              {audit.data.map(e => (
+              {audit.data.entries.map(e => (
                 <li key={e.id} className="py-2">
                   <div className="flex items-center gap-2">
                     <Badge variant={e.action.includes("rejected") ? "destructive" : "outline"} className="text-[10px]">
@@ -360,7 +376,7 @@ export default function ConnectionMap() {
                   {e.justification && <div className="italic text-muted-foreground">"{e.justification}"</div>}
                 </li>
               ))}
-              {audit.data.length === 0 && (
+              {audit.data.entries.length === 0 && (
                 <li className="py-6 text-center text-muted-foreground">No audit entries yet.</li>
               )}
             </ol>
@@ -377,7 +393,89 @@ export default function ConnectionMap() {
           byUserLabel={user?.displayName ?? user?.username ?? "super_admin"}
         />
       )}
+
+      {resetTarget && (
+        <ResetPcDialog
+          pcId={resetTarget}
+          row={allPcs.find(p => p.id === resetTarget) ?? null}
+          isPending={reset.isPending}
+          onClose={() => setResetTarget(null)}
+          onConfirm={async (force) => {
+            try {
+              await reset.mutateAsync({
+                pcId: resetTarget,
+                byUserId: user?.id ?? null,
+                force,
+              });
+              toast({ title: force ? "PC force-removed" : "PC reset", description: resetTarget });
+              setResetTarget(null);
+              setSelectedA(null); setSelectedB(null);
+            } catch (e) {
+              toast({ title: "Reset failed", description: (e as Error).message, variant: "destructive" });
+            }
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function ResetPcDialog(props: {
+  pcId: string;
+  row: PcRow | null;
+  isPending: boolean;
+  onClose: () => void;
+  onConfirm: (force: boolean) => Promise<void> | void;
+}) {
+  const [force, setForce] = useState(false);
+  const lastSeen = props.row?.lastSeen ? new Date(props.row.lastSeen).getTime() : 0;
+  const isStale = !props.row?.online && (!lastSeen || (Date.now() - lastSeen) > RESET_LIVE_HEARTBEAT_MS);
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) props.onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ShieldAlert className="h-4 w-4 text-rose-300" /> Reset PC
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <div className="font-mono text-xs break-all">{props.pcId}</div>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Revokes every active pair the PC participates in and removes its
+            registry + claim rows. Use this when hardware is replaced or a PC
+            must re-onboard from scratch. The PC re-registers on next launch.
+          </p>
+          {isStale ? (
+            <div className="p-3 rounded bg-amber-500/10 border border-amber-500/30 space-y-2">
+              <div className="text-xs text-amber-200 flex items-center gap-1">
+                <Info className="h-3.5 w-3.5" /> No recent heartbeat
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                This PC last checked in
+                {lastSeen ? ` ${Math.round((Date.now() - lastSeen) / 60000)} min ago` : " never"}.
+                If the hardware is gone, you can also delete its registry row outright.
+              </p>
+              <label className="flex items-center gap-2 text-[12px] cursor-pointer">
+                <Checkbox checked={force} onCheckedChange={(v) => setForce(!!v)} data-testid="checkbox-force-delete" />
+                Also delete registry row (force delete)
+              </label>
+            </div>
+          ) : (
+            <div className="text-[11px] text-muted-foreground">
+              PC is currently {props.row?.online ? "online" : "recently online"} — registry row will repopulate on its next heartbeat.
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={props.onClose}>Cancel</Button>
+          <Button variant="destructive" onClick={() => props.onConfirm(force)} disabled={props.isPending} data-testid="button-confirm-reset">
+            {props.isPending
+              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Resetting…</>
+              : <><Trash2 className="h-4 w-4 mr-2" /> {force ? "Force delete" : "Reset"}</>}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -400,7 +498,18 @@ function PairDialog(props: {
 
   const isCrossSqn = !!(props.a.tier === "squadron" && props.b.tier === "squadron"
     && props.a.squadron && props.b.squadron
-    && props.a.squadron.toLowerCase() !== props.b.squadron.toLowerCase());
+    && canonSquadron(props.a.squadron) !== canonSquadron(props.b.squadron));
+
+  // Two squadron-tier PCs registered for the SAME canonical squadron
+  // are a duplicate registration, not a pair candidate. The matrix has
+  // no kind for "two ops PCs of the same sqn" — every legitimate
+  // in-squadron link goes Flight↔Ops, so emitting one of these would
+  // be operator confusion. Surface as a hard block so the operator
+  // resets one PC instead of trying to pair them.
+  const isDuplicateSqn = !!(props.a.tier === "squadron" && props.b.tier === "squadron"
+    && props.a.squadron && props.b.squadron
+    && canonSquadron(props.a.squadron) === canonSquadron(props.b.squadron)
+    && props.a.id !== props.b.id);
 
   const tentative: PairKind | null = useMemo(() => {
     return resolvePairKind({
@@ -453,7 +562,19 @@ function PairDialog(props: {
             {" ↔ "}
             {props.b.tier}{props.b.squadron ? ` · ${props.b.squadron}` : ""}
           </div>
-          {tentative ? (
+          {isDuplicateSqn ? (
+            <div className="p-3 bg-rose-500/10 rounded border border-rose-500/40 text-xs text-rose-200">
+              <div className="font-medium flex items-center gap-1 mb-1">
+                <AlertTriangle className="h-3.5 w-3.5" /> Duplicate squadron registration
+              </div>
+              <p className="leading-relaxed">
+                Both PCs are registered as the squadron tier for
+                <span className="font-mono mx-1">{props.a.squadron}</span>.
+                Each squadron should have exactly one Ops PC. Reset the
+                obsolete PC from the left column instead of pairing them.
+              </p>
+            </div>
+          ) : tentative ? (
             <Badge variant="secondary" className="text-[10px]">{PAIR_KIND_LABEL[tentative]}</Badge>
           ) : (
             <Badge variant="destructive" className="text-[10px]">Pairing forbidden by matrix</Badge>
@@ -507,7 +628,7 @@ function PairDialog(props: {
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={props.onClose}>Cancel</Button>
-          <Button disabled={!tentative || create.isPending} onClick={submit}>
+          <Button disabled={!tentative || create.isPending || isDuplicateSqn} onClick={submit}>
             {create.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Pairing…</> : <><RefreshCw className="h-4 w-4 mr-2" /> Pair</>}
           </Button>
         </DialogFooter>

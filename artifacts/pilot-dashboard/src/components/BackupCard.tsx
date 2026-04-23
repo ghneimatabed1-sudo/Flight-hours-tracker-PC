@@ -25,15 +25,19 @@ import {
 
 // Local widening for the Electron preload bridge. Optional methods because
 // the same component runs in pure-browser dev mode where they don't exist.
-declare global {
-  interface Window {
-    rjafElectron?: {
-      hardwareFingerprint?: () => Promise<string>;
-      isPackaged?: () => Promise<boolean>;
-      pickBackupFolder?: () => Promise<string | null>;
-      writeBackupFile?: (folder: string, filename: string, content: string) => Promise<string>;
-    };
-  }
+// All other declarations of `rjafElectron` (LicenseKeys, Settings, Diagnostic)
+// are merged structurally — every method is optional, so the union type is
+// safe even though different files declare different subsets.
+type RjafElectronBridge = {
+  hardwareFingerprint?: () => Promise<string>;
+  isPackaged?: () => Promise<boolean>;
+  pickBackupFolder?: () => Promise<string | null>;
+  writeBackupFile?: (folder: string, filename: string, content: string) => Promise<string>;
+  [key: string]: unknown;
+};
+function getElectronBridge(): RjafElectronBridge | null {
+  if (typeof window === "undefined") return null;
+  return ((window as unknown) as { rjafElectron?: RjafElectronBridge }).rjafElectron ?? null;
 }
 
 // Persistent settings keys for the auto-backup feature.
@@ -79,7 +83,7 @@ export function BackupCard() {
   const [autoMsg, setAutoMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
 
-  const hasFolderPicker = typeof window !== "undefined" && !!window.rjafElectron?.pickBackupFolder;
+  const hasFolderPicker = !!getElectronBridge()?.pickBackupFolder;
 
   const tx = (en: string, ar: string) => (isAr ? ar : en);
 
@@ -114,9 +118,10 @@ export function BackupCard() {
   }
 
   async function pickFolder() {
-    if (!hasFolderPicker || !window.rjafElectron?.pickBackupFolder) return;
+    const bridge = getElectronBridge();
+    if (!hasFolderPicker || !bridge?.pickBackupFolder) return;
     try {
-      const chosen = await window.rjafElectron.pickBackupFolder();
+      const chosen = await bridge.pickBackupFolder();
       if (!chosen) return;
       setFolder(chosen);
       localStorage.setItem(LS_FOLDER, chosen);
@@ -152,8 +157,9 @@ export function BackupCard() {
       const text = await exportBackup(savedPwd);
       const filename = suggestBackupFilename();
       let savedPath = "";
-      if (folder && window.rjafElectron?.writeBackupFile) {
-        savedPath = await window.rjafElectron.writeBackupFile(folder, filename, text);
+      const bridge = getElectronBridge();
+      if (folder && bridge?.writeBackupFile) {
+        savedPath = await bridge.writeBackupFile(folder, filename, text);
       } else {
         const blob = new Blob([text], { type: "application/octet-stream" });
         const url = URL.createObjectURL(blob);

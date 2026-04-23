@@ -61,14 +61,12 @@ import Cycle from "@/pages/Cycle";
 import Leaves from "@/pages/Leaves";
 import Unavailable from "@/pages/Unavailable";
 import DutyWeek from "@/pages/DutyWeek";
-import Schedule from "@/pages/Schedule";
 import Risk from "@/pages/Risk";
 import Coordinating from "@/pages/Coordinating";
 import NotamsPage from "@/pages/NotamsPage";
 import NavRoutes from "@/pages/NavRoutes";
 import Units from "@/pages/Units";
 import PdfExports from "@/pages/PdfExports";
-import Users from "@/pages/Users";
 import AuditLog from "@/pages/AuditLog";
 import HistoricalImport from "@/pages/HistoricalImport";
 import SettingsPage from "@/pages/Settings";
@@ -124,12 +122,6 @@ function SquadronOpsRoutes() {
       <Route path="/leaves" component={Leaves} />
       <Route path="/unavailable" component={Unavailable} />
       <Route path="/duty" component={DutyWeek} />
-      {/* Daily Missions (/schedule) was retired in the April 2026 field-use
-          review. The route was previously kept mounted as a dead link to
-          satisfy old bookmarks, but the reviewer flagged it as still
-          accessible — so it now redirects to the Flight Program which
-          replaced its workflow. */}
-      <Route path="/schedule">{() => { window.location.replace("/flight-program"); return null; }}</Route>
       <Route path="/flight-program" component={FlightProgram} />
       <Route path="/final-schedules" component={FinalSchedules} />
       <Route path="/risk" component={Risk} />
@@ -138,7 +130,6 @@ function SquadronOpsRoutes() {
       <Route path="/nav-routes" component={NavRoutes} />
       <Route path="/units" component={Units} />
       <Route path="/pdf" component={PdfExports} />
-      <Route path="/users" component={Users} />
       <Route path="/audit" component={AuditLog} />
       <Route path="/reminders" component={Reminders} />
       <Route path="/import" component={HistoricalImport} />
@@ -151,13 +142,10 @@ function SquadronOpsRoutes() {
       <Route path="/connections" component={Connections} />
       <Route path="/diagnostic" component={DiagnosticPage} />
       <Route path="/help" component={Help} />
-      {/* Catch-all: silently redirect to Dashboard instead of showing 404.
-          This handles role transitions where the previous user (e.g.
-          super_admin browsing /admin/keys) signs out and a different role
-          (e.g. ops) signs in — the hash from the prior session is no
-          longer valid in this route table, but landing on a 404 is a
-          worse experience than landing on the home page. */}
-      <Route><Redirect to="/" /></Route>
+      {/* Real 404 so a stale hash / typo / removed route surfaces visibly
+          instead of silently bouncing home. Logs the bad URL to the console
+          so future broken sidebar links are findable. */}
+      <Route component={NotFound} />
     </Switch>
   );
 }
@@ -183,8 +171,7 @@ function AdminRoutes() {
           the catch-all below was silently redirecting clicks back to
           /admin, making the Settings entry appear broken. */}
       <Route path="/settings" component={SettingsPage} />
-      {/* See SquadronOpsRoutes catch-all: redirect home rather than 404. */}
-      <Route><Redirect to="/admin" /></Route>
+      <Route component={NotFound} />
     </Switch>
   );
 }
@@ -235,8 +222,7 @@ function CommanderRoutes() {
       <Route path="/dashboard/connections" component={Connections} />
       <Route path="/dashboard/diagnostic" component={DiagnosticPage} />
       <Route path="/diagnostic" component={DiagnosticPage} />
-      {/* See SquadronOpsRoutes catch-all: redirect home rather than 404. */}
-      <Route><Redirect to="/dashboard" /></Route>
+      <Route component={NotFound} />
     </Switch>
   );
 }

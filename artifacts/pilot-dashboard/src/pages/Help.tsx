@@ -190,8 +190,8 @@ export default function Help() {
               <p className="text-xs text-muted-foreground leading-relaxed">{t("help_support_b")}</p>
               <div className="text-xs space-y-0.5 pt-1">
                 <div><span className="text-muted-foreground">{t("creditsDeveloper")}: </span><span className="font-semibold">Capt. ABEDALQADER GHUNMAT</span></div>
-                <div><span className="text-muted-foreground">{t("creditsPhone")}: </span><a href="tel:+9620775008345" className="text-primary hover:underline">0775008345</a></div>
-                <div><span className="text-muted-foreground">{t("creditsEmail")}: </span><a href="mailto:ghneimatabed1@icloud.com" className="text-primary hover:underline">ghneimatabed1@icloud.com</a></div>
+                <div><span className="text-muted-foreground">{t("creditsPhone")}: </span><button type="button" onClick={() => window.open("tel:+9620775008345", "_blank", "noopener")} className="text-primary hover:underline">0775008345</button></div>
+                <div><span className="text-muted-foreground">{t("creditsEmail")}: </span><button type="button" onClick={() => window.open("mailto:ghneimatabed1@icloud.com", "_blank", "noopener")} className="text-primary hover:underline">ghneimatabed1@icloud.com</button></div>
               </div>
             </div>
           </div>

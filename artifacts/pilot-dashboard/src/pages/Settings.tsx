@@ -922,8 +922,8 @@ export default function Settings() {
           <div className="space-y-1.5 flex-1">
             <div className="text-sm font-semibold gold-grad">{t("creditsTitle")}</div>
             <div className="text-sm">{t("creditsDeveloper")}: <span className="font-semibold">Capt. ABEDALQADER GHUNMAT</span></div>
-            <div className="text-sm">{t("creditsPhone")}: <a href="tel:+9620775008345" className="text-primary hover:underline">0775008345</a></div>
-            <div className="text-sm">{t("creditsEmail")}: <a href="mailto:ghneimatabed1@icloud.com" className="text-primary hover:underline">ghneimatabed1@icloud.com</a></div>
+            <div className="text-sm">{t("creditsPhone")}: <button type="button" onClick={() => window.open("tel:+9620775008345", "_blank", "noopener")} className="text-primary hover:underline">0775008345</button></div>
+            <div className="text-sm">{t("creditsEmail")}: <button type="button" onClick={() => window.open("mailto:ghneimatabed1@icloud.com", "_blank", "noopener")} className="text-primary hover:underline">ghneimatabed1@icloud.com</button></div>
             <p className="text-xs text-muted-foreground pt-1">{t("creditsBlurb")}</p>
           </div>
         </Card>
