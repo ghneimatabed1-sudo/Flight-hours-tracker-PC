@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hawk Eye",
     "slug": "pilot-mobile",
-    "version": "1.0.8",
+    "version": "1.0.9",
     "orientation": "portrait",
     "icon": "./assets/images/emblem.png",
     "scheme": "pilot-mobile",
@@ -16,14 +16,14 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.rjaf.pilotlogbook",
-      "buildNumber": "6",
+      "buildNumber": "7",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "com.rjaf.pilotlogbook",
-      "versionCode": 6,
+      "versionCode": 7,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/emblem.png",
         "backgroundColor": "#ffffff"
