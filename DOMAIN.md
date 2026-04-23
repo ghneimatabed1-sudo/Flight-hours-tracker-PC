@@ -165,13 +165,49 @@ When a sortie is logged, the matching currency dates auto-refresh. (Source of tr
 
 ## 7. Schedule chain — how a flight schedule travels up
 
-1. **Ops or Flight Cmdr drafts** the schedule for tomorrow.
-2. **Submit to Squadron Cmdr.** Status = `submitted`. The row sits in the Squadron Cmdr's PC.
-3. Squadron Cmdr **Approves** (status = `approved`, forwards to Wing) **or Rejects** (status = `rejected`, sent back to originator with a reason) **or Holds** (status = `held`, paused with a note) **or Edits** (status = `edited`, edited rows attached, sent back to originator who must accept the diff).
-4. Same pattern repeats Wing → Base → HQ.
-5. At any tier, any participating PC can view the full history (every action, who did it, when).
+### 7.1 Operator-stated authoritative chain (v1.1.94, captured verbatim)
 
-A schedule can be **deleted** by any PC that has touched it (after a v1.1.60 widening), so a stale or wrongly-sent sheet can be wiped from every screen with one click.
+The operator described the schedule chain as follows. This is the **contract** the system must satisfy; any divergence in code is a bug.
+
+```
+Ops Officer ──draft & send──► Flight Cmdr ──edit-bounce──► Ops
+                                  │                         (Ops re-edits, returns)
+                                  │ approve
+                                  ▼
+                              Sqn Cmdr ──edit-bounce──► Flight Cmdr
+                                  │
+                                  │ approve
+                                  ▼
+                              Wing Cmdr ──edit-bounce / forward
+                                  │
+                                  │ approve
+                                  ▼
+                              Base Cmdr ──FINAL APPROVE──► archived for that
+                                                            specific day +
+                                                            specific squadron
+```
+
+Either **Ops** or **Flight Cmdr** can be the originator. Edit-bounces always return one tier downward. Final storage happens on **Base Cmdr's approve**, not Wing's.
+
+### 7.2 What the code does today (v1.1.94 baseline — known divergences)
+
+The current `useDecideSchedule` enforces a **4-tier** chain `flight | squadron | wing | base` where:
+- `flight → squadron` and `squadron → wing` are the only forward hops.
+- **Wing tier is terminal** — Wing's Approve releases the sheet to Base/HQ as **read-only viewers** via `canViewFinalSchedules`. Base does not have a separate Approve action.
+- **There is no separate "ops" tier**: Ops officers operate the squadron-tier PC. Edit-bounces from Sqn Cmdr land on the squadron PC where the Ops officer sits.
+
+**Open gaps vs. §7.1** (to be reconciled in a future migration after operator answers the structural questions):
+1. Whether Ops needs its own tier or is correctly modelled as the squadron-PC operator.
+2. Adding the Wing → Base forward hop and Base's Approve action.
+3. Moving final-archive trigger from Wing.approve to Base.approve.
+
+### 7.3 Common rules at every tier
+
+- **Any participating PC** can view the full history (every action, who did it, when).
+- **Reject** sends the sheet back to the originator with a reason.
+- **Hold** pauses with a note.
+- **Edit** attaches edited rows + bounces one tier down for re-approval (the receiver must accept the diff).
+- **Delete** can be issued by any PC that has touched the share (v1.1.60 widening) — wipes from every screen with one click.
 
 ---
 
