@@ -59,6 +59,44 @@ jobs:
         run: pnpm install --frozen-lockfile=false
         working-directory: .
 
+      # Safety net: ensure the version we are about to publish is strictly
+      # greater than the latest existing release. Without this, a forgotten
+      # `package.json` bump produces a build that electron-updater on every
+      # installed PC silently ignores ("you're already on x.y.z, no update")
+      # — exactly the failure mode that made the operator think Hawk Eye
+      # was broken. Now CI auto-bumps the patch number so a code push is
+      # always enough.
+      - name: Auto-bump patch version above latest published release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          LATEST=$(curl -sS \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/ghneimatabed1-sudo/Flight-hours-tracker-Releases/releases?per_page=20" \
+            | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const r=JSON.parse(s);const tags=r.filter(x=>!x.draft).map(x=>(x.tag_name||'').replace(/^v/,'')).filter(Boolean);tags.sort((a,b)=>{const A=a.split('.').map(Number),B=b.split('.').map(Number);for(let i=0;i<3;i++){if((A[i]||0)!==(B[i]||0))return(B[i]||0)-(A[i]||0)}return 0});console.log(tags[0]||'')});")
+          CURRENT=$(node -p "require('./package.json').version")
+          echo "current=$CURRENT  latest_release=$LATEST"
+          if [ -z "$LATEST" ]; then
+            echo "No prior release — keeping current version $CURRENT"
+            exit 0
+          fi
+          NEW=$(node -e "
+            const cur='$CURRENT'.split('.').map(Number);
+            const lat='$LATEST'.split('.').map(Number);
+            const cmp=(a,b)=>{for(let i=0;i<3;i++){if((a[i]||0)!==(b[i]||0))return(a[i]||0)-(b[i]||0)}return 0};
+            if (cmp(cur,lat)>0) { console.log(cur.join('.')); }
+            else { lat[2]=(lat[2]||0)+1; console.log(lat.join('.')); }
+          ")
+          if [ "$NEW" != "$CURRENT" ]; then
+            node -e "const fs=require('fs');const p=require('./package.json');p.version='$NEW';fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n');"
+            echo "Bumped package.json: $CURRENT -> $NEW"
+          else
+            echo "Version $CURRENT already ahead of latest $LATEST — no bump needed"
+          fi
+
       - name: Install Electron toolchain
         # electron + electron-builder are dev tooling. electron-updater MUST
         # be a regular dependency so electron-builder bundles it into the
