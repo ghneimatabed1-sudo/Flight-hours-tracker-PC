@@ -535,8 +535,8 @@ export default function ScheduleChain() {
                       </select>
                     </td>
                     <td className="p-1"><input value={r.ac} onChange={e => updateRow(r.id, { ac: e.target.value })} className="w-20 px-1 py-1 bg-input border border-border rounded text-xs font-mono" placeholder="UH-60M" /></td>
-                    <td className="p-1"><input value={r.crew[0] ?? ""} onChange={e => updateRow(r.id, { crew: [e.target.value, r.crew[1] ?? ""].filter((v, i) => v || i === 0) })} className="w-28 px-1 py-1 bg-input border border-border rounded text-xs" placeholder="Pilot" data-testid="input-draft-pilot" /></td>
-                    <td className="p-1"><input value={r.crew[1] ?? ""} onChange={e => updateRow(r.id, { crew: [r.crew[0] ?? "", e.target.value].filter((v, i) => v || i === 0) })} className="w-28 px-1 py-1 bg-input border border-border rounded text-xs" placeholder="Co-Pilot" data-testid="input-draft-copilot" /></td>
+                    <td className="p-1"><input value={(r.crew ?? [])[0] ?? ""} onChange={e => updateRow(r.id, { crew: [e.target.value, (r.crew ?? [])[1] ?? ""].filter((v, i) => v || i === 0) })} className="w-28 px-1 py-1 bg-input border border-border rounded text-xs" placeholder="Pilot" data-testid="input-draft-pilot" /></td>
+                    <td className="p-1"><input value={(r.crew ?? [])[1] ?? ""} onChange={e => updateRow(r.id, { crew: [(r.crew ?? [])[0] ?? "", e.target.value].filter((v, i) => v || i === 0) })} className="w-28 px-1 py-1 bg-input border border-border rounded text-xs" placeholder="Co-Pilot" data-testid="input-draft-copilot" /></td>
                     <td className="p-1"><input value={r.config} onChange={e => updateRow(r.id, { config: e.target.value })} className="w-24 px-1 py-1 bg-input border border-border rounded text-xs" /></td>
                     <td className="p-1"><input value={r.route ?? ""} onChange={e => updateRow(r.id, { route: e.target.value })} className="w-28 px-1 py-1 bg-input border border-border rounded text-xs" placeholder="OJAM-OJAQ" data-testid="input-draft-route" /></td>
                     <td className="p-1"><input value={r.takeoff} onChange={e => updateRow(r.id, { takeoff: e.target.value })} className="w-16 px-1 py-1 bg-input border border-border rounded text-xs font-mono" placeholder="0800" /></td>
@@ -1007,8 +1007,8 @@ function ScheduleTable({ share }: { share: ScheduleShare }) {
                 <td className="px-2 py-1 text-center font-mono">{idx + 1}</td>
                 <td className="px-2 py-1 font-mono">{r.dn ?? ""}</td>
                 <td className="px-2 py-1 font-mono">{r.ac}</td>
-                <td className="px-2 py-1">{r.crew[0] ?? ""}</td>
-                <td className="px-2 py-1">{r.crew[1] ?? ""}</td>
+                <td className="px-2 py-1">{(r.crew ?? [])[0] ?? ""}</td>
+                <td className="px-2 py-1">{(r.crew ?? [])[1] ?? ""}</td>
                 <td className="px-2 py-1">{r.config}</td>
                 <td className="px-2 py-1">{r.route ?? ""}</td>
                 <td className="px-2 py-1 text-right font-mono">{r.takeoff}</td>
