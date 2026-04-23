@@ -624,7 +624,20 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
           parent_pc_id: o.parentPcId ?? null,
           squadron_pc_id: o.squadronPcId ?? null,
         }, { onConflict: "id" });
-        if (error && /column .* does not exist/i.test(error.message ?? "")) {
+        // Detect "column does not exist" across the multiple shapes
+        // PostgREST/Supabase emit it in:
+        //   - raw Postgres: 'column "parent_pc_id" does not exist' (SQLSTATE 42703)
+        //   - PostgREST schema cache miss: "Could not find the 'parent_pc_id' column of 'xpc_registry' in the schema cache" (PGRST204)
+        //   - Some proxies prefix with the column name only.
+        // Any of those means migration 0037 has not been applied yet —
+        // retry with the legacy 5-column upsert so heartbeat survives.
+        const errMsg = (error?.message ?? "") + " " + (error?.details ?? "") + " " + (error?.hint ?? "");
+        const errCode = error?.code ?? "";
+        const isMissingNewColumn =
+          /parent_pc_id|squadron_pc_id/i.test(errMsg) &&
+          (errCode === "42703" || errCode === "PGRST204" ||
+            /does not exist|schema cache|could not find/i.test(errMsg));
+        if (error && isMissingNewColumn) {
           // Migration 0037 not applied yet on this project — retry with
           // the legacy column set so heartbeat keeps working. Operator
           // gets the routing benefits as soon as they paste 0037 in.

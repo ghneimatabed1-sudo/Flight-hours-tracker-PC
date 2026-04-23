@@ -929,10 +929,19 @@ export default function Settings() {
 // would route to the wrong wing/base.
 function ChainSetupSection() {
   const pcsQ = useRegisteredPCs();
-  const myTier = (() => {
-    try { return (localStorage.getItem("rjaf.pcTier") || "") as "ops" | "flight" | "squadron" | "wing" | "base" | ""; }
-    catch { return ""; }
-  })();
+  const { user } = useAuth();
+  // Derive tier from authenticated user role/scope — mirrors the
+  // computation used in ScheduleChain. Earlier draft read from
+  // localStorage `rjaf.pcTier`, but no code writes that key, so the
+  // panel never rendered. Using the same source as ScheduleChain
+  // guarantees consistency between the warning banner and the picker.
+  const myTier: "ops" | "flight" | "squadron" | "wing" | "base" | "" =
+    !user ? ""
+    : user.role === "ops" ? "ops"
+    : user.scope === "flight" ? "flight"
+    : user.scope === "wing" ? "wing"
+    : user.scope === "base" ? "base"
+    : "squadron";
   const myPcId = (() => {
     try { return localStorage.getItem("rjaf.xpc.localId") || ""; } catch { return ""; }
   })();
