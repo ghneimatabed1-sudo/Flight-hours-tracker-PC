@@ -14,3 +14,9 @@ update squadrons
        default_monthly_targets = coalesce(default_monthly_targets, '{}'::jsonb)
  where default_aircraft is null
     or default_monthly_targets is null;
+
+
+-- Reload PostgREST schema cache so RPCs / new columns become callable
+-- via the REST API immediately. See .local/memory/supabase-admin.md and
+-- the convention documented in 0041_canon_identity.sql.
+notify pgrst, 'reload schema';

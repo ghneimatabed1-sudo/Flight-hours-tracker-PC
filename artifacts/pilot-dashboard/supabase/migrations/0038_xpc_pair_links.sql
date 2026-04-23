@@ -1004,3 +1004,9 @@ begin
 
   alter table public.xpc_pair_links enable trigger xpc_pair_links_enforce_trg;
 end $$;
+
+
+-- Reload PostgREST schema cache so RPCs / new columns become callable
+-- via the REST API immediately. See .local/memory/supabase-admin.md and
+-- the convention documented in 0041_canon_identity.sql.
+notify pgrst, 'reload schema';

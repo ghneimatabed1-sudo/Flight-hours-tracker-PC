@@ -31,3 +31,9 @@ alter table public.xpc_pending
 alter table public.squadrons
   add column if not exists default_aircraft         jsonb not null default '[]'::jsonb,
   add column if not exists default_monthly_targets  jsonb not null default '{}'::jsonb;
+
+
+-- Reload PostgREST schema cache so RPCs / new columns become callable
+-- via the REST API immediately. See .local/memory/supabase-admin.md and
+-- the convention documented in 0041_canon_identity.sql.
+notify pgrst, 'reload schema';
