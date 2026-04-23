@@ -69,6 +69,22 @@ export interface SquadronDefaults {
    *  squadrons run 30 hrs / 6 months as the floor, but other airframes /
    *  other regulators may differ — operator edits per squadron. */
   minSixMonthHours: number;
+  /** Higher-echelon name printed at the top of every Monthly Report sheet
+   *  (above the squadron). For NO.8 SQDN this is "QUICK REACTION FORCE
+   *  GROUP". Other RJAF squadrons sit under different parents (e.g. an
+   *  AH-1F squadron under "ATTACK HELICOPTER GROUP"); editing this once
+   *  per APK install retitles the whole packet. */
+  groupName: string;
+  /** Acronym for the parent group, used as the prefix on every form name
+   *  ("QRFG RCN FORM 1", "QRFG FUEL", "QRFG AUTHORIZATION", etc.) and on
+   *  the unit block of F1/F2/F3. Defaults to "QRFG". Operators editing
+   *  `groupName` should also update this. */
+  groupAcronym: string;
+  /** Primary airframe model (e.g. "UH-60M", "AH-1F", "UH-60AIL"). Used
+   *  as the F1 unit-cell fallback, the Arabic-roster column header,
+   *  and the FUEL helper text. Combined with the per-airframe burn rate
+   *  in `fuelBurnByAirframe` to drive the Form 4 fuel formula. */
+  primaryAirframe: string;
 }
 
 export function factoryDefaults(): SquadronDefaults {
@@ -82,6 +98,9 @@ export function factoryDefaults(): SquadronDefaults {
     ammoPlaceholder: "-",
     autoSuggestRemarks: true,
     minSixMonthHours: 30,
+    groupName: "QUICK REACTION FORCE GROUP",
+    groupAcronym: "QRFG",
+    primaryAirframe: "UH-60M",
   };
 }
 
@@ -103,6 +122,9 @@ export function loadSquadronDefaults(squadronNumber: string | undefined): Squadr
       ammoPlaceholder: parsed.ammoPlaceholder ?? f.ammoPlaceholder,
       autoSuggestRemarks: parsed.autoSuggestRemarks ?? f.autoSuggestRemarks,
       minSixMonthHours: parsed.minSixMonthHours ?? f.minSixMonthHours,
+      groupName: parsed.groupName ?? f.groupName,
+      groupAcronym: parsed.groupAcronym ?? f.groupAcronym,
+      primaryAirframe: parsed.primaryAirframe ?? f.primaryAirframe,
     };
   } catch {
     return factoryDefaults();

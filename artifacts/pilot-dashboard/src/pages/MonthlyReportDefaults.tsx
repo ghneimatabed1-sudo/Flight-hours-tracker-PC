@@ -130,6 +130,37 @@ export default function MonthlyReportDefaults() {
                 within 20% as <b>LOW</b>; below as <b>UNDER</b>.
               </div>
             </Field>
+            <Field label="Parent group / wing — full name">
+              <input value={d.groupName} onChange={e => update("groupName", e.target.value)}
+                className="w-full bg-background border border-border rounded px-2 py-1.5 text-sm"
+                data-testid="input-default-group-name"
+                placeholder="QUICK REACTION FORCE GROUP" />
+              <div className="text-[11px] text-muted-foreground mt-1">
+                Printed at the top of every Monthly Report sheet, above the
+                squadron name. Edit once per APK install for the unit.
+              </div>
+            </Field>
+            <Field label="Parent group / wing — acronym">
+              <input value={d.groupAcronym} onChange={e => update("groupAcronym", e.target.value)}
+                className="w-full bg-background border border-border rounded px-2 py-1.5 text-sm"
+                data-testid="input-default-group-acronym"
+                placeholder="QRFG" />
+              <div className="text-[11px] text-muted-foreground mt-1">
+                Used as the prefix on every form name (e.g. <b>QRFG</b> RCN FORM 1,
+                <b>QRFG</b> FUEL, <b>QRFG</b> AUTHORIZATION) and on the unit block.
+              </div>
+            </Field>
+            <Field label="Primary airframe">
+              <input value={d.primaryAirframe} onChange={e => update("primaryAirframe", e.target.value)}
+                className="w-full bg-background border border-border rounded px-2 py-1.5 text-sm"
+                data-testid="input-default-primary-airframe"
+                placeholder="UH-60M" />
+              <div className="text-[11px] text-muted-foreground mt-1">
+                Squadron's main aircraft model. Used as the F1 unit-cell fallback,
+                the Arabic-roster column header, and the FUEL helper text. Add the
+                burn rate for it in the airframe table below.
+              </div>
+            </Field>
           </div>
         </Section>
 

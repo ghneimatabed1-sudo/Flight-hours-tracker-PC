@@ -31,10 +31,14 @@ export default function MonthlyReport() {
     () => loadSquadronDefaults(sqdnNumberForDefaults),
     [sqdnNumberForDefaults],
   );
-  // Primary airframe fuel-burn rate, used as the placeholder/default in the
-  // Form 4 / FUEL formula when a row has no explicit override. The operator
-  // edits both the rate (Squadron defaults page) and any per-row overrides.
-  const defaultFuelHr = useMemo(() => fuelBurnFor(defaults, "UH-60M"), [defaults]);
+  // Primary airframe + fuel-burn rate, used as the placeholder/default in
+  // the Form 4 / FUEL formula when a row has no explicit override. The
+  // operator edits the airframe name + rate on the Squadron defaults page
+  // and any per-row overrides on the wizard.
+  const primaryAirframe = defaults.primaryAirframe || "UH-60M";
+  const groupName = defaults.groupName || "QUICK REACTION FORCE GROUP";
+  const groupAcronym = defaults.groupAcronym || "QRFG";
+  const defaultFuelHr = useMemo(() => fuelBurnFor(defaults, primaryAirframe), [defaults, primaryAirframe]);
 
   const [period, setPeriod] = useState<string>(() => lastCompletedPeriod());
   const [inputs, setInputs] = useState<ReportInputs>(() =>
@@ -539,9 +543,9 @@ export default function MonthlyReport() {
       {/* ───────── FORM 1 ───────── */}
       <section className="form-page" data-testid="form1">
         <div className="form-meta">
-          <div><b>QRFG RCN FORM 1</b><br/>QRFG HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div><b>{groupAcronym} RCN FORM 1</b><br/>{groupAcronym} HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
           <div className="text-center">
-            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-title">{groupName}<br/>NO {sqdnNumber} SQDN</div>
             <div className="form-sub">INDIVIDUAL PILOT ACHIEVEMENTS</div>
           </div>
           <div className="text-right"><b>ACHIEVEMENTS FOR : {monthHeader}</b></div>
@@ -577,7 +581,7 @@ export default function MonthlyReport() {
                 <td className="center">{r.pilot.id}</td>
                 <td className="center">{r.pilot.rank}</td>
                 <td>{r.pilot.name}</td>
-                <td className="center">{r.pilot.unit === "HQ Attached" ? "UH-60M" : (r.pilot.unit || "UH-60M")}</td>
+                <td className="center">{r.pilot.unit === "HQ Attached" ? primaryAirframe : (r.pilot.unit || primaryAirframe)}</td>
                 <td className="center">{r.status}</td>
                 <td className="num">{r.day1.toFixed(1)}</td>
                 <td className="num">{r.day2.toFixed(1)}</td>
@@ -623,9 +627,9 @@ export default function MonthlyReport() {
       {/* ───────── FORM 2 ───────── */}
       <section className="form-page" data-testid="form2">
         <div className="form-meta">
-          <div><b>QRFG RCN FORM 2</b><br/>QRFG HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div><b>{groupAcronym} RCN FORM 2</b><br/>{groupAcronym} HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
           <div className="text-center">
-            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-title">{groupName}<br/>NO {sqdnNumber} SQDN</div>
             <div className="form-sub">INDIVIDUAL PILOT ACHIEVEMENTS</div>
           </div>
           <div className="text-right"><b>ACHIEVEMENTS FOR : {monthHeader}</b></div>
@@ -691,9 +695,9 @@ export default function MonthlyReport() {
       {/* ───────── FORM 3 ───────── */}
       <section className="form-page" data-testid="form3">
         <div className="form-meta">
-          <div><b>QRFG RCN FORM 3</b><br/>QRFG HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div><b>{groupAcronym} RCN FORM 3</b><br/>{groupAcronym} HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
           <div className="text-center">
-            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-title">{groupName}<br/>NO {sqdnNumber} SQDN</div>
             <div className="form-sub">MONTHLY PLANNED FLYING TASKS</div>
           </div>
           <div className="text-right"><b>ACHIEVEMENTS FOR : {monthHeader}</b></div>
@@ -791,9 +795,9 @@ export default function MonthlyReport() {
       {/* ───────── FORM 4 ───────── */}
       <section className="form-page" data-testid="form4">
         <div className="form-meta">
-          <div><b>QRFG RCN FORM 4</b><br/>MONTH : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div><b>{groupAcronym} RCN FORM 4</b><br/>MONTH : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
           <div className="text-center">
-            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-title">{groupName}<br/>NO {sqdnNumber} SQDN</div>
             <div className="form-sub">MONTHLY PLANNED FLYING TASKS</div>
           </div>
           <div className="text-right"><b>PLANNED FOR : {nextMonthHeader}</b></div>
@@ -866,9 +870,9 @@ export default function MonthlyReport() {
           fuel = pilots × sorties/pilot × duration × lb/hr. */}
       <section className="form-page" data-testid="form-fuel">
         <div className="form-meta">
-          <div><b>QRFG FUEL</b><br/>MONTH : {nextMonthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div><b>{groupAcronym} FUEL</b><br/>MONTH : {nextMonthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
           <div className="text-center">
-            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-title">{groupName}<br/>NO {sqdnNumber} SQDN</div>
             <div className="form-sub">FUEL CONSUMPTION FORECAST</div>
           </div>
           <div className="text-right"><b>PLANNED FOR : {nextMonthHeader}</b></div>
@@ -925,7 +929,7 @@ export default function MonthlyReport() {
         </table>
         <div style={{marginTop:6, fontSize:10, color:"#444"}}>
           Formula per row: <span style={{fontFamily:"monospace"}}>pilots × sorties/pilot × duration × fuel/hr</span>
-          {" "}— default fuel/hr from squadron settings (currently {defaultFuelHr} lb/hr for UH-60M),
+          {" "}— default fuel/hr from squadron settings (currently {defaultFuelHr} lb/hr for {primaryAirframe}),
           per-row overrides marked with *. Edit defaults via Squadron defaults page.
         </div>
         <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
@@ -940,9 +944,9 @@ export default function MonthlyReport() {
       {/* ───────── AUTHORIZATION (daily sortie log) ───────── */}
       <section className="form-page" data-testid="form-authorization">
         <div className="form-meta">
-          <div><b>QRFG AUTHORIZATION</b><br/>MONTH : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div><b>{groupAcronym} AUTHORIZATION</b><br/>MONTH : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
           <div className="text-center">
-            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-title">{groupName}<br/>NO {sqdnNumber} SQDN</div>
             <div className="form-sub">DAILY SORTIE AUTHORIZATION LOG</div>
           </div>
           <div className="text-right"><b>FOR : {monthHeader}</b><br/><span style={{fontSize:9, color:"#555"}}>AUTO from sortie records</span></div>
@@ -1025,9 +1029,9 @@ export default function MonthlyReport() {
       {/* ───────── P-LEAVES (annual leave matrix) ───────── */}
       <section className="form-page" data-testid="form-pleaves">
         <div className="form-meta">
-          <div><b>QRFG P-LEAVES</b><br/>YEAR : {period.split("-")[0]}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div><b>{groupAcronym} P-LEAVES</b><br/>YEAR : {period.split("-")[0]}<br/>UNIT : NO {sqdnNumber} SQDN</div>
           <div className="text-center">
-            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-title">{groupName}<br/>NO {sqdnNumber} SQDN</div>
             <div className="form-sub">PILOT ANNUAL LEAVES — DAYS PER MONTH</div>
           </div>
           <div className="text-right"><b>AS OF : {monthHeader}</b><br/><span style={{fontSize:9, color:"#555"}}>AUTO from leaves register</span></div>
@@ -1081,9 +1085,9 @@ export default function MonthlyReport() {
       {/* ───────── SIX MONTHS RUNNING ───────── */}
       <section className="form-page" data-testid="form-sixmonths">
         <div className="form-meta">
-          <div><b>QRFG 6-MONTHS</b><br/>ENDING : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div><b>{groupAcronym} 6-MONTHS</b><br/>ENDING : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
           <div className="text-center">
-            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-title">{groupName}<br/>NO {sqdnNumber} SQDN</div>
             <div className="form-sub">ROLLING SIX-MONTH FLYING HOURS — CURRENCY CHECK</div>
           </div>
           <div className="text-right"><b>FLOOR : {defaults.minSixMonthHours} HRS</b><br/><span style={{fontSize:9, color:"#555"}}>AUTO from sortie records</span></div>
@@ -1136,9 +1140,9 @@ export default function MonthlyReport() {
       {/* ───────── DUAL HOURS ───────── */}
       <section className="form-page" data-testid="form-dual">
         <div className="form-meta">
-          <div><b>QRFG DUAL</b><br/>MONTH : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div><b>{groupAcronym} DUAL</b><br/>MONTH : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
           <div className="text-center">
-            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-title">{groupName}<br/>NO {sqdnNumber} SQDN</div>
             <div className="form-sub">DUAL FLIGHT HOURS — INSTRUCTOR / STUDENT BREAKDOWN</div>
           </div>
           <div className="text-right"><b>FOR : {monthHeader}</b><br/><span style={{fontSize:9, color:"#555"}}>AUTO from sortie records</span></div>
@@ -1194,9 +1198,9 @@ export default function MonthlyReport() {
       {/* ───────── MISSION SOLO ───────── */}
       <section className="form-page" data-testid="form-missionsolo">
         <div className="form-meta">
-          <div><b>QRFG MISSION SOLO</b><br/>MONTH : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div><b>{groupAcronym} MISSION SOLO</b><br/>MONTH : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
           <div className="text-center">
-            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-title">{groupName}<br/>NO {sqdnNumber} SQDN</div>
             <div className="form-sub">SOLO SORTIES BY MISSION TYPE — STANDARDISATION</div>
           </div>
           <div className="text-right"><b>FOR : {monthHeader}</b><br/><span style={{fontSize:9, color:"#555"}}>AUTO from sortie records</span></div>
@@ -1258,7 +1262,7 @@ export default function MonthlyReport() {
       <section className="form-page" data-testid="arabic-roster" dir="rtl">
         <div className="form-meta" dir="ltr">
           <div className="text-center" style={{flex:1}}>
-            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-title">{groupName}<br/>NO {sqdnNumber} SQDN</div>
           </div>
         </div>
         <div className="secret">SECRET ( WHEN FILLED )</div>
@@ -1271,7 +1275,7 @@ export default function MonthlyReport() {
               <th>الإختصاص الإضافي</th>
               <th>تاريخ انتهاء الفحص الطبي</th>
               <th>تاريخ آخر طلعة</th>
-              <th>كامل ساعات طيران UH-60L/M</th>
+              <th>{`كامل ساعات طيران ${primaryAirframe}`}</th>
               <th>ساعات الشهر الماضي</th>
               <th>العنوان</th>
               <th>رقم الهاتف</th>
