@@ -1618,7 +1618,40 @@ export function useDecideSchedule() {
       if (isLive()) {
         const { error } = await supabase!.from("xpc_schedule_shares")
           .update(shareToRow(cur)).eq("id", cur.id);
-        if (error) throw error;
+        if (error) {
+          // v1.1.91: hard-diagnose RLS 42501 in the wild. When the
+          // Commander/Wing action throws, we want a single console
+          // payload that tells us:
+          //   - which user the browser thinks is logged in (auth.uid)
+          //   - what pc_ids that user owns server-side
+          //   - which row + which action was being attempted
+          //   - the full Supabase error envelope
+          // Without this, "new row violates RLS" is a black box and we
+          // ship blind fixes that miss the real cause.
+          try {
+            const { data: { session } } = await supabase!.auth.getSession();
+            const uid = session?.user?.id ?? null;
+            const { data: pcs } = await supabase!.from("xpc_user_pcs").select("pc_id").eq("user_id", uid ?? "");
+            console.error("[xpc.schedule.decide] RLS/UPDATE failure", {
+              auth_uid: uid,
+              session_email: session?.user?.email ?? null,
+              owned_pc_ids: (pcs ?? []).map(p => p.pc_id),
+              row_id: cur.id,
+              row_origin_pc: cur.originSquadronId,
+              row_current_pc: cur.currentPcId,
+              row_current_tier: cur.currentTier,
+              attempted_action: input.action,
+              attempted_by: input.by,
+              error_code: (error as { code?: string }).code,
+              error_message: error.message,
+              error_details: (error as { details?: string }).details,
+              error_hint: (error as { hint?: string }).hint,
+            });
+          } catch (diagErr) {
+            console.error("[xpc.schedule.decide] diagnostic itself failed", diagErr);
+          }
+          throw error;
+        }
       } else {
         const all = readShares();
         const idx = all.findIndex(s => s.id === cur.id);
