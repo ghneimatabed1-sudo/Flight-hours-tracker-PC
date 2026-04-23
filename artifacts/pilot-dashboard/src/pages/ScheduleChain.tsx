@@ -272,19 +272,37 @@ export default function ScheduleChain() {
     }
     const valid = draftRows.filter(r => r.ac.trim() || r.mission.trim());
     if (valid.length === 0) { toast({ title: "Add at least one row", variant: "destructive" }); return; }
+    // v1.1.92: refuse to submit when this PC has no resolvable seat id.
+    // Sending "self" was the smoking gun behind the recurring 42501 RLS
+    // failures on the Ops PC: Postgres rejects an INSERT whose
+    // origin_squadron_id is not in the user's xpc_my_pc_ids().
+    if (!myPcId || myPcId === "self") {
+      toast({
+        title: "PC seat not registered",
+        description: "Sign out and sign back in so this PC can claim its squadron seat, then try again.",
+        variant: "destructive",
+      });
+      return;
+    }
     const targetId = realTarget?.id ?? seatTarget!.id;
     const targetName = realTarget?.squadronName ?? seatTarget!.label;
     const targetTier = (realTarget?.tier ?? seatTarget!.tier) as "flight" | "squadron" | "wing" | "base";
-    await submit.mutateAsync({
-      date: draftDate,
-      originSquadronId: myPcId ?? "self",
-      originSquadronName: myPcName,
-      rows: valid,
-      targetPcId: targetId,
-      targetPcName: targetName,
-      targetTier,
-      submittedBy: user?.username ?? "ops",
-    });
+    try {
+      await submit.mutateAsync({
+        date: draftDate,
+        originSquadronId: myPcId,
+        originSquadronName: myPcName,
+        rows: valid,
+        targetPcId: targetId,
+        targetPcName: targetName,
+        targetTier,
+        submittedBy: user?.username ?? "ops",
+      });
+    } catch (e) {
+      const msg = (e as Error)?.message ?? String(e);
+      toast({ title: "Submit failed", description: msg, variant: "destructive" });
+      return;
+    }
     toast({ title: `Schedule sent to ${targetName}` });
     setDraftRows([blankRow()]);
     setSubmitTo("");

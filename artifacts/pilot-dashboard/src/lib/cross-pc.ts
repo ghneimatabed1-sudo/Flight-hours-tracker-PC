@@ -1488,9 +1488,55 @@ export function useSubmitSchedule() {
         // RLS gate on xpc_schedule_shares.insert is
         // (origin_squadron_id = ANY (xpc_my_pc_ids())). Defensive
         // claim, same reasoning as useSendMessage.
-        await ensureMyPcClaim(share.originSquadronId);
+        // v1.1.92: Previously the return value of ensureMyPcClaim was
+        // ignored, so when auth.uid() wasn't ready (or the claim upsert
+        // failed) the INSERT proceeded anyway and crashed with 42501
+        // "new row violates row-level security policy". Treat a failed
+        // claim as a hard precondition error with a user-actionable
+        // message, BEFORE we let PostgREST hand back an unreadable
+        // RLS code.
+        if (!share.originSquadronId || share.originSquadronId === "self") {
+          throw new Error(
+            "Cannot submit: this PC has no registered squadron seat. " +
+            "Sign out and sign back in, then try again."
+          );
+        }
+        const claimed = await ensureMyPcClaim(share.originSquadronId);
+        if (!claimed) {
+          throw new Error(
+            `Cannot submit: failed to claim PC seat "${share.originSquadronId}" ` +
+            "for the current Supabase session. Check that you're signed in " +
+            "(Settings → Account) and try again."
+          );
+        }
         const { error } = await supabase!.from("xpc_schedule_shares").insert(shareToRow(share));
-        if (error) throw error;
+        if (error) {
+          // v1.1.92: same diagnostic envelope as useDecideSchedule —
+          // dump auth state + intended row + full PostgREST error so
+          // the next 42501 in the field is one console line away from
+          // root cause instead of another guessing round.
+          try {
+            const { data: { session } } = await supabase!.auth.getSession();
+            const uid = session?.user?.id ?? null;
+            const { data: pcs } = await supabase!.from("xpc_user_pcs").select("pc_id").eq("user_id", uid ?? "");
+            console.error("[xpc.schedule.submit] RLS/INSERT failure", {
+              auth_uid: uid,
+              session_email: session?.user?.email ?? null,
+              owned_pc_ids: (pcs ?? []).map(p => p.pc_id),
+              attempted_origin_pc: share.originSquadronId,
+              attempted_target_pc: share.currentPcId,
+              attempted_target_tier: share.currentTier,
+              submitted_by: input.submittedBy,
+              error_code: (error as { code?: string }).code,
+              error_message: error.message,
+              error_details: (error as { details?: string }).details,
+              error_hint: (error as { hint?: string }).hint,
+            });
+          } catch (diagErr) {
+            console.error("[xpc.schedule.submit] diagnostic itself failed", diagErr);
+          }
+          throw error;
+        }
       } else {
         const all = readShares();
         all.push(share);
