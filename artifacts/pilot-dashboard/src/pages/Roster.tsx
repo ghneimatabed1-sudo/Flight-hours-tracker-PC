@@ -246,9 +246,11 @@ export default function Roster() {
                 <th className="px-3 py-2 text-left">{t("arabicName")}</th>
                 <th className="px-3 py-2 text-left">Unit</th>
                 <th className="px-3 py-2 text-left">{t("phone")}</th>
-                <th className="px-3 py-2 text-right">{t("openingDay")}</th>
-                <th className="px-3 py-2 text-right">{t("openingNight")}</th>
-                <th className="px-3 py-2 text-right">{t("openingNvg")}</th>
+                {/* The 3 legacy "Opening Day/Night/NVG" columns were removed
+                    from the roster grid in v1.1.88. Initial Hours covers
+                    the same purpose with clearer wording, and the legacy
+                    fields are still summed into lifetime totals by
+                    calculations.ts so no existing pilot data is lost. */}
                 <th className="px-3 py-2 text-left">{t("doctorNote")}</th>
                 <th className="px-3 py-2 text-right">{t("actions")}</th>
               </tr>
@@ -278,9 +280,6 @@ export default function Roster() {
                   <td className="px-3 py-2 text-right rtl:text-left">{p.arabicName}</td>
                   <td className="px-3 py-2"><span className="text-[11px] px-2 py-0.5 rounded-full bg-secondary border border-border">{p.unit}</span></td>
                   <td className="px-3 py-2 font-mono">{p.phone}</td>
-                  <td className="px-3 py-2 text-right font-mono">{p.openingDay}</td>
-                  <td className="px-3 py-2 text-right font-mono">{p.openingNight}</td>
-                  <td className="px-3 py-2 text-right font-mono">{p.openingNvg}</td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">{p.doctorNote || "—"}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     <button onClick={() => setEditing(p)} className="p-1.5 rounded hover:bg-secondary" title={t("edit")} data-testid={`button-edit-${p.id}`}>
@@ -597,21 +596,11 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
             expanded={ihExpanded}
             onToggle={() => setIhExpanded(v => !v)}
           />
-          {/* Legacy "Opening" hours — only shown when an existing pilot has
-              non-zero values. New pilots use the richer Initial Hours
-              section above; this block stays visible for back-compat so
-              existing data can still be edited / zeroed-out without losing
-              the entry point. */}
-          {(p.openingDay || p.openingNight || p.openingNvg) ? (
-            <div className="grid grid-cols-3 gap-3 pt-2 border-t border-border">
-              <div className="col-span-3 text-[11px] text-amber-300/80">
-                Legacy opening hours (pre-baseline). Move these into Initial Hours above and zero them out, or leave as-is — both add to lifetime totals.
-              </div>
-              <NumField label={t("openingDay")} value={p.openingDay} onChange={v => set("openingDay", v)} testId="input-openingDay" />
-              <NumField label={t("openingNight")} value={p.openingNight} onChange={v => set("openingNight", v)} testId="input-openingNight" />
-              <NumField label={t("openingNvg")} value={p.openingNvg} onChange={v => set("openingNvg", v)} testId="input-openingNvg" />
-            </div>
-          ) : null}
+          {/* Legacy "Opening Day/Night/NVG" hour fields were removed from
+              the editor in v1.1.88. Initial Hours (above) covers the same
+              purpose. Existing legacy values continue to add into lifetime
+              totals via calculations.ts so no historic data is lost — the
+              fields are simply hidden from the operator-facing form. */}
           <div className="grid grid-cols-3 gap-3 pt-2 border-t border-border">
             <div className="col-span-3">
               <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Last Currency Flown</div>
