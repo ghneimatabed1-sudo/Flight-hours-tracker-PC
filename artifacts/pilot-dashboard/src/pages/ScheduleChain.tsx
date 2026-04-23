@@ -138,13 +138,40 @@ export default function ScheduleChain() {
     [...arr].sort((a, b) =>
       (a.deviceName || a.squadronName).localeCompare(b.deviceName || b.squadronName),
     );
+  // v1.1.98 multi-squadron org chart. Each PC declares its parent in the
+  // chain (Sqn → Wing, Wing → Base) via `rjaf.parentPcId` localStorage,
+  // mirrored to xpc_registry.parent_pc_id. When set, the upstream forward
+  // dropdown locks to ONLY that parent — no more "Sqn Cmdr in NO.8 sees
+  // every Wing PC in the country and one mis-click ships to the wrong
+  // wing." Falls back to today's permissive listing if the operator
+  // hasn't pinned a parent yet (with a banner above the dropdown so the
+  // omission is visible).
+  const myParentPcId = useMemo<string | null>(() => {
+    try { return localStorage.getItem("rjaf.parentPcId") || null; } catch { return null; }
+  }, []);
   const wingPCs = useMemo(
-    () => sortByName(registry.data.filter(p => !p.isSelf && p.tier === "wing" && isFresh(p))),
-    [registry.data],
+    () => {
+      const all = registry.data.filter(p => !p.isSelf && p.tier === "wing" && isFresh(p));
+      // Sqn Cmdr forwards UP to wing — lock to my pinned parent if present.
+      if ((myTier === "squadron" || myTier === "ops") && myParentPcId) {
+        const pinned = all.filter(p => p.id === myParentPcId);
+        if (pinned.length > 0) return sortByName(pinned);
+      }
+      return sortByName(all);
+    },
+    [registry.data, myTier, myParentPcId],
   );
   const basePCs = useMemo(
-    () => sortByName(registry.data.filter(p => !p.isSelf && p.tier === "base" && isFresh(p))),
-    [registry.data],
+    () => {
+      const all = registry.data.filter(p => !p.isSelf && p.tier === "base" && isFresh(p));
+      // Wing Cmdr forwards UP to base — lock to my pinned parent if present.
+      if (myTier === "wing" && myParentPcId) {
+        const pinned = all.filter(p => p.id === myParentPcId);
+        if (pinned.length > 0) return sortByName(pinned);
+      }
+      return sortByName(all);
+    },
+    [registry.data, myTier, myParentPcId],
   );
   // Squadron commanders explicitly link specific flight commander PCs at
   // setup time. When that linkage exists on this PC, narrow the down-chain
@@ -166,10 +193,20 @@ export default function ScheduleChain() {
       // exceptions. The earlier "linked-flight bypass" let an offline
       // PC stay selectable as long as it had been bound at setup; per
       // spec stale PCs cannot be selected, forwarded to, or messaged.
-      const all = registry.data.filter(p => !p.isSelf && p.tier === "flight");
-      return sortByName(all.filter(p => isFresh(p)));
+      const all = registry.data.filter(p => !p.isSelf && p.tier === "flight" && isFresh(p));
+      // v1.1.98 multi-squadron: an Ops PC or Sqn Cmdr PC may only address
+      // its OWN flights. Each Flight PC declares squadronPcId pointing
+      // at the Sqn-tier PC it belongs to. When set on at least one row,
+      // we trust the org chart and hide flights that belong elsewhere.
+      const myPcId = fallbackId;
+      const ownFlights = all.filter(p => p.squadronPcId === myPcId);
+      if (ownFlights.length > 0) return sortByName(ownFlights);
+      // Legacy fallback: if NO flight has declared a squadronPcId yet,
+      // show every active Flight PC (preserves pre-v1.1.98 behaviour).
+      const anyFlightPinned = all.some(p => p.squadronPcId);
+      return sortByName(anyFlightPinned ? [] : all);
     },
-    [registry.data, linkedFlightPcIds],
+    [registry.data, linkedFlightPcIds, fallbackId],
   );
   const squadronPCs = useMemo(
     () => sortByName(registry.data.filter(p => !p.isSelf && p.tier === "squadron" && isFresh(p))),
@@ -181,11 +218,12 @@ export default function ScheduleChain() {
   const composeTargets = useMemo(() => {
     if (myTier === "flight") return squadronPCs;
     if (myTier === "squadron") return [...wingPCs, ...flightPCs];
-    // Ops Pilot: lateral peer share inside the squadron only.
-    // Down-chain → linked Flight Cmdr PCs.
-    // Peer-chain → other squadron-tier PCs (the Squadron Cmdr PC sits
-    // here; self is already excluded by the registry filters above).
-    if (myTier === "ops") return [...flightPCs, ...squadronPCs];
+    // v1.1.98 — operator hard rule: "Ops Pilot PC cannot directly send
+    // to the wing commander. He can only talk to the flight commander."
+    // Ops's compose targets are Flight PCs ONLY. The Sqn Cmdr PC is NOT
+    // a valid Ops compose target; if Ops needs the Sqn Cmdr to see the
+    // sheet, Ops sends to Flight, Flight approves and forwards up.
+    if (myTier === "ops") return flightPCs;
     return [];
   }, [myTier, squadronPCs, wingPCs, flightPCs]);
   // v1.1.38: when the strict tier-filtered list is empty (e.g. Sqn Cmdr
@@ -365,6 +403,31 @@ export default function ScheduleChain() {
           tiers. Squadron composers pick a Wing PC (up-chain) or a Flight
           PC (down-chain). Flight composers pick a Squadron PC. Ops Pilot
           composers pick a Flight Cmdr PC or the Squadron Cmdr PC. */}
+      {/* v1.1.98 multi-squadron setup-incomplete banner. When this PC's
+          tier needs to forward upchain (Sqn→Wing or Wing→Base) and the
+          operator has NOT pinned a parent in Settings → Chain Setup, AND
+          the registry shows more than one possible parent, surface a
+          loud warning so the operator doesn't silently mis-route to the
+          wrong wing/base. Single-install deployments stay silent. */}
+      {((myTier === "squadron" || myTier === "ops") && !myParentPcId && wingPCs.length > 1) && (
+        <Card className="mb-3 border-amber-400/50 bg-amber-500/10">
+          <div className="text-amber-100 text-sm font-semibold mb-1">⚠ Multiple Wing PCs visible — pin your parent</div>
+          <div className="text-xs text-amber-100/80">
+            This PC sees {wingPCs.length} Wing Cmdr PCs. Without pinning your squadron's parent Wing
+            in <span className="font-mono">Settings → Chain Setup</span>, the forward dropdown will list all of them and a wrong click
+            will ship the day to a different wing.
+          </div>
+        </Card>
+      )}
+      {(myTier === "wing" && !myParentPcId && basePCs.length > 1) && (
+        <Card className="mb-3 border-amber-400/50 bg-amber-500/10">
+          <div className="text-amber-100 text-sm font-semibold mb-1">⚠ Multiple Base PCs visible — pin your parent</div>
+          <div className="text-xs text-amber-100/80">
+            This wing sees {basePCs.length} Base Cmdr PCs. Pin the parent base in <span className="font-mono">Settings → Chain Setup</span> so
+            "Approve & send to Base" routes to the right one every time.
+          </div>
+        </Card>
+      )}
       {(myTier === "squadron" || myTier === "flight" || myTier === "ops") && (
         <Card className="mb-3">
           <div className="text-sm font-semibold mb-2">Compose & submit</div>
@@ -378,7 +441,7 @@ export default function ScheduleChain() {
                 {myTier === "flight"
                   ? "Send to (Squadron PC)"
                   : myTier === "ops"
-                  ? "Send to (Flight Cmdr or Squadron Cmdr PC)"
+                  ? "Send to (Flight Cmdr PC)"
                   : "Send to (Wing or Flight PC)"}
               </label>
               <select value={submitTo} onChange={e => setSubmitTo(e.target.value)} className="w-full mt-1 px-3 py-1.5 rounded-md bg-input border border-border text-sm" data-testid="select-target">

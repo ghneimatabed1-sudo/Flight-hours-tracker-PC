@@ -452,7 +452,17 @@ function ArchiveBootstrap() {
       }
     } catch { /* localStorage blocked — registry just shows the code */ }
     const tick = () => {
-      registerLocalPC({ id, displayName, tier, base: sqnBase });
+      // v1.1.98 multi-squadron: thread the operator-pinned parent PC id
+      // (Settings → Chain Setup) into every heartbeat so xpc_registry
+      // carries an authoritative org-chart pointer and forward dropdowns
+      // can lock to the right wing/base.
+      let parentPcId: string | undefined;
+      let squadronPcId: string | undefined;
+      try {
+        parentPcId = localStorage.getItem("rjaf.parentPcId") || undefined;
+        squadronPcId = localStorage.getItem("rjaf.squadronPcId") || undefined;
+      } catch { /* localStorage blocked — fall through */ }
+      registerLocalPC({ id, displayName, tier, base: sqnBase, parentPcId, squadronPcId });
       purgeExpiredMessages();
       // Squadron commanders re-broadcast their flight-commander group on
       // every heartbeat so any flight PC coming online later picks up the

@@ -10,7 +10,8 @@ import {
 } from "@/lib/auth";
 import { useCurrencyWindow, DEFAULT_CURRENCY_WINDOW } from "@/lib/currency-settings";
 import { usePilots, useAllLinkedDevices, useRevokePilotDevices } from "@/lib/squadron-data";
-import { Smartphone, ShieldOff, Loader2, AlertTriangle, Eraser, ArrowRight, Sliders } from "lucide-react";
+import { Smartphone, ShieldOff, Loader2, AlertTriangle, Eraser, ArrowRight, Sliders, Link2 } from "lucide-react";
+import { useRegisteredPCs } from "@/lib/cross-pc";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Link } from "wouter";
 
@@ -904,6 +905,7 @@ export default function Settings() {
             commander-tier accounts so it never appears in the Sqn Cmdr
             or Flight Cmdr Settings page. */}
         {(user?.role === "ops" || user?.role === "deputy") && <MobileDevicesCard />}
+        <ChainSetupSection />
         <Card className="lg:col-span-2 flex items-center gap-5">
           <img src="brand/wings.png" className="h-16 object-contain shrink-0 opacity-95" alt="Pilot Wings" />
           <div className="space-y-1.5 flex-1">
@@ -916,6 +918,148 @@ export default function Settings() {
         </Card>
       </div>
     </div>
+  );
+}
+
+// v1.1.98 multi-squadron Chain Setup. Lets the operator pin the org-chart
+// pointer for THIS PC: which Wing PC its Sqn talks up to (or which Base
+// PC its Wing talks up to), and — for Flight PCs — which Squadron PC
+// owns it. Without this pin, when the registry shows multiple wings or
+// bases the forward dropdowns would list all of them and a wrong click
+// would route to the wrong wing/base.
+function ChainSetupSection() {
+  const pcsQ = useRegisteredPCs();
+  const myTier = (() => {
+    try { return (localStorage.getItem("rjaf.pcTier") || "") as "ops" | "flight" | "squadron" | "wing" | "base" | ""; }
+    catch { return ""; }
+  })();
+  const myPcId = (() => {
+    try { return localStorage.getItem("rjaf.xpc.localId") || ""; } catch { return ""; }
+  })();
+  const [parentPcId, setParentPcId] = useState<string>(() => {
+    try { return localStorage.getItem("rjaf.parentPcId") || ""; } catch { return ""; }
+  });
+  const [squadronPcId, setSquadronPcId] = useState<string>(() => {
+    try { return localStorage.getItem("rjaf.squadronPcId") || ""; } catch { return ""; }
+  });
+  const [savedNote, setSavedNote] = useState<string>("");
+
+  // What tier should the parent PC be? Sqn → wing, Wing → base. Ops PCs
+  // share their squadron's parent so they also pick a wing. Flight has
+  // no upchain parent — it uses squadronPcId instead. Base has none.
+  const parentTier: "wing" | "base" | null =
+    myTier === "wing" ? "base" :
+    (myTier === "squadron" || myTier === "ops") ? "wing" :
+    null;
+
+  const parentChoices = (pcsQ.data ?? []).filter(p => p.tier === parentTier && p.id !== myPcId);
+  const squadronChoices = (pcsQ.data ?? []).filter(p => p.tier === "squadron" && p.id !== myPcId);
+
+  const save = () => {
+    try {
+      if (parentPcId) localStorage.setItem("rjaf.parentPcId", parentPcId);
+      else localStorage.removeItem("rjaf.parentPcId");
+      if (myTier === "flight") {
+        if (squadronPcId) localStorage.setItem("rjaf.squadronPcId", squadronPcId);
+        else localStorage.removeItem("rjaf.squadronPcId");
+      }
+      setSavedNote("Saved. Heartbeat will publish the change within 30s.");
+      setTimeout(() => setSavedNote(""), 4000);
+    } catch {
+      setSavedNote("Could not save (localStorage blocked).");
+    }
+  };
+
+  // Base tier has no upchain parent and no squadron pointer — render
+  // an explanatory note instead of an empty form.
+  if (myTier === "base") {
+    return (
+      <Card className="lg:col-span-2 space-y-2">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <Link2 className="h-4 w-4" /> Chain Setup
+        </div>
+        <p className="text-xs text-muted-foreground">
+          This is a Base PC — it sits at the top of the chain. Nothing to pin here. Wings under this base
+          should pin <span className="font-semibold">this PC</span> as their parent in their own Settings.
+        </p>
+        <div className="text-[11px] text-muted-foreground font-mono break-all">My PC id: {myPcId || "—"}</div>
+      </Card>
+    );
+  }
+  if (myTier === "" || parentTier === null && myTier !== "flight") {
+    return null;
+  }
+
+  return (
+    <Card className="lg:col-span-2 space-y-3">
+      <div className="flex items-center gap-2 text-sm font-semibold">
+        <Link2 className="h-4 w-4" /> Chain Setup
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Pin this PC's place in the multi-squadron org chart. As Hawk Eye scales beyond one squadron the
+        registry starts listing PCs from other wings and bases too — pinning the parent here keeps every
+        forward routed to the right destination, even when 15+ squadrons are online.
+      </p>
+
+      {parentTier && (
+        <label className="block">
+          <span className="text-xs text-muted-foreground">
+            Parent {parentTier === "wing" ? "Wing PC (your squadron's wing commander)" : "Base PC (your wing's base commander)"}
+          </span>
+          <select
+            value={parentPcId}
+            onChange={e => setParentPcId(e.target.value)}
+            className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm"
+            data-testid="select-parent-pc"
+          >
+            <option value="">— not pinned (will list all visible {parentTier} PCs) —</option>
+            {parentChoices.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.deviceName ? `${p.deviceName} · ` : ""}{p.squadronName} ({p.id})
+                {p.online ? " · online" : ""}
+              </option>
+            ))}
+          </select>
+          {parentChoices.length === 0 && (
+            <div className="text-[11px] text-amber-300/80 mt-1">
+              No {parentTier} PCs visible yet. Bring the {parentTier} PC online once and it will appear here.
+            </div>
+          )}
+        </label>
+      )}
+
+      {myTier === "flight" && (
+        <label className="block">
+          <span className="text-xs text-muted-foreground">Owning Squadron PC (which squadron this flight reports to)</span>
+          <select
+            value={squadronPcId}
+            onChange={e => setSquadronPcId(e.target.value)}
+            className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm"
+            data-testid="select-squadron-pc"
+          >
+            <option value="">— not pinned —</option>
+            {squadronChoices.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.deviceName ? `${p.deviceName} · ` : ""}{p.squadronName} ({p.id})
+                {p.online ? " · online" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={save}
+          className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm"
+          data-testid="button-save-chain-setup"
+        >
+          Save chain pins
+        </button>
+        {savedNote && <span className="text-xs text-muted-foreground">{savedNote}</span>}
+      </div>
+      <div className="text-[11px] text-muted-foreground font-mono break-all">My PC id: {myPcId || "—"}</div>
+    </Card>
   );
 }
 

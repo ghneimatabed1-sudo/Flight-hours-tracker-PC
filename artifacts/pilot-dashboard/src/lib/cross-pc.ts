@@ -409,6 +409,13 @@ export interface SquadronPC {
   // "the name I gave the device", not by the airbase it happens to be at.
   deviceName?: string;
   lastSeen: string;       // ISO
+  // v1.1.98 multi-squadron org chart pointer (xpc_registry.parent_pc_id).
+  // Squadron PC → its Wing PC id; Wing PC → its Base PC id; Flight PC →
+  // undefined (use squadronPcId instead).
+  parentPcId?: string;
+  // Flight PCs only: the Sqn-tier PC this flight belongs to. Lets a Sqn
+  // Cmdr's "down-chain to flight" picker show only its own children.
+  squadronPcId?: string;
 }
 
 export interface RegisteredPC extends SquadronPC {
@@ -508,6 +515,14 @@ export interface RegisterPcOpts {
   tier: PcTier;
   base?: string;
   wing?: string;
+  // v1.1.98 multi-squadron: this PC's parent in the org chart.
+  //   Squadron PC → Wing PC id     ("WING:NORTH#abc123")
+  //   Wing PC     → Base PC id     ("BASE:KAB#def456")
+  //   Flight PC   → leave undefined; use squadronPcId instead.
+  parentPcId?: string;
+  // For Flight PCs only: which Squadron PC do we belong under? Lets a
+  // Sqn Cmdr's down-chain composer show only their own flights.
+  squadronPcId?: string;
 }
 
 function rowToPc(r: Record<string, unknown>): SquadronPC {
@@ -527,6 +542,8 @@ function rowToPc(r: Record<string, unknown>): SquadronPC {
     wing: r.wing ? String(r.wing) : undefined,
     deviceName: r.device_name ? String(r.device_name) : undefined,
     lastSeen: String(r.last_seen ?? nowIso()),
+    parentPcId: r.parent_pc_id ? String(r.parent_pc_id) : undefined,
+    squadronPcId: r.squadron_pc_id ? String(r.squadron_pc_id) : undefined,
   };
 }
 
@@ -553,6 +570,8 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
     wing: o.wing,
     deviceName,
     lastSeen: nowIso(),
+    parentPcId: o.parentPcId,
+    squadronPcId: o.squadronPcId,
   };
   // Mirror into localStorage so the offline fallback path (and a quick
   // first paint before the Supabase round-trip resolves) has data to show.
@@ -598,7 +617,28 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
           wing: o.wing ?? null,
           device_name: deviceName ?? null,
           last_seen: entry.lastSeen,
+          // v1.1.98 multi-squadron org-chart pointer. Older Supabase
+          // schemas (pre-0037) don't have these columns yet — PostgREST
+          // will surface a "column does not exist" error in that case.
+          // We catch + retry-without below so the upsert still wins.
+          parent_pc_id: o.parentPcId ?? null,
+          squadron_pc_id: o.squadronPcId ?? null,
         }, { onConflict: "id" });
+        if (error && /column .* does not exist/i.test(error.message ?? "")) {
+          // Migration 0037 not applied yet on this project — retry with
+          // the legacy column set so heartbeat keeps working. Operator
+          // gets the routing benefits as soon as they paste 0037 in.
+          const legacy = await supabase!.from("xpc_registry").upsert({
+            id: o.id,
+            squadron_name: o.displayName,
+            tier: dbTier,
+            base: o.base ?? null,
+            wing: o.wing ?? null,
+            device_name: deviceName ?? null,
+            last_seen: entry.lastSeen,
+          }, { onConflict: "id" });
+          if (!legacy.error) { clearHeartbeatError(); return; }
+        }
         if (error) {
           reportHeartbeatError(
             `Registry upsert rejected for "${o.id}" (${error.code ?? "?"}): ${error.message}`,
@@ -1649,7 +1689,18 @@ export function useDecideSchedule() {
         // for that day for that squadron (operator: "if the wing commander
         // didn't want to send it to the base commander, it's OK").
         // Base is the terminal tier — final archive is on Base.approve.
-        if (cur.currentTier === "flight") {
+        // v1.1.98: when the forward target is a Flight PC (id starts
+        // with "FLIGHT:"), this is a peer-share / ping-pong return —
+        // NOT a chain advance. Used by:
+        //   • Ops re-sending revised rows back to a specific Flight Cmdr
+        //     after Flight bounced edits ("send it back to that specific
+        //     flight commander", per operator).
+        //   • Sqn Cmdr peer-sharing back down to Flight (squadron ↔ flight).
+        // In all other cases the target is upchain and we advance the tier.
+        const targetIsFlight = (input.forwardPcId ?? "").startsWith("FLIGHT:");
+        if (targetIsFlight) {
+          cur.currentTier = "flight";
+        } else if (cur.currentTier === "flight") {
           cur.currentTier = "squadron";
         } else if (cur.currentTier === "squadron") {
           cur.currentTier = "wing";
@@ -1660,7 +1711,10 @@ export function useDecideSchedule() {
         }
         cur.currentPcId = input.forwardPcId ?? null;
         cur.currentPcName = input.forwardPcName ?? null;
-        cur.status = "reviewed";
+        // Peer-share back to Flight stays in "submitted" so the Flight
+        // Cmdr's inbox treats it as a fresh action item (not as a
+        // already-reviewed sheet just passing through).
+        cur.status = targetIsFlight ? "submitted" : "reviewed";
         // Track every PC that has handled the share so the approve-time
         // visibility rule can include them.
         if (input.forwardPcId) {
