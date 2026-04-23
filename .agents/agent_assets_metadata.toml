@@ -101,3 +101,9 @@ id = "6sAaNCEdUw_wzqk0rPsBg"
 uri = "file://.local/HAWK-EYE-OVERNIGHT-MASTER-REPORT.md"
 type = "text"
 title = "Hawk Eye — Overnight Master Report (all agents, all work, 2026-04-23)"
+
+[[outputs]]
+id = "q6V8HFQuXLYRKedUecL8b"
+uri = "file://.local/test-report-2026-04-23.md"
+type = "text"
+title = "Hawk Eye — Overnight Comprehensive Simulation Report (2026-04-23)"
