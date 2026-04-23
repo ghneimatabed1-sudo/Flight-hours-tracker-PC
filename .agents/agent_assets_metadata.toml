@@ -95,3 +95,9 @@ id = "aTe4a4fLJZ9j91NXvr2xF"
 uri = "file://.local/HAWK-EYE-FINAL-REPORT-2026-04-23.md"
 type = "text"
 title = "Hawk Eye — Consolidated Overnight Report (2026-04-23)"
+
+[[outputs]]
+id = "6sAaNCEdUw_wzqk0rPsBg"
+uri = "file://.local/HAWK-EYE-OVERNIGHT-MASTER-REPORT.md"
+type = "text"
+title = "Hawk Eye — Overnight Master Report (all agents, all work, 2026-04-23)"
