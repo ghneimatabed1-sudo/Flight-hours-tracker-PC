@@ -1500,9 +1500,46 @@ export function useScheduleShares(
               // Server-side narrowing keeps payload small; the client-side
               // `visible()` filter then enforces the dismissal / rejecter
               // rules so the logic stays in one place.
-              qry = qry.or(
-                `current_pc_id.eq.${forPcId},origin_squadron_id.eq.${forPcId},and(status.eq.approved,chain_pc_ids.cs.{${forPcId}})`,
-              );
+              //
+              // v1.1.101 — widen the OR clause with logical-seat LIKE
+              // patterns + peer-squadron mirror (mirrors useMessages at
+              // cross-pc.ts:2154-2160). Without this, a commander who
+              // reinstalled Windows / cleared localStorage / moved to a
+              // replacement PC got a NEW device suffix (#xyz → #abc) and
+              // the strict eq filter silently dropped every share that
+              // had been routed to the OLD suffix. At 15-20 squadrons
+              // with 4-5 PCs per squadron, suffix drift becomes routine
+              // (new AV install, clean reimage, SSD swap, etc) — the
+              // logical-seat pattern keeps the inbox wired to the tier
+              // role regardless of which physical PC is currently on
+              // that desk. Stays in lock-step with the client-side
+              // makePcMatcher so visible() agrees with what the server
+              // returns on both paths (live + local fallback).
+              const hashIdx = forPcId.indexOf("#");
+              const logicalSeat = hashIdx < 0 ? null : forPcId.slice(0, hashIdx);
+              const peerSquadronId = forPcId.startsWith("SQDNCMD:")
+                ? forPcId.slice("SQDNCMD:".length)
+                : (!forPcId.includes(":") ? `SQDNCMD:${forPcId}` : null);
+              const orParts: string[] = [
+                `current_pc_id.eq.${forPcId}`,
+                `origin_squadron_id.eq.${forPcId}`,
+                `and(status.eq.approved,chain_pc_ids.cs.{${forPcId}})`,
+              ];
+              if (peerSquadronId !== null) {
+                orParts.push(
+                  `current_pc_id.eq.${peerSquadronId}`,
+                  `origin_squadron_id.eq.${peerSquadronId}`,
+                );
+              }
+              if (logicalSeat !== null) {
+                orParts.push(
+                  `current_pc_id.like.${logicalSeat}#*`,
+                  `origin_squadron_id.like.${logicalSeat}#*`,
+                  `current_pc_id.eq.${logicalSeat}`,
+                  `origin_squadron_id.eq.${logicalSeat}`,
+                );
+              }
+              qry = qry.or(orParts.join(","));
             }
             const { data, error } = await qry;
             if (error) throw error;
