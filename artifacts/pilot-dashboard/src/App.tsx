@@ -86,6 +86,8 @@ import AdminSquadrons from "@/pages/admin/Squadrons";
 import AdminAuditLog from "@/pages/admin/AuditLog";
 import AdminSecurity from "@/pages/admin/Security";
 import RemindersSchedule from "@/pages/admin/RemindersSchedule";
+import ConnectionMap from "@/pages/admin/ConnectionMap";
+import Connections from "@/pages/Connections";
 import ReminderLog from "@/pages/admin/ReminderLog";
 import CommanderOverview from "@/pages/dashboard/Overview";
 import PilotsTable from "@/pages/dashboard/PilotsTable";
@@ -143,6 +145,7 @@ function SquadronOpsRoutes() {
       <Route path="/monthly-report/defaults" component={MonthlyReportDefaults} />
       <Route path="/monthly-report" component={MonthlyReport} />
       <Route path="/settings" component={SettingsPage} />
+      <Route path="/connections" component={Connections} />
       <Route path="/diagnostic" component={DiagnosticPage} />
       <Route path="/help" component={Help} />
       {/* Catch-all: silently redirect to Dashboard instead of showing 404.
@@ -166,6 +169,8 @@ function AdminRoutes() {
       <Route path="/admin/squadrons" component={AdminSquadrons} />
       <Route path="/admin/audit" component={AdminAuditLog} />
       <Route path="/admin/security" component={AdminSecurity} />
+      <Route path="/admin/connection-map" component={ConnectionMap} />
+      <Route path="/connections" component={Connections} />
       <Route path="/admin/reminders" component={RemindersSchedule} />
       <Route path="/admin/reminders/log" component={ReminderLog} />
       <Route path="/diagnostic" component={DiagnosticPage} />
@@ -223,6 +228,8 @@ function CommanderRoutes() {
           /dashboard/settings so links from either layout resolve. */}
       <Route path="/dashboard/settings" component={SettingsPage} />
       <Route path="/settings" component={SettingsPage} />
+      <Route path="/connections" component={Connections} />
+      <Route path="/dashboard/connections" component={Connections} />
       <Route path="/dashboard/diagnostic" component={DiagnosticPage} />
       <Route path="/diagnostic" component={DiagnosticPage} />
       {/* See SquadronOpsRoutes catch-all: redirect home rather than 404. */}

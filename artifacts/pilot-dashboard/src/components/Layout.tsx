@@ -7,7 +7,7 @@ import {
   Trophy, CalendarRange, PalmtreeIcon, UserX, Calendar, ClipboardList,
   ShieldAlert, FileText, Megaphone, Map, Tags, FileDown, Settings,
   Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle,
-  Archive, Bell, Activity,
+  Archive, Bell, Activity, Link2,
   // These five icons MUST be aliased (not imported under their original
   // names). Vite/Rollup's name-mangling step in production builds leaves
   // certain lucide-react identifiers — Inbox, Mail, Share2, UserPlus,
@@ -73,6 +73,7 @@ const ITEMS: readonly Item[] = [
   { p: "/ops-team", k: "nav_opsteam", I: Users2Icon },
   { p: "/monthly-report", k: "nav_monthly_report", I: FileBarChartIcon },
   { p: "/help", k: "nav_help", I: HelpCircle },
+  { p: "/connections", k: "nav_connections" as TKey, I: Link2 },
   { p: "/settings", k: "nav_settings", I: Settings },
   { p: "/diagnostic", k: "nav_diagnostic", I: Activity },
 ] as const;

@@ -712,6 +712,14 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
           return;
         }
         clearHeartbeatError();
+        // Tick last_activity_at on every pair this PC participates in.
+        // This is what powers the 90-day inactivity sweep — without it
+        // the timer would always read "creation time" and the sweep
+        // would either never expire anything or expire everything in
+        // bulk on day 90. Best-effort: failures here do NOT touch the
+        // heartbeat error indicator (a missing 0038 migration must not
+        // break the registry tick).
+        try { await supabase!.rpc("xpc_pair_touch", { p_pc_id: o.id }); } catch { /* ignore */ }
       } catch (e) {
         reportHeartbeatError(
           `Registry upsert threw for "${o.id}": ${(e as Error)?.message ?? String(e)}`,

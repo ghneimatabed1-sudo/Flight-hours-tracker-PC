@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { useI18n, type Key } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2, Bell, ClipboardCheck, History, Settings as SettingsIcon } from "lucide-react";
+import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2, Bell, ClipboardCheck, History, Settings as SettingsIcon, Link2 as Link2Icon, Network } from "lucide-react";
 import { canUseMessages, canUseScheduleChain, canViewFinalSchedules } from "@/lib/cross-pc";
 import { useSidebarBadges } from "@/lib/sidebar-badges";
 import { FlightBindingGate, FlightBindingBadge } from "@/components/FlightBindingGate";
@@ -53,6 +53,8 @@ export function HQLayout({ children }: { children: ReactNode }) {
         { path: "/admin/reminders", labelKey: "remindersSchedule", icon: <AlarmClock className="h-4 w-4" /> },
         { path: "/admin/audit", labelKey: "auditLog", icon: <ListChecks className="h-4 w-4" /> },
         { path: "/admin/security", labelKey: "nav_security", icon: <Lock className="h-4 w-4" /> },
+        { path: "/admin/connection-map", labelKey: "nav_connection_map" as Key, icon: <Network className="h-4 w-4" /> },
+        { path: "/connections", labelKey: "nav_connections" as Key, icon: <Link2Icon className="h-4 w-4" /> },
         { path: "/settings", labelKey: "nav_settings", icon: <SettingsIcon className="h-4 w-4" /> },
         { path: "/diagnostic", labelKey: "nav_diagnostic" as Key, icon: <Activity className="h-4 w-4" /> },
       ]
@@ -119,6 +121,7 @@ export function HQLayout({ children }: { children: ReactNode }) {
         // / HQ) needs the auto-updater toggle and the manual "Check for
         // app update" button. Without this entry the operator on a flight
         // commander PC has no way to pull a new installer build.
+        { path: "/dashboard/connections", labelKey: "nav_connections" as Key, icon: <Link2Icon className="h-4 w-4" /> },
         { path: "/dashboard/settings", labelKey: "nav_settings" as Key, icon: <SettingsIcon className="h-4 w-4" /> },
         { path: "/dashboard/diagnostic", labelKey: "nav_diagnostic" as Key, icon: <Activity className="h-4 w-4" /> },
       ];
