@@ -213,3 +213,14 @@ PC Roster column shows a coloured dot per pilot with a "Last sync: N min ago" to
 **Mobile UI (`app/(tabs)/index.tsx`).** New "Periodic Summary" card on the Home tab between the year-breakdown and sync cards. Year picker (4 chips for past 4 years) + scope picker (H1 / H2 / Annual chips) drive the `computePeriodicSummary` memo. Card reuses the existing `styles.card` visual language (gold accent on active chips, tabular-nums for hours, empty-state copy when the period has no sorties). EN+AR i18n keys added (`home_periodic_*`).
 
 **Verification:** `tsc --noEmit` clean on both projects. Existing dashboard PDF tests unaffected. Mobile workflow shows the card at runtime; APK/IPA picked up automatically by `.github/workflows/mobile-unsigned-builds.yml` on next mobile-path push.
+
+## v1.1.101 — return-to-originator unblock (2026-04-23)
+**Bug**: After Ops edits/rejects a flight schedule composed by a Flight Cmdr (or any tier), the returned share appeared on the originator's PC in the Sent card with NO approve/edit/reject buttons ("no option for approval, no option for edit, no option for reject. Nothing").
+
+**Root cause**: `FlightProgramShareInbox` (pages/FlightProgram.tsx:612) incoming filter was `matchesMe(currentPcId) && !matchesMe(originSquadronId)`. When a share bounces back to its originator, both sides match the same PC — the `!matchesMe(originSquadronId)` clause excluded it from Incoming entirely and it fell into Sent (view-only). Schedule Chain had the correct partition all along.
+
+**Fix**: Mirror Schedule Chain (ScheduleChain.tsx:358-359): `incoming = current-holder`, `sent = origin-AND-NOT-current`. Tier-agnostic so it protects Flight/Sqn/Wing/Base/HQ as we scale to 15-20 squadrons.
+
+**Secondary fix**: `cross-pc.ts` edit+reject-return paths were hard-coding `currentTier = "squadron"`. New `tierFromPcId()` helper derives tier from the origin PC id prefix (FLIGHT:/WING:/BASE:/SQDNCMD:/HQ:) so bounce-back badges & sidebar counts reflect the real origin tier.
+
+Commit: 737368d · auto-build via `.github/workflows/dashboard-windows-installer.yml`.
