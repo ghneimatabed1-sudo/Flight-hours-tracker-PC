@@ -244,12 +244,23 @@ export default function FlightProgram() {
       // directly. Schedule Chain enforces the same rule; FlightProgram
       // must match so an operator can't bypass the chain by submitting
       // straight from the daily-sheet editor.
+      // v1.1.102 — widened with id-prefix fallback. `rowToPc` already
+      // decodes a FLIGHT: id prefix to tier="flight", but if any row
+      // slips through with a stale tier column (legacy writes, local
+      // fallback entries written before the prefix scheme), the id
+      // prefix is the authoritative signal. Belt-and-suspenders so Ops
+      // never sees an empty Flight-Cmdr dropdown when a Flight Cmdr PC
+      // IS actually in the registry — the exact symptom reported at
+      // NO.8 SQDN on 23-Apr.
       if (user?.role === "ops") {
-        return all.filter(p => p.tier === "flight");
+        return all.filter(p =>
+          p.tier === "flight"
+          || p.id.startsWith("FLIGHT:"),
+        );
       }
       return all;
     },
-    [registry.data, isFlightCmdr, isSquadronCmdr, flightBinding?.pcId],
+    [registry.data, isFlightCmdr, isSquadronCmdr, flightBinding?.pcId, user?.role],
   );
   // v1.1.38: forgiving fallback. When the strict tier filter yields zero
   // PCs (the Sqn Cmdr saw "— pick a registered PC —" and nothing else
@@ -456,6 +467,35 @@ export default function FlightProgram() {
                     <span className="text-[10px] text-amber-300">
                       Registry is empty on this PC. Sign in once on the recipient PC with internet so this PC can see it.
                     </span>
+                  )}
+                  {/* v1.1.102 — Ops diagnostic panel. When Ops sees zero
+                      Flight Cmdr PCs but the registry DOES contain other
+                      PCs, surface that list so the operator can tell the
+                      difference between "nobody online" and "Flight Cmdr
+                      PC heartbeat didn't land". Root-cause hint included:
+                      usually the Flight Cmdr needs to sign in once with
+                      the app open so the registry row publishes. */}
+                  {user?.role === "ops"
+                    && effectiveTargets.length === 0
+                    && registry.data.filter(p => !p.isSelf).length > 0 && (
+                    <div className="text-[10px] text-amber-300 space-y-0.5 mt-1 p-2 rounded-md bg-amber-500/10 border border-amber-500/30">
+                      <div className="font-semibold">
+                        No Flight Commander PC found in the registry.
+                      </div>
+                      <div>
+                        {registry.data.filter(p => !p.isSelf).length} other PC(s) are online, but none is a Flight Cmdr:
+                      </div>
+                      <ul className="pl-3 list-disc">
+                        {registry.data.filter(p => !p.isSelf).slice(0, 8).map(p => (
+                          <li key={p.id}>
+                            <code>{p.id}</code> — tier <code>{p.tier}</code>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="text-muted-foreground">
+                        Ask the Flight Cmdr to sign in on the app with internet on. Their PC registers its row within 30s.
+                      </div>
+                    </div>
                   )}
                 </>
               )}
