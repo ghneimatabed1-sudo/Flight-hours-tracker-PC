@@ -38,6 +38,14 @@ const FACTORY_LECTURES = [
 const FACTORY_EXERCISES = ["GH", "IF", "NVG", "NIGHT", "CONTINUATION TRNG", "MTF"];
 
 /**
+ * Aircraft models the squadron operates. Drives the A/C Type dropdown on
+ * Add Sortie, the Sortie Log edit form, and the seed value on every new
+ * Flight Program row. NO.8 SQDN flies UH-60M and UH-60AIL with AS332 as a
+ * crossover; an AH-1F squadron would replace these. Operator-editable.
+ */
+const FACTORY_AIRFRAMES = ["UH-60M", "UH-60L", "UH-60AIL", "AS332"];
+
+/**
  * Per-airframe fuel burn rate (lb/hr). UH-60M is the squadron's primary
  * airframe and burns 576 lb/hr per the workbook. Operators can add more
  * airframe entries (e.g. UH-60AIL, AH-1, OH-58) on the defaults page.
@@ -85,6 +93,12 @@ export interface SquadronDefaults {
    *  and the FUEL helper text. Combined with the per-airframe burn rate
    *  in `fuelBurnByAirframe` to drive the Form 4 fuel formula. */
   primaryAirframe: string;
+  /** All aircraft models the squadron operates, in the order they should
+   *  appear in dropdowns. Drives the A/C Type select on Add Sortie, the
+   *  Sortie Log edit form, and the seed value on every new Flight Program
+   *  row. NO.8 SQDN flies UH-60M / UH-60L / UH-60AIL plus AS332 as a
+   *  crossover; an AH-1F squadron would replace the list entirely. */
+  airframes: string[];
 }
 
 export function factoryDefaults(): SquadronDefaults {
@@ -101,6 +115,7 @@ export function factoryDefaults(): SquadronDefaults {
     groupName: "QUICK REACTION FORCE GROUP",
     groupAcronym: "QRFG",
     primaryAirframe: "UH-60M",
+    airframes: [...FACTORY_AIRFRAMES],
   };
 }
 
@@ -125,6 +140,7 @@ export function loadSquadronDefaults(squadronNumber: string | undefined): Squadr
       groupName: parsed.groupName ?? f.groupName,
       groupAcronym: parsed.groupAcronym ?? f.groupAcronym,
       primaryAirframe: parsed.primaryAirframe ?? f.primaryAirframe,
+      airframes: parsed.airframes?.length ? parsed.airframes : f.airframes,
     };
   } catch {
     return factoryDefaults();

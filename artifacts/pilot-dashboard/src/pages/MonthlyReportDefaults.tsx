@@ -184,6 +184,17 @@ export default function MonthlyReportDefaults() {
           />
         </Section>
 
+        {/* Aircraft models the squadron flies */}
+        <Section title="Aircraft models flown by this squadron"
+          hint="Drives the A/C Type dropdown on Add Sortie, the Sortie Log edit form, and the seed value on every new Flight Program row. NO.8 SQDN's defaults are UH-60M / UH-60L / UH-60AIL / AS332. An AH-1F squadron would replace the list entirely. Whatever you list here also feeds the fuel-burn table below — add a burn rate for each one.">
+          <ListEditor
+            items={d.airframes}
+            onChange={v => update("airframes", v)}
+            placeholder="Airframe (e.g. UH-60M, AH-1F, CH-47D)"
+            testId="airframe"
+          />
+        </Section>
+
         {/* Fuel-burn per airframe */}
         <Section title="Fuel burn rate (lb/hr) by airframe"
           hint="Used in the Form 4 / FUEL block to compute total fuel: pilots × sorties/pilot × duration × lb/hr. Add a row for every airframe your squadron flies — each row's rate is editable. UH-60M factory rate is 576 lb/hr per the workbook.">

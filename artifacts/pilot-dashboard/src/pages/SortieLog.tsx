@@ -4,6 +4,7 @@ import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { usePilots, useSorties, useUpdateSortie, useDeleteSortie, useRestoreSortie } from "@/lib/squadron-data";
 import { useAuth } from "@/lib/auth";
+import { loadSquadronDefaults } from "@/lib/squadron-defaults";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 import { SortieDiffDialog } from "@/components/SortieDiffDialog";
 import { showUndo } from "@/lib/undo-store";
@@ -15,7 +16,14 @@ import { useFrozenAccess } from "@/lib/monthly-close";
 
 export default function SortieLog() {
   const { t, rankOf } = useI18n();
-  const { user } = useAuth();
+  const { user, squadron } = useAuth();
+  const sqdnDefaults = useMemo(
+    () => loadSquadronDefaults(squadron?.number),
+    [squadron?.number],
+  );
+  const acTypeOptions = sqdnDefaults.airframes.length
+    ? sqdnDefaults.airframes
+    : ["UH-60M", "UH-60L", "UH-60AIL", "AS332"];
   const [q, setQ] = useState("");
   const [type, setType] = useState("All");
   // Sortie date picker — defaults to today, blank means "all days".
@@ -375,6 +383,7 @@ export default function SortieLog() {
         <SortieEditDialog
           sortie={editing}
           pilots={PILOTS.map(p => ({ id: p.id, label: `${rankOf(p)} ${p.name}` }))}
+          acTypeOptions={acTypeOptions}
           busy={updateMut.isPending}
           onCancel={() => setEditing(null)}
           onSave={(next) => {
@@ -436,11 +445,12 @@ interface PilotOpt { id: string; label: string; }
 interface SortieEditDialogProps {
   sortie: Sortie;
   pilots: PilotOpt[];
+  acTypeOptions: string[];
   busy?: boolean;
   onCancel: () => void;
   onSave: (next: Sortie) => void;
 }
-function SortieEditDialog({ sortie, pilots, busy, onCancel, onSave }: SortieEditDialogProps) {
+function SortieEditDialog({ sortie, pilots, acTypeOptions, busy, onCancel, onSave }: SortieEditDialogProps) {
   const { t, rankOf } = useI18n();
   const [form, setForm] = useState<Sortie>(sortie);
   const set = <K extends keyof Sortie>(k: K, v: Sortie[K]) => setForm(f => ({ ...f, [k]: v }));
@@ -461,7 +471,7 @@ function SortieEditDialog({ sortie, pilots, busy, onCancel, onSave }: SortieEdit
             <L label={t("date")}><DateInput value={form.date} onChange={(v) => set("date", v)} className={I} data-testid="input-edit-date" /></L>
             <L label={t("acType")}>
               <select value={form.acType} onChange={e => set("acType", e.target.value)} className={I}>
-                {["UH-60M", "UH-60L", "UH-60AIL", "AS332"].map(o => <option key={o}>{o}</option>)}
+                {acTypeOptions.map(o => <option key={o}>{o}</option>)}
               </select>
             </L>
             <L label={t("acNumber")}><input value={form.acNumber} onChange={e => set("acNumber", e.target.value)} className={I} data-testid="input-edit-acnum" /></L>

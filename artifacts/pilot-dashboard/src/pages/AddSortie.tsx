@@ -18,6 +18,7 @@ import { showUndo } from "@/lib/undo-store";
 import { Plane, Pencil, Trash2, X, UserPlus, User, Lock, Unlock } from "lucide-react";
 import { useRegisteredPCs, useSubmitPending } from "@/lib/cross-pc";
 import { useAuth } from "@/lib/auth";
+import { loadSquadronDefaults } from "@/lib/squadron-defaults";
 import type { ExternalPilotRef } from "@/lib/mock";
 import { useFrozenAccess } from "@/lib/monthly-close";
 
@@ -133,14 +134,29 @@ export default function AddSortie() {
   const update = useUpdateSortie();
   const del = useDeleteSortie();
 
-  const [form, setForm] = useState<FormState>(blankForm);
+  const auth = useAuth();
+  // Squadron-level defaults: the operator-editable list of airframes the
+  // squadron flies + the primary airframe used as the seed for new entries.
+  // A NO.5 SQDN install with UH-60AIL configured shows that as the default
+  // here; an AH-1F squadron sees AH-1F. Falls back to the NO.8 list if the
+  // operator hasn't set anything yet.
+  const sqdnDefaults = useMemo(
+    () => loadSquadronDefaults(auth.squadron?.number),
+    [auth.squadron?.number],
+  );
+  const acTypeOptions = sqdnDefaults.airframes.length
+    ? sqdnDefaults.airframes
+    : ["UH-60M", "UH-60L", "UH-60AIL", "AS332"];
+  const [form, setForm] = useState<FormState>(() => ({
+    ...blankForm(),
+    acType: sqdnDefaults.primaryAirframe || "UH-60M",
+  }));
   const [confirmDel, setConfirmDel] = useState<Sortie | null>(null);
   // Pending edit waiting for the change-summary dialog. We capture both
   // the original record (for the diff + undo snapshot) and the proposed
   // new payload (already fully bucketed) so the dialog can render the
   // diff and the confirm handler can fire the mutation directly.
   const [pendingEdit, setPendingEdit] = useState<{ before: Sortie; after: Sortie } | null>(null);
-  const auth = useAuth();
   const frozen = useFrozenAccess();
   const lockedMessage =
     "Hours older than 12 months are frozen. Ask the super admin to authorize this PC from the Super Admin page.";
@@ -566,7 +582,7 @@ export default function AddSortie() {
           {/* Row 1: flight info */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             <Mini label="Date" type="date" value={form.date} onChange={v => set("date", v)} />
-            <MiniSelect label="A/C Type" value={form.acType} onChange={v => set("acType", v)} opts={["UH-60M", "UH-60L", "UH-60AIL", "AS332"]} />
+            <MiniSelect label="A/C Type" value={form.acType} onChange={v => set("acType", v)} opts={acTypeOptions} />
             <Mini label="A/C No" value={form.acNumber} onChange={v => set("acNumber", v)} placeholder="e.g. 832" />
             <MiniSelect label="Sortie Type" value={form.sortieType} onChange={v => set("sortieType", v)} opts={SORTIE_TYPES} />
             <Mini label="Time (hrs)" type="number" step="0.1" value={form.time} onChange={v => set("time", v)} placeholder="0.0" />

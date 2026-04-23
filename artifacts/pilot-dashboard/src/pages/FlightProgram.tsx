@@ -3,6 +3,7 @@ import DateInput from "@/components/DateInput";
 import { useI18n } from "@/lib/i18n";
 import { usePilots } from "@/lib/squadron-data";
 import { useAuth } from "@/lib/auth";
+import { loadSquadronDefaults } from "@/lib/squadron-defaults";
 import { Button } from "@/components/ui/button";
 import { Printer, Save, Settings, Send, X as CloseIcon, Check, X, Trash2, Eye, EyeOff } from "lucide-react";
 import FlightScheduleSheet, { emptyProgramRow } from "@/components/FlightScheduleSheet";
@@ -43,21 +44,41 @@ interface Defaults {
 
 const STORAGE_PREFIX  = "rjaf.flightProgram.";
 const DEFAULTS_KEY    = "rjaf.flightProgram.defaults";
-const FACTORY_DEFAULTS: Defaults = {
-  airbase:  "KING ABDULLAH II AIRBASE",
-  squadron: "NO.8 SQDN",
-  fltCmdr:  "",
-  sqdnCmdr: "",
-  acType:   "UH-60M",
+
+/**
+ * Compose the factory defaults from live squadron data + Squadron Defaults
+ * (Monthly Report page). This way a fresh install at NO.5 SQDN flying
+ * UH-60AIL gets the right airbase / squadron name / airframe baked in
+ * without the operator having to type them — instead of the old behaviour
+ * which hard-coded NO.8's KING ABDULLAH II AIRBASE / NO.8 SQDN / UH-60M.
+ *
+ * The operator can still override any of these from the in-page Defaults
+ * dialog; the localStorage layer (DEFAULTS_KEY) wins over the squadron
+ * record. Pre-existing NO.8 saves continue to load unchanged.
+ */
+const factoryDefaultsFor = (
+  squadron: { name?: string; base?: string; number?: string } | null | undefined,
+): Defaults => {
+  const sqd = loadSquadronDefaults(squadron?.number);
+  return {
+    airbase:  squadron?.base ?? "",
+    squadron: squadron?.name ?? "",
+    fltCmdr:  "",
+    sqdnCmdr: "",
+    acType:   sqd.primaryAirframe || "UH-60M",
+  };
 };
 
-const loadDefaults = (): Defaults => {
+const loadDefaults = (
+  squadron: { name?: string; base?: string; number?: string } | null | undefined,
+): Defaults => {
+  const factory = factoryDefaultsFor(squadron);
   try {
     const raw = localStorage.getItem(DEFAULTS_KEY);
-    if (!raw) return { ...FACTORY_DEFAULTS };
-    return { ...FACTORY_DEFAULTS, ...(JSON.parse(raw) as Partial<Defaults>) };
+    if (!raw) return { ...factory };
+    return { ...factory, ...(JSON.parse(raw) as Partial<Defaults>) };
   } catch {
-    return { ...FACTORY_DEFAULTS };
+    return { ...factory };
   }
 };
 const saveDefaults = (d: Defaults) => localStorage.setItem(DEFAULTS_KEY, JSON.stringify(d));
@@ -144,9 +165,9 @@ export default function FlightProgram() {
   const isFlightCmdr = user?.role === "commander" && user?.scope === "flight";
 
   const todayIso = new Date().toISOString().slice(0, 10);
-  const [defaults, setDefaults]       = useState<Defaults>(() => loadDefaults());
+  const [defaults, setDefaults]       = useState<Defaults>(() => loadDefaults(squadron));
   const [date, setDate]               = useState<string>(todayIso);
-  const [prog, setProg]               = useState<ScheduleProgram>(() => loadProgram(todayIso, loadDefaults()));
+  const [prog, setProg]               = useState<ScheduleProgram>(() => loadProgram(todayIso, loadDefaults(squadron)));
   const [savedFlash, setSavedFlash]   = useState(false);
   const [showDefaults, setShowDefaults] = useState(false);
   const [showSubmit, setShowSubmit]   = useState(false);

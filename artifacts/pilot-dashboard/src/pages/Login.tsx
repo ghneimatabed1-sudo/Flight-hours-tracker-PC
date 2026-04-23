@@ -24,9 +24,13 @@ export default function LoginGate() {
   const [licUsername, setLicUsername] = useState("");
   const [licError, setLicError] = useState<string | null>(null);
 
-  const [name, setName] = useState("Royal Squadron");
-  const [num, setNum] = useState("8");
-  const [base, setBase] = useState("King Abdullah I AB");
+  // Squadron-bootstrap fields are blank on first run so a fresh install at
+  // any squadron (NO.5 SQDN, NO.7 SQDN, etc.) doesn't quietly accept NO.8's
+  // values. The placeholders show the expected shape; the operator types
+  // their own. Once configured the values persist via lib/auth.tsx.
+  const [name, setName] = useState("");
+  const [num, setNum] = useState("");
+  const [base, setBase] = useState("");
 
   const [u, setU] = useState("");
   const [p, setP] = useState("");
