@@ -116,12 +116,40 @@ jobs:
           ORIGINAL=$(cat "$NSH")
           printf '!define INSTALL_PASSWORD "%s"\r\n%s' "$INSTALL_PASSWORD" "$ORIGINAL" > "$NSH"
 
+      - name: Verify Supabase build secrets were injected
+        # Hard-fail BEFORE the renderer build if either Supabase secret is
+        # empty. Without these the installer ships with no backend wired
+        # up — every PC ends up isolated, the cross-PC registry never
+        # populates, and operators waste hours on the Connection
+        # Diagnostic page wondering why nobody else is listed. We print
+        # the host portion only (never the anon key) so the build log
+        # confirms which project the build is bound to without leaking
+        # the credential.
+        run: |
+          set -euo pipefail
+          if [ -z "${VITE_SUPABASE_URL:-}" ]; then
+            echo "::error::VITE_SUPABASE_URL secret is not set in this repo. The installer would ship without a backend and no PC would see any other PC. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          if [ -z "${VITE_SUPABASE_ANON_KEY:-}" ]; then
+            echo "::error::VITE_SUPABASE_ANON_KEY secret is not set in this repo. The installer would ship without a backend and no PC would see any other PC. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          # Strip scheme + path, keep host only.
+          HOST=$(printf '%s' "$VITE_SUPABASE_URL" | sed -E 's#^https?://##; s#/.*$##')
+          echo "VITE_SUPABASE_URL host ok: $HOST"
+          echo "VITE_SUPABASE_ANON_KEY ok: (length ${#VITE_SUPABASE_ANON_KEY})"
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
       - name: Vite build (renderer)
         env:
           PORT: "5173"
           BASE_PATH: "./"
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_EXPECTED_SUPABASE_HOST: ${{ secrets.VITE_SUPABASE_URL }}
           # Public URL of the api-server. The license-registration flow
           # routes through this server so the provisioning secret stays
           # off the client. If unset, the renderer falls back to "/api"

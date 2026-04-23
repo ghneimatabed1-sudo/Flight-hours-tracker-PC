@@ -7,7 +7,7 @@ import {
   Trophy, CalendarRange, PalmtreeIcon, UserX, Calendar, ClipboardList,
   ShieldAlert, FileText, Megaphone, Map, Tags, FileDown, Settings,
   Sun, Moon, Wifi, WifiOff, LogOut, Menu, History, Upload, HelpCircle,
-  Archive, Bell,
+  Archive, Bell, Activity,
   // These five icons MUST be aliased (not imported under their original
   // names). Vite/Rollup's name-mangling step in production builds leaves
   // certain lucide-react identifiers — Inbox, Mail, Share2, UserPlus,
@@ -28,6 +28,7 @@ import {
 import { canUseMessages, canUseScheduleChain, canViewFinalSchedules } from "@/lib/cross-pc";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
 import { IncomingAlertWatcher } from "@/components/IncomingAlertWatcher";
+import { SessionCollisionBanner } from "@/components/SessionCollisionBanner";
 import { useSidebarBadges } from "@/lib/sidebar-badges";
 
 type Item = { p: string; k: TKey; I: typeof LayoutDashboard };
@@ -71,6 +72,7 @@ const ITEMS: readonly Item[] = [
   { p: "/monthly-report", k: "nav_monthly_report", I: FileBarChartIcon },
   { p: "/help", k: "nav_help", I: HelpCircle },
   { p: "/settings", k: "nav_settings", I: Settings },
+  { p: "/diagnostic", k: "nav_diagnostic", I: Activity },
 ] as const;
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -252,6 +254,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
+        <SessionCollisionBanner />
         <main className="flex-1 overflow-y-auto p-5">{children}</main>
       </div>
       {/* Cross-PC alert watcher: chimes + toasts + desktop notifications

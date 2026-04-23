@@ -238,3 +238,34 @@ Commit: 737368d · auto-build via `.github/workflows/dashboard-windows-installer
 - Schedule History on Flight Cmdr PC → shows a sheet they forwarded (in-flight) AND the same sheet after Wing approval (Final tag). Print button opens the row first, then the browser print dialog.
 
 Typecheck remains clean for everything in this diff (4 pre-existing errors in BackupCard / DateInput / FinalSchedules.tsx:483 / admin/LicenseKeys are unrelated). Forward error-toast wrapping for the standalone Send button is included; the auto-forward inside Approve was already wrapped in the outer try/catch.
+
+## Task #131 — Connection Diagnostic page + Supabase build-secret guard (2026-04-23)
+**New page** `/diagnostic` (mounted in SquadronOps, Commander, and Admin route trees + sidebar entries under Settings, plus a "I think my PC isn't connecting" link from Settings → header). Surfaces:
+- **Backend card**: shows the Supabase project HOST only (anon key never displayed). When `VITE_EXPECTED_SUPABASE_HOST` is baked into the build, mismatches render a red banner so an installer wired to the wrong project is obvious in seconds. The Windows-installer workflow now sets `VITE_EXPECTED_SUPABASE_HOST = VITE_SUPABASE_URL` so every official build self-checks at runtime.
+- **This-PC card**: canonical PC id, tier, scope, signed-in user, device suffix, fingerprint, last heartbeat OK timestamp + heartbeat error if any.
+- **Verify Connectivity** button: forces an immediate `registerLocalPC` upsert, reads the row back from `xpc_registry`, reports round-trip ms or the exact Supabase error message (covers "RLS silently dropped the write" — most common cause of an invisible PC).
+- **Live PCs table**: polled every 5 s (faster than the default 30 s elsewhere) with online/offline dots (online = heartbeat within `ACTIVE_WINDOW_MS`) and a "this PC" tag on the local row.
+- **Browser session check card** + **persistent yellow banner** (`SessionCollisionBanner`, mounted in both `Layout` and `HQLayout` chrome): uses a `BroadcastChannel("rjaf.session.collision")` ping/pong handshake to detect another tab in the SAME browser profile signed in as a DIFFERENT auth user. Two such tabs share Supabase's auth storage and silently overwrite each other — the #1 cause of "second PC won't show up" bug reports during testing. Banner directs operators to the Diagnostic page and explains the fix (separate browser profile / different browser).
+
+**GitHub Actions hard-fail.** `.github/workflows/dashboard-windows-installer.yml` now has a "Verify Supabase build secrets were injected" step that runs BEFORE `pnpm run build` and fails the pipeline if either `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY` is empty. The build log prints the URL HOST + the anon-key length (never the key itself) so the build is auditable without leaking the credential. Mirrors the existing `VITE_API_SERVER_URL` guard.
+
+### Test-rig setup for simulating multiple PCs on one machine
+The full multi-PC environment runs across many physical machines; for desk-side testing you can stand up several "PCs" on one laptop, but ONLY if you keep their auth storage isolated. Things that look like separate PCs but aren't:
+- Two tabs in the **same** Chrome profile → same `localStorage`, same Supabase auth session. The second sign-in silently kicks out the first. The yellow `SessionCollisionBanner` will fire.
+- Two windows in the same browser profile → same as above (windows ≠ profiles).
+- An incognito window + a normal window → these ARE isolated (incognito gets its own storage), counts as two PCs.
+
+Recommended rig (one laptop = up to ~5 simulated PCs):
+1. **PC A** — Chrome, default profile, sign in as the Squadron Ops account.
+2. **PC B** — Chrome → People → "Add" → new profile "Cmdr". Sign in as the Squadron Commander account.
+3. **PC C** — Edge (or Firefox), sign in as Wing Commander.
+4. **PC D** — A different browser again (Brave / Safari / second Edge profile), sign in as Base Commander.
+5. **PC E** — The packaged Electron app (always its own process, fully isolated regardless of browser profiles).
+
+Visit `/diagnostic` on each "PC" and confirm:
+- The Backend card shows the **same** host on every PC. Different hosts ⇒ those PCs are talking to different Supabase projects and will never see each other.
+- The PCs table on every PC lists every other PC (online dot if last heartbeat ≤ 90 s).
+- No yellow `SessionCollisionBanner` is showing — if it is, two of your "PCs" are actually two tabs in the same browser profile and the rig isn't isolated.
+- "Verify Connectivity" returns OK with a small ms number on each PC.
+
+If a PC fails to appear on the others, the Diagnostic page on THAT PC tells you exactly why (Supabase not configured / wrong host / RLS rejected the write / heartbeat error).

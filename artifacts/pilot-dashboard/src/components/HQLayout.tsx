@@ -11,6 +11,7 @@ import { FlightBindingGate, FlightBindingBadge } from "@/components/FlightBindin
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
 import emblem from "@assets/rjaf_emblem.png";
 import { RecoveryCodesLowBanner } from "@/components/RecoveryCodesLowBanner";
+import { SessionCollisionBanner } from "@/components/SessionCollisionBanner";
 
 interface NavItem {
   path: string;
@@ -52,6 +53,7 @@ export function HQLayout({ children }: { children: ReactNode }) {
         { path: "/admin/audit", labelKey: "auditLog", icon: <ListChecks className="h-4 w-4" /> },
         { path: "/admin/security", labelKey: "nav_security", icon: <Lock className="h-4 w-4" /> },
         { path: "/settings", labelKey: "nav_settings", icon: <SettingsIcon className="h-4 w-4" /> },
+        { path: "/diagnostic", labelKey: "nav_diagnostic" as Key, icon: <Activity className="h-4 w-4" /> },
       ]
     : [
         { path: "/dashboard", labelKey: "overview", icon: <BarChart3 className="h-4 w-4" /> },
@@ -117,6 +119,7 @@ export function HQLayout({ children }: { children: ReactNode }) {
         // app update" button. Without this entry the operator on a flight
         // commander PC has no way to pull a new installer build.
         { path: "/dashboard/settings", labelKey: "nav_settings" as Key, icon: <SettingsIcon className="h-4 w-4" /> },
+        { path: "/dashboard/diagnostic", labelKey: "nav_diagnostic" as Key, icon: <Activity className="h-4 w-4" /> },
       ];
 
   return (
@@ -228,6 +231,7 @@ export function HQLayout({ children }: { children: ReactNode }) {
           </ul>
         </nav>
         <main className="flex-1 min-w-0 p-4 sm:p-6 space-y-4 overflow-y-auto">
+          <SessionCollisionBanner />
           {isAdmin && <RecoveryCodesLowBanner />}
           <FlightBindingGate>
             {children}

@@ -739,7 +739,18 @@ export default function Settings() {
 
   return (
     <div>
-      <PageHead title={t("nav_settings")} />
+      <PageHead
+        title={t("nav_settings")}
+        actions={
+          <Link
+            href="/diagnostic"
+            data-testid="link-settings-diagnostic"
+            className="text-xs px-2.5 py-1.5 rounded-md bg-secondary border border-border hover:bg-secondary/70 inline-flex items-center gap-1.5"
+          >
+            {lang === "ar" ? "أعتقد أن جهازي لا يتصل" : "I think my PC isn't connecting"}
+          </Link>
+        }
+      />
       <div className="grid lg:grid-cols-2 gap-4">
         <Card>
           <form onSubmit={save} className="space-y-3">

@@ -71,6 +71,7 @@ import Users from "@/pages/Users";
 import AuditLog from "@/pages/AuditLog";
 import HistoricalImport from "@/pages/HistoricalImport";
 import SettingsPage from "@/pages/Settings";
+import DiagnosticPage from "@/pages/Diagnostic";
 import Help from "@/pages/Help";
 import Reminders from "@/pages/Reminders";
 import Archives from "@/pages/Archives";
@@ -142,6 +143,7 @@ function SquadronOpsRoutes() {
       <Route path="/monthly-report/defaults" component={MonthlyReportDefaults} />
       <Route path="/monthly-report" component={MonthlyReport} />
       <Route path="/settings" component={SettingsPage} />
+      <Route path="/diagnostic" component={DiagnosticPage} />
       <Route path="/help" component={Help} />
       {/* Catch-all: silently redirect to Dashboard instead of showing 404.
           This handles role transitions where the previous user (e.g.
@@ -166,6 +168,7 @@ function AdminRoutes() {
       <Route path="/admin/security" component={AdminSecurity} />
       <Route path="/admin/reminders" component={RemindersSchedule} />
       <Route path="/admin/reminders/log" component={ReminderLog} />
+      <Route path="/diagnostic" component={DiagnosticPage} />
       {/* Settings page (auto-updater toggle + "Check for app update" button)
           is shared with SquadronOpsRoutes. The HQ sidebar links to /settings
           so super_admin users need this route mounted here too — without it
@@ -220,6 +223,8 @@ function CommanderRoutes() {
           /dashboard/settings so links from either layout resolve. */}
       <Route path="/dashboard/settings" component={SettingsPage} />
       <Route path="/settings" component={SettingsPage} />
+      <Route path="/dashboard/diagnostic" component={DiagnosticPage} />
+      <Route path="/diagnostic" component={DiagnosticPage} />
       {/* See SquadronOpsRoutes catch-all: redirect home rather than 404. */}
       <Route><Redirect to="/dashboard" /></Route>
     </Switch>
