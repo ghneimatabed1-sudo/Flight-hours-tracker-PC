@@ -89,3 +89,9 @@ id = "EzMTV6FCkd2F4cB2gpbWx"
 uri = "file://artifacts/pilot-dashboard/release/HawkEye-1.1.71-win-x64.zip"
 type = "unspecified"
 title = "Hawk Eye v1.1.71 — Windows update bundle"
+
+[[outputs]]
+id = "aTe4a4fLJZ9j91NXvr2xF"
+uri = "file://.local/HAWK-EYE-FINAL-REPORT-2026-04-23.md"
+type = "text"
+title = "Hawk Eye — Consolidated Overnight Report (2026-04-23)"
