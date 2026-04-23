@@ -76,43 +76,50 @@ create policy wings_read on public.wings
 -- Reads the existing free-text base/wing strings from squadrons and
 -- xpc_registry, dedups them by trimmed name, and pins each squadron/PC
 -- to a row in the new tables. Idempotent — safe to re-run.
+drop function if exists public.xpc_backfill_org_chart();
+-- OUT param renamed from "name" to "entry_name" because the original
+-- collided with `bases.name` inside the inner INSERT (PL/pgSQL hoists
+-- OUT parameter names into every nested SQL scope, producing a 42702
+-- "column reference is ambiguous" error). Aliases on UPDATE FROM use
+-- `sq` / `xr` / `b` / `w` for the same reason — the loop variable `r`
+-- otherwise shadows a table aliased `r` in the same function body.
 create or replace function public.xpc_backfill_org_chart()
-returns table(action text, name text)
+returns table(action text, entry_name text)
 language plpgsql security definer set search_path = public
 as $$
 declare
   r record;
 begin
   -- 1. bases from squadrons.base
-  for r in (select distinct trim(base) as nm from public.squadrons where base is not null and trim(base) <> '') loop
+  for r in (select distinct trim(s.base) as nm from public.squadrons s where s.base is not null and trim(s.base) <> '') loop
     insert into public.bases (name) values (r.nm) on conflict (name) do nothing;
-    return query select 'base'::text, r.nm;
+    action := 'base'; entry_name := r.nm; return next;
   end loop;
-  -- 2. bases from xpc_registry.base (in case wing/base PCs declared bases unknown to squadrons)
-  for r in (select distinct trim(base) as nm from public.xpc_registry where base is not null and trim(base) <> '') loop
+  -- 2. bases from xpc_registry.base (wing/base PCs may declare bases unknown to squadrons)
+  for r in (select distinct trim(x.base) as nm from public.xpc_registry x where x.base is not null and trim(x.base) <> '') loop
     insert into public.bases (name) values (r.nm) on conflict (name) do nothing;
   end loop;
   -- 3. wings from xpc_registry.wing (squadrons table has no wing yet)
-  for r in (select distinct trim(wing) as nm, trim(base) as bnm from public.xpc_registry where wing is not null and trim(wing) <> '') loop
+  for r in (select distinct trim(x.wing) as nm, trim(x.base) as bnm from public.xpc_registry x where x.wing is not null and trim(x.wing) <> '') loop
     insert into public.wings (name, base_id)
-      values (r.nm, (select id from public.bases where name = r.bnm))
+      values (r.nm, (select b.id from public.bases b where b.name = r.bnm))
       on conflict (name) do update set base_id = excluded.base_id where public.wings.base_id is null;
-    return query select 'wing'::text, r.nm;
+    action := 'wing'; entry_name := r.nm; return next;
   end loop;
   -- 4. backfill squadrons.base_id from squadrons.base
-  update public.squadrons s
+  update public.squadrons sq
      set base_id = b.id
     from public.bases b
-   where b.name = trim(s.base) and s.base_id is null;
+   where b.name = trim(sq.base) and sq.base_id is null;
   -- 5. backfill xpc_registry.base_id / wing_id from text columns
-  update public.xpc_registry r
+  update public.xpc_registry xr
      set base_id = b.id
     from public.bases b
-   where b.name = trim(r.base) and r.base_id is null;
-  update public.xpc_registry r
+   where b.name = trim(xr.base) and xr.base_id is null;
+  update public.xpc_registry xr
      set wing_id = w.id
     from public.wings w
-   where w.name = trim(r.wing) and r.wing_id is null;
+   where w.name = trim(xr.wing) and xr.wing_id is null;
 end;
 $$;
 grant execute on function public.xpc_backfill_org_chart() to authenticated;
