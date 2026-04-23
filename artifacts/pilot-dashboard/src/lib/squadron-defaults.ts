@@ -99,6 +99,12 @@ export interface SquadronDefaults {
    *  row. NO.8 SQDN flies UH-60M / UH-60L / UH-60AIL plus AS332 as a
    *  crossover; an AH-1F squadron would replace the list entirely. */
   airframes: string[];
+  /** Short label shown on the Sortie Log header on Add Sortie
+   *  ("QREG · 2026-04-23 · UH-60M"). NO.8 SQDN uses "QREG" (Quick
+   *  Reaction Group) — other squadrons may use "SQNREG", "FLTLOG",
+   *  or any short tag of their choice. Editing this once per APK
+   *  install retitles the daily log header. */
+  sortieLogLabel: string;
 }
 
 export function factoryDefaults(): SquadronDefaults {
@@ -116,6 +122,7 @@ export function factoryDefaults(): SquadronDefaults {
     groupAcronym: "QRFG",
     primaryAirframe: "UH-60M",
     airframes: [...FACTORY_AIRFRAMES],
+    sortieLogLabel: "QREG",
   };
 }
 
@@ -141,6 +148,7 @@ export function loadSquadronDefaults(squadronNumber: string | undefined): Squadr
       groupAcronym: parsed.groupAcronym ?? f.groupAcronym,
       primaryAirframe: parsed.primaryAirframe ?? f.primaryAirframe,
       airframes: parsed.airframes?.length ? parsed.airframes : f.airframes,
+      sortieLogLabel: parsed.sortieLogLabel ?? f.sortieLogLabel,
     };
   } catch {
     return factoryDefaults();

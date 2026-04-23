@@ -730,7 +730,7 @@ export default function AddSortie() {
       {/* Sortie list */}
       <Card>
         <div className="flex items-center justify-between mb-2">
-          <div className="text-sm font-semibold">QREG · {form.date} · {form.acType}</div>
+          <div className="text-sm font-semibold">{sqdnDefaults.sortieLogLabel || "QREG"} · {form.date} · {form.acType}</div>
           <div className="text-[11px] text-muted-foreground">All sorties for this date — click <span className="text-primary">edit</span> to load back into the form.</div>
         </div>
         <div className="overflow-x-auto">

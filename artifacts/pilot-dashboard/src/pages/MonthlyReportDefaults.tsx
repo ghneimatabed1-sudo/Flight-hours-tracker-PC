@@ -150,6 +150,17 @@ export default function MonthlyReportDefaults() {
                 <b>QRFG</b> FUEL, <b>QRFG</b> AUTHORIZATION) and on the unit block.
               </div>
             </Field>
+            <Field label="Sortie Log header label">
+              <input value={d.sortieLogLabel} onChange={e => update("sortieLogLabel", e.target.value)}
+                className="w-full bg-background border border-border rounded px-2 py-1.5 text-sm"
+                data-testid="input-default-sortie-log-label"
+                placeholder="QREG" />
+              <div className="text-[11px] text-muted-foreground mt-1">
+                Short tag shown above the daily Sortie Log on Add Sortie
+                (e.g. <b>QREG</b> · 2026-04-23 · UH-60M). NO.8 SQDN uses
+                "QREG"; other squadrons may use "SQNREG", "FLTLOG", etc.
+              </div>
+            </Field>
             <Field label="Primary airframe">
               <input value={d.primaryAirframe} onChange={e => update("primaryAirframe", e.target.value)}
                 className="w-full bg-background border border-border rounded px-2 py-1.5 text-sm"
