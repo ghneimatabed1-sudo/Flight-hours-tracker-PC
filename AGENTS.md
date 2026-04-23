@@ -20,9 +20,10 @@
 
 ## Mandatory reading before any change
 
-1. **`replit.md`** — full project overview, brand assets, and the **Domain Logic Memory** protocol.
-2. **`.local/memory/README.md`** + the matching file in `.local/memory/` for the area you're touching. **These are the operator's settled rules — never re-decide them, never guess from code alone.**
-3. **`.local/HAWK-EYE-OVERNIGHT-MASTER-REPORT.md`** — what was built, every version v1.1.75→present, what the simulation harness covers.
+1. **`DOMAIN.md`** — what every page, role, report, and number actually means in operational terms (Squadron Cmdr vs Wing Cmdr vs Base Cmdr, Monthly Report Forms 1-4, sortie definition, hour calculation, schedule chain, guest pilots, currency rules). **The functional encyclopedia.**
+2. **`replit.md`** — full project overview, brand assets, and the **Domain Logic Memory** protocol.
+3. **`.local/memory/README.md`** + the matching file in `.local/memory/` for the area you're touching. **These are the operator's settled rules — never re-decide them, never guess from code alone.**
+4. **`.local/HAWK-EYE-OVERNIGHT-MASTER-REPORT.md`** — what was built, every version v1.1.75→present, what the simulation harness covers.
 
 ## Absolute do-nots (each one has bitten us; don't relearn)
 
