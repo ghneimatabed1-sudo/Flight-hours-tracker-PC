@@ -890,6 +890,72 @@ export default function ScheduleChain() {
                             <X className="h-3 w-3" /> Reject
                           </button>
                         )}
+                        {/* v1.1.106 — explicit "Send to [next tier]"
+                            button, distinct from Approve. The chain is
+                            now two-click by design: (1) Approve stamps
+                            your decision, (2) Send forwards up-chain.
+                            The combined "Approve & send" green button
+                            still works as a one-click shortcut, but
+                            operators who want to review, edit, and
+                            then forward separately now have a clear
+                            Send action. Button shows up for:
+                              • Flight Cmdr on a flight-tier share → Sqn Cmdr
+                              • Sqn Cmdr on a squadron-tier share → Wing Cmdr
+                              • Wing Cmdr on a wing-tier share     → Base Cmdr
+                            When no target PC is registered for the
+                            next tier, the button hides (the chain
+                            cannot advance yet — the amber "please
+                            provision" block above explains why). */}
+                        {(() => {
+                          let target: { id: string; squadronName: string; deviceName?: string } | null = null;
+                          let nextTierLabel = "";
+                          let nextWireTier: "squadron" | "wing" | "base" | null = null;
+                          if (myTier === "flight" && share.currentTier === "flight" && sqnCmdrPCs.length > 0) {
+                            const id = forwardTo || sqnCmdrPCs[0].id;
+                            target = sqnCmdrPCs.find(p => p.id === id) ?? sqnCmdrPCs[0];
+                            nextTierLabel = "Sqn Cmdr";
+                            nextWireTier = "squadron";
+                          } else if (myTier === "squadron" && isSqnCmdrPc && share.currentTier === "squadron" && wingPCs.length > 0) {
+                            const id = forwardTo || wingPCs[0].id;
+                            target = wingPCs.find(p => p.id === id) ?? wingPCs[0];
+                            nextTierLabel = "Wing Cmdr";
+                            nextWireTier = "wing";
+                          } else if (myTier === "wing" && share.currentTier === "wing" && basePCs.length > 0) {
+                            const id = forwardTo || basePCs[0].id;
+                            target = basePCs.find(p => p.id === id) ?? basePCs[0];
+                            nextTierLabel = "Base Cmdr";
+                            nextWireTier = "base";
+                          }
+                          if (!target || !nextWireTier) return null;
+                          const t = target;
+                          const nt = nextWireTier;
+                          return (
+                            <button
+                              onClick={async () => {
+                                await decide.mutateAsync({
+                                  id: share.id, action: "forward", by: user?.username ?? "cmd", tier: wireTier,
+                                  forwardPcId: t.id, forwardPcName: t.squadronName,
+                                });
+                                // Stamp an approval event at the new
+                                // tier so the receiver sees "approved
+                                // by [upstream]" in the audit trail
+                                // and the final-schedules archive can
+                                // distinguish Wing-signed finals.
+                                await decide.mutateAsync({
+                                  id: share.id, action: "approve", by: user?.username ?? "cmd", tier: nt,
+                                  note: decisionNote || undefined,
+                                });
+                                toast({ title: `Sent to ${t.squadronName || nextTierLabel}` });
+                                setDecisionNote("");
+                              }}
+                              className="px-3 py-1.5 rounded-md bg-indigo-500/20 border border-indigo-400/50 text-indigo-100 text-xs font-semibold inline-flex items-center gap-1"
+                              data-testid={`send-next-${share.id}`}
+                              title={`Forward this schedule to ${t.deviceName || t.squadronName || nextTierLabel}`}
+                            >
+                              <Send className="h-3 w-3" /> Send to {nextTierLabel}
+                            </button>
+                          );
+                        })()}
                         {/* v1.1.60 hard delete — wipes the share from EVERY
                             PC. Available to every role on every inbox card
                             (RLS migration 0029 grants delete to any
