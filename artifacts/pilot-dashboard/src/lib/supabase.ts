@@ -239,12 +239,26 @@ export async function recordAuditEvent(event: {
   detail?: Record<string, unknown>;
 }): Promise<void> {
   if (!supabase) return;
-  await supabase.from("audit_log").insert({
-    type: event.type,
-    actor: event.actor ?? null,
-    detail: event.detail ?? {},
-    occurred_at: new Date().toISOString(),
-  });
+  // v1.1.95 — Audit writes MUST NEVER throw. Migration 0036 already
+  // relaxes the audit_log INSERT policy to bare auth, but if anything
+  // ever fails again (network blip, future policy regression, retention
+  // race), an audit failure must not make the user's real action look
+  // like it failed. Log to console for forensics and move on.
+  try {
+    const { error } = await supabase.from("audit_log").insert({
+      type: event.type,
+      actor: event.actor ?? null,
+      detail: event.detail ?? {},
+      occurred_at: new Date().toISOString(),
+    });
+    if (error) {
+      console.warn("[audit] insert failed (non-fatal)", { type: event.type, error });
+      return;
+    }
+  } catch (e) {
+    console.warn("[audit] insert threw (non-fatal)", { type: event.type, error: e });
+    return;
+  }
   // Opportunistic retention eviction — runs fire-and-forget so it NEVER
   // blocks the caller. The cleanup adds 1-2 sequential network roundtrips
   // (count + delete) which used to compound on hot paths like login,
