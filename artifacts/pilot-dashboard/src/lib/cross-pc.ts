@@ -2236,6 +2236,64 @@ export function canUseScheduleChain(role: string | undefined, scope: string | un
   return false;
 }
 
+/**
+ * Wipe every registered PC from the central registry + the local mirror.
+ *
+ * Used when redeploying the same APK install to a different squadron
+ * (e.g. NO.8 → NO.5): the prior squadron's PCs survive in the
+ * central xpc_registry table and in this PC's localStorage mirror,
+ * leaking into every picker (Schedule Chain, Messages, License Keys
+ * commander targets, ...) for up to 24h until the auto-prune runs.
+ *
+ * Behaviour
+ * ─────────
+ *  • Wipes the local `rjaf.xpc.registry` mirror outright.
+ *  • DELETEs every row from the central `xpc_registry` table, except
+ *    the row belonging to THIS PC (so the operator clicking the button
+ *    is not silently signed out of the chain). Pass
+ *    `{ includeSelf: true }` to wipe self too.
+ *  • DELETEs the matching `xpc_user_pcs` claim rows so a re-register
+ *    on the same auth.uid does not collide with an orphan claim.
+ *  • Best-effort: a failure on either delete is reported but does NOT
+ *    throw, so the local mirror is always cleared.
+ *
+ * Returns a summary `{ removedLocal, removedCentral, errors }`.
+ */
+export async function wipeAllRegisteredPCs(
+  opts: { includeSelf?: boolean } = {},
+): Promise<{ removedLocal: number; removedCentral: number; errors: string[] }> {
+  const errors: string[] = [];
+  const myPcId = localPcId();
+  const localBefore = readRegistry();
+  const removedLocal = opts.includeSelf
+    ? localBefore.length
+    : localBefore.filter(r => r.id !== myPcId).length;
+  // Local mirror — keep self only if includeSelf is false.
+  writeRegistry(opts.includeSelf ? [] : localBefore.filter(r => r.id === myPcId));
+
+  let removedCentral = 0;
+  if (isLive() && supabase) {
+    try {
+      let q = supabase.from("xpc_registry").delete().select("id");
+      if (!opts.includeSelf && myPcId) q = q.neq("id", myPcId);
+      const { data, error } = await q;
+      if (error) errors.push(`xpc_registry: ${error.message}`);
+      else removedCentral = (data as Array<{ id: string }> | null)?.length ?? 0;
+    } catch (e) {
+      errors.push(`xpc_registry threw: ${(e as Error)?.message ?? String(e)}`);
+    }
+    try {
+      let q = supabase.from("xpc_user_pcs").delete().select("pc_id");
+      if (!opts.includeSelf && myPcId) q = q.neq("pc_id", myPcId);
+      const { error } = await q;
+      if (error) errors.push(`xpc_user_pcs: ${error.message}`);
+    } catch (e) {
+      errors.push(`xpc_user_pcs threw: ${(e as Error)?.message ?? String(e)}`);
+    }
+  }
+  return { removedLocal, removedCentral, errors };
+}
+
 // v1.1.64 — read-only final-schedule viewers. Base Cmdr and HQ Cmdr
 // PCs see every Wing-approved flight schedule from every registered
 // squadron, sorted by squadron with the latest update on top. They

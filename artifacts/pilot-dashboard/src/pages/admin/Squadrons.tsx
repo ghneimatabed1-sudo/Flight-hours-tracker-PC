@@ -27,9 +27,12 @@ import {
   useRegisteredPCs,
   getLatestSquadronFlightGroup,
   publishSquadronFlightGroup,
+  wipeAllRegisteredPCs,
 } from "@/lib/cross-pc";
+import { useAuth } from "@/lib/auth";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Squadron } from "@/lib/types";
-import { Plane, Plus, Pencil, Trash2 } from "lucide-react";
+import { Plane, Plus, Pencil, Trash2, Eraser } from "lucide-react";
 
 type DraftSquadron = {
   name: string;
@@ -48,6 +51,12 @@ const EMPTY_DRAFT: DraftSquadron = {
 export default function Squadrons() {
   const { t, lang } = useI18n();
   const list = useSquadrons();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const isSuperAdmin = user?.role === "super_admin";
+
+  const [wipeOpen, setWipeOpen] = useState(false);
+  const [wiping, setWiping] = useState(false);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -219,10 +228,25 @@ export default function Squadrons() {
         <h2 className="text-xl font-bold flex items-center gap-2">
           <Plane className="h-5 w-5" />{t("squadrons")}
         </h2>
-        <Button onClick={openCreate} data-testid="button-add-squadron">
-          <Plus className="h-4 w-4 me-2" />
-          {lang === "ar" ? "إضافة سرب" : "Add Squadron"}
-        </Button>
+        <div className="flex items-center gap-2">
+          {isSuperAdmin ? (
+            <Button
+              variant="outline"
+              onClick={() => setWipeOpen(true)}
+              data-testid="button-wipe-registered-pcs"
+              title={lang === "ar"
+                ? "حذف جميع أجهزة الكمبيوتر المسجلة (يحتفظ بهذا الجهاز)"
+                : "Wipe every registered PC from the central registry (keeps this PC)"}
+            >
+              <Eraser className="h-4 w-4 me-2" />
+              {lang === "ar" ? "مسح الأجهزة المسجلة" : "Clear registered PCs"}
+            </Button>
+          ) : null}
+          <Button onClick={openCreate} data-testid="button-add-squadron">
+            <Plus className="h-4 w-4 me-2" />
+            {lang === "ar" ? "إضافة سرب" : "Add Squadron"}
+          </Button>
+        </div>
       </div>
 
       {list.length === 0 ? (
@@ -555,6 +579,71 @@ export default function Squadrons() {
             </Button>
             <Button onClick={save} data-testid="button-save-squadron">
               {lang === "ar" ? "حفظ" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={wipeOpen} onOpenChange={(o) => !wiping && setWipeOpen(o)}>
+        <DialogContent data-testid="dialog-wipe-registered-pcs">
+          <DialogHeader>
+            <DialogTitle>
+              {lang === "ar" ? "مسح جميع الأجهزة المسجلة" : "Clear all registered PCs"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p>
+              {lang === "ar"
+                ? "سيؤدي هذا إلى حذف كل جهاز كمبيوتر مسجل من السجل المركزي ومن النسخة المحلية على هذا الجهاز. سيتم الاحتفاظ بهذا الجهاز فقط حتى لا يتم تسجيل خروجك من سلسلة التنسيق."
+                : "This deletes every registered PC from the central registry and from this PC's local mirror. Only THIS PC is kept, so you do not sign yourself out of the chain."}
+            </p>
+            <p className="text-muted-foreground">
+              {lang === "ar"
+                ? "كل جهاز كمبيوتر آخر سيعيد التسجيل تلقائياً عند نبضته التالية (خلال ٣٠ ثانية) إذا كان لا يزال متصلاً. استخدم هذا الزر عند نقل التطبيق إلى سرب آخر للتخلص من أجهزة السرب السابق."
+                : "Every other PC will automatically re-register on its next heartbeat (within 30s) if it is still online. Use this when moving the install to another squadron, to flush the previous squadron's PCs."}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setWipeOpen(false)}
+              disabled={wiping}
+            >
+              {lang === "ar" ? "إلغاء" : "Cancel"}
+            </Button>
+            <Button
+              variant="destructive"
+              data-testid="button-confirm-wipe-registered-pcs"
+              disabled={wiping}
+              onClick={async () => {
+                setWiping(true);
+                try {
+                  const res = await wipeAllRegisteredPCs();
+                  await queryClient.invalidateQueries({ queryKey: ["xpc", "registry"] });
+                  if (res.errors.length > 0) {
+                    window.alert(
+                      (lang === "ar"
+                        ? "تم المسح محلياً، لكن أبلغ الخادم المركزي عن أخطاء:\n\n"
+                        : "Wipe done locally, but the central server reported errors:\n\n") +
+                      res.errors.map(e => "  • " + e).join("\n"),
+                    );
+                  } else {
+                    window.alert(
+                      lang === "ar"
+                        ? `تم. تم حذف ${res.removedCentral} جهاز من السجل المركزي و ${res.removedLocal} من النسخة المحلية.`
+                        : `Done. Removed ${res.removedCentral} PC(s) from the central registry and ${res.removedLocal} from this PC's mirror.`,
+                    );
+                  }
+                  setWipeOpen(false);
+                } finally {
+                  setWiping(false);
+                }
+              }}
+            >
+              <Eraser className="h-4 w-4 me-2" />
+              {wiping
+                ? (lang === "ar" ? "جارٍ المسح..." : "Clearing...")
+                : (lang === "ar" ? "تأكيد المسح" : "Confirm wipe")}
             </Button>
           </DialogFooter>
         </DialogContent>
