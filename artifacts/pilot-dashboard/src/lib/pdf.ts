@@ -1104,7 +1104,260 @@ export async function exportCycle(
   save(doc, `cycle-${half}-${lang}-${fileStamp()}.pdf`);
 }
 
-// ─── Individual Pilot Record (full dossier) ───────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// Periodic Summary  (canonical 10-column RJAF paper-logbook layout)
+// ─────────────────────────────────────────────────────────────────────────
+// Replicates the periodic summary page that every pilot signs in their paper
+// logbook every six months (H1 = Jan–Jun, H2 = Jul–Dec) plus a third Annual
+// option that aggregates the full calendar year.
+//
+// Canonical column layout (left → right):
+//   Date | A/C Type | Day-1P | Day-2P | Day-Dual
+//                   | Night-1P | Night-2P | Night-Dual
+//                   | Total (cols 1-6) | Captain | Sim | Instr-Act
+//
+// Per-pilot attribution rule:
+//   The 9-bucket fields on a Sortie record are SQUADRON-level totals
+//   (both crewmembers add into them via deriveSortieBuckets). For a per-
+//   pilot logbook view we credit the sortie's flight time `t` ONCE to the
+//   bucket dictated by THIS pilot's seat status (`pilotSeatStatus` if they
+//   were the listed pilot, otherwise `coPilotSeatStatus`). Sim and
+//   instrument-actual hours follow standard logbook convention — both
+//   crewmembers credit the full sortie value (squadron sim time is shared).
+// ─────────────────────────────────────────────────────────────────────────
+export type PeriodicScope = "H1" | "H2" | "FULL";
+
+export async function exportPeriodicSummary(
+  sqdn: SquadronInfo,
+  pilot: Pilot,
+  sorties: Sortie[],
+  year: number,
+  scope: PeriodicScope,
+  lang: PdfLang = "en",
+) {
+  const emblem = await loadEmblem();
+  const doc = await setupDoc(lang);
+
+  const scopeLabel =
+    scope === "H1" ? (lang === "ar" ? "النصف الأول" : "First Half")
+    : scope === "H2" ? (lang === "ar" ? "النصف الثاني" : "Second Half")
+    : (lang === "ar" ? "السنوي" : "Annual");
+
+  const startMonth = scope === "H2" ? 6 : 0;
+  const endMonth = scope === "H1" ? 5 : 11;
+  const startDate = new Date(year, startMonth, 1);
+  const endDate = new Date(year, endMonth + 1, 0);
+
+  const fmtDateShort = (d: Date) => {
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+  };
+  const periodLabel = `${fmtDateShort(startDate)} → ${fmtDateShort(endDate)}`;
+
+  drawHeader(
+    doc, sqdn,
+    `${lang === "ar" ? "ملخص دوري" : "Periodic Summary"} · ${scopeLabel} ${year} · ${pilotName(pilot, lang)}`,
+    emblem, lang,
+  );
+
+  // Identity strip
+  autoTable(doc, {
+    startY: 42, theme: "grid",
+    body: [[
+      shape(tr("field_name", lang)), pilotName(pilot, lang),
+      shape(tr("field_id", lang)), pilot.id,
+      shape(tr("field_unit", lang)), shape(pilot.unit),
+    ]],
+    styles: { fontSize: 9, cellPadding: 2, ...tableStyles(lang) },
+    margin: { left: 8, right: 8 },
+  });
+
+  type Bucket = {
+    day1: number; day2: number; dayDual: number;
+    night1: number; night2: number; nightDual: number;
+    captain: number; sim: number; instrument: number;
+    sorties: number;
+  };
+  const blank = (): Bucket => ({
+    day1: 0, day2: 0, dayDual: 0,
+    night1: 0, night2: 0, nightDual: 0,
+    captain: 0, sim: 0, instrument: 0, sorties: 0,
+  });
+
+  const byAc = new Map<string, Bucket>();
+  const grand = blank();
+
+  for (const s of sorties) {
+    const isPilot = s.pilotId === pilot.id;
+    const isCo = s.coPilotId === pilot.id;
+    if (!isPilot && !isCo) continue;
+
+    // Local Y/M/D parse — same approach as squadron-data to avoid TZ skew.
+    const parts = (s.date || "").split("-");
+    if (parts.length !== 3) continue;
+    const y = Number(parts[0]);
+    const m = Number(parts[1]) - 1;
+    const d = Number(parts[2]);
+    if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) continue;
+    if (y !== year) continue;
+    if (m < startMonth || m > endMonth) continue;
+
+    // Resolve this pilot's seat. Prefer the canonical pilotSeatStatus /
+    // coPilotSeatStatus fields; fall back to the legacy pilotIsCaptain
+    // boolean (true → "1st", false → "2nd") for pre-rebuild records.
+    //
+    // Co-pilot fallback subtlety: legacy rows often carry only
+    // `pilotIsCaptain` and leave `coPilotIsCaptain` undefined. Treating
+    // an undefined boolean as "false" silently mis-attributes the co-pilot
+    // to the 2nd seat even when the listed pilot was ALSO 2nd. So when the
+    // co-pilot's own legacy flag is missing, we infer it as the opposite
+    // of the listed pilot's flag (standard 2-seat assumption: exactly one
+    // of the two crewmembers is captain).
+    let seat: "1st" | "2nd" | "Dual" | undefined =
+      isPilot ? s.pilotSeatStatus : s.coPilotSeatStatus;
+    if (!seat) {
+      let legacy: boolean;
+      if (isPilot) {
+        legacy = !!s.pilotIsCaptain;
+      } else if (s.coPilotIsCaptain != null) {
+        legacy = !!s.coPilotIsCaptain;
+      } else {
+        // Co-pilot flag missing: invert the pilot flag so seats stay paired.
+        legacy = !s.pilotIsCaptain;
+      }
+      seat = legacy ? "1st" : "2nd";
+    }
+
+    const t = Number(s.actual ?? s.time ?? 0);
+    const sim = Number(s.sim ?? 0);
+    const instr = Number(s.ifAct ?? 0);
+
+    // Determine condition. Prefer explicit s.condition; else infer from
+    // which 9-bucket family carries hours (NVG sorties fold into Night
+    // for the paper-logbook 10-col layout — the canonical RJAF book has
+    // no NVG column on the periodic summary page).
+    let condition: "Day" | "Night" | "NVG" = s.condition ?? "Day";
+    if (!s.condition) {
+      const nightTotal = (s.night1 ?? 0) + (s.night2 ?? 0) + (s.nightDual ?? 0);
+      const nvgTotal = (s.nvg1 ?? 0) + (s.nvg2 ?? 0) + (s.nvgDual ?? 0) + (s.nvg ?? 0);
+      if (nvgTotal > 0) condition = "NVG";
+      else if (nightTotal > 0) condition = "Night";
+    }
+
+    const key = s.acType || "—";
+    if (!byAc.has(key)) byAc.set(key, blank());
+    const b = byAc.get(key)!;
+
+    if (t > 0) {
+      if (condition === "Day") {
+        if (seat === "1st") { b.day1 += t; grand.day1 += t; }
+        else if (seat === "Dual") { b.dayDual += t; grand.dayDual += t; }
+        else { b.day2 += t; grand.day2 += t; }
+      } else {
+        // Night and NVG both bucket into the Night columns on the
+        // periodic summary page (paper logbook has no NVG column).
+        if (seat === "1st") { b.night1 += t; grand.night1 += t; }
+        else if (seat === "Dual") { b.nightDual += t; grand.nightDual += t; }
+        else { b.night2 += t; grand.night2 += t; }
+      }
+      if (seat === "1st") { b.captain += t; grand.captain += t; }
+    }
+
+    b.sim += sim; grand.sim += sim;
+    b.instrument += instr; grand.instrument += instr;
+    b.sorties += 1; grand.sorties += 1;
+  }
+
+  // Period banner
+  const yBanner = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
+  doc.setFont(baseFont(lang), "normal"); doc.setFontSize(10); doc.setTextColor(20, 24, 32);
+  doc.text(shape(`${lang === "ar" ? "الفترة" : "Period"}: ${periodLabel}    ·    ${lang === "ar" ? "الطلعات" : "Sorties"}: ${grand.sorties}`), 8, yBanner);
+
+  // 10-column canonical table (with grouped Day/Night sub-headers)
+  const dualLbl = lang === "ar" ? "ثنائي" : "Dual";
+  const acKeys = [...byAc.keys()].sort();
+  const rows: (string | number)[][] = acKeys.length === 0
+    ? [[periodLabel, "—", "0.0", "0.0", "0.0", "0.0", "0.0", "0.0", "0.0", "0.0", "0.0", "0.0"]]
+    : acKeys.map((ac) => {
+        const b = byAc.get(ac)!;
+        const total6 = b.day1 + b.day2 + b.dayDual + b.night1 + b.night2 + b.nightDual;
+        return [
+          periodLabel, ac,
+          b.day1.toFixed(1), b.day2.toFixed(1), b.dayDual.toFixed(1),
+          b.night1.toFixed(1), b.night2.toFixed(1), b.nightDual.toFixed(1),
+          total6.toFixed(1),
+          b.captain.toFixed(1), b.sim.toFixed(1), b.instrument.toFixed(1),
+        ];
+      });
+
+  const grandTotal6 = grand.day1 + grand.day2 + grand.dayDual + grand.night1 + grand.night2 + grand.nightDual;
+
+  autoTable(doc, {
+    startY: yBanner + 2,
+    head: [
+      [
+        { content: shape(tr("date_label", lang)), rowSpan: 2 },
+        { content: lang === "ar" ? "نوع الطائرة" : "A/C Type", rowSpan: 2 },
+        { content: shape(tr("col_day", lang)), colSpan: 3 },
+        { content: shape(tr("col_night", lang)), colSpan: 3 },
+        { content: lang === "ar" ? "الإجمالي (1-6)" : "Total (1-6)", rowSpan: 2 },
+        { content: shape(tr("col_captain", lang)), rowSpan: 2 },
+        { content: shape(tr("col_sim", lang)), rowSpan: 2 },
+        { content: lang === "ar" ? "أجهزة فعلي" : "Instr Act", rowSpan: 2 },
+      ],
+      ["1P", "2P", dualLbl, "1P", "2P", dualLbl],
+    ],
+    body: rows,
+    foot: [[
+      { content: lang === "ar" ? "الإجمالي" : "TOTAL", colSpan: 2, styles: { halign: "right", fontStyle: "bold" } },
+      grand.day1.toFixed(1), grand.day2.toFixed(1), grand.dayDual.toFixed(1),
+      grand.night1.toFixed(1), grand.night2.toFixed(1), grand.nightDual.toFixed(1),
+      { content: grandTotal6.toFixed(1), styles: { fontStyle: "bold" } },
+      grand.captain.toFixed(1), grand.sim.toFixed(1), grand.instrument.toFixed(1),
+    ]],
+    styles: { fontSize: 8, cellPadding: 1.6, halign: "center", ...tableStyles(lang) },
+    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], halign: "center", ...tableStyles(lang) },
+    footStyles: { fillColor: [240, 240, 230], textColor: [20, 24, 32], ...tableStyles(lang), fontStyle: "bold" },
+    margin: { left: 8, right: 8 },
+  });
+
+  // Certification + 3 signature lines + stamp box
+  let yC = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 12;
+  doc.setFontSize(10);
+  doc.text(
+    shape(lang === "ar"
+      ? `أصدّق صحة المعلومات للفترة من ${fmtDateShort(startDate)} إلى ${fmtDateShort(endDate)}.`
+      : `Certified correct for the period from ${fmtDateShort(startDate)} to ${fmtDateShort(endDate)}.`),
+    8, yC,
+  );
+  yC += 18;
+
+  const sigW = 55;
+  const blocks = lang === "ar"
+    ? ["الطيار", "قائد السرب", "قائد الجناح"]
+    : ["Self", "Sqdn Cdr", "Flight Cdr"];
+  doc.setFontSize(9);
+  blocks.forEach((label, i) => {
+    const x = 10 + i * (sigW + 8);
+    doc.line(x, yC, x + sigW, yC);
+    doc.text(shape(label), x, yC + 5);
+  });
+
+  // Stamp box to the right of the signatures (or below if it overflows).
+  const stampX = 10 + 3 * (sigW + 8) + 8;
+  const stampW = 32, stampH = 22;
+  if (stampX + stampW < 200) {
+    doc.rect(stampX, yC - 16, stampW, stampH);
+    doc.text(shape(lang === "ar" ? "ختم" : "Stamp"), stampX + 9, yC - 4);
+  } else {
+    doc.rect(10, yC + 12, stampW, stampH);
+    doc.text(shape(lang === "ar" ? "ختم" : "Stamp"), 19, yC + 24);
+  }
+
+  footer(doc, lang);
+  save(doc, `periodic-${scope.toLowerCase()}-${year}-${pilot.id}-${lang}-${fileStamp()}.pdf`);
+}
+
 export async function exportIndividualPilotRecord(
   sqdn: SquadronInfo, pilot: Pilot, sorties: Sortie[], lang: PdfLang = "en",
 ) {
@@ -1247,4 +1500,5 @@ export const PDF_EXPORTS = {
   leaves: exportLeaves,
   cycle: exportCycle,
   individualPilotRecord: exportIndividualPilotRecord,
+  periodicSummary: exportPeriodicSummary,
 } as const;

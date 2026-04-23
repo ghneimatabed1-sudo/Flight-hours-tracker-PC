@@ -189,3 +189,19 @@ PC Roster column shows a coloured dot per pilot with a "Last sync: N min ago" to
 **Deployed:** Migration 0018 via Supabase Management API (HTTP 201). Both apps compile clean (`tsc --noEmit` passes).
 
 **Still pending (next build):** Commander accounts → Supabase table + RLS + login RPCs (currently localStorage-only in `src/lib/commander-store.ts`); remove `DEFAULT_ADMIN_PASSWORD_HASH` + `MASTER_RECOVERY_HASH` from production PC build; trigger PC v1.0.50 + mobile v1.0.5 Windows/EAS builds.
+
+# v1.1.81 (PC) / v1.0.11 (mobile) — Periodic Summary (paper-logbook H1/H2/Annual)
+
+**Goal.** Replicate the canonical RJAF paper-logbook periodic summary page that every pilot signs at the squadron every six months — three scopes (First Half = Jan–Jun, Second Half = Jul–Dec, Annual = full calendar year) plus a year picker covering the past 4 years. PC dashboard exports the page as PDF; mobile shows the same numbers inline on the Home tab.
+
+**PC dashboard (`src/lib/pdf.ts`).** New `exportPeriodicSummary(sqdn, pilot, sorties, year, scope, lang)` produces the canonical 10-column layout: `Date | A/C Type | Day-1P | Day-2P | Day-Dual | Night-1P | Night-2P | Night-Dual | Total(1-6) | Captain | Sim | Instr-Act`, grouped by aircraft type with a TOTAL footer row, certification banner ("Certified correct from <DD MMM YYYY> to <DD MMM YYYY>"), three signature blocks (Self / Sqdn Cdr / Flight Cdr), and a stamp box. Per-pilot attribution rule: `t = sortie.actual` is credited ONCE to the bucket dictated by THIS pilot's `pilotSeatStatus` (or `coPilotSeatStatus`) — never both. Sim and `ifAct` follow standard logbook convention (both crewmembers credit the full sortie value). NVG sorties fold into the Night columns per paper-book convention (book has no NVG column).
+
+**Legacy fallback subtlety:** when seat-status fields are missing on legacy rows, we derive the seat from `pilotIsCaptain`. If `coPilotIsCaptain` is undefined we INVERT the pilot's flag (standard 2-seat assumption — exactly one crewmember is captain) so the co-pilot doesn't silently default to "2nd" when both pilots flew as 2nd seat.
+
+**PC UI (`src/pages/PdfExports.tsx`).** Added a `Year` dropdown in the controls strip (current year + past 3) and 3 new `perPilot` entries: `periodicH1`, `periodicH2`, `periodicAnnual`. Title labels include the selected year so the operator sees `Periodic Summary · H1 · 2026` before clicking. Wired into the run handler with a `PeriodicScope` union (`H1` | `H2` | `FULL`). Filename pattern: `periodic-{scope}-{year}-{pilotId}-{lang}-{stamp}.pdf`.
+
+**Mobile (`lib/calculations.ts` + Home tab).** New `computePeriodicSummary(profile, sorties, year, scope)` returns `{day, night, nvg, sim, captain, secondPilot, instrument, total, grandTotal, sorties, startISO, endISO}`. Local Y/M/D parse for the date filter (TZ-safe, matches `squadron-data` convention). Captain attribution = `Day + Night` flying time only (matches the dashboard contract — sim is excluded). Mobile sortie shape doesn't carry per-seat 1P/2P/Dual splits or `ifAct`, so the on-screen card surfaces the simpler 6-line breakdown (Day / Night / NVG / Sim / Captain / Second Pilot) plus the Total(1-6) and Grand Total rows.
+
+**Mobile UI (`app/(tabs)/index.tsx`).** New "Periodic Summary" card on the Home tab between the year-breakdown and sync cards. Year picker (4 chips for past 4 years) + scope picker (H1 / H2 / Annual chips) drive the `computePeriodicSummary` memo. Card reuses the existing `styles.card` visual language (gold accent on active chips, tabular-nums for hours, empty-state copy when the period has no sorties). EN+AR i18n keys added (`home_periodic_*`).
+
+**Verification:** `tsc --noEmit` clean on both projects. Existing dashboard PDF tests unaffected. Mobile workflow shows the card at runtime; APK/IPA picked up automatically by `.github/workflows/mobile-unsigned-builds.yml` on next mobile-path push.

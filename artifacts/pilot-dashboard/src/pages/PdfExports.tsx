@@ -30,7 +30,9 @@ import {
   exportLeaves,
   exportCycle,
   exportIndividualPilotRecord,
+  exportPeriodicSummary,
   type PdfLang,
+  type PeriodicScope,
   type NavRouteLine,
   type RiskRow,
 } from "@/lib/pdf";
@@ -94,6 +96,12 @@ export default function PdfExports() {
   const [to, setTo] = useState<string>(isoToday());
 
   // Per-pilot picker (default: first pilot in roster).
+  // Year picker for the Periodic Summary (paper-logbook 6-month / annual
+  // page). Defaults to the current calendar year. Operator can pick any of
+  // the past three years from the dropdown — covers the typical retro-fill
+  // window for missed signatures.
+  const [pdfYear, setPdfYear] = useState<number>(new Date().getFullYear());
+
   const [pilotId, setPilotId] = useState<string>("");
   useEffect(() => {
     if (!pilotId && pilots.length > 0) setPilotId(pilots[0].id);
@@ -147,6 +155,12 @@ export default function PdfExports() {
 
     { key: "pilotLogbook", group: "perPilot", title: lang === "ar" ? "سجل طيران الطيار" : "Pilot Logbook", desc: lang === "ar" ? "طلعات طيار محدد ضمن نطاق تاريخ." : "Selected pilot, date-range filtered.", needsRange: true, needsPilot: true },
     { key: "pilotRecord", group: "perPilot", title: lang === "ar" ? "السجل الكامل للطيار" : "Individual Pilot Record", desc: lang === "ar" ? "ملف كامل: الهوية، الساعات، المؤهلات، آخر 30 طلعة." : "Full dossier — identity, hours, currencies, last 30 sorties.", needsPilot: true },
+    // Periodic Summary — canonical 10-column RJAF paper-logbook page.
+    // Three scopes: First Half (Jan-Jun), Second Half (Jul-Dec), Annual.
+    // Year picker is shown in the controls strip above.
+    { key: "periodicH1", group: "perPilot", title: lang === "ar" ? `ملخص دوري · النصف الأول · ${pdfYear}` : `Periodic Summary · H1 · ${pdfYear}`, desc: lang === "ar" ? "صفحة كتاب السجل الورقي للنصف الأول (يناير-يونيو)." : "Paper-logbook periodic summary page — Jan–Jun.", needsPilot: true },
+    { key: "periodicH2", group: "perPilot", title: lang === "ar" ? `ملخص دوري · النصف الثاني · ${pdfYear}` : `Periodic Summary · H2 · ${pdfYear}`, desc: lang === "ar" ? "صفحة كتاب السجل الورقي للنصف الثاني (يوليو-ديسمبر)." : "Paper-logbook periodic summary page — Jul–Dec.", needsPilot: true },
+    { key: "periodicAnnual", group: "perPilot", title: lang === "ar" ? `ملخص دوري · السنوي · ${pdfYear}` : `Periodic Summary · Annual · ${pdfYear}`, desc: lang === "ar" ? "صفحة كتاب السجل الورقي للسنة الكاملة." : "Paper-logbook periodic summary page — full calendar year.", needsPilot: true },
 
     { key: "audit", group: "admin", title: lang === "ar" ? "سجل التدقيق" : "Audit Log", desc: lang === "ar" ? "كل أحداث التحرير ضمن نطاق تاريخ." : "Every edit/delete within the date range.", needsRange: true },
     { key: "reminders", group: "admin", title: lang === "ar" ? "سجل التذكيرات" : "Reminders Log", desc: lang === "ar" ? "تذكيرات الطيارين المسجلة." : "Configured pilot reminders + last sent." },
@@ -228,6 +242,17 @@ export default function PdfExports() {
           if (!pickedPilot) throw new Error("No pilot selected");
           await exportIndividualPilotRecord(sqdn, pickedPilot, sorties, pdfLang); break;
         }
+        case "periodicH1":
+        case "periodicH2":
+        case "periodicAnnual": {
+          if (!pickedPilot) throw new Error("No pilot selected");
+          const scope: PeriodicScope =
+            spec.key === "periodicH1" ? "H1"
+            : spec.key === "periodicH2" ? "H2"
+            : "FULL";
+          await exportPeriodicSummary(sqdn, pickedPilot, sorties, pdfYear, scope, pdfLang);
+          break;
+        }
         case "audit": {
           const rows = auditQ.data.map((a) => ({
             at: a.ts, user: a.user, action: a.action,
@@ -297,6 +322,18 @@ export default function PdfExports() {
           <DateInput value={to} onChange={setTo}
             className="text-xs px-2 py-1 rounded-md border border-border bg-background"
             data-testid="input-pdf-to" />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground">{lang === "ar" ? "السنة" : "Year"}:</span>
+          <select value={pdfYear} onChange={(e) => setPdfYear(Number(e.target.value))}
+            className="text-xs px-2 py-1 rounded-md border border-border bg-background"
+            data-testid="select-pdf-year">
+            {[0, 1, 2, 3].map((d) => {
+              const y = new Date().getFullYear() - d;
+              return <option key={y} value={y}>{y}</option>;
+            })}
+          </select>
         </div>
 
         <div className="flex items-center gap-2">

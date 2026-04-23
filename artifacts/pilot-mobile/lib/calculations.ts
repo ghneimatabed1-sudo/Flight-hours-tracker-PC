@@ -157,6 +157,118 @@ export function computeTotals(
   };
 }
 
+// ─── Periodic Summary (paper-logbook) ─────────────────────────────
+// Mirrors the dashboard's `exportPeriodicSummary` PDF for an arbitrary
+// (year, scope) tuple so the pilot can pull up his own H1 / H2 / Annual
+// flying summary on the phone — same numbers the squadron commander sees
+// on the PC. SortieRecord on mobile carries the flat day/night/nvg/sim
+// fields plus pilotIsCaptain, so we surface a compact 6-line summary
+// (no per-seat 1P/2P/Dual split — that breakdown only exists on the PC
+// dashboard's Sortie shape).
+export type PeriodicScope = "H1" | "H2" | "FULL";
+
+export interface PeriodicSummary {
+  year: number;
+  scope: PeriodicScope;
+  startISO: string;   // YYYY-MM-DD
+  endISO: string;     // YYYY-MM-DD
+  day: number;
+  night: number;
+  nvg: number;
+  sim: number;
+  captain: number;
+  secondPilot: number;
+  instrument: number;
+  total: number;      // Day + Night (canonical 6-col total)
+  grandTotal: number; // Day + Night + NVG + Sim
+  sorties: number;
+}
+
+function pad2(n: number): string { return String(n).padStart(2, "0"); }
+function isoDate(y: number, m1: number, d: number): string {
+  return `${y}-${pad2(m1)}-${pad2(d)}`;
+}
+
+export function computePeriodicSummary(
+  profile: PilotProfile,
+  sorties: SortieRecord[],
+  year: number,
+  scope: PeriodicScope,
+): PeriodicSummary {
+  // H1 = Jan-Jun (months 0-5); H2 = Jul-Dec (months 6-11); FULL = whole year.
+  const startMonth = scope === "H2" ? 6 : 0;
+  const endMonth = scope === "H1" ? 5 : 11;
+  // Last day of endMonth: trick is `new Date(y, endMonth+1, 0)` → day 0 of
+  // the next month rolls back to the last day of endMonth. Local TZ-safe.
+  const lastDay = new Date(year, endMonth + 1, 0).getDate();
+
+  const opening = {
+    day: safeNum(profile.openingDay),
+    night: safeNum(profile.openingNight),
+    nvg: safeNum(profile.openingNvg),
+    sim: safeNum(profile.openingSim),
+    captain: safeNum(profile.openingCaptain),
+    instrument: safeNum(profile.openingInstrument),
+  };
+  void opening; // baseline is NOT added to periodic summary — paper logbook
+                // periodic page covers ONLY sorties flown within the period.
+
+  let day = 0, night = 0, nvg = 0, sim = 0, cap = 0, instr = 0, count = 0;
+
+  for (const s of sorties) {
+    const parts = (s.date || "").split("-");
+    if (parts.length !== 3) continue;
+    const y = Number(parts[0]);
+    const m = Number(parts[1]) - 1;
+    if (!Number.isFinite(y) || !Number.isFinite(m)) continue;
+    if (y !== year) continue;
+    if (m < startMonth || m > endMonth) continue;
+
+    const sd = safeNum(s.day);
+    const sn = safeNum(s.night);
+    const sg = safeNum(s.nvg);
+    const ss = safeNum(s.sim);
+
+    day += sd;
+    night += sn;
+    nvg += sg;
+    sim += ss;
+    // Captain attribution = flying time only (Day + Night), matching the
+    // dashboard's exportPeriodicSummary which attributes `t = sortie.actual`
+    // (stick time) and excludes sim. NVG folds into Night per paper-book
+    // convention but is NOT separately added here — it's already counted
+    // inside the night bucket on dashboard sorties; on mobile the sortie
+    // shape carries day/night/nvg as independent fields, and the legacy
+    // computeTotals treats night and nvg as separate buckets, so we keep
+    // captain on Day+Night only to match the dashboard contract exactly.
+    if (s.pilotIsCaptain) cap += sd + sn;
+    // Mobile SortieRecord doesn't carry an instrument-actual field today;
+    // when the dashboard publishes one to the mobile sortie shape we'll
+    // surface it here. Until then it stays at 0 (matches what the pilot
+    // sees in the rest of the app).
+    void instr;
+    count += 1;
+  }
+
+  const total = day + night;
+  const grandTotal = day + night + nvg + sim;
+  const secondPilot = Math.max(0, total - cap);
+
+  return {
+    year,
+    scope,
+    startISO: isoDate(year, startMonth + 1, 1),
+    endISO: isoDate(year, endMonth + 1, lastDay),
+    day, night, nvg, sim,
+    captain: cap,
+    secondPilot,
+    instrument: instr,
+    total,
+    grandTotal,
+    sorties: count,
+  };
+}
+
 export interface CurrencyItem {
   key: "day" | "night" | "nvg" | "irt" | "medical" | "sim";
   label: string;

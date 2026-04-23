@@ -15,7 +15,13 @@ import Svg, { Circle, G } from "react-native-svg";
 
 import { CurrencyTile } from "@/components/CurrencyTile";
 import { useColors } from "@/hooks/useColors";
-import { computeCurrencies, computeTotals, formatHours } from "@/lib/calculations";
+import {
+  computeCurrencies,
+  computePeriodicSummary,
+  computeTotals,
+  formatHours,
+  type PeriodicScope,
+} from "@/lib/calculations";
 import { useAppData } from "@/lib/data";
 import { useI18n } from "@/lib/i18n";
 
@@ -49,6 +55,20 @@ export default function HomeScreen() {
   const totals = useMemo(
     () => (snapshot ? computeTotals(snapshot.profile, snapshot.sorties) : null),
     [snapshot]
+  );
+
+  // Periodic Summary state — H1 / H2 / Annual toggle + year picker.
+  // Mirrors the dashboard's PdfExports.tsx page so the pilot can pull up
+  // the same numbers his squadron commander signs on the paper logbook.
+  const currentYear = now.getFullYear();
+  const [periodicYear, setPeriodicYear] = useState<number>(currentYear);
+  const [periodicScope, setPeriodicScope] = useState<PeriodicScope>(
+    // Default scope: H1 if we're in Jan-Jun, else H2.
+    now.getMonth() <= 5 ? "H1" : "H2"
+  );
+  const periodic = useMemo(
+    () => snapshot ? computePeriodicSummary(snapshot.profile, snapshot.sorties, periodicYear, periodicScope) : null,
+    [snapshot, periodicYear, periodicScope]
   );
 
   const currencyStrip = useMemo(() => {
@@ -283,6 +303,124 @@ export default function HomeScreen() {
         </View>
       </View>
 
+      {/* ── Periodic Summary (paper-logbook H1 / H2 / Annual) ─── */}
+      {periodic && (
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={[styles.cardHeadRow, { flexDirection: rowDir }]}>
+            <Text style={[styles.cardEyebrow, { color: colors.mutedForeground }]}>
+              {`// ${t("home_periodic_title").toUpperCase()}`}
+            </Text>
+            <View style={{ flex: 1 }} />
+            <Text style={[styles.cardMeta, { color: colors.mutedForeground }]}>
+              {t("home_periodic_hint")}
+            </Text>
+          </View>
+
+          {/* Year picker — past 4 years */}
+          <View style={[styles.periodicRow, { flexDirection: rowDir }]}>
+            {[0, 1, 2, 3].map((d) => {
+              const y = currentYear - d;
+              const active = y === periodicYear;
+              return (
+                <Pressable
+                  key={y}
+                  onPress={() => {
+                    if (Platform.OS !== "web") Haptics.selectionAsync().catch(() => {});
+                    setPeriodicYear(y);
+                  }}
+                  style={[
+                    styles.periodicChip,
+                    {
+                      backgroundColor: active ? colors.primary + "22" : "transparent",
+                      borderColor: active ? colors.primary : colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.periodicChipLabel, { color: active ? colors.primary : colors.foreground }]}>
+                    {y}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {/* Scope picker — H1 / H2 / Annual */}
+          <View style={[styles.periodicRow, { flexDirection: rowDir }]}>
+            {(["H1", "H2", "FULL"] as const).map((s) => {
+              const active = s === periodicScope;
+              const label = s === "H1" ? t("home_periodic_h1") : s === "H2" ? t("home_periodic_h2") : t("home_periodic_annual");
+              return (
+                <Pressable
+                  key={s}
+                  onPress={() => {
+                    if (Platform.OS !== "web") Haptics.selectionAsync().catch(() => {});
+                    setPeriodicScope(s);
+                  }}
+                  style={[
+                    styles.periodicChip,
+                    {
+                      flex: 1,
+                      backgroundColor: active ? colors.primary + "22" : "transparent",
+                      borderColor: active ? colors.primary : colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.periodicChipLabel, { color: active ? colors.primary : colors.foreground }]}>
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {/* Period banner */}
+          <View style={[styles.periodicPeriod, { borderColor: colors.border, flexDirection: rowDir }]}>
+            <Feather name="calendar" size={12} color={colors.mutedForeground} />
+            <Text style={[styles.periodicPeriodLabel, { color: colors.mutedForeground }]}>
+              {t("home_periodic_period").toUpperCase()}
+            </Text>
+            <View style={{ flex: 1 }} />
+            <Text style={[styles.periodicPeriodValue, { color: colors.foreground }]}>
+              {`${periodic.startISO} → ${periodic.endISO}`}
+            </Text>
+          </View>
+
+          {/* Six-line breakdown */}
+          {periodic.sorties === 0 ? (
+            <Text style={[styles.periodicEmpty, { color: colors.mutedForeground, textAlign: align }]}>
+              {t("home_periodic_no_sorties")}
+            </Text>
+          ) : (
+            <View style={{ gap: 6 }}>
+              <PeriodicRow lbl={t("home_day").toUpperCase()} val={formatHours(periodic.day)} colors={colors} rowDir={rowDir} />
+              <PeriodicRow lbl={t("home_night").toUpperCase()} val={formatHours(periodic.night)} colors={colors} rowDir={rowDir} />
+              <PeriodicRow lbl={t("home_nvg").toUpperCase()} val={formatHours(periodic.nvg)} colors={colors} rowDir={rowDir} />
+              <PeriodicRow lbl={t("home_sim").toUpperCase()} val={formatHours(periodic.sim)} colors={colors} rowDir={rowDir} />
+              <PeriodicRow lbl={t("home_captain").toUpperCase()} val={formatHours(periodic.captain)} colors={colors} rowDir={rowDir} />
+              <PeriodicRow lbl={t("home_second_pilot").toUpperCase()} val={formatHours(periodic.secondPilot)} colors={colors} rowDir={rowDir} />
+              <View style={[styles.periodicTotalRow, { borderColor: colors.border, flexDirection: rowDir }]}>
+                <Text style={[styles.periodicTotalLbl, { color: colors.mutedForeground }]}>
+                  {t("home_periodic_total6").toUpperCase()}
+                </Text>
+                <View style={{ flex: 1 }} />
+                <Text style={[styles.periodicTotalVal, { color: colors.foreground }]}>
+                  {formatHours(periodic.total)}
+                </Text>
+              </View>
+              <View style={[styles.periodicTotalRow, { flexDirection: rowDir }]}>
+                <Text style={[styles.periodicTotalLbl, { color: colors.primary }]}>
+                  {t("home_periodic_grand").toUpperCase()}
+                </Text>
+                <View style={{ flex: 1 }} />
+                <Text style={[styles.periodicTotalVal, { color: colors.primary }]}>
+                  {`${formatHours(periodic.grandTotal)} · ${periodic.sorties} ${t("home_sortie_count")}`}
+                </Text>
+              </View>
+            </View>
+          )}
+        </View>
+      )}
+
       {/* ── Sync card ─────────────────────────── */}
       <View
         style={[
@@ -498,6 +636,23 @@ function HalfYearBar({
           <View style={{ width: `${nvgPct}%`, backgroundColor: "#4ADE80" }} />
         </View>
       </View>
+    </View>
+  );
+}
+
+function PeriodicRow({
+  lbl, val, colors, rowDir,
+}: {
+  lbl: string;
+  val: string;
+  colors: ReturnType<typeof useColors>;
+  rowDir: "row" | "row-reverse";
+}) {
+  return (
+    <View style={[styles.periodicLine, { flexDirection: rowDir }]}>
+      <Text style={[styles.periodicLineLbl, { color: colors.mutedForeground }]}>{lbl}</Text>
+      <View style={{ flex: 1 }} />
+      <Text style={[styles.periodicLineVal, { color: colors.foreground }]}>{val}</Text>
     </View>
   );
 }
@@ -839,4 +994,76 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   refreshText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
+
+  // ── Periodic Summary card ────────────────────────────────────────
+  periodicRow: {
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  periodicChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  periodicChipLabel: {
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.6,
+  },
+  periodicPeriod: {
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  periodicPeriodLabel: {
+    fontSize: 9,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 1.4,
+  },
+  periodicPeriodValue: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    fontVariant: ["tabular-nums"],
+  },
+  periodicLine: {
+    alignItems: "baseline",
+    gap: 6,
+  },
+  periodicLineLbl: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 1.4,
+  },
+  periodicLineVal: {
+    fontSize: 14,
+    fontFamily: "Inter_700Bold",
+    fontVariant: ["tabular-nums"],
+  },
+  periodicTotalRow: {
+    alignItems: "baseline",
+    gap: 6,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  periodicTotalLbl: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 1.4,
+  },
+  periodicTotalVal: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+    fontVariant: ["tabular-nums"],
+  },
+  periodicEmpty: {
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+    paddingVertical: 8,
+  },
 });
