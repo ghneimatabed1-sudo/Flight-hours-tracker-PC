@@ -221,16 +221,14 @@ export default function ScheduleChain() {
     () => squadronPCs.filter(p => p.id.startsWith("SQDNCMD:")),
     [squadronPCs],
   );
-  // Flight Cmdr forward targets on approve. Prefer Sqn Cmdr PCs when
-  // they exist. When the squadron has no Sqn Cmdr PC yet (common at a
-  // new install — operator hasn't provisioned that desk), fall through
-  // to Wing Cmdr so the chain still flows up instead of dead-ending at
-  // the Flight tier. Operator can still pick "Approve only" if they
-  // want to stop the chain here.
-  const flightApproveForwardTargets = useMemo(
-    () => sqnCmdrPCs.length > 0 ? sqnCmdrPCs : wingPCs,
-    [sqnCmdrPCs, wingPCs],
-  );
+  // v1.1.104 — Flight Cmdr forward targets on approve are STRICTLY
+  // Sqn Cmdr PCs. The operator's authoritative chain spec:
+  //    Ops ↔ Flight Cmdr (compose/edit) → Sqn Cmdr → Wing → Base
+  // No skip-to-Wing fallback. When no Sqn Cmdr PC is registered, the
+  // button shows a clear block message telling the operator to
+  // provision a Sqn Cmdr desk, rather than silently short-circuiting
+  // the chain.
+  const flightApproveForwardTargets = sqnCmdrPCs;
   // Am I running on a Sqn Cmdr PC? Ops and Sqn Cmdr both resolve to
   // myTier === "squadron", but only the Sqn Cmdr's canonical id carries
   // the SQDNCMD: prefix. Used to gate the squadron→wing auto-forward so
@@ -749,22 +747,31 @@ export default function ScheduleChain() {
                             </select>
                           </div>
                         )}
-                        {/* v1.1.103 Flight tier: Flight Cmdr approves and
-                            auto-forwards up-chain. Prefers a Sqn Cmdr PC
-                            when one exists; falls through to Wing Cmdr
-                            when the squadron hasn't provisioned a Sqn
-                            Cmdr desk yet — so the chain still flows up
-                            instead of dead-ending here. */}
-                        {share.currentTier === "flight" && myTier === "flight" && flightApproveForwardTargets.length > 0 && (
+                        {/* v1.1.104 Flight tier: Flight Cmdr approves and
+                            auto-forwards to the Sqn Cmdr (strict per
+                            chain spec — no Wing shortcut). When the
+                            squadron hasn't provisioned a Sqn Cmdr PC
+                            yet, the approve button is hidden and an
+                            amber block message tells the operator to
+                            register one. */}
+                        {share.currentTier === "flight" && myTier === "flight" && sqnCmdrPCs.length > 0 && (
                           <div>
                             <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                              On approve, send to {sqnCmdrPCs.length > 0 ? "Squadron Cmdr" : "Wing Cmdr"}
+                              On approve, send to Squadron Cmdr
                             </label>
-                            <select value={forwardTo || flightApproveForwardTargets[0]?.id || ""} onChange={e => setForwardTo(e.target.value)} className="px-2 py-1 rounded bg-input border border-border text-xs" data-testid={`forward-target-${share.id}`}>
-                              {flightApproveForwardTargets.map(p => (
+                            <select value={forwardTo || sqnCmdrPCs[0]?.id || ""} onChange={e => setForwardTo(e.target.value)} className="px-2 py-1 rounded bg-input border border-border text-xs" data-testid={`forward-target-${share.id}`}>
+                              {sqnCmdrPCs.map(p => (
                                 <option key={p.id} value={p.id}>{p.deviceName || p.squadronName}{p.online ? " · online" : " · offline"}</option>
                               ))}
                             </select>
+                          </div>
+                        )}
+                        {share.currentTier === "flight" && myTier === "flight" && sqnCmdrPCs.length === 0 && (
+                          <div className="w-full text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
+                            <div className="font-semibold">No Squadron Commander PC registered.</div>
+                            <div className="text-muted-foreground">
+                              This squadron needs a Sqn Cmdr PC online before the Flight Cmdr can forward the schedule up the chain. Ask the Sqn Cmdr to sign in on their PC once with internet on.
+                            </div>
                           </div>
                         )}
                         {/* v1.1.103 Sqn Cmdr tier: when the Sqn Cmdr
@@ -864,16 +871,25 @@ export default function ScheduleChain() {
                                 ? "Approve & send to Wing"
                                 : "Approve"}
                         </button>
-                        <button
-                          onClick={async () => {
-                            await decide.mutateAsync({ id: share.id, action: "reject", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined });
-                            toast({ title: "Rejected" }); setDecisionNote("");
-                          }}
-                          className="px-3 py-1.5 rounded-md bg-rose-500/20 border border-rose-400/40 text-rose-100 text-xs font-semibold inline-flex items-center gap-1"
-                          data-testid={`reject-${share.id}`}
-                        >
-                          <X className="h-3 w-3" /> Reject
-                        </button>
+                        {/* v1.1.104 chain spec: Wing and Base tiers are
+                            approve-only. No Reject, no Edit, no Hold —
+                            they're read-only reviewers who either stamp
+                            the sheet forward or (at Base) archive it.
+                            Gate is on myTier, not share.currentTier,
+                            because the operator's role decides what
+                            actions they can take. */}
+                        {myTier !== "wing" && myTier !== "base" && (
+                          <button
+                            onClick={async () => {
+                              await decide.mutateAsync({ id: share.id, action: "reject", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined });
+                              toast({ title: "Rejected" }); setDecisionNote("");
+                            }}
+                            className="px-3 py-1.5 rounded-md bg-rose-500/20 border border-rose-400/40 text-rose-100 text-xs font-semibold inline-flex items-center gap-1"
+                            data-testid={`reject-${share.id}`}
+                          >
+                            <X className="h-3 w-3" /> Reject
+                          </button>
+                        )}
                         {/* v1.1.60 hard delete — wipes the share from EVERY
                             PC. Available to every role on every inbox card
                             (RLS migration 0029 grants delete to any
@@ -890,16 +906,18 @@ export default function ScheduleChain() {
                         >
                           <Trash2 className="h-3 w-3" /> Delete
                         </button>
-                        <button
-                          onClick={async () => {
-                            await decide.mutateAsync({ id: share.id, action: "hold", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined });
-                            toast({ title: "Held" }); setDecisionNote("");
-                          }}
-                          className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs inline-flex items-center gap-1"
-                        >
-                          <PauseCircle className="h-3 w-3" /> Hold
-                        </button>
-                        {share.program ? (
+                        {myTier !== "wing" && myTier !== "base" && (
+                          <button
+                            onClick={async () => {
+                              await decide.mutateAsync({ id: share.id, action: "hold", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined });
+                              toast({ title: "Held" }); setDecisionNote("");
+                            }}
+                            className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs inline-flex items-center gap-1"
+                          >
+                            <PauseCircle className="h-3 w-3" /> Hold
+                          </button>
+                        )}
+                        {myTier !== "wing" && myTier !== "base" && (share.program ? (
                           editBuffer[share.id] ? (
                             <>
                               <button
@@ -954,7 +972,7 @@ export default function ScheduleChain() {
                           >
                             <Pencil className="h-3 w-3" /> Edit & return
                           </button>
-                        )}
+                        ))}
                         <button
                           onClick={() => window.print()}
                           className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs inline-flex items-center gap-1 no-print"

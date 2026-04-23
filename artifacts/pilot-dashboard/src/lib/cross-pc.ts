@@ -2524,8 +2524,14 @@ export async function wipeAllRegisteredPCs(
 // PCs see every Wing-approved flight schedule from every registered
 // squadron, sorted by squadron with the latest update on top. They
 // have no action buttons.
+// v1.1.104 — Flight Cmdr and Sqn Cmdr also granted access. Per the
+// operator's chain spec they need to "come back for it" on a specific
+// date after the schedule flows up to Base and finalises. The page's
+// squadron-scoped filter + chain_pc_ids visibility ensures each of
+// them only sees the schedules their own PC participated in — no
+// cross-squadron leakage.
 export function canViewFinalSchedules(role: string | undefined, scope: string | undefined): boolean {
   if (role === "super_admin") return true;
-  if (role === "commander" && (scope === "base" || scope === "hq")) return true;
+  if (role === "commander" && (scope === "base" || scope === "hq" || scope === "flight" || scope === "squadron")) return true;
   return false;
 }
