@@ -28,6 +28,7 @@ import {
 import { canUseMessages, canUseScheduleChain, canViewFinalSchedules } from "@/lib/cross-pc";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
 import { IncomingAlertWatcher } from "@/components/IncomingAlertWatcher";
+import { useSidebarBadges } from "@/lib/sidebar-badges";
 
 type Item = { p: string; k: TKey; I: typeof LayoutDashboard };
 const ITEMS: readonly Item[] = [
@@ -77,6 +78,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [loc] = useLocation();
   const [open, setOpen] = useState(true);
   const [online] = useState(navigator.onLine);
+  const badges = useSidebarBadges();
 
   // Theme: dark (default — military) or light (daylight / briefing room).
   // Persisted per device in localStorage so commanders / ops officers
@@ -151,10 +153,38 @@ export default function Layout({ children }: { children: ReactNode }) {
             return true;
           }).map(({ p, k, I }) => {
             const active = loc === p || (p !== "/" && loc.startsWith(p));
+            // v1.1.97: unread/incoming badge so the operator notices a
+            // new schedule, message or pending guest even if they missed
+            // the toast notification. Pulses when there's anything to
+            // act on; suppressed while you're already viewing that page.
+            const count = badges[p] ?? 0;
+            const showBadge = count > 0 && !active;
             return (
-              <Link key={p} href={p} className={`flex items-center gap-3 px-3 py-2 mx-2 my-0.5 rounded-md text-sm row-hover ${active ? "bg-sidebar-accent text-sidebar-primary font-medium" : "text-sidebar-foreground"}`}>
-                <I className="h-4 w-4 shrink-0" />
+              <Link
+                key={p}
+                href={p}
+                className={`relative flex items-center gap-3 px-3 py-2 mx-2 my-0.5 rounded-md text-sm row-hover ${active ? "bg-sidebar-accent text-sidebar-primary font-medium" : showBadge ? "bg-rose-500/10 text-rose-100 ring-1 ring-rose-500/40" : "text-sidebar-foreground"}`}
+                data-testid={`nav-${p.replace(/^\//, "") || "home"}`}
+              >
+                <span className="relative shrink-0">
+                  <I className="h-4 w-4" />
+                  {showBadge && !open && (
+                    <span
+                      className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-sidebar animate-pulse"
+                      aria-hidden
+                    />
+                  )}
+                </span>
                 {open && <span className="truncate">{t(k)}</span>}
+                {open && showBadge && (
+                  <span
+                    className="ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-rose-500 text-white text-[10px] font-bold leading-none animate-pulse"
+                    data-testid={`nav-badge-${p.replace(/^\//, "")}`}
+                    aria-label={`${count} new`}
+                  >
+                    {count > 99 ? "99+" : count}
+                  </span>
+                )}
               </Link>
             );
           })}
