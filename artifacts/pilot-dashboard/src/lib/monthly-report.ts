@@ -535,3 +535,366 @@ export function suggestRemarksFor(
 
   return parts.join(" + ");
 }
+
+/* ═════════════════════════════════════════════════════════════════════
+ * APPENDIX SHEETS — derived from the same sortie / pilot / leave data
+ * that already flows through the squadron PC. Every appendix row is
+ * pure AUTO data: nothing here requires operator input. They mirror
+ * the workbook's audit-appendix tabs (AUTHORIZATION, P MISSIONS SOLO,
+ * P-LEAVES, 6 MONTHS RUNNING, DUAL) so the squadron commander gets
+ * the same packet they're used to seeing.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+/* ───────────── AUTHORIZATION (daily sortie log) ───────────── */
+
+export interface AuthLogRow {
+  no: number;
+  date: string;
+  acType: string;
+  acNumber: string;
+  mission: string;
+  pcName: string;        // person flying as Pilot-in-Command (1st seat captain)
+  piName: string;        // the other crewmember (2nd seat / dual student)
+  day1: number; day2: number; dayDual: number;
+  night1: number; night2: number; nightDual: number;
+  nvg: number;
+  ifSim: number; ifAct: number;
+  total: number;
+  remarks: string;
+}
+
+/**
+ * Chronological sortie log for the period — every flown sortie, one
+ * row each. This is the source-of-truth ledger; every other monthly
+ * form derives from these rows. The squadron commander signs this
+ * sheet (and only this sheet) to authorise the month's flying record.
+ *
+ * "PC" / "PI" naming follows RJAF convention:
+ *   • PC = Pilot in Command. We pick the captain — `pilotIsCaptain` /
+ *     `coPilotIsCaptain` flag wins; falls back to the `pilotId` slot.
+ *   • PI = Pilot, the other crewmember (or "—" for solo flights).
+ *
+ * External pilots (visiting QHIs etc.) are rendered from
+ * `pilot/coPilotExternal.name` so they appear in the log even when
+ * they aren't in the squadron roster. Sorties with neither resolvable
+ * crewmember are still listed (date + AC) so the operator can spot
+ * data-entry gaps.
+ */
+export function buildAuthorizationLog(
+  sorties: Sortie[],
+  pilots: Pilot[],
+  period: string,
+): AuthLogRow[] {
+  const byId = new Map(pilots.map(p => [p.id, p]));
+  const monthSorties = sorties
+    .filter(s => (s.date || "").startsWith(period))
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+
+  const nameOf = (id: string, ext?: { name?: string } | undefined): string => {
+    if (id && byId.has(id)) {
+      const p = byId.get(id)!;
+      return `${p.rank ? p.rank + " " : ""}${p.name}`;
+    }
+    if (ext?.name) return ext.name;
+    return "—";
+  };
+
+  return monthSorties.map((s, i) => {
+    // Decide PC vs PI by the explicit captain flags. Convention: the
+    // captain seat is the PC; the other crewmember is the PI. If both
+    // or neither are flagged captain, fall back to the pilotId slot.
+    const pIsCap = s.pilotIsCaptain === true;
+    const cIsCap = s.coPilotIsCaptain === true;
+    const pcFromPilotSlot = pIsCap || (!pIsCap && !cIsCap);
+    const pcName = pcFromPilotSlot
+      ? nameOf(s.pilotId, s.pilotExternal)
+      : nameOf(s.coPilotId, s.coPilotExternal);
+    const piName = pcFromPilotSlot
+      ? nameOf(s.coPilotId, s.coPilotExternal)
+      : nameOf(s.pilotId, s.pilotExternal);
+
+    const total = round1(
+      (s.day1||0) + (s.day2||0) + (s.dayDual||0) +
+      (s.night1||0) + (s.night2||0) + (s.nightDual||0)
+    );
+
+    return {
+      no: i + 1,
+      date: s.date,
+      acType: s.acType || "",
+      acNumber: s.acNumber || "",
+      mission: (s.sortieType || s.name || "").toString(),
+      pcName, piName,
+      day1: round1(s.day1||0), day2: round1(s.day2||0), dayDual: round1(s.dayDual||0),
+      night1: round1(s.night1||0), night2: round1(s.night2||0), nightDual: round1(s.nightDual||0),
+      nvg: round1(s.nvg||0),
+      ifSim: round1(s.sim||0), ifAct: round1(s.actual||0),
+      total,
+      remarks: s.remarks || "",
+    };
+  });
+}
+
+/* ───────────── MISSION SOLO (per-pilot non-dual sortie summary) ───────────── */
+
+export interface MissionSoloRow {
+  pilot: Pilot;
+  /** Per-bucket count of solo sorties (where the pilot was not flying dual). */
+  soloByBucket: Record<MissionBucket, number>;
+  /** Per-bucket sum of solo hours. */
+  hoursByBucket: Record<MissionBucket, number>;
+  totalSorties: number;
+  totalHours: number;
+  /** ISO date of the most recent solo flight in the period (or empty). */
+  lastSoloDate: string;
+}
+
+/**
+ * "Solo" here follows the workbook's MISSIONS SOLO sheet convention:
+ * a sortie counts as solo for a given pilot when that pilot was NOT
+ * flying dual on it — i.e. they were credited with 1st-seat or 2nd-seat
+ * hours but no dual hours. For UH-60M (always 2-pilot crew), this
+ * captures sorties flown without an instructor on board, which is what
+ * the standardisation officer cares about: who's been operating with
+ * full PIC authority and how often.
+ */
+export function buildMissionSolo(
+  pilots: Pilot[],
+  sorties: Sortie[],
+  period: string,
+): MissionSoloRow[] {
+  const monthSorties = sorties.filter(s => (s.date || "").startsWith(period));
+
+  return pilots.map(p => {
+    const soloByBucket = Object.fromEntries(
+      MISSION_BUCKETS.map(b => [b, 0])
+    ) as Record<MissionBucket, number>;
+    const hoursByBucket = Object.fromEntries(
+      MISSION_BUCKETS.map(b => [b, 0])
+    ) as Record<MissionBucket, number>;
+
+    let totalSorties = 0;
+    let totalHours = 0;
+    let lastSoloDate = "";
+
+    for (const s of monthSorties) {
+      const isPilot = s.pilotId === p.id;
+      const isCo    = s.coPilotId === p.id;
+      if (!isPilot && !isCo) continue;
+
+      // Solo credit follows the per-seat bucket convention used by Form 1:
+      //   • 1st-seat slot (pilotId)   gets day1 + night1
+      //   • 2nd-seat slot (coPilotId) gets day2 + night2
+      // A flight is "solo" for this pilot if they earned non-dual hours
+      // on it AND nobody on the sortie was flying dual (dualSeat > 0
+      // means the sortie was a dual-instruction event).
+      // NVG hours are NOT added in — Form 1's totalForMonth treats NVG
+      // as a subset of night hours (display column only), so adding
+      // s.nvg here would double-count the night portion.
+      const soloSeat = isPilot
+        ? (s.day1||0) + (s.night1||0)
+        : (s.day2||0) + (s.night2||0);
+      const dualSeat = (s.dayDual||0) + (s.nightDual||0);
+      if (soloSeat <= 0 || dualSeat > 0) continue;
+
+      const bucket = missionBucket(s);
+      soloByBucket[bucket] += 1;
+      hoursByBucket[bucket] = round1(hoursByBucket[bucket] + soloSeat);
+      totalSorties += 1;
+      totalHours = round1(totalHours + soloSeat);
+      if (!lastSoloDate || s.date > lastSoloDate) lastSoloDate = s.date;
+    }
+
+    return { pilot: p, soloByBucket, hoursByBucket, totalSorties, totalHours, lastSoloDate };
+  });
+}
+
+/* ───────────── P-LEAVES (annual leave matrix) ───────────── */
+
+export interface PLeavesRow {
+  pilot: Pilot;
+  months: number[];      // length 12, days taken per month (Jan = 0, Dec = 11)
+  total: number;          // year-to-date days taken
+}
+
+/**
+ * 12-month per-pilot annual leave grid. Mirrors the workbook's P-LEAVES
+ * sheet: every pilot is a row, every column is a month, the cell is the
+ * number of days that pilot took annual leave in that month. The data
+ * already lives in this shape inside the leaves store, so this is a
+ * view-shaping pass rather than a re-derivation.
+ */
+export function buildPLeaves(
+  pilots: Pilot[],
+  leaves: Array<{ pilotId: string; months: number[]; total: number }>,
+): PLeavesRow[] {
+  const byId = new Map(leaves.map(r => [r.pilotId, r]));
+  return pilots.map(p => {
+    const r = byId.get(p.id);
+    // Always normalise to exactly 12 entries so the printed grid stays
+    // aligned even if upstream storage drifts (truncated / extended array).
+    const months = Array.from({ length: 12 }, (_, i) => r?.months?.[i] ?? 0);
+    const total = r?.total ?? months.reduce((a, n) => a + n, 0);
+    return { pilot: p, months, total };
+  });
+}
+
+/* ───────────── SIX MONTHS RUNNING (currency) ───────────── */
+
+export interface SixMonthsRow {
+  pilot: Pilot;
+  /** Six entries, oldest -> newest. monthLabel is "JAN", "FEB", … . */
+  cells: { period: string; monthLabel: string; hours: number }[];
+  total6mo: number;
+  avgPerMo: number;
+  /** Currency state vs the squadron's minimum hours floor:
+   *  "OK" >= floor, "LOW" within 20% of the floor, "UNDER" otherwise. */
+  flag: "OK" | "LOW" | "UNDER";
+}
+
+const MONTH_LABELS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+
+/**
+ * Per-pilot rolling 6-month hours grid ending at the report period.
+ * Output is 6 cells per pilot (oldest first), plus 6-month total,
+ * average per month, and a 3-state currency flag against the
+ * squadron's `minSixMonthHours` floor (set in Squadron Defaults).
+ *
+ * Hours counted = day1+day2+dayDual + night1+night2+nightDual.
+ * NVG is NOT double-counted (workbook treats NVG as a subset of
+ * night hours, which is how our sortie schema also stores it).
+ */
+export function buildSixMonths(
+  pilots: Pilot[],
+  sorties: Sortie[],
+  period: string,
+  minHoursFloor: number,
+): SixMonthsRow[] {
+  // Build the list of 6 periods ending at `period`, oldest first.
+  const periods: string[] = [];
+  const [y0, m0] = period.split("-").map(Number);
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(y0, m0 - 1 - i, 1);
+    periods.push(`${d.getFullYear()}-${pad2(d.getMonth() + 1)}`);
+  }
+  const periodSet = new Set(periods);
+  const monthIndexOf = (period: string) => parseInt(period.split("-")[1], 10) - 1;
+
+  // Bucket sorties per pilot, per month, attributing hours by SEAT (not
+  // by full sortie). For a 1.5 hr flight where pilot A is 1st seat and
+  // pilot B is 2nd seat, each pilot logs 1.5 hr of cockpit time — not
+  // 3.0 hrs (which is what summing the whole sortie's day1+day2+… would
+  // produce). Dual time is credited to whoever was in the seat, mirroring
+  // Form 1's per-pilot accounting. NVG is excluded — it's a subset of
+  // night hours per the workbook convention.
+  const bucket = new Map<string, Map<string, number>>();
+  const addTo = (id: string, period6: string, hrs: number) => {
+    if (!id || hrs <= 0) return;
+    let inner = bucket.get(id);
+    if (!inner) { inner = new Map(); bucket.set(id, inner); }
+    inner.set(period6, round1((inner.get(period6) || 0) + hrs));
+  };
+  for (const s of sorties) {
+    const period6 = (s.date || "").slice(0, 7);
+    if (!periodSet.has(period6)) continue;
+    const dual = (s.dayDual||0) + (s.nightDual||0);
+    const firstSeat  = (s.day1||0) + (s.night1||0) + dual;
+    const secondSeat = (s.day2||0) + (s.night2||0) + dual;
+    addTo(s.pilotId,   period6, firstSeat);
+    addTo(s.coPilotId, period6, secondSeat);
+  }
+
+  return pilots.map(p => {
+    const inner = bucket.get(p.id);
+    const cells = periods.map(per => ({
+      period: per,
+      monthLabel: MONTH_LABELS[monthIndexOf(per)],
+      hours: inner?.get(per) ?? 0,
+    }));
+    const total6mo = round1(cells.reduce((a, c) => a + c.hours, 0));
+    const avgPerMo = round1(total6mo / 6);
+    const flag: SixMonthsRow["flag"] =
+      total6mo >= minHoursFloor ? "OK"
+      : total6mo >= minHoursFloor * 0.8 ? "LOW"
+      : "UNDER";
+    return { pilot: p, cells, total6mo, avgPerMo, flag };
+  });
+}
+
+/* ───────────── DUAL hours per pilot ───────────── */
+
+export interface DualRow {
+  pilot: Pilot;
+  dayDual: number;
+  nightDual: number;
+  nvgDual: number;
+  totalDual: number;
+  totalSolo: number;     // day1+day2+night1+night2 — non-dual time
+  /** Human-readable ratio "1 : 2.4" of dual hours to solo hours.
+   *  "—" when one side is zero (so the printed sheet doesn't lie). */
+  ratio: string;
+}
+
+/**
+ * Per-pilot dual / solo hours breakdown for the period. Used by the
+ * standardisation officer to spot pilots who are flying disproportionately
+ * dual (need more solo authority) or disproportionately solo (might
+ * need a check-ride). NVG dual is shown separately because it's the
+ * scarcest resource and the most-reviewed datapoint.
+ */
+export function buildDualHours(
+  pilots: Pilot[],
+  sorties: Sortie[],
+  period: string,
+): DualRow[] {
+  const monthSorties = sorties.filter(s => (s.date || "").startsWith(period));
+
+  return pilots.map(p => {
+    let dayDual = 0, nightDual = 0, nvgDual = 0, totalSolo = 0;
+    for (const s of monthSorties) {
+      const isPilot = s.pilotId === p.id;
+      const isCo    = s.coPilotId === p.id;
+      if (!isPilot && !isCo) continue;
+      // Dual time is credited to whoever was in the seat (both pilots get
+      // the dual hours when they were dual-flying together). NVG dual is
+      // shown as informational and NOT added into totalDual — it overlaps
+      // with night dual (NVG is night flight under goggles).
+      dayDual   += (s.dayDual   || 0);
+      nightDual += (s.nightDual || 0);
+      nvgDual   += (s.nvgDual   || 0);
+      // Solo time is per-seat (1st-seat slot earns day1+night1, 2nd-seat
+      // earns day2+night2) — same convention as Form 1 / SIX-MONTHS.
+      totalSolo += isPilot
+        ? (s.day1||0) + (s.night1||0)
+        : (s.day2||0) + (s.night2||0);
+    }
+    const totalDual = round1(dayDual + nightDual);
+    totalSolo = round1(totalSolo);
+
+    let ratio = "—";
+    if (totalDual > 0 && totalSolo > 0) {
+      // Express as "1 : X.X" of the smaller side, oriented so the larger
+      // side is on the right — easier to read at a glance.
+      const r = totalSolo > totalDual
+        ? round1(totalSolo / totalDual)
+        : round1(totalDual / totalSolo);
+      ratio = totalSolo > totalDual
+        ? `1 dual : ${r.toFixed(1)} solo`
+        : `${r.toFixed(1)} dual : 1 solo`;
+    } else if (totalDual > 0) {
+      ratio = "all dual";
+    } else if (totalSolo > 0) {
+      ratio = "all solo";
+    }
+
+    return {
+      pilot: p,
+      dayDual: round1(dayDual),
+      nightDual: round1(nightDual),
+      nvgDual: round1(nvgDual),
+      totalDual,
+      totalSolo,
+      ratio,
+    };
+  });
+}

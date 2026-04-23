@@ -64,6 +64,11 @@ export interface SquadronDefaults {
   ammoPlaceholder: string;
   /** Default REMARKS suggestions enabled (auto-fill from leave/TDY records). */
   autoSuggestRemarks: boolean;
+  /** Minimum hours required across the rolling 6-month window. Drives the
+   *  currency flag on the printed SIX-MONTHS sheet. Typical UH-60M
+   *  squadrons run 30 hrs / 6 months as the floor, but other airframes /
+   *  other regulators may differ — operator edits per squadron. */
+  minSixMonthHours: number;
 }
 
 export function factoryDefaults(): SquadronDefaults {
@@ -76,6 +81,7 @@ export function factoryDefaults(): SquadronDefaults {
     fuelBurnByAirframe: { ...FACTORY_FUEL_BURN },
     ammoPlaceholder: "-",
     autoSuggestRemarks: true,
+    minSixMonthHours: 30,
   };
 }
 
@@ -96,6 +102,7 @@ export function loadSquadronDefaults(squadronNumber: string | undefined): Squadr
       fuelBurnByAirframe: { ...f.fuelBurnByAirframe, ...(parsed.fuelBurnByAirframe || {}) },
       ammoPlaceholder: parsed.ammoPlaceholder ?? f.ammoPlaceholder,
       autoSuggestRemarks: parsed.autoSuggestRemarks ?? f.autoSuggestRemarks,
+      minSixMonthHours: parsed.minSixMonthHours ?? f.minSixMonthHours,
     };
   } catch {
     return factoryDefaults();

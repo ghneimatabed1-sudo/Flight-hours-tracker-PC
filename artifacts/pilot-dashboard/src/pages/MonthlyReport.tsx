@@ -7,6 +7,8 @@ import { useAuth } from "@/lib/auth";
 import { usePilots, useSorties, useLeaves, useUnavailable } from "@/lib/squadron-data";
 import {
   buildForm1Rows, buildForm2Rows, buildForm3, buildArabicRoster,
+  buildAuthorizationLog, buildMissionSolo, buildPLeaves,
+  buildSixMonths, buildDualHours,
   lastCompletedPeriod, loadInputsOrPrefill, saveInputs,
   periodLabel, MISSION_BUCKETS, MISSION_LABEL,
   deriveForm3Stats, suggestNextMonthPlanFrom, suggestRemarksFor,
@@ -78,6 +80,46 @@ export default function MonthlyReport() {
     deriveForm3Stats(inputs, form3), [inputs, form3]);
   const arabicRoster = useMemo(() =>
     buildArabicRoster(pilots, sorties, period, form1), [pilots, sorties, period, form1]);
+
+  // ── Appendix sheets (all derived AUTO data) ──────────────────────────
+  const authLog = useMemo(() =>
+    buildAuthorizationLog(sorties, pilots, period), [sorties, pilots, period]);
+  const missionSolo = useMemo(() =>
+    buildMissionSolo(pilots, sorties, period), [pilots, sorties, period]);
+  const pLeaves = useMemo(() =>
+    buildPLeaves(pilots, leaves), [pilots, leaves]);
+  const sixMonths = useMemo(() =>
+    buildSixMonths(pilots, sorties, period, defaults.minSixMonthHours),
+    [pilots, sorties, period, defaults.minSixMonthHours]);
+  // Six-month header labels derived from the report period itself — used
+  // by the printed thead AND the empty-state colSpan, so the table stays
+  // structurally aligned even when there are no pilots in the roster.
+  const sixMonthHeaders = useMemo(() => {
+    const labels = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+    const [y0, m0] = period.split("-").map(Number);
+    const out: { period: string; label: string; year: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(y0, m0 - 1 - i, 1);
+      out.push({
+        period: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`,
+        label: labels[d.getMonth()],
+        year: d.getFullYear(),
+      });
+    }
+    return out;
+  }, [period]);
+  const dualHours = useMemo(() =>
+    buildDualHours(pilots, sorties, period), [pilots, sorties, period]);
+
+  // Authorization log totals (printed at the foot of the AUTH sheet)
+  const authLogTotals = useMemo(() => authLog.reduce((a, r) => ({
+    day1: round1(a.day1 + r.day1),  day2: round1(a.day2 + r.day2),  dayDual: round1(a.dayDual + r.dayDual),
+    night1: round1(a.night1 + r.night1), night2: round1(a.night2 + r.night2), nightDual: round1(a.nightDual + r.nightDual),
+    nvg: round1(a.nvg + r.nvg),
+    ifSim: round1(a.ifSim + r.ifSim), ifAct: round1(a.ifAct + r.ifAct),
+    total: round1(a.total + r.total),
+    sorties: a.sorties + 1,
+  }), { day1:0,day2:0,dayDual:0,night1:0,night2:0,nightDual:0,nvg:0,ifSim:0,ifAct:0,total:0,sorties:0 }), [authLog]);
 
   // Form 1 totals row — sum of all per-pilot columns. Officer can compare
   // this against squadron-wide reports without manually adding numbers.
@@ -514,6 +556,7 @@ export default function MonthlyReport() {
               <th rowSpan={2}>STATUS</th>
               <th colSpan={3}>DAY</th>
               <th colSpan={3}>NIGHT</th>
+              <th rowSpan={2}>NVG</th>
               <th rowSpan={2}>TOTAL FOR MONTH</th>
               <th colSpan={2}>TOTAL</th>
               <th colSpan={2}>IF FOR MONTH</th>
@@ -542,6 +585,7 @@ export default function MonthlyReport() {
                 <td className="num">{r.night1.toFixed(1)}</td>
                 <td className="num">{r.night2.toFixed(1)}</td>
                 <td className="num">{r.nightDual.toFixed(1)}</td>
+                <td className="num">{r.nvg.toFixed(1)}</td>
                 <td className="num"><b>{r.totalForMonth.toFixed(1)}</b></td>
                 <td className="num">{r.cap}</td>
                 <td className="num">{r.sor}</td>
@@ -551,7 +595,7 @@ export default function MonthlyReport() {
               </tr>
             ))}
             {form1.length === 0 && (
-              <tr><td colSpan={18} className="center" style={{padding:"12px"}}>{t("monthlyEmpty")}</td></tr>
+              <tr><td colSpan={19} className="center" style={{padding:"12px"}}>{t("monthlyEmpty")}</td></tr>
             )}
             {form1.length > 0 && (
               <tr data-testid="form1-totals" style={{background:"#f3f4f6", fontWeight:700}}>
@@ -562,6 +606,7 @@ export default function MonthlyReport() {
                 <td className="num">{form1Totals.night1.toFixed(1)}</td>
                 <td className="num">{form1Totals.night2.toFixed(1)}</td>
                 <td className="num">{form1Totals.nightDual.toFixed(1)}</td>
+                <td className="num">{form1Totals.nvg.toFixed(1)}</td>
                 <td className="num">{form1Totals.totalForMonth.toFixed(1)}</td>
                 <td className="num">{form1Totals.cap}</td>
                 <td className="num">{form1Totals.sor}</td>
@@ -882,6 +927,329 @@ export default function MonthlyReport() {
           Formula per row: <span style={{fontFamily:"monospace"}}>pilots × sorties/pilot × duration × fuel/hr</span>
           {" "}— default fuel/hr from squadron settings (currently {defaultFuelHr} lb/hr for UH-60M),
           per-row overrides marked with *. Edit defaults via Squadron defaults page.
+        </div>
+        <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
+      </section>
+
+      {/* ═══════════════════════════════════════════════════════════════
+          APPENDIX SHEETS — pure AUTO data, derived from sortie/leave
+          records. These mirror the workbook's appendix tabs that the
+          squadron commander signs alongside Forms 1-4.
+          ═══════════════════════════════════════════════════════════════ */}
+
+      {/* ───────── AUTHORIZATION (daily sortie log) ───────── */}
+      <section className="form-page" data-testid="form-authorization">
+        <div className="form-meta">
+          <div><b>QRFG AUTHORIZATION</b><br/>MONTH : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div className="text-center">
+            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-sub">DAILY SORTIE AUTHORIZATION LOG</div>
+          </div>
+          <div className="text-right"><b>FOR : {monthHeader}</b><br/><span style={{fontSize:9, color:"#555"}}>AUTO from sortie records</span></div>
+        </div>
+        <div className="secret">SECRET ( WHEN FILLED )</div>
+        <table>
+          <thead>
+            <tr>
+              <th rowSpan={2}>#</th>
+              <th rowSpan={2}>DATE</th>
+              <th rowSpan={2}>A/C TYPE</th>
+              <th rowSpan={2}>A/C #</th>
+              <th rowSpan={2}>MISSION</th>
+              <th rowSpan={2}>PC (CAPTAIN)</th>
+              <th rowSpan={2}>PI</th>
+              <th colSpan={3}>DAY</th>
+              <th colSpan={3}>NIGHT</th>
+              <th rowSpan={2}>NVG</th>
+              <th colSpan={2}>IF</th>
+              <th rowSpan={2}>TOTAL</th>
+              <th rowSpan={2}>REMARKS</th>
+            </tr>
+            <tr>
+              <th>1P</th><th>2P</th><th>D</th>
+              <th>1P</th><th>2P</th><th>D</th>
+              <th>SIM</th><th>ACT</th>
+            </tr>
+          </thead>
+          <tbody>
+            {authLog.map(r => (
+              <tr key={r.no} data-testid={`auth-row-${r.no}`}>
+                <td className="center">{r.no}</td>
+                <td className="center">{r.date}</td>
+                <td className="center">{r.acType}</td>
+                <td className="center">{r.acNumber}</td>
+                <td>{r.mission}</td>
+                <td>{r.pcName}</td>
+                <td>{r.piName}</td>
+                <td className="num">{r.day1.toFixed(1)}</td>
+                <td className="num">{r.day2.toFixed(1)}</td>
+                <td className="num">{r.dayDual.toFixed(1)}</td>
+                <td className="num">{r.night1.toFixed(1)}</td>
+                <td className="num">{r.night2.toFixed(1)}</td>
+                <td className="num">{r.nightDual.toFixed(1)}</td>
+                <td className="num">{r.nvg.toFixed(1)}</td>
+                <td className="num">{r.ifSim.toFixed(1)}</td>
+                <td className="num">{r.ifAct.toFixed(1)}</td>
+                <td className="num"><b>{r.total.toFixed(1)}</b></td>
+                <td>{r.remarks}</td>
+              </tr>
+            ))}
+            {authLog.length === 0 && (
+              <tr><td colSpan={18} className="center" style={{padding:"12px"}}>No sorties flown this period.</td></tr>
+            )}
+            {authLog.length > 0 && (
+              <tr data-testid="auth-totals" style={{background:"#f3f4f6", fontWeight:700}}>
+                <td colSpan={7} className="center">TOTAL — {authLogTotals.sorties} SORTIES</td>
+                <td className="num">{authLogTotals.day1.toFixed(1)}</td>
+                <td className="num">{authLogTotals.day2.toFixed(1)}</td>
+                <td className="num">{authLogTotals.dayDual.toFixed(1)}</td>
+                <td className="num">{authLogTotals.night1.toFixed(1)}</td>
+                <td className="num">{authLogTotals.night2.toFixed(1)}</td>
+                <td className="num">{authLogTotals.nightDual.toFixed(1)}</td>
+                <td className="num">{authLogTotals.nvg.toFixed(1)}</td>
+                <td className="num">{authLogTotals.ifSim.toFixed(1)}</td>
+                <td className="num">{authLogTotals.ifAct.toFixed(1)}</td>
+                <td className="num">{authLogTotals.total.toFixed(1)}</td>
+                <td></td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+        <div style={{marginTop:8, fontSize:10}}>
+          <b>SQDN CMDR SIGNATURE:</b> _________________________________
+          &nbsp;&nbsp;&nbsp; <b>DATE:</b> ____________
+        </div>
+        <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
+      </section>
+
+      {/* ───────── P-LEAVES (annual leave matrix) ───────── */}
+      <section className="form-page" data-testid="form-pleaves">
+        <div className="form-meta">
+          <div><b>QRFG P-LEAVES</b><br/>YEAR : {period.split("-")[0]}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div className="text-center">
+            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-sub">PILOT ANNUAL LEAVES — DAYS PER MONTH</div>
+          </div>
+          <div className="text-right"><b>AS OF : {monthHeader}</b><br/><span style={{fontSize:9, color:"#555"}}>AUTO from leaves register</span></div>
+        </div>
+        <div className="secret">SECRET ( WHEN FILLED )</div>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>RANK</th>
+              <th>NAME</th>
+              {["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"].map((m, i) => (
+                <th key={m} style={i === parseInt(period.split("-")[1],10)-1 ? {background:"#fde68a"} : undefined}>{m}</th>
+              ))}
+              <th>TOTAL</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pLeaves.map((r, i) => (
+              <tr key={r.pilot.id} data-testid={`pleaves-row-${r.pilot.id}`}>
+                <td className="center">{i+1}</td>
+                <td className="center">{r.pilot.rank}</td>
+                <td>{r.pilot.name}</td>
+                {r.months.map((days, mi) => (
+                  <td key={mi} className="num" style={mi === parseInt(period.split("-")[1],10)-1 ? {background:"#fef3c7"} : undefined}>
+                    {days > 0 ? days : ""}
+                  </td>
+                ))}
+                <td className="num"><b>{r.total}</b></td>
+              </tr>
+            ))}
+            {pLeaves.length === 0 && (
+              <tr><td colSpan={16} className="center" style={{padding:"12px"}}>No pilots in roster.</td></tr>
+            )}
+            {pLeaves.length > 0 && (
+              <tr style={{background:"#f3f4f6", fontWeight:700}}>
+                <td colSpan={3} className="center">TOTAL</td>
+                {Array.from({length:12}, (_, mi) => (
+                  <td key={mi} className="num">
+                    {pLeaves.reduce((a, r) => a + (r.months[mi] || 0), 0) || ""}
+                  </td>
+                ))}
+                <td className="num">{pLeaves.reduce((a, r) => a + r.total, 0)}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+        <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
+      </section>
+
+      {/* ───────── SIX MONTHS RUNNING ───────── */}
+      <section className="form-page" data-testid="form-sixmonths">
+        <div className="form-meta">
+          <div><b>QRFG 6-MONTHS</b><br/>ENDING : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div className="text-center">
+            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-sub">ROLLING SIX-MONTH FLYING HOURS — CURRENCY CHECK</div>
+          </div>
+          <div className="text-right"><b>FLOOR : {defaults.minSixMonthHours} HRS</b><br/><span style={{fontSize:9, color:"#555"}}>AUTO from sortie records</span></div>
+        </div>
+        <div className="secret">SECRET ( WHEN FILLED )</div>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>RANK</th>
+              <th>NAME</th>
+              {sixMonthHeaders.map(h => (
+                <th key={h.period}>{h.label}<br/><span style={{fontWeight:400, fontSize:9}}>{h.year}</span></th>
+              ))}
+              <th>6-MO TOTAL</th>
+              <th>AVG / MO</th>
+              <th>STATUS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sixMonths.map((r, i) => (
+              <tr key={r.pilot.id} data-testid={`sixmo-row-${r.pilot.id}`}>
+                <td className="center">{i+1}</td>
+                <td className="center">{r.pilot.rank}</td>
+                <td>{r.pilot.name}</td>
+                {r.cells.map(c => (
+                  <td key={c.period} className="num">{c.hours > 0 ? c.hours.toFixed(1) : ""}</td>
+                ))}
+                <td className="num"><b>{r.total6mo.toFixed(1)}</b></td>
+                <td className="num">{r.avgPerMo.toFixed(1)}</td>
+                <td className="center" style={{
+                  background: r.flag === "OK" ? "#dcfce7" : r.flag === "LOW" ? "#fef3c7" : "#fee2e2",
+                  fontWeight: 700,
+                }}>{r.flag}</td>
+              </tr>
+            ))}
+            {sixMonths.length === 0 && (
+              <tr><td colSpan={3 + sixMonthHeaders.length + 3} className="center" style={{padding:"12px"}}>No pilots in roster.</td></tr>
+            )}
+          </tbody>
+        </table>
+        <div style={{marginTop:6, fontSize:10, color:"#444"}}>
+          <b>STATUS:</b> OK = at or above floor ({defaults.minSixMonthHours} hrs/6 mo);
+          {" "}LOW = within 20% of floor; UNDER = below floor (action required).
+          {" "}Adjust the floor in <i>Squadron defaults → Min 6-month hours</i>.
+        </div>
+        <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
+      </section>
+
+      {/* ───────── DUAL HOURS ───────── */}
+      <section className="form-page" data-testid="form-dual">
+        <div className="form-meta">
+          <div><b>QRFG DUAL</b><br/>MONTH : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div className="text-center">
+            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-sub">DUAL FLIGHT HOURS — INSTRUCTOR / STUDENT BREAKDOWN</div>
+          </div>
+          <div className="text-right"><b>FOR : {monthHeader}</b><br/><span style={{fontSize:9, color:"#555"}}>AUTO from sortie records</span></div>
+        </div>
+        <div className="secret">SECRET ( WHEN FILLED )</div>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>RANK</th>
+              <th>NAME</th>
+              <th>DAY DUAL</th>
+              <th>NIGHT DUAL</th>
+              <th>NVG DUAL</th>
+              <th>TOTAL DUAL</th>
+              <th>NON-DUAL HRS</th>
+              <th>RATIO</th>
+            </tr>
+          </thead>
+          <tbody>
+            {dualHours.map((r, i) => (
+              <tr key={r.pilot.id} data-testid={`dual-row-${r.pilot.id}`}>
+                <td className="center">{i+1}</td>
+                <td className="center">{r.pilot.rank}</td>
+                <td>{r.pilot.name}</td>
+                <td className="num">{r.dayDual.toFixed(1)}</td>
+                <td className="num">{r.nightDual.toFixed(1)}</td>
+                <td className="num">{r.nvgDual.toFixed(1)}</td>
+                <td className="num"><b>{r.totalDual.toFixed(1)}</b></td>
+                <td className="num">{r.totalSolo.toFixed(1)}</td>
+                <td className="center" style={{fontSize:10}}>{r.ratio}</td>
+              </tr>
+            ))}
+            {dualHours.length === 0 && (
+              <tr><td colSpan={9} className="center" style={{padding:"12px"}}>No pilots in roster.</td></tr>
+            )}
+            {dualHours.length > 0 && (
+              <tr style={{background:"#f3f4f6", fontWeight:700}}>
+                <td colSpan={3} className="center">TOTAL</td>
+                <td className="num">{dualHours.reduce((a,r) => a + r.dayDual, 0).toFixed(1)}</td>
+                <td className="num">{dualHours.reduce((a,r) => a + r.nightDual, 0).toFixed(1)}</td>
+                <td className="num">{dualHours.reduce((a,r) => a + r.nvgDual, 0).toFixed(1)}</td>
+                <td className="num">{dualHours.reduce((a,r) => a + r.totalDual, 0).toFixed(1)}</td>
+                <td className="num">{dualHours.reduce((a,r) => a + r.totalSolo, 0).toFixed(1)}</td>
+                <td></td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+        <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
+      </section>
+
+      {/* ───────── MISSION SOLO ───────── */}
+      <section className="form-page" data-testid="form-missionsolo">
+        <div className="form-meta">
+          <div><b>QRFG MISSION SOLO</b><br/>MONTH : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div className="text-center">
+            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-sub">SOLO SORTIES BY MISSION TYPE — STANDARDISATION</div>
+          </div>
+          <div className="text-right"><b>FOR : {monthHeader}</b><br/><span style={{fontSize:9, color:"#555"}}>AUTO from sortie records</span></div>
+        </div>
+        <div className="secret">SECRET ( WHEN FILLED )</div>
+        <table>
+          <thead>
+            <tr>
+              <th rowSpan={2}>#</th>
+              <th rowSpan={2}>RANK</th>
+              <th rowSpan={2}>NAME</th>
+              <th colSpan={MISSION_BUCKETS.length}>SOLO SORTIES BY MISSION TYPE</th>
+              <th rowSpan={2}>TOTAL SORTIES</th>
+              <th rowSpan={2}>TOTAL HRS</th>
+              <th rowSpan={2}>LAST SOLO</th>
+            </tr>
+            <tr>
+              {MISSION_BUCKETS.map(b => <th key={b}>{MISSION_LABEL[b]}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {missionSolo.map((r, i) => (
+              <tr key={r.pilot.id} data-testid={`solo-row-${r.pilot.id}`}>
+                <td className="center">{i+1}</td>
+                <td className="center">{r.pilot.rank}</td>
+                <td>{r.pilot.name}</td>
+                {MISSION_BUCKETS.map(b => (
+                  <td key={b} className="num">{r.soloByBucket[b] > 0 ? r.soloByBucket[b] : ""}</td>
+                ))}
+                <td className="num"><b>{r.totalSorties}</b></td>
+                <td className="num">{r.totalHours.toFixed(1)}</td>
+                <td className="center">{r.lastSoloDate || "—"}</td>
+              </tr>
+            ))}
+            {missionSolo.length === 0 && (
+              <tr><td colSpan={MISSION_BUCKETS.length + 6} className="center" style={{padding:"12px"}}>No pilots in roster.</td></tr>
+            )}
+            {missionSolo.length > 0 && (
+              <tr style={{background:"#f3f4f6", fontWeight:700}}>
+                <td colSpan={3} className="center">TOTAL</td>
+                {MISSION_BUCKETS.map(b => (
+                  <td key={b} className="num">{missionSolo.reduce((a,r) => a + r.soloByBucket[b], 0) || ""}</td>
+                ))}
+                <td className="num">{missionSolo.reduce((a,r) => a + r.totalSorties, 0)}</td>
+                <td className="num">{missionSolo.reduce((a,r) => a + r.totalHours, 0).toFixed(1)}</td>
+                <td></td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+        <div style={{marginTop:6, fontSize:10, color:"#444"}}>
+          <b>SOLO</b> = sortie where the pilot earned non-dual seat hours and no dual instruction occurred on the flight.
+          Used by the standardisation officer to track PIC currency and instructor-vs-student utilisation.
         </div>
         <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
       </section>

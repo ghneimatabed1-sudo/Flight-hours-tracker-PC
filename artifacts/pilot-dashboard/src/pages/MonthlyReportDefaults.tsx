@@ -119,6 +119,17 @@ export default function MonthlyReportDefaults() {
                 Suggest "X DAYS ANNUAL LEAVE / TDY / SICK" from leave records
               </label>
             </Field>
+            <Field label="Min 6-month flying hours (currency floor)">
+              <input type="number" step="1" min="0" value={d.minSixMonthHours}
+                onChange={e => update("minSixMonthHours", parseFloat(e.target.value) || 0)}
+                className="w-full bg-background border border-border rounded px-2 py-1.5 text-sm"
+                data-testid="input-default-min-six-month-hours" />
+              <div className="text-[11px] text-muted-foreground mt-1">
+                Threshold for the SIX-MONTHS sheet status flag. Pilots at or above
+                this floor across the rolling 6-month window print as <b>OK</b>;
+                within 20% as <b>LOW</b>; below as <b>UNDER</b>.
+              </div>
+            </Field>
           </div>
         </Section>
 
