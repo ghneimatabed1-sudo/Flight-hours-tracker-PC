@@ -39,6 +39,27 @@ const isLive = () => supabaseConfigured && supabase !== null;
 let lastHeartbeatErrorMsg: string | null = null;
 let lastHeartbeatErrorAt: number | null = null;
 let lastHeartbeatOkAt: number | null = null;
+// Loud-banner state. Task #134: a stable RLS / 401 / 403 rejection
+// used to toast once and then go silent — the operator's PC would
+// silently drop out of every other PC's picker with no on-screen
+// signal. We now flip a `bannerVisible` flag immediately on any RLS
+// / 401 / 403 rejection (codes 42501 / 401 / 403 / PGRST301), or
+// after THREE consecutive non-OK heartbeats of any kind (covers
+// transient network errors that would otherwise spam every 30s
+// without telling the operator the PC is invisible upstream). The
+// banner is dismissible only by a successful heartbeat — clicking
+// "Diagnose" navigates to /diagnostic, but the banner stays until
+// the next successful upsert clears it.
+let consecutiveHbFailures = 0;
+let bannerVisible = false;
+function isLoudFailureCode(code: string | undefined | null, msg: string | undefined | null): boolean {
+  if (!code && !msg) return false;
+  const c = String(code ?? "").toLowerCase();
+  if (c === "42501" || c === "401" || c === "403" || c === "pgrst301") return true;
+  const m = String(msg ?? "");
+  if (/row[- ]level security|rls|401|403|forbidden|unauthor/i.test(m)) return true;
+  return false;
+}
 
 // Module-scope flag set by `setResetInProgress` (called from auth.tsx
 // `resetThisPC` right before the cloud DELETEs). Suppresses any
@@ -54,8 +75,9 @@ const heartbeatListeners = new Set<() => void>();
 
 function notifyHeartbeat() { for (const fn of heartbeatListeners) fn(); }
 
-function reportHeartbeatError(msg: string) {
+function reportHeartbeatError(msg: string, code?: string | null) {
   lastHeartbeatErrorAt = Date.now();
+  consecutiveHbFailures += 1;
   // Always log to the console so a developer pulling logs from a remote
   // PC can see every tick's failure, not just the first one.
   console.warn("[xpc heartbeat]", msg);
@@ -66,20 +88,50 @@ function reportHeartbeatError(msg: string) {
     lastHeartbeatErrorMsg = msg;
     recordDataError(`Cross-PC heartbeat failed: ${msg}`);
   }
+  // Loud-banner trigger: any RLS/401/403 fires immediately, otherwise
+  // require 3 consecutive failures so a single network blip does not
+  // alarm the operator.
+  if (isLoudFailureCode(code, msg) || consecutiveHbFailures >= 3) {
+    bannerVisible = true;
+  }
   notifyHeartbeat();
 }
 
 function clearHeartbeatError() {
   lastHeartbeatOkAt = Date.now();
-  if (lastHeartbeatErrorMsg !== null) {
+  consecutiveHbFailures = 0;
+  const wasBanner = bannerVisible;
+  bannerVisible = false;
+  if (lastHeartbeatErrorMsg !== null || wasBanner) {
     lastHeartbeatErrorMsg = null;
     lastHeartbeatErrorAt = null;
     notifyHeartbeat();
   }
 }
 
-export function getHeartbeatStatus(): { errorMsg: string | null; errorAt: number | null; okAt: number | null } {
-  return { errorMsg: lastHeartbeatErrorMsg, errorAt: lastHeartbeatErrorAt, okAt: lastHeartbeatOkAt };
+export function getHeartbeatStatus(): {
+  errorMsg: string | null;
+  errorAt: number | null;
+  okAt: number | null;
+  bannerVisible: boolean;
+  consecutiveFailures: number;
+} {
+  return {
+    errorMsg: lastHeartbeatErrorMsg,
+    errorAt: lastHeartbeatErrorAt,
+    okAt: lastHeartbeatOkAt,
+    bannerVisible,
+    consecutiveFailures: consecutiveHbFailures,
+  };
+}
+
+// "Heartbeat fresh" = a successful upsert within the last 90 s.
+// Used by the topbar Online badge to flip to amber when the network
+// is up but our PC has dropped off the registry. Falls back to false
+// if we have never had a successful heartbeat in this session.
+export function isHeartbeatFresh(): boolean {
+  if (!lastHeartbeatOkAt) return false;
+  return Date.now() - lastHeartbeatOkAt <= ACTIVE_WINDOW_MS;
 }
 
 export function subscribeHeartbeatStatus(fn: () => void): () => void {
@@ -655,6 +707,7 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
         if (error) {
           reportHeartbeatError(
             `Registry upsert rejected for "${o.id}" (${error.code ?? "?"}): ${error.message}`,
+            error.code,
           );
           return;
         }
@@ -827,6 +880,83 @@ export function useRegisteredPCs(): UseQueryResult<RegisteredPC[]> & { data: Reg
       // that"). The TEST_DEMO: prefix is reserved for that test harness;
       // no production PC may use it. Filter at the source so downstream
       // pickers, inboxes and counts can never see them.
+      return rows
+        .filter(r => !r.id.startsWith("TEST_DEMO:"))
+        .map(r => ({
+          ...r,
+          online: new Date(r.lastSeen).getTime() >= cutoff,
+          isSelf: r.id === me,
+        }));
+    },
+    refetchInterval: 30_000,
+    staleTime: 10_000,
+    retry: isLive() ? 1 : false,
+  });
+  return { ...q, data: q.data ?? [] } as UseQueryResult<RegisteredPC[]> & { data: RegisteredPC[] };
+}
+
+// ── Tolerant squadron-name comparison ──────────────────────────────────
+//
+// Squadron labels drift in practice — operators type "NO.8", "NO. 8",
+// "8 SQN", "8 SQDN", "no 8", "Squadron 8". The Messages and Schedule
+// pickers used to do their own ad-hoc lowercase+stripping, which
+// missed near-matches and silently dropped flight-cmdr PCs from a
+// squadron commander's recipient list. This is the single source of
+// truth: keep squadron-name comparisons routed through here so a fix
+// here propagates everywhere.
+export function normalizeSquadronKey(s: string | undefined | null): string {
+  return (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+export function squadronNameMatches(
+  a: string | undefined | null,
+  b: string | undefined | null,
+): boolean {
+  const ka = normalizeSquadronKey(a);
+  const kb = normalizeSquadronKey(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  if (ka.includes(kb) || kb.includes(ka)) return true;
+  // Bare-number fallback — "no8" ↔ "8" ↔ "sqn8" ↔ "sqdn8". Pull the
+  // first run of digits from each side and compare; same number wins.
+  const da = ka.match(/\d+/)?.[0] ?? "";
+  const db = kb.match(/\d+/)?.[0] ?? "";
+  if (da && db && da === db) return true;
+  return false;
+}
+
+// Stale-aware registry hook — same shape as useRegisteredPCs but the
+// server-side last_seen floor is widened to 24 hours so the Messages
+// picker can render PCs that have gone briefly offline as "stale"
+// rather than dropping them silently. The `online` flag still reflects
+// the 90 s ACTIVE_WINDOW_MS so callers can distinguish active from
+// stale rows. Used by Messages.tsx to comply with task #134's
+// "stale PCs are visible, not hidden" rule.
+const STALE_PICKER_WINDOW_MS = 24 * 60 * 60_000;
+export function useRegisteredPCsIncludingStale(): UseQueryResult<RegisteredPC[]> & { data: RegisteredPC[] } {
+  const q = useQuery<RegisteredPC[]>({
+    queryKey: ["xpc", "registry", "includingStale"],
+    queryFn: async () => {
+      const me = localPcId();
+      const cutoff = Date.now() - ONLINE_WINDOW_MS;
+      let rows: SquadronPC[] = [];
+      if (isLive()) {
+        rows = await liveOrLocal(
+          async () => {
+            const floor = new Date(Date.now() - STALE_PICKER_WINDOW_MS).toISOString();
+            const { data, error } = await supabase!
+              .from("xpc_registry")
+              .select("*")
+              .gte("last_seen", floor)
+              .order("last_seen", { ascending: false })
+              .limit(5000);
+            if (error) throw error;
+            return (data ?? []).map(rowToPc);
+          },
+          () => readRegistry(),
+        );
+      } else {
+        rows = readRegistry();
+      }
       return rows
         .filter(r => !r.id.startsWith("TEST_DEMO:"))
         .map(r => ({

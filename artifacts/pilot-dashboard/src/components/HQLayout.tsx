@@ -9,6 +9,7 @@ import { canUseMessages, canUseScheduleChain, canViewFinalSchedules } from "@/li
 import { useSidebarBadges } from "@/lib/sidebar-badges";
 import { FlightBindingGate, FlightBindingBadge } from "@/components/FlightBindingGate";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
+import HeartbeatFailureBanner from "@/components/HeartbeatFailureBanner";
 import emblem from "@assets/rjaf_emblem.png";
 import { RecoveryCodesLowBanner } from "@/components/RecoveryCodesLowBanner";
 import { SessionCollisionBanner } from "@/components/SessionCollisionBanner";
@@ -231,6 +232,7 @@ export function HQLayout({ children }: { children: ReactNode }) {
           </ul>
         </nav>
         <main className="flex-1 min-w-0 p-4 sm:p-6 space-y-4 overflow-y-auto">
+          <HeartbeatFailureBanner diagnosticPath={isAdmin ? "/diagnostic" : "/dashboard/diagnostic"} />
           <SessionCollisionBanner />
           {isAdmin && <RecoveryCodesLowBanner />}
           <FlightBindingGate>

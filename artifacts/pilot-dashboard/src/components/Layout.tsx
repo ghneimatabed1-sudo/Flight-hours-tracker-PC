@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { canUseMessages, canUseScheduleChain, canViewFinalSchedules } from "@/lib/cross-pc";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
+import HeartbeatFailureBanner from "@/components/HeartbeatFailureBanner";
+import { getHeartbeatStatus, isHeartbeatFresh, subscribeHeartbeatStatus } from "@/lib/cross-pc";
 import { IncomingAlertWatcher } from "@/components/IncomingAlertWatcher";
 import { SessionCollisionBanner } from "@/components/SessionCollisionBanner";
 import { useSidebarBadges } from "@/lib/sidebar-badges";
@@ -80,7 +82,50 @@ export default function Layout({ children }: { children: ReactNode }) {
   const { user, logout, squadron } = useAuth();
   const [loc] = useLocation();
   const [open, setOpen] = useState(true);
-  const [online] = useState(navigator.onLine);
+  const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+  // Re-render the topbar Online badge whenever the heartbeat ticks so
+  // the badge can flip green → amber → red as the cross-PC link
+  // degrades. The badge no longer relies on navigator.onLine alone —
+  // a PC can be on the LAN but cut off from Supabase by RLS / firewall.
+  const [, setHbTick] = useState(0);
+  useEffect(() => subscribeHeartbeatStatus(() => setHbTick(x => x + 1)), []);
+  const hb = getHeartbeatStatus();
+  const hbFresh = isHeartbeatFresh();
+  // task #134 spec — three states keyed off NETWORK availability and
+  // heartbeat freshness:
+  //   • green  : navigator.onLine && heartbeat fresh (≤90 s)
+  //   • amber  : navigator.onLine && heartbeat stale OR failing (the
+  //              network is up, but our PC is not talking to Supabase /
+  //              registry — operator should diagnose)
+  //   • red    : !navigator.onLine (PC is off the network entirely)
+  // Click anywhere on the badge opens /diagnostic so the operator can
+  // immediately investigate. The badge is a button, not a span, so
+  // it's keyboard-focusable and screen-reader-clickable.
+  const linkState: "green" | "amber" | "red" = !online
+    ? "red"
+    : hbFresh && !hb.bannerVisible
+      ? "green"
+      : "amber";
+  const linkLabel = linkState === "green"
+    ? t("online")
+    : linkState === "amber"
+      ? (hb.okAt ? "Stale" : "Connecting…")
+      : t("offline");
+  const linkCls = linkState === "green"
+    ? "text-emerald-300 bg-emerald-500/10"
+    : linkState === "amber"
+      ? "text-amber-300 bg-amber-500/10"
+      : "text-rose-300 bg-rose-500/15";
   const badges = useSidebarBadges();
 
   // Theme: dark (default — military) or light (daylight / briefing room).
@@ -225,10 +270,17 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md ${online ? "text-emerald-300 bg-emerald-500/10" : "text-amber-300 bg-amber-500/10"}`}>
-              {online ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
-              {online ? t("online") : t("offline")}
-            </span>
+            <Link
+              href="/diagnostic"
+              className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md ${linkCls} hover:opacity-90 cursor-pointer`}
+              title={hb.errorMsg ? `${linkLabel} — ${hb.errorMsg} · Click to diagnose` : `${linkLabel} · Click to diagnose`}
+              data-testid="badge-link-state"
+              data-state={linkState}
+              aria-label={`Connection ${linkLabel}. Click to open diagnostics.`}
+            >
+              {linkState === "green" ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
+              {linkLabel}
+            </Link>
             <LiveDataIndicator />
             <button onClick={() => setLang(lang === "en" ? "ar" : "en")} className="text-xs px-2 py-1 rounded-md border border-border hover:bg-secondary">
               {lang === "en" ? t("arabic") : t("english")}
@@ -254,6 +306,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
+        <HeartbeatFailureBanner diagnosticPath="/diagnostic" />
         <SessionCollisionBanner />
         <main className="flex-1 overflow-y-auto p-5">{children}</main>
       </div>

@@ -5,7 +5,7 @@ import {
   useMessages,
   useSendMessage,
   useMarkMessageRead,
-  useRegisteredPCs,
+  useRegisteredPCsIncludingStale,
   isPcActive,
   getMessageRetentionDays,
   setMessageRetentionDays,
@@ -13,12 +13,17 @@ import {
   canUseMessages,
   getLocalPcId,
   getFlightBinding,
+  squadronNameMatches,
+  getHeartbeatStatus,
+  subscribeHeartbeatStatus,
   type MessagePriority,
   type PrivateMessage,
 } from "@/lib/cross-pc";
+import { Link } from "wouter";
+import { useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { fmtDateTimeDDMM } from "@/lib/format";
-import { Mail, Send, Reply, Check, AlertOctagon, Settings } from "lucide-react";
+import { Mail, Send, Reply, Check, AlertOctagon, Settings, Activity, UserCog } from "lucide-react";
 
 // User-facing labels: keep the DB enum (normal/medium/urgent) but show
 // the operator's preferred wording (Normal / High / Very High) and the
@@ -73,7 +78,17 @@ export default function Messages() {
   const myPcId = canonicalId || fallbackId || null;
   const myPcName = squadron?.name ?? user?.displayName ?? "Local PC";
 
-  const registry = useRegisteredPCs();
+  // v1.1.110 (task #134) — pull stale (90 s – 24 h) PCs into the
+  // picker so the operator can see and choose them. The row is
+  // marked stale in the dropdown label and a yellow toast fires on
+  // send, but the operator is no longer dead-ended by a brief
+  // heartbeat lapse on the recipient PC.
+  const registry = useRegisteredPCsIncludingStale();
+  // Re-render the compose surface whenever the heartbeat status
+  // changes so the "Show error" disclosure picks up new failures
+  // without waiting for the next user interaction.
+  const [, setHbTick] = useState(0);
+  useEffect(() => subscribeHeartbeatStatus(() => setHbTick(x => x + 1)), []);
   const inbox = useMessages(myPcId);
   const send = useSendMessage();
   const markRead = useMarkMessageRead();
@@ -121,19 +136,16 @@ export default function Messages() {
       // only the composer side is gated. Linked-flight bindings still
       // bypass the active filter so a freshly reimaged flight PC stays
       // addressable.
+      // task #134: relax the 90 s gate — stale PCs (between 90 s and
+      // 24 h) are now KEPT in the picker so the operator can still
+      // address them. The dropdown row marks them with a grey dot
+      // and a yellow warning fires on send. Truly-dead PCs (>24 h)
+      // are excluded server-side by useRegisteredPCsIncludingStale.
       const base = registry.data.filter(
         p => !p.isSelf && (
           p.tier === "squadron" || p.tier === "wing" || p.tier === "base" || p.tier === "flight"
         ),
-      ).filter(p => {
-        // v1.1.73: every recipient row must pass the 90 s active gate —
-        // no exceptions. Linked-flight bindings used to bypass this so
-        // a freshly reimaged flight PC stayed addressable, but per spec
-        // ("stale PCs cannot be selected, forwarded to, or messaged")
-        // we drop the bypass to remove the only remaining path that
-        // could surface an offline PC in the recipient picker.
-        return isPcActive(p);
-      }).sort((a, b) => {
+      ).sort((a, b) => {
         // Sort by tier (base → wing → squadron → flight) then by displayed
         // name so finding a specific PC in a 100-row dropdown is fast.
         const tierOrder = { base: 0, wing: 1, squadron: 2, flight: 3 } as const;
@@ -156,38 +168,45 @@ export default function Messages() {
         // a substring + bare-number fallback), so spelling drift like
         // "NO.8" vs "no 8" vs "8 SQN" still groups correctly.
         const boundPc = registry.data.find(p => p.id === flightBinding.pcId);
-        const normalize = (s: string | undefined | null) =>
-          (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-        // v1.1.34: when the Ops PC is fully shut down and its registry
-        // row hasn't synced to this Flight PC yet, `boundPc` is
-        // undefined — leaving the Sqn Cmdr off the picker. Fall back
-        // to this Flight PC's own squadron name from the auth context
-        // so the Flight Cmdr ↔ Sqn Cmdr channel keeps working with
-        // the Ops PC powered off.
+        // v1.1.34 / task #134: when the Ops PC is fully shut down and
+        // its registry row hasn't synced to this Flight PC yet,
+        // `boundPc` is undefined — fall back to this Flight PC's own
+        // squadron name from the auth context. Squadron-name
+        // comparison is now routed through the shared
+        // squadronNameMatches() helper so spelling drift like "NO.8"
+        // vs "no 8" vs "8 SQN" vs "8 SQDN" still groups correctly
+        // (single source of truth in cross-pc.ts).
         const opsSqName = boundPc?.squadronName ?? squadron?.name ?? "";
-        const boundKey = normalize(opsSqName);
-        const boundDigits = opsSqName.match(/\d+/)?.[0] ?? "";
-        const sameSquadron = (other: { squadronName?: string }) => {
-          const k = normalize(other.squadronName);
-          if (!k || !boundKey) return false;
-          if (k === boundKey) return true;
-          if (k.includes(boundKey) || boundKey.includes(k)) return true;
-          if (boundDigits && k.includes(boundDigits)) return true;
-          return false;
-        };
-        return base.filter(p =>
+        const filtered = base.filter(p =>
           // Always include the bound Ops PC even if registry doesn't
           // show it (defensive — the binding is the source of truth).
           p.id === flightBinding.pcId
           // Plus every squadron-tier PC sharing the bound squadron —
           // picks up the Squadron Commander PC alongside the Ops PC.
-          || (p.tier === "squadron" && sameSquadron(p))
+          || (p.tier === "squadron" && squadronNameMatches(p.squadronName, opsSqName))
         );
+        // v1.1.108 forgiving fallback (ported from FlightProgram.tsx):
+        // when the strict Flight-Cmdr filter still yields zero rows,
+        // surface every non-self PC the registry knows about so the
+        // operator can pick manually rather than be dead-ended. The
+        // submit-time same-squadron guard still applies so a Flight
+        // Cmdr cannot accidentally message outside their bound
+        // squadron — this only affects what they SEE.
+        if (filtered.length === 0) {
+          return {
+            list: registry.data
+              .filter(p => !p.isSelf)
+              .sort((a, b) => (a.deviceName || a.squadronName).localeCompare(b.deviceName || b.squadronName)),
+            usingFallback: true,
+          };
+        }
+        return { list: filtered, usingFallback: false };
       }
-      return base;
+      return { list: base, usingFallback: false };
     },
     [registry.data, isFlightCmdr, flightBinding?.pcId, linkedFlightPcIds],
   );
+  const usingFlightFallback = selectablePCs.usingFallback;
   // v1.1.73: previously a "show every non-self PC" fallback fired when
   // the strict tier filter yielded zero rows, so an operator could
   // still pick someone manually. That fallback is removed because it
@@ -195,8 +214,7 @@ export default function Messages() {
   // single-source active rule. With the picker empty, the operator
   // must use a "By role" logical seat — those are virtual and route
   // to whoever's actually online next.
-  const usingFallbackRecipients = false;
-  const effectiveSelectablePCs = selectablePCs;
+  const effectiveSelectablePCs = selectablePCs.list;
   // Set of every PC id the local registry currently considers active
   // (heartbeat in the last 90 s). Passed into MessageList so existing
   // threads with a now-inactive counterpart can render an "Offline"
@@ -255,13 +273,26 @@ export default function Messages() {
     // out of registry, so a composeTo that refers to a PC missing
     // from registry is necessarily offline — covers replies to a PC
     // that has since dropped). Logical seats are virtual and bypass.
-    if (composeTo && !seatTarget && !activePcIds.has(composeTo)) {
+    // task #134: stale recipients (90 s – 24 h) are no longer dead-
+    // ended. If the picked PC is in the registry but stale, warn the
+    // operator with a yellow toast and proceed — the message will
+    // queue locally / land when the PC's heartbeat resumes. Truly
+    // unknown PCs (not even in the 24 h registry) still hard-block.
+    if (composeTo && !seatTarget && !realTarget) {
       toast({
-        title: "Recipient is offline",
-        description: "That PC has not sent a heartbeat in the last 90 seconds. Pick another recipient or use a 'By role' option.",
+        title: "Recipient not found",
+        description: "That PC has not been seen in the last 24 hours. Pick another recipient or use a 'By role' option above.",
         variant: "destructive",
       });
       return;
+    }
+    if (composeTo && realTarget && !seatTarget && !activePcIds.has(composeTo)) {
+      toast({
+        title: "Recipient is stale",
+        description: "No heartbeat in the last 90 seconds — sending anyway. The message will queue and deliver once their PC reconnects.",
+        variant: "default",
+        className: "bg-amber-500/15 border-amber-500/40 text-amber-100",
+      });
     }
     if (!realTarget && !seatTarget) { toast({ title: "Recipient not found", variant: "destructive" }); return; }
     const target = realTarget ?? {
@@ -281,24 +312,13 @@ export default function Messages() {
       // selectablePCs filter so what the operator can SEE matches
       // what the send guard accepts.
       const boundPc = registry.data.find(p => p.id === flightBinding.pcId);
-      const normalize = (s: string | undefined | null) =>
-        (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-      // v1.1.34: same fallback as the picker — if the Ops PC is shut
-      // down and unreachable in registry, anchor the same-squadron
-      // check on this Flight PC's own auth squadron name so the send
-      // to the Sqn Cmdr still passes the guard.
+      // task #134: route same-squadron comparison through the shared
+      // squadronNameMatches() helper so picker and submit guard agree
+      // (they used to maintain two near-identical normalisers that
+      // could silently drift).
       const opsSqName = boundPc?.squadronName ?? squadron?.name ?? "";
-      const boundKey = normalize(opsSqName);
-      const boundDigits = opsSqName.match(/\d+/)?.[0] ?? "";
-      const targetKey = normalize(target.squadronName);
-      const sameSquadron =
-        !!boundKey && !!targetKey && (
-          targetKey === boundKey
-          || targetKey.includes(boundKey) || boundKey.includes(targetKey)
-          || (!!boundDigits && targetKey.includes(boundDigits))
-        );
       const isBound = target.id === flightBinding.pcId;
-      const isSquadronPeer = target.tier === "squadron" && sameSquadron;
+      const isSquadronPeer = target.tier === "squadron" && squadronNameMatches(target.squadronName, opsSqName);
       if (!isBound && !isSquadronPeer) {
         toast({ title: "Flight Commander may only message PCs in the bound squadron", variant: "destructive" });
         return;
@@ -384,22 +404,44 @@ export default function Messages() {
                   </optgroup>
                 )}
                 <optgroup label={`Registered PCs (${effectiveSelectablePCs.length})`}>
-                  {effectiveSelectablePCs.map(p => (
-                    <option key={p.id} value={p.id} disabled={!isPcActive(p)}>
-                      {p.deviceName || p.squadronName} · {p.tier}{isPcActive(p) ? " · online" : " · offline"}
-                    </option>
-                  ))}
+                  {effectiveSelectablePCs.map(p => {
+                    const active = isPcActive(p);
+                    // task #134: stale rows (older than 90 s but within
+                    // 24 h) stay selectable. The label includes a grey
+                    // "●" dot, the literal word "stale", and a relative
+                    // "last seen Xm ago" so operators can judge how
+                    // long ago the recipient was reachable. Screen
+                    // readers get the same info via aria-label so
+                    // visually-impaired users aren't disadvantaged.
+                    const ageLbl = !active ? ` — last seen ${relativeAge(p.lastSeen)}` : "";
+                    const lbl = active ? " · online" : ` · ● stale${ageLbl}`;
+                    const aria = active
+                      ? `${p.deviceName || p.squadronName}, ${p.tier}, online`
+                      : `${p.deviceName || p.squadronName}, ${p.tier}, stale, last seen ${relativeAge(p.lastSeen)}`;
+                    return (
+                      <option key={p.id} value={p.id} aria-label={aria}>
+                        {p.deviceName || p.squadronName} · {p.tier}{lbl}
+                      </option>
+                    );
+                  })}
                 </optgroup>
               </select>
-              {usingFallbackRecipients && (
-                <p className="text-[11px] text-amber-300 mt-1">
-                  No PC matched the strict tier filter — showing every PC in the registry ({effectiveSelectablePCs.length}). Pick the right one manually.
+              {usingFlightFallback && (
+                <p
+                  className="text-[11px] text-amber-300 mt-1 border border-amber-500/40 bg-amber-500/10 rounded-md px-2 py-1"
+                  data-testid="text-fallback-warning"
+                  role="alert"
+                >
+                  Showing every registered PC because no exact match was found — pick carefully.
                 </p>
               )}
               {effectiveSelectablePCs.length === 0 && (
-                <p className="text-[11px] text-amber-300 mt-1">
-                  No other PC has registered yet on this network. Use a "By role" option above — the message will deliver the moment that role's PC comes online.
-                </p>
+                <DeadEndGate
+                  hb={getHeartbeatStatus()}
+                  myTier={myTier}
+                  logicalSeatTargets={logicalSeatTargets}
+                  onPickSeat={(id) => { setComposeTo(id); }}
+                />
               )}
               <p className="text-[11px] text-muted-foreground mt-1">
                 Registry on this PC: {registry.data.length} PC(s) total
@@ -408,17 +450,25 @@ export default function Messages() {
                 )}
               </p>
               {composeTo && (() => {
-                // Logical-seat targets ("any Sqn Cmdr in NO.8") are
-                // virtual — they always accept a send because whoever
-                // signs in next gets the message. Only direct PC ids
-                // need the active-window check.
+                // task #134: stale recipients (no heartbeat in 90 s
+                // but seen in the last 24 h) are now allowed — show
+                // a non-blocking yellow note explaining the message
+                // will queue. Truly-unknown recipients still get a
+                // red blocker note (Send button is disabled below).
                 const seat = logicalSeatTargets.find(s => s.id === composeTo);
                 if (seat) return null;
                 const sel = effectiveSelectablePCs.find(p => p.id === composeTo);
                 if (sel && isPcActive(sel)) return null;
+                if (sel) {
+                  return (
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1" data-testid="text-stale-warning">
+                      This PC is stale (no heartbeat in the last 90 s, but seen in the last 24 h). Sending is allowed — the message will queue and deliver once their PC reconnects.
+                    </p>
+                  );
+                }
                 return (
-                  <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1">
-                    This PC is offline (no heartbeat in the last 90 s). Sending is disabled — pick another recipient or wait for it to reconnect, or use a "By role" option above so the message routes to whichever PC of that role next signs in.
+                  <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-1">
+                    This recipient has not been seen in the last 24 h — pick another recipient or use a "By role" option above.
                   </p>
                 );
               })()}
@@ -468,12 +518,17 @@ export default function Messages() {
                 // active-window filter excludes it) is still
                 // recognised as offline and the button stays disabled.
                 const seat = logicalSeatTargets.find(s => s.id === composeTo);
-                const recipientOffline = !!composeTo && !seat && !activePcIds.has(composeTo);
+                // task #134: only hard-block when the recipient is
+                // genuinely unknown (not in the 24 h registry AND not
+                // a logical seat). Stale-but-seen recipients submit
+                // through with a yellow toast.
+                const knownInRegistry = !!composeTo && registry.data.some(p => p.id === composeTo);
+                const recipientUnknown = !!composeTo && !seat && !knownInRegistry;
                 return (
                   <button
                     onClick={submitSend}
-                    disabled={send.isPending || recipientOffline}
-                    title={recipientOffline ? "Recipient PC is offline (no heartbeat in 90 s) — cannot send" : undefined}
+                    disabled={send.isPending || recipientUnknown}
+                    title={recipientUnknown ? "Recipient PC has not been seen in the last 24 h — cannot send" : undefined}
                     className="px-4 py-2 rounded-md bg-primary text-primary-foreground font-semibold inline-flex items-center gap-2 disabled:opacity-50"
                     data-testid="button-send"
                   >
@@ -514,6 +569,105 @@ export default function Messages() {
           </div>
         </Card>
       )}
+    </div>
+  );
+}
+
+// Dead-end replacement (task #134). When the picker has no recipients
+// AND there are no logical-seat targets either, the operator used to
+// see a single line of amber text and a disabled Send button. Replace
+// that with three actionable cards so they always have a next step:
+//
+//   1. Diagnose — link to /diagnostic so the operator can see WHY
+//      their PC isn't seeing other PCs (heartbeat error, RLS, no
+//      Supabase config, etc.).
+//   2. Send by role — explains the "By role" path and points at the
+//      logical-seat picker above (covers wing/base operators when
+//      no flight PCs are online yet).
+//   3. Show error — collapsible details panel with the verbatim last
+//      heartbeat error so they can copy-paste it to support.
+// Render a relative-age suffix like "12s ago" / "4m ago" / "2h ago"
+// for a stale PC's lastSeen timestamp. Used in the picker label and
+// aria-label so operators can judge how stale a recipient is at a
+// glance (a 91-second lag is very different from a 4-hour lag).
+function relativeAge(lastSeen: string): string {
+  const ms = Date.now() - new Date(lastSeen).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "just now";
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+function DeadEndGate({
+  hb,
+  myTier,
+  logicalSeatTargets,
+  onPickSeat,
+}: {
+  hb: ReturnType<typeof getHeartbeatStatus>;
+  myTier: "flight" | "squadron" | "wing" | "base";
+  logicalSeatTargets: Array<{ id: string; label: string; tier: "flight"|"squadron"|"wing"|"base" }>;
+  onPickSeat: (id: string) => void;
+}) {
+  const [showErr, setShowErr] = useState(false);
+  const seatsAvailable = logicalSeatTargets.length > 0;
+  return (
+    <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2" data-testid="messages-dead-end">
+      <Link
+        href={myTier === "flight" || myTier === "squadron" ? "/diagnostic" : "/dashboard/diagnostic"}
+        className="rounded-md border border-border bg-secondary/40 p-3 hover:bg-secondary/60 transition"
+        data-testid="dead-end-diagnose"
+      >
+        <div className="flex items-center gap-1.5 text-xs font-semibold">
+          <Activity className="h-3.5 w-3.5" /> Diagnose
+        </div>
+        <div className="text-[11px] text-muted-foreground mt-1">
+          Open the diagnostic page to see why this PC isn't seeing the other PCs (heartbeat / RLS / config).
+        </div>
+      </Link>
+      <button
+        type="button"
+        onClick={seatsAvailable ? () => onPickSeat(logicalSeatTargets[0].id) : undefined}
+        disabled={!seatsAvailable}
+        className="text-left rounded-md border border-border bg-secondary/40 p-3 hover:bg-secondary/60 transition disabled:opacity-50 disabled:cursor-not-allowed"
+        data-testid="dead-end-by-role"
+        title={seatsAvailable
+          ? `Auto-select "${logicalSeatTargets[0].label}" so the message routes to whoever signs in for that seat`
+          : "No logical-seat targets are available for your role"}
+      >
+        <div className="flex items-center gap-1.5 text-xs font-semibold">
+          <UserCog className="h-3.5 w-3.5" /> Send by role anyway
+        </div>
+        <div className="text-[11px] text-muted-foreground mt-1">
+          {seatsAvailable
+            ? <>Click to address <em>{logicalSeatTargets[0].label}</em> — the message routes to whoever signs in for that seat.</>
+            : "No logical-seat targets are available — wait for another PC to register, or use Diagnose."}
+        </div>
+      </button>
+      <button
+        type="button"
+        onClick={() => setShowErr(v => !v)}
+        className="text-left rounded-md border border-border bg-secondary/40 p-3 hover:bg-secondary/60 transition"
+        data-testid="dead-end-show-error"
+      >
+        <div className="flex items-center gap-1.5 text-xs font-semibold">
+          <AlertOctagon className="h-3.5 w-3.5" /> {showErr ? "Hide error" : "Show error"}
+        </div>
+        <div className="text-[11px] text-muted-foreground mt-1">
+          {hb.errorMsg
+            ? "View the last cross-PC heartbeat error verbatim."
+            : "No recent heartbeat error recorded — registry may simply be empty on this network."}
+        </div>
+        {showErr && hb.errorMsg && (
+          <pre className="mt-2 whitespace-pre-wrap break-words text-[10px] font-mono text-rose-300 bg-black/30 p-2 rounded border border-rose-500/30">
+            {hb.errorMsg}
+          </pre>
+        )}
+      </button>
     </div>
   );
 }
