@@ -136,6 +136,8 @@ function rowsToSnapshot(
     openingNvg: num(d.openingNvg) + ihNvg,
     openingCaptain: num(d.openingCaptain) + ihCaptain,
     openingSim: num(d.openingSim),
+    // Instrument hours — overlay-only baseline (see initial-hours.md).
+    openingInstrument: ih ? num(ih.instrument) : 0,
     expiry: {
       day: str(expiry.day) ?? "",
       night: str(expiry.night) ?? "",

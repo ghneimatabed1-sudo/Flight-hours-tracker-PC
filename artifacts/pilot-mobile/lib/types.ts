@@ -15,6 +15,12 @@ export interface PilotProfile {
   openingNvg: number;
   openingCaptain: number;
   openingSim: number;
+  // Lifetime instrument (ACT) hours — overlay label, not added to grand
+  // total. Sourced from the dashboard baseline `data.initialHours.instrument`.
+  // Surfaced on the home screen as an overlay chip alongside Captain/Sim
+  // so the pilot can see the value without it inflating flight time. See
+  // `.local/memory/initial-hours.md` for the canonical contract.
+  openingInstrument?: number;
   expiry: {
     day: string;
     night: string;

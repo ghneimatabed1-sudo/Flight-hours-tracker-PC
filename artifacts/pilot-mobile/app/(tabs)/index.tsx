@@ -11,9 +11,9 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Circle, G } from "react-native-svg";
 
 import { CurrencyTile } from "@/components/CurrencyTile";
-import { Stat } from "@/components/Stat";
 import { useColors } from "@/hooks/useColors";
 import { computeCurrencies, computeTotals, formatHours } from "@/lib/calculations";
 import { useAppData } from "@/lib/data";
@@ -168,111 +168,117 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* ── Quick stats ───────────────────────── */}
-      <View style={[styles.row, styles.gap]}>
-        <Stat
-          label={t("home_month_hours")}
-          value={formatHours(totals.monthTotal)}
-          hint={`${totals.sortiesThisMonth} ${t("home_sortie_count")}`}
-          emphasis
-          isRTL={isRTL}
-        />
-        <Stat
-          label={t("home_captain")}
-          value={formatHours(totals.totalCaptain)}
-          isRTL={isRTL}
-        />
-      </View>
-
-      <View style={[styles.row, styles.gap]}>
-        <Stat label={t("home_sim").toUpperCase()} value={formatHours(totals.totalSim)} isRTL={isRTL} />
-        <Stat label={t("home_nvg").toUpperCase()} value={formatHours(totals.totalNvg)} isRTL={isRTL} />
-      </View>
-
-      {/* ── Half-year breakdown table (matches old APK summary page) ──── */}
-      <View style={[styles.table, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Text style={[styles.tableTitle, { color: colors.foreground, textAlign: align }]}>
-          {t("home_breakdown_title")}
-        </Text>
-        <Text style={[styles.tableHint, { color: colors.mutedForeground, textAlign: align }]}>
-          {`${t("home_breakdown_hint")} · ${new Date().getFullYear()}`}
-        </Text>
-
-        <View style={[styles.tblHead, { borderColor: colors.border, flexDirection: rowDir }]}>
-          <Text style={[styles.tblCellLabel, { color: colors.mutedForeground }]}>{""}</Text>
-          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_day")}</Text>
-          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_night")}</Text>
-          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_nvg")}</Text>
-          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_sim")}</Text>
-          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_total")}</Text>
-        </View>
-
-        <BreakdownRow
-          label={`${t("home_h1")} · ${t("home_h1_hint")}`}
-          sub={`${totals.h1.sorties} ${t("home_col_sorties")}`}
-          cells={[totals.h1.day, totals.h1.night, totals.h1.nvg, totals.h1.sim, totals.h1.total]}
-          rowDir={rowDir}
-        />
-        <BreakdownRow
-          label={`${t("home_h2")} · ${t("home_h2_hint")}`}
-          sub={`${totals.h2.sorties} ${t("home_col_sorties")}`}
-          cells={[totals.h2.day, totals.h2.night, totals.h2.nvg, totals.h2.sim, totals.h2.total]}
-          rowDir={rowDir}
-        />
-        <BreakdownRow
-          label={t("home_year")}
-          sub={`${totals.h1.sorties + totals.h2.sorties} ${t("home_col_sorties")}`}
-          cells={[
-            totals.h1.day + totals.h2.day,
-            totals.h1.night + totals.h2.night,
-            totals.h1.nvg + totals.h2.nvg,
-            totals.h1.sim + totals.h2.sim,
-            totals.yearHours,
-          ]}
-          emphasis
-          rowDir={rowDir}
-        />
-      </View>
-
-      {/* ── Career totals (career = opening balance + every logged sortie) ──── */}
-      <View style={[styles.table, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Text style={[styles.tableTitle, { color: colors.foreground, textAlign: align }]}>
-          {t("home_career_title")}
-        </Text>
-        <Text style={[styles.tableHint, { color: colors.mutedForeground, textAlign: align }]}>
-          {`${t("home_career_hint")} · ${totals.totalSorties} ${t("home_col_sorties")}`}
-        </Text>
-
-        <View style={[styles.tblHead, { borderColor: colors.border, flexDirection: rowDir }]}>
-          <Text style={[styles.tblCellLabel, { color: colors.mutedForeground }]}>{""}</Text>
-          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_day")}</Text>
-          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_night")}</Text>
-          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_nvg")}</Text>
-          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_sim")}</Text>
-          <Text style={[styles.tblCell, styles.tblCellHead, { color: colors.mutedForeground }]}>{t("home_col_pic")}</Text>
-        </View>
-
-        <BreakdownRow
-          label={t("home_total_hours")}
-          sub=""
-          cells={[totals.totalDay, totals.totalNight, totals.totalNvg, totals.totalSim, totals.totalCaptain]}
-          emphasis
-          rowDir={rowDir}
-        />
-        <View style={[styles.tblGrandRow, { borderColor: colors.border, flexDirection: rowDir }]}>
-          <Text style={[styles.tblCellLabel, { color: colors.foreground }]}>
-            {`${t("home_total_hours")}  (D+N)`}
+      {/* ── Career composition (3 rings + overlay chips) ──── */}
+      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[styles.cardHeadRow, { flexDirection: rowDir }]}>
+          <Text style={[styles.cardEyebrow, { color: colors.mutedForeground }]}>
+            {`// ${t("home_career_title").toUpperCase()}`}
           </Text>
-          <Text style={[styles.tblGrandValue, { color: colors.primary }]}>
-            {formatHours(totals.grandTotal)}
+          <View style={{ flex: 1 }} />
+          <Text style={[styles.cardMeta, { color: colors.mutedForeground }]}>
+            {`${totals.totalSorties} ${t("home_col_sorties")}`}
           </Text>
         </View>
-        <View style={[styles.tblGrandRow, { borderColor: colors.border, flexDirection: rowDir }]}>
-          <Text style={[styles.tblCellLabel, { color: colors.foreground }]}>
-            {t("home_second_pilot")}
+
+        <View style={[styles.ringsRow, { flexDirection: rowDir }]}>
+          <RingStat
+            label={t("home_day").toUpperCase()}
+            value={totals.totalDay}
+            total={totals.grandTotal}
+            color={colors.primary}
+            track={colors.border}
+            fg={colors.foreground}
+            muted={colors.mutedForeground}
+          />
+          <RingStat
+            label={t("home_night").toUpperCase()}
+            value={totals.totalNight}
+            total={totals.grandTotal}
+            color="#7C9CFF"
+            track={colors.border}
+            fg={colors.foreground}
+            muted={colors.mutedForeground}
+          />
+          <RingStat
+            label={t("home_nvg").toUpperCase()}
+            value={totals.totalNvg}
+            total={totals.grandTotal}
+            color="#4ADE80"
+            track={colors.border}
+            fg={colors.foreground}
+            muted={colors.mutedForeground}
+          />
+        </View>
+
+        <View style={[styles.grandBar, { borderColor: colors.border }]}>
+          <Text style={[styles.grandLabel, { color: colors.mutedForeground }]}>
+            {t("home_total_hours").toUpperCase()}
           </Text>
-          <Text style={[styles.tblGrandValue, { color: colors.foreground }]}>
-            {formatHours(totals.totalSecondPilot)}
+          <Text style={[styles.grandValue, { color: colors.primary }]}>
+            {`${formatHours(totals.grandTotal)} ${t("home_hrs").toUpperCase()}`}
+          </Text>
+        </View>
+
+        <Text style={[styles.overlayCaption, { color: colors.mutedForeground, textAlign: align }]}>
+          {t("home_overlay_caption")}
+        </Text>
+        <View style={[styles.overlayRow, { flexDirection: rowDir }]}>
+          <OverlayPill label={t("home_captain").toUpperCase()} value={formatHours(totals.totalCaptain)} />
+          <OverlayPill label={t("home_second_pilot").toUpperCase()} value={formatHours(totals.totalSecondPilot)} />
+          <OverlayPill label={t("home_instrument").toUpperCase()} value={formatHours(profile.openingInstrument ?? 0)} />
+          <OverlayPill label={t("home_sim").toUpperCase()} value={formatHours(totals.totalSim)} />
+        </View>
+      </View>
+
+      {/* ── Year breakdown (H1 vs H2 visual bars) ──── */}
+      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[styles.cardHeadRow, { flexDirection: rowDir }]}>
+          <Text style={[styles.cardEyebrow, { color: colors.mutedForeground }]}>
+            {`// ${new Date().getFullYear()} · ${t("home_breakdown_title").toUpperCase()}`}
+          </Text>
+          <View style={{ flex: 1 }} />
+          <Text style={[styles.cardMeta, { color: colors.primary, fontFamily: "Inter_700Bold" }]}>
+            {`${formatHours(totals.yearHours)} ${t("home_hrs").toUpperCase()}`}
+          </Text>
+        </View>
+
+        <HalfYearBar
+          title={`${t("home_h1")} · ${t("home_h1_hint")}`}
+          total={totals.h1.total}
+          day={totals.h1.day}
+          night={totals.h1.night}
+          nvg={totals.h1.nvg}
+          sorties={totals.h1.sorties}
+          maxValue={Math.max(totals.h1.total, totals.h2.total, 1)}
+          rowDir={rowDir}
+          align={align}
+        />
+        <HalfYearBar
+          title={`${t("home_h2")} · ${t("home_h2_hint")}`}
+          total={totals.h2.total}
+          day={totals.h2.day}
+          night={totals.h2.night}
+          nvg={totals.h2.nvg}
+          sorties={totals.h2.sorties}
+          maxValue={Math.max(totals.h1.total, totals.h2.total, 1)}
+          rowDir={rowDir}
+          align={align}
+        />
+
+        <View style={[styles.legendRow, { flexDirection: rowDir }]}>
+          <LegendDot color={colors.primary} label={t("home_day").toUpperCase()} />
+          <LegendDot color="#7C9CFF" label={t("home_night").toUpperCase()} />
+          <LegendDot color="#4ADE80" label={t("home_nvg").toUpperCase()} />
+        </View>
+
+        <View style={[styles.monthChip, { borderColor: colors.border, flexDirection: rowDir }]}>
+          <Feather name="calendar" size={12} color={colors.mutedForeground} />
+          <Text style={[styles.monthChipLabel, { color: colors.mutedForeground }]}>
+            {t("home_month_hours").toUpperCase()}
+          </Text>
+          <View style={{ flex: 1 }} />
+          <Text style={[styles.monthChipValue, { color: colors.foreground }]}>
+            {`${formatHours(totals.monthTotal)} · ${totals.sortiesThisMonth} ${t("home_sortie_count")}`}
           </Text>
         </View>
       </View>
@@ -341,54 +347,167 @@ function HeroChip({ label, value, accent }: { label: string; value: string; acce
   );
 }
 
-function BreakdownRow({
+/**
+ * Circular ring stat used in the career composition card. Renders a thin
+ * track with a thicker accent arc representing `value / total`. The center
+ * of the ring shows the absolute hours; the percentage of career total
+ * sits below the label so the pilot reads:
+ *
+ *   12.4
+ *    DAY
+ *    62%
+ *
+ * Designed to live in a 3-up row alongside Night and NVG so the pilot
+ * sees the full flying mix at a glance without a spreadsheet.
+ */
+function RingStat({
   label,
-  sub,
-  cells,
-  emphasis,
-  rowDir,
+  value,
+  total,
+  color,
+  track,
+  fg,
+  muted,
 }: {
   label: string;
-  sub: string;
-  cells: number[];
-  emphasis?: boolean;
-  rowDir: "row" | "row-reverse";
+  value: number;
+  total: number;
+  color: string;
+  track: string;
+  fg: string;
+  muted: string;
 }) {
+  const size = 92;
+  const stroke = 8;
+  const radius = (size - stroke) / 2;
+  const circ = 2 * Math.PI * radius;
+  const pct = total > 0 ? Math.min(1, value / total) : 0;
+  const dash = circ * pct;
+  const pctLabel = `${Math.round(pct * 100)}%`;
+
+  return (
+    <View style={styles.ringWrap}>
+      <View style={{ width: size, height: size }}>
+        <Svg width={size} height={size}>
+          <G rotation={-90} originX={size / 2} originY={size / 2}>
+            <Circle
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              stroke={track}
+              strokeOpacity={0.6}
+              strokeWidth={stroke}
+              fill="none"
+            />
+            <Circle
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              stroke={color}
+              strokeWidth={stroke}
+              strokeLinecap="round"
+              strokeDasharray={`${dash} ${circ - dash}`}
+              fill="none"
+            />
+          </G>
+        </Svg>
+        <View style={styles.ringCenter}>
+          <Text style={[styles.ringValue, { color: fg }]}>{formatHours(value)}</Text>
+        </View>
+      </View>
+      <Text style={[styles.ringLabel, { color: muted }]}>{label}</Text>
+      <Text style={[styles.ringPct, { color }]}>{pctLabel}</Text>
+    </View>
+  );
+}
+
+/**
+ * Pill-shaped overlay stat (Captain / Second Pilot / Instrument / Sim).
+ * Sits in a 4-up wrap row beneath the rings. Visually distinct from the
+ * grand-total bar so pilots understand these are *labels on the same
+ * flight time*, not extra hours that add to the total — see the
+ * `Time vs Overlay` rule in `.local/memory/initial-hours.md`.
+ */
+function OverlayPill({ label, value }: { label: string; value: string }) {
   const colors = useColors();
   return (
-    <View
-      style={[
-        styles.tblRow,
-        {
-          borderColor: colors.border,
-          flexDirection: rowDir,
-          backgroundColor: emphasis ? colors.primary + "14" : "transparent",
-        },
-      ]}
-    >
-      <View style={styles.tblLabelCell}>
-        <Text style={[styles.tblLabel, { color: colors.foreground, fontWeight: emphasis ? "700" : "600" }]}>
-          {label}
+    <View style={[styles.pill, { backgroundColor: colors.background, borderColor: colors.border }]}>
+      <Text style={[styles.pillLabel, { color: colors.mutedForeground }]}>{label}</Text>
+      <Text style={[styles.pillValue, { color: colors.foreground }]}>{value}</Text>
+    </View>
+  );
+}
+
+/**
+ * Single half-year row: a horizontal stacked bar split into Day/Night/NVG
+ * segments, sized proportional to the larger of H1/H2 so both halves
+ * share a common scale. The right side carries hours + sortie count so
+ * the row reads top-to-bottom as a tiny chart card.
+ */
+function HalfYearBar({
+  title,
+  total,
+  day,
+  night,
+  nvg,
+  sorties,
+  maxValue,
+  rowDir,
+  align,
+}: {
+  title: string;
+  total: number;
+  day: number;
+  night: number;
+  nvg: number;
+  sorties: number;
+  maxValue: number;
+  rowDir: "row" | "row-reverse";
+  align: "left" | "right";
+}) {
+  const colors = useColors();
+  const widthPct = Math.max(0.04, total / maxValue) * 100;
+  const safe = total > 0 ? total : 1;
+  const dayPct = total > 0 ? (day / safe) * 100 : 100;
+  const nightPct = total > 0 ? (night / safe) * 100 : 0;
+  const nvgPct = total > 0 ? (nvg / safe) * 100 : 0;
+  const empty = total === 0;
+
+  return (
+    <View style={styles.halfRow}>
+      <View style={[styles.halfHeader, { flexDirection: rowDir }]}>
+        <Text style={[styles.halfTitle, { color: colors.foreground, textAlign: align }]}>{title}</Text>
+        <View style={{ flex: 1 }} />
+        <Text style={[styles.halfMeta, { color: colors.mutedForeground }]}>
+          {`${formatHours(total)} · ${sorties}`}
         </Text>
-        {sub ? (
-          <Text style={[styles.tblSub, { color: colors.mutedForeground }]}>{sub}</Text>
-        ) : null}
       </View>
-      {cells.map((v, i) => (
-        <Text
-          key={i}
-          style={[
-            styles.tblCell,
-            styles.tblCellValue,
-            {
-              color: emphasis && i === cells.length - 1 ? colors.primary : colors.foreground,
-              fontWeight: emphasis ? "700" : "500",
-            },
-          ]}
+      <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
+        <View
+          style={{
+            width: `${widthPct}%`,
+            height: "100%",
+            flexDirection: "row",
+            opacity: empty ? 0.25 : 1,
+            borderRadius: 6,
+            overflow: "hidden",
+          }}
         >
-          {formatHours(v)}
-        </Text>
-      ))}
+          <View style={{ width: `${dayPct}%`, backgroundColor: empty ? colors.mutedForeground : colors.primary }} />
+          <View style={{ width: `${nightPct}%`, backgroundColor: "#7C9CFF" }} />
+          <View style={{ width: `${nvgPct}%`, backgroundColor: "#4ADE80" }} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function LegendDot({ color, label }: { color: string; label: string }) {
+  const colors = useColors();
+  return (
+    <View style={styles.legendItem}>
+      <View style={[styles.legendSwatch, { backgroundColor: color }]} />
+      <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>{label}</Text>
     </View>
   );
 }
@@ -503,88 +622,192 @@ const styles = StyleSheet.create({
     alignItems: "stretch",
   },
 
-  // grids
-  row: { flexDirection: "row", gap: 12 },
-  gap: { marginTop: 0 },
-
-  // breakdown table
-  table: {
-    borderRadius: 14,
+  // ── Career composition + year breakdown card ────────────────────
+  card: {
+    borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
-    padding: 14,
-    gap: 4,
+    padding: 18,
+    gap: 14,
   },
-  tableTitle: {
-    fontSize: 14,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: 0.3,
+  cardHeadRow: {
+    alignItems: "center",
+    gap: 8,
   },
-  tableHint: {
+  cardEyebrow: {
     fontSize: 10,
-    fontFamily: "Inter_500Medium",
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 1.8,
+    textTransform: "uppercase",
+  },
+  cardMeta: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
     letterSpacing: 1.2,
     textTransform: "uppercase",
-    marginBottom: 8,
-  },
-  tblHead: {
-    alignItems: "center",
-    paddingVertical: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  tblRow: {
-    alignItems: "center",
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderRadius: 4,
-  },
-  tblLabelCell: {
-    flex: 1.6,
-    paddingHorizontal: 4,
-  },
-  tblLabel: {
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
-  },
-  tblSub: {
-    fontSize: 9,
-    fontFamily: "Inter_500Medium",
-    letterSpacing: 0.6,
-    textTransform: "uppercase",
-    marginTop: 2,
-  },
-  tblCell: {
-    flex: 1,
-    textAlign: "center",
     fontVariant: ["tabular-nums"],
   },
-  tblCellHead: {
-    fontSize: 10,
-    fontFamily: "Inter_600SemiBold",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-  },
-  tblCellValue: {
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
-  },
-  tblCellLabel: {
-    flex: 1.6,
-    fontSize: 10,
-    fontFamily: "Inter_600SemiBold",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-    paddingHorizontal: 4,
-  },
-  tblGrandRow: {
+
+  // rings
+  ringsRow: {
     alignItems: "center",
-    paddingVertical: 10,
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  ringWrap: {
+    flex: 1,
+    alignItems: "center",
+    gap: 6,
+  },
+  ringCenter: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ringValue: {
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: -0.5,
+    fontVariant: ["tabular-nums"],
+  },
+  ringLabel: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 1.6,
+  },
+  ringPct: {
+    fontSize: 10,
+    fontFamily: "Inter_600SemiBold",
+    fontVariant: ["tabular-nums"],
+    letterSpacing: 0.4,
+  },
+
+  // grand total bar
+  grandBar: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    paddingTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  tblGrandValue: {
-    fontSize: 18,
+  grandLabel: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 1.8,
+  },
+  grandValue: {
+    fontSize: 22,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: -0.6,
+    fontVariant: ["tabular-nums"],
+  },
+
+  // overlays
+  overlayCaption: {
+    fontSize: 9,
+    fontFamily: "Inter_500Medium",
+    letterSpacing: 1.4,
+    textTransform: "uppercase",
+    opacity: 0.75,
+  },
+  overlayRow: {
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  pill: {
+    flexGrow: 1,
+    flexBasis: "47%",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  pillLabel: {
+    fontSize: 10,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 1.2,
+  },
+  pillValue: {
+    fontSize: 14,
     fontFamily: "Inter_700Bold",
     fontVariant: ["tabular-nums"],
-    paddingHorizontal: 4,
+  },
+
+  // half-year stacked bars
+  halfRow: {
+    gap: 6,
+  },
+  halfHeader: {
+    alignItems: "baseline",
+    gap: 8,
+  },
+  halfTitle: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.3,
+  },
+  halfMeta: {
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+    fontVariant: ["tabular-nums"],
+    letterSpacing: 0.4,
+  },
+  barTrack: {
+    height: 12,
+    borderRadius: 6,
+    overflow: "hidden",
+  },
+
+  // legend
+  legendRow: {
+    alignItems: "center",
+    gap: 14,
+    paddingTop: 4,
+  },
+  legendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  legendSwatch: {
+    width: 8,
+    height: 8,
+    borderRadius: 2,
+  },
+  legendLabel: {
+    fontSize: 9,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+  },
+
+  // month chip
+  monthChip: {
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+    marginTop: 4,
+  },
+  monthChipLabel: {
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 1.6,
+  },
+  monthChipValue: {
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+    fontVariant: ["tabular-nums"],
+    letterSpacing: 0.3,
   },
 
   // sync
