@@ -239,11 +239,13 @@ export default function FlightProgram() {
       if (isSquadronCmdr) {
         return all.filter(p => p.tier === "flight" || p.tier === "squadron" || p.tier === "wing");
       }
-      // v1.1.64 — Ops Pilot targets: squadron-internal only. Ops
-      // publishes to its Flight Cmdrs and to the Sqn Cmdr PC; the
-      // Sqn Cmdr is the one who submits up to Wing for approval.
+      // v1.1.100 — Ops Pilot targets: Flight Cmdr ONLY. The org-chart
+      // rule is non-negotiable: Ops never talks to Sqn / Wing / Base
+      // directly. Schedule Chain enforces the same rule; FlightProgram
+      // must match so an operator can't bypass the chain by submitting
+      // straight from the daily-sheet editor.
       if (user?.role === "ops") {
-        return all.filter(p => p.tier === "flight" || p.tier === "squadron");
+        return all.filter(p => p.tier === "flight");
       }
       return all;
     },
