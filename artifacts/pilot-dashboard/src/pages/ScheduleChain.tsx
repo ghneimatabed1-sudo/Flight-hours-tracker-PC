@@ -27,6 +27,63 @@ import { usePilots } from "@/lib/squadron-data";
 import FlightScheduleSheet from "@/components/FlightScheduleSheet";
 import { Send, Check, X, PauseCircle, Pencil, Plus, Printer, Trash2 } from "lucide-react";
 
+// v1.1.107 — reverse of programToShareRows. When a Flight Cmdr (or
+// any tier) composes a schedule via the ScheduleChain quick-row
+// composer, we also populate a minimal ScheduleProgram so the share
+// surfaces in the FlightProgram inbox too. Without this, Ops (or
+// whoever the sheet is addressed to) only sees the share in the
+// Schedule Chain sidebar — the Flight Schedule sidebar filter
+// requires `!!s.program` and silently drops rows-only shares.
+// Operator's exact words: "if I wrote a flight schedule on the Flight
+// Commander interface, it will show up on the ScheduleChain of the
+// operation pilot PC. It does not show up in the flight schedule
+// sidebar option." This helper closes that gap.
+function rowsToProgram(rows: ScheduleRow[], date: string, squadronName: string): ScheduleProgram {
+  const toProgramRow = (r: ScheduleRow): ScheduleProgramRow => {
+    // row.ac is "ACTYPE DN" (see programToShareRows below). Split off
+    // the DN tag if present so the paper sheet gets a clean acType.
+    const acParts = (r.ac || "").trim().split(/\s+/);
+    const acType = acParts[0] ?? "";
+    return {
+      dn: r.dn || "D",
+      acType,
+      toTime: r.takeoff || "",
+      pilot: r.crew?.[0] ?? "",
+      coPilot: r.crew?.[1] ?? "",
+      msnDuty: r.mission || "",
+      duration: r.dur || "",
+      fuel: r.fuel || "",
+      configuration: r.config || "",
+      route: r.route || "",
+      remarks: r.remarks || "",
+      atcTakeoff: r.atcTakeoff || r.takeoff || "",
+      atcLanding: r.atcLanding || r.land || "",
+    };
+  };
+  const dayRows = rows.filter(r => (r.dn || "D") === "D").map(toProgramRow);
+  const nightRows = rows.filter(r => (r.dn || "D") !== "D").map(toProgramRow);
+  return {
+    date,
+    mode: nightRows.length > 0 && dayRows.length > 0 ? "DAY_AND_NIGHT" : nightRows.length > 0 ? "NIGHT" : "DAY",
+    airbase: "",
+    squadron: squadronName,
+    dayRows: dayRows.length > 0 ? dayRows : [],
+    nightRows: nightRows.length > 0 ? nightRows : [],
+    mainBriefer: "",
+    briefTime: "",
+    dayOps: "",
+    nightOps: "",
+    lecture: "",
+    capte: "",
+    nightBrief: "",
+    reportingTime: "",
+    acNeededDay: { main: "", stby: "" },
+    acNeededNight: { main: "", stby: "" },
+    fltCmdr: "",
+    sqdnCmdr: "",
+  };
+}
+
 // Mirror of the helper in pages/FlightProgram.tsx — flattens an
 // ScheduleProgram into the compact row list the diff machinery uses.
 function programToShareRows(p: ScheduleProgram): ScheduleRow[] {
@@ -361,6 +418,9 @@ export default function ScheduleChain() {
         targetPcName: targetName,
         targetTier,
         submittedBy: user?.username ?? "ops",
+        // v1.1.107 — attach a program so the share also surfaces in
+        // the FlightProgram inbox (which filters on `!!s.program`).
+        program: rowsToProgram(valid, draftDate, myPcName),
       });
     } catch (e) {
       const msg = (e as Error)?.message ?? String(e);
