@@ -608,12 +608,26 @@ function FlightProgramShareInbox() {
     () => shares.filter(s => !!s.program),
     [shares],
   );
+  // v1.1.101 — the previous incoming filter excluded every share where
+  // originSquadronId matched me, which meant a Flight Cmdr (or any tier)
+  // who ORIGINATED a schedule and then got it returned by Ops/downstream
+  // via Edit or Reject never saw it in Incoming — it fell into the Sent
+  // card which has no Approve / Reject / Edit controls, so the returned
+  // sheet sat there with "no options, nothing" (operator's exact words).
+  // Schedule Chain (ScheduleChain.tsx:358-359) already had the correct
+  // partition — incoming = current-holder, sent = origin-but-NOT-current.
+  // Mirror that here so the bug cannot recur on any tier (Flight, Sqn,
+  // Wing, Base, HQ) once we scale to 15-20 squadrons.
   const incoming = useMemo(
-    () => programShares.filter(s => matchesMe(s.currentPcId) && !matchesMe(s.originSquadronId)),
+    () => programShares.filter(s => matchesMe(s.currentPcId)),
     [programShares, matchesMe],
   );
   const sent = useMemo(
-    () => programShares.filter(s => matchesMe(s.originSquadronId) && !s.originatorDismissedAt),
+    () => programShares.filter(s =>
+      matchesMe(s.originSquadronId)
+      && !matchesMe(s.currentPcId)
+      && !s.originatorDismissedAt,
+    ),
     [programShares, matchesMe],
   );
   const wireTier: "flight" | "squadron" | "wing" | "base" =

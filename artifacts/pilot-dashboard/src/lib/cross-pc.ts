@@ -1415,6 +1415,26 @@ function shareToRow(s: ScheduleShare): Record<string, unknown> {
 // chainPcIds. This is exactly how the Base Cmdr / HQ Cmdr final-
 // schedules page populates its sorted-per-squadron rollup. It is
 // strictly a viewer flag — viewers still cannot mutate any share.
+// v1.1.101 — decode the ScheduleTier from a PC id prefix. Used on
+// edit / reject return so the tier badge and sidebar badge count
+// match the originator's actual tier instead of a hard-coded
+// "squadron". Stays in lock-step with localPcId() formats:
+//   "FLIGHT:<...>"   → flight
+//   "WING:<...>"     → wing
+//   "BASE:<...>"     → base
+//   "SQDNCMD:<...>"  → squadron  (Sqn Cmdr PC)
+//   "HQ:<...>"       → base      (HQ PC has no own ScheduleTier; treat
+//                                  as base for archive/view semantics)
+//   anything else    → squadron  (Ops PC uses the bare squadron code)
+export function tierFromPcId(pcId: string | null | undefined): ScheduleTier {
+  if (!pcId) return "squadron";
+  if (pcId.startsWith("FLIGHT:")) return "flight";
+  if (pcId.startsWith("WING:")) return "wing";
+  if (pcId.startsWith("BASE:")) return "base";
+  if (pcId.startsWith("HQ:")) return "base";
+  return "squadron";
+}
+
 export function isWingApprovedFinal(s: ScheduleShare): boolean {
   if (s.status !== "approved") return false;
   // Find the latest "approved" entry; the tier on that entry tells us
@@ -1668,7 +1688,13 @@ export function useDecideSchedule() {
         cur.status = "rejected";
         cur.currentPcId = cur.originSquadronId;
         cur.currentPcName = cur.originSquadronName;
-        cur.currentTier = "squadron";
+        // v1.1.101 — derive tier from the originator's PC id prefix
+        // instead of hard-coding "squadron". Otherwise a Flight Cmdr
+        // (FLIGHT:...), Wing Cmdr (WING:...), or Base Cmdr (BASE:...)
+        // origin sees the bounced sheet labelled with the wrong tier
+        // badge, which cascades into the sidebar badge counts and the
+        // Now-at indicator lying about who holds the ball.
+        cur.currentTier = tierFromPcId(cur.originSquadronId);
         push("rejected", input.note);
       } else if (input.action === "hold") {
         cur.status = "held";
@@ -1678,11 +1704,18 @@ export function useDecideSchedule() {
         cur.editedRows = input.editedRows ?? cur.rows;
         cur.editedProgram = input.editedProgram ?? cur.program;
         cur.editedBy = input.by;
-        // Edits ALWAYS go back to the originating squadron — the operator
-        // wants to re-approve the change before it propagates further.
+        // Edits ALWAYS go back to the originator — the operator wants
+        // to re-approve the change before it propagates further.
+        // v1.1.101 — derive the returned-to tier from the origin PC id
+        // prefix, NOT a hard-coded "squadron". When a Flight Cmdr,
+        // Wing Cmdr, or Base Cmdr originated the share, returning edits
+        // while mislabelling the tier made the bounce-back card render
+        // with the wrong badge and (on some tiers) slip out of the
+        // Incoming bucket entirely. The fix is tier-agnostic so the
+        // same path works once we scale to 15-20 squadrons.
         cur.currentPcId = cur.originSquadronId;
         cur.currentPcName = cur.originSquadronName;
-        cur.currentTier = "squadron";
+        cur.currentTier = tierFromPcId(cur.originSquadronId);
         push("edited", input.note ?? "edits returned to originator");
       } else if (input.action === "forward") {
         // v1.1.64 chain transitions:
