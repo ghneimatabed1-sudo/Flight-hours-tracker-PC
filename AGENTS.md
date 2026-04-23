@@ -42,6 +42,7 @@
 5. **Never edit `artifact.toml` or `.replit` directly** — use the artifact skills.
 6. **Never hardcode squadron names.** Every operator deploys their own squadron. The system is squadron-portable; preserve that.
 7. **Never delete data without an explicit operator request.** Even "looks orphaned" rows might be backups for a PC that's been offline.
+8. **Never let `DOMAIN.md` go stale.** It is a contract with the operator. After ANY change that affects what a page does, what a role sees, what a number means, what a report contains, or how a flow works (schedule chain, guest pilots, currency, sortie fields, hour calc, role permissions, menu items, etc.) — open `DOMAIN.md` in the same change, update the affected section, and commit it together with the code. Same applies to `.local/memory/<area>.md` for the area touched. Documentation drift is a bug.
 
 ## Safety nets you can run any time
 

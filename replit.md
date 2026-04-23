@@ -1,6 +1,10 @@
-# 🚨 AI AGENTS — READ `/AGENTS.md` FIRST
+# 🚨 AI AGENTS — READ `/AGENTS.md` AND `/DOMAIN.md` FIRST
 
-Every AI agent (Replit Agent, Cursor, Claude Code, Aider, Cline, etc.) **must read `AGENTS.md` at the repo root before any change.** It captures the do-nots, the migration recipe, the test commands, and the architecture in 60 seconds. It exists to prevent re-discovering bugs we have already paid for.
+Every AI agent (Replit Agent, Cursor, Claude Code, Aider, Cline, etc.) **must read both files at the repo root before any change**:
+- **`AGENTS.md`** — the do-nots, the migration recipe, the test commands, the architecture in 60 seconds.
+- **`DOMAIN.md`** — what every page, role, report, and number actually means in operational terms.
+
+**Both documents are living contracts.** The instant a code change alters what a role sees, what a page does, what a number means, what a report contains, or how a flow works, the matching section in `DOMAIN.md` (and the matching `.local/memory/<area>.md` if one exists) **must be updated in the same commit as the code change**. Documentation drift is treated as a bug.
 
 # Overview
 
