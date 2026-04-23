@@ -15,7 +15,8 @@
    No Approve / Reject / Edit / Delete — viewers only. The composer
    stays on the squadron PCs.
    ──────────────────────────────────────────────────────────────────── */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { markFinalSchedulesSeen } from "@/lib/sidebar-badges";
 import { ChevronDown, ChevronRight, ClipboardCheck, FileText, Printer } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
@@ -44,6 +45,15 @@ export default function FinalSchedules() {
   // finals only" so drafts and Sqn-only approvals never appear here.
   const myPcId = getLocalPcId();
   const { data: shares = [] } = useScheduleShares(myPcId, { viewAllApproved: allowed });
+
+  // v1.1.105 — mark the archive as "seen" so the sidebar red-dot /
+  // badge count clears the moment the operator opens this page. The
+  // helper writes a timestamp to localStorage and fires a window
+  // event that useSidebarBadges listens for, so the Layout refreshes
+  // without a hard navigation.
+  useEffect(() => {
+    if (allowed) markFinalSchedulesSeen();
+  }, [allowed]);
   const registry = useRegisteredPCs();
   // Cross-squadron pilot roster (already populated by the dashboard
   // sync layer on Base / HQ PCs). We use it to derive at-a-glance
