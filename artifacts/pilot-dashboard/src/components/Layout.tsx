@@ -116,11 +116,13 @@ export default function Layout({ children }: { children: ReactNode }) {
             // other roles don't see it in the sidebar and the page itself
             // blocks direct URL access.
             if (p === "/flight-program") {
-              // The Flight Schedule label is hidden from the operations
-              // pilot's sidebar at the operator's request — the route
-              // itself stays available for whoever still needs it via
-              // direct URL or another entry point.
-              return false;
+              // v1.1.100: Flight Schedule is back in the Ops sidebar.
+              // The Ops officer authors the daily schedule sheet here
+              // and forwards it up the chain (Ops → Flight Cmdr) via
+              // Schedule Chain. Restricted to the Ops officer + super
+              // admin (other roles wouldn't have ops-side write access
+              // to the flight-program payload anyway).
+              return user?.role === "ops" || user?.role === "super_admin";
             }
             if (p === "/ops-team") {
               // Only the lead ops pilot manages the assigned ops sub-accounts.
