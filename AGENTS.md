@@ -69,3 +69,48 @@
 - **Ask the operator** before any destructive action, before changing settled domain rules, or before re-architecting.
 - **Speak plain English** in chat (the operator is non-technical). Save jargon for code comments.
 - **Update `replit.md`** for architecture changes. **Update or create a `.local/memory/<area>.md`** for any new domain rule the operator settles. **Append to this file** for any new "do not" you learn the hard way.
+
+---
+
+## Memory-update protocol — do this WITHOUT being asked
+
+Every commit that changes behaviour MUST also update memory in the same commit. The operator should never have to say "update your memory". Treat this as part of the work, not a follow-up.
+
+**Checklist before every `git commit`:**
+1. Did this change affect what a page does, what a role sees, what a number means, what a report contains, or how a flow works? → Open **`DOMAIN.md`** and update the matching section. Add a "v1.x.xx — what changed" line in the relevant subsection if the contract moved.
+2. Did this change settle a new operator-stated rule, fix a previously-mysterious bug, or alter a settled feature? → Open or create **`.local/memory/<area>.md`** and append a Change Log entry with the date.
+3. Did this change introduce a new "do not" the next agent must avoid? → Append it to the **Absolute do-nots** list in this file (with the version that introduced the lesson).
+4. Did this change touch architecture (new tables, new tiers, new artifacts, new external services)? → Update **`replit.md`** Architecture section.
+5. Are migrations involved? → Add the migration number + one-line summary to the **Recent fixes** list below.
+
+**Default commit-message footer template (use it):**
+```
+DOMAIN.md updated: §X.Y (or N/A — explain why)
+.local/memory/<area>.md updated: yes (or N/A — explain why)
+AGENTS.md do-nots updated: yes (or N/A — explain why)
+```
+
+If any of those four say N/A, that's fine — but you must consciously decide N/A, not silently skip.
+
+---
+
+## Recent fixes — concrete lessons (most recent first)
+
+### v1.1.96 (2026-04-23) — Wing→Base forward + Base.approve final archive
+- Operator-stated chain (DOMAIN.md §7.1) is now wired end-to-end: ops→sqn→wing→base→base.approve = final archive. Wing.approve without Base forward is also valid (saves the day for that squadron).
+- The Wing→Base forward UI was already in `ScheduleChain.tsx:651-700`; the only blocker was a `throw` in `cross-pc.ts:1659` saying "Wing tier shares are terminal". Removing it opened the path.
+- **Lesson:** before adding new UI, search for what's already wired. The UI was complete a release earlier and just needed the back-end transition unblocked.
+
+### v1.1.95 (2026-04-23) — Bulletproof RLS + audit_log was the real killer
+- The persistent 42501 the operator kept hitting after Wing edit-bounce was NOT the schedule_shares policy — it was the `audit_log` INSERT policy. `audit_log WITH CHECK` required `squadron_id = squadron_id()`, where `squadron_id()` reads `app_metadata.squadron_id` from the JWT. Wing-tier and most ops users have no such claim → function returned NULL → comparison flipped to NULL → treated as FALSE → 42501. The audit insert fires immediately AFTER the schedule update inside `useDecideSchedule`, so the failure surfaced as if the schedule write had been rejected.
+- Migration `0036_xpc_bulletproof_rls.sql`: dropped sentinel guards on all `xpc_*` WITH CHECK; relaxed `audit_log` INSERT WITH CHECK to bare `auth.uid() IS NOT NULL`.
+- `recordAuditEvent()` now swallows + logs failures so audit problems can never again masquerade as a real-action failure.
+- **Lesson:** when an action does N writes and ONE fails, the user's toast names the LAST failed table — but the FIRST failure could be N-1 steps earlier. Always trace every write in a mutation, not just the named one. And audits must NEVER throw.
+
+### v1.1.94 (2026-04-23) — Universal autoclaim trigger across xpc_* tables
+- Migration `0035_xpc_universal_autoclaim_rls.sql`: BEFORE INSERT/UPDATE triggers on `xpc_schedule_shares`, `xpc_messages`, `xpc_pending`, `xpc_squadron_snapshot` auto-claim the actor's PC seat in `xpc_user_pcs` so the row is immediately visible to them via `xpc_my_pc_ids()`.
+
+### v1.1.93 (2026-04-23) — Initial robust insert (was insufficient on its own — see 1.1.95)
+- Migration `0034_robust_schedule_insert_rls.sql`: first attempt at autoclaim. Necessary but not sufficient — see v1.1.95 for the real root cause.
+
+**When you ship a new version, append a short entry above. This list is the running changelog the next agent reads first.**
