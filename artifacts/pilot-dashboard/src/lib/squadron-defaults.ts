@@ -38,22 +38,21 @@ const FACTORY_LECTURES = [
 const FACTORY_EXERCISES = ["GH", "IF", "NVG", "NIGHT", "CONTINUATION TRNG", "MTF"];
 
 /**
- * Aircraft models the squadron operates. Drives the A/C Type dropdown on
- * Add Sortie, the Sortie Log edit form, and the seed value on every new
- * Flight Program row. NO.8 SQDN flies UH-60M and UH-60AIL with AS332 as a
- * crossover; an AH-1F squadron would replace these. Operator-editable.
+ * Aircraft models the squadron operates. Task #137 (zero-trouble
+ * multi-squadron install): factory ships EMPTY so a fresh PC running the
+ * Setup Wizard fills in its own airframes — no NO.8 / UH-60M leakage
+ * onto unrelated squadrons. The wizard writes the per-squadron list to
+ * the `squadrons.default_aircraft` jsonb column added by migration 0039,
+ * and `loadSquadronDefaults()` overlays a per-PC localStorage cache for
+ * offline starts.
  */
-const FACTORY_AIRFRAMES = ["UH-60M", "UH-60L", "UH-60AIL", "AS332"];
+const FACTORY_AIRFRAMES: string[] = [];
 
 /**
- * Per-airframe fuel burn rate (lb/hr). UH-60M is the squadron's primary
- * airframe and burns 576 lb/hr per the workbook. Operators can add more
- * airframe entries (e.g. UH-60AIL, AH-1, OH-58) on the defaults page.
+ * Per-airframe fuel burn rate (lb/hr). Factory is empty for the same
+ * reason — each squadron writes its own table during the wizard.
  */
-const FACTORY_FUEL_BURN: Record<string, number> = {
-  "UH-60M": 576,
-  "UH-60AIL": 576,
-};
+const FACTORY_FUEL_BURN: Record<string, number> = {};
 
 export interface SquadronDefaults {
   /** Default lecture topics — operator can add/remove on the defaults page. */
@@ -99,6 +98,17 @@ export interface SquadronDefaults {
    *  row. NO.8 SQDN flies UH-60M / UH-60L / UH-60AIL plus AS332 as a
    *  crossover; an AH-1F squadron would replace the list entirely. */
   airframes: string[];
+  /** Air base name as captured by the Setup Wizard (e.g. "Main Air Base").
+   *  Mirrors `squadrons.base` for offline reads. */
+  airbase?: string;
+  /** Free-form "Base" descriptor — used when the squadron sits under
+   *  a base headquarters distinct from the physical airbase (e.g.
+   *  "8th Air Base HQ"). Captured by the Setup Wizard. */
+  base?: string;
+  /** Wing the squadron sits under (e.g. "8th Wing"). Captured by the
+   *  Setup Wizard alongside group/airbase so a fresh install can render
+   *  full chain-of-command labels without hitting the central server. */
+  wing?: string;
   /** Short label shown on the Sortie Log header on Add Sortie
    *  ("QREG · 2026-04-23 · UH-60M"). NO.8 SQDN uses "QREG" (Quick
    *  Reaction Group) — other squadrons may use "SQNREG", "FLTLOG",
@@ -118,11 +128,14 @@ export function factoryDefaults(): SquadronDefaults {
     ammoPlaceholder: "-",
     autoSuggestRemarks: true,
     minSixMonthHours: 30,
-    groupName: "QUICK REACTION FORCE GROUP",
-    groupAcronym: "QRFG",
-    primaryAirframe: "UH-60M",
+    // Task #137: factory text is now neutral so a fresh PC doesn't show
+    // a NO.8-flavoured group / acronym / log label until the squadron's
+    // Setup Wizard fills them in.
+    groupName: "",
+    groupAcronym: "",
+    primaryAirframe: "",
     airframes: [...FACTORY_AIRFRAMES],
-    sortieLogLabel: "QREG",
+    sortieLogLabel: "SQNLOG",
   };
 }
 
@@ -152,6 +165,77 @@ export function loadSquadronDefaults(squadronNumber: string | undefined): Squadr
     };
   } catch {
     return factoryDefaults();
+  }
+}
+
+/**
+ * Task #137 — read the squadron's DB-backed defaults
+ * (`default_aircraft`, `default_monthly_targets` from migration 0039)
+ * and overlay them onto the local cache so any sibling PC for the
+ * same squadron picks up the wizard's output without re-running it.
+ *
+ * Returns true when a populated row was found and merged in (caller
+ * uses this to auto-mark the Setup Wizard "complete" so the gate
+ * doesn't redirect existing installs). Returns false when the
+ * Supabase client is offline / the row is absent / the row has no
+ * aircraft configured yet — i.e. the wizard is still required.
+ */
+export async function hydrateSquadronDefaultsFromDb(
+  squadronNumber: string | undefined,
+): Promise<boolean> {
+  if (!squadronNumber) return false;
+  try {
+    const { supabase, supabaseConfigured } = await import("@/lib/supabase");
+    if (!supabaseConfigured || !supabase) return false;
+    const { data, error } = await supabase
+      .from("squadrons")
+      .select("number, name, base, wing, default_aircraft, default_monthly_targets")
+      .eq("number", squadronNumber)
+      .maybeSingle();
+    if (error || !data) return false;
+    const ac = Array.isArray(data.default_aircraft) ? data.default_aircraft : [];
+    const cur = loadSquadronDefaults(squadronNumber);
+    if (ac.length === 0) {
+      // Row exists but no aircraft configured yet — this is an
+      // upgraded install pre-dating migration 0039. Seed identity
+      // fields onto the local cache and report success so the
+      // SetupGate marks the wizard complete (existing PCs are never
+      // force-redirected). The operator can still navigate to
+      // /setup/squadron manually to configure airframes.
+      saveSquadronDefaults(squadronNumber, {
+        ...cur,
+        airbase: (data.base as string | null) ?? cur.airbase,
+        base: (data.base as string | null) ?? cur.base,
+        wing: (data.wing as string | null) ?? cur.wing,
+      });
+      return true;
+    }
+    const burn: Record<string, number> = { ...cur.fuelBurnByAirframe };
+    const airframes: string[] = [];
+    for (const row of ac as Array<{ model?: string; fuelBurn?: number }>) {
+      const m = (row?.model || "").trim();
+      if (!m) continue;
+      airframes.push(m);
+      if (typeof row.fuelBurn === "number") burn[m] = row.fuelBurn;
+    }
+    const targets =
+      data.default_monthly_targets && typeof data.default_monthly_targets === "object"
+        ? (data.default_monthly_targets as Record<string, number>)
+        : {};
+    const monthly = Object.values(targets).find(v => typeof v === "number" && v > 0);
+    saveSquadronDefaults(squadronNumber, {
+      ...cur,
+      airbase: (data.base as string | null) ?? cur.airbase,
+      base: (data.base as string | null) ?? cur.base,
+      wing: (data.wing as string | null) ?? cur.wing,
+      airframes: airframes.length ? airframes : cur.airframes,
+      primaryAirframe: airframes[0] || cur.primaryAirframe,
+      fuelBurnByAirframe: burn,
+      minSixMonthHours: monthly ? monthly * 6 : cur.minSixMonthHours,
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
 

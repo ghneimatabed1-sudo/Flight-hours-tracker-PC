@@ -31,7 +31,7 @@ fi
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MIGRATIONS="$HERE/../migrations"
-SEED="$HERE/seed.sql"
+SEED="$HERE/seed.demo.sql"
 
 if [[ ! -f "$SEED" ]]; then
   echo "ERROR: $SEED not found. Run: node $HERE/generate-seed.mjs" >&2

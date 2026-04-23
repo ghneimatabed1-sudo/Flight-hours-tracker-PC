@@ -6,9 +6,66 @@ export interface User {
   id?: string;
   username: string;
   displayName: string;
+  // Optional military rank (e.g. "Maj", "Capt"). Sourced from
+  // `user_metadata.rank` when present so message inboxes and schedule
+  // history can render proper "Maj. Ahmad" labels instead of cryptic
+  // auth usernames. Falls back to "" for legacy accounts.
+  rank?: string;
   role: Role;
   scope?: CommanderScope;
   squadronIds?: string[];
+}
+
+// Render a friendly seat label from a user's role + commander scope.
+// Used by the message inbox / schedule chain to show "Flight Cmdr" or
+// "Wing Cmdr" alongside the operator's name. Ops officers come back as
+// "Ops Pilot"; commanders without a recognised scope fall through to
+// "Commander". Returns an empty string for non-operational roles
+// (super_admin, admin) so the surrounding UI just renders the name.
+export function seatLabelFromRoleScope(
+  role: Role | null | undefined,
+  scope: CommanderScope | null | undefined,
+): string {
+  if (!role) return "";
+  if (role === "ops" || role === "deputy") return "Ops Pilot";
+  if (role === "commander") {
+    if (scope === "flight")   return "Flight Cmdr";
+    if (scope === "squadron") return "Sqn Cmdr";
+    if (scope === "wing")     return "Wing Cmdr";
+    if (scope === "base")     return "Base Cmdr";
+    if (scope === "hq")       return "HQ";
+    return "Commander";
+  }
+  return "";
+}
+
+// Compose the rich "Maj. Ahmad · Flight Cmdr · NO.8 SQDN" identity
+// label used across every audit/inbox surface. Each segment is
+// optional — passing only `displayName` returns just the name; passing
+// rank + name + seat + pcName returns the full string. Falls back to
+// the legacy `username` if no displayName is available so old rows
+// still render something readable instead of "—".
+export function composeIdentityLabel(parts: {
+  rank?: string | null;
+  displayName?: string | null;
+  username?: string | null;
+  seatLabel?: string | null;
+  pcName?: string | null;
+}): string {
+  const name = (parts.displayName ?? "").trim() || (parts.username ?? "").trim();
+  const rank = (parts.rank ?? "").trim();
+  const head = rank && name
+    ? `${rank}. ${name}`
+    : (rank || name);
+  const tail: string[] = [];
+  const seat = (parts.seatLabel ?? "").trim();
+  const pc   = (parts.pcName ?? "").trim();
+  if (seat) tail.push(seat);
+  if (pc && pc !== name) tail.push(pc);
+  if (!head && tail.length === 0) return "";
+  if (!head) return tail.join(" · ");
+  if (tail.length === 0) return head;
+  return `${head} · ${tail.join(" · ")}`;
 }
 
 export interface Squadron {

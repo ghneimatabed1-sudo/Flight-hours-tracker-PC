@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import DateInput from "@/components/DateInput";
 import { Card, PageHead } from "@/components/Layout";
 import { useAuth } from "@/lib/auth";
+import { seatLabelFromRoleScope, composeIdentityLabel } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 import {
   useScheduleShares,
@@ -143,6 +144,15 @@ export default function ScheduleChain() {
     : `${myTier.toUpperCase()}:${user?.displayName ?? user?.username ?? "CMD"}`;
   const myPcId = canonicalId || fallbackId || null;
   const myPcName = squadron?.name ?? user?.displayName ?? "Local PC";
+
+  // Task #137 — rich actor identity stamped into every history entry so
+  // downstream views ("Last actor", "Last action by", etc.) can render
+  // "Maj. Ahmad · Flight Cmdr · NO.8 SQDN" instead of a bare username.
+  const actorIdentity = {
+    byDisplayName: user?.displayName,
+    byRank: user?.rank,
+    bySeatLabel: seatLabelFromRoleScope(user?.role, user?.scope),
+  };
 
   const sharesQ = useScheduleShares(myPcId);
   const registry = useRegisteredPCs();
@@ -418,6 +428,9 @@ export default function ScheduleChain() {
         targetPcName: targetName,
         targetTier,
         submittedBy: user?.username ?? "ops",
+        submittedByDisplayName: user?.displayName,
+        submittedByRank: user?.rank,
+        submittedBySeatLabel: seatLabelFromRoleScope(user?.role, user?.scope),
         // v1.1.107 — attach a program so the share also surfaces in
         // the FlightProgram inbox (which filters on `!!s.program`).
         program: rowsToProgram(valid, draftDate, myPcName),
@@ -901,11 +914,11 @@ export default function ScheduleChain() {
                               const baseId = forwardTo || basePCs[0].id;
                               const baseTarget = basePCs.find(p => p.id === baseId) ?? basePCs[0];
                               await decide.mutateAsync({
-                                id: share.id, action: "forward", by: approver, tier: wireTier,
+                                id: share.id, action: "forward", by: approver, ...actorIdentity, tier: wireTier,
                                 forwardPcId: baseTarget.id, forwardPcName: baseTarget.squadronName,
                               });
                               await decide.mutateAsync({
-                                id: share.id, action: "approve", by: approver, tier: "base",
+                                id: share.id, action: "approve", by: approver, ...actorIdentity, tier: "base",
                                 note: decisionNote || undefined,
                               });
                               toast({ title: `Approved · sent to ${baseTarget.squadronName}` });
@@ -921,11 +934,11 @@ export default function ScheduleChain() {
                               const target = flightApproveForwardTargets.find(p => p.id === targetId) ?? flightApproveForwardTargets[0];
                               const nextTier: "squadron" | "wing" = target.id.startsWith("SQDNCMD:") ? "squadron" : "wing";
                               await decide.mutateAsync({
-                                id: share.id, action: "forward", by: approver, tier: wireTier,
+                                id: share.id, action: "forward", by: approver, ...actorIdentity, tier: wireTier,
                                 forwardPcId: target.id, forwardPcName: target.squadronName,
                               });
                               await decide.mutateAsync({
-                                id: share.id, action: "approve", by: approver, tier: nextTier,
+                                id: share.id, action: "approve", by: approver, ...actorIdentity, tier: nextTier,
                                 note: decisionNote || undefined,
                               });
                               toast({ title: `Approved · sent to ${target.squadronName}` });
@@ -937,16 +950,16 @@ export default function ScheduleChain() {
                               const wingId = forwardTo || wingPCs[0].id;
                               const wingTarget = wingPCs.find(p => p.id === wingId) ?? wingPCs[0];
                               await decide.mutateAsync({
-                                id: share.id, action: "forward", by: approver, tier: wireTier,
+                                id: share.id, action: "forward", by: approver, ...actorIdentity, tier: wireTier,
                                 forwardPcId: wingTarget.id, forwardPcName: wingTarget.squadronName,
                               });
                               await decide.mutateAsync({
-                                id: share.id, action: "approve", by: approver, tier: "wing",
+                                id: share.id, action: "approve", by: approver, ...actorIdentity, tier: "wing",
                                 note: decisionNote || undefined,
                               });
                               toast({ title: `Approved · sent to ${wingTarget.squadronName}` });
                             } else {
-                              await decide.mutateAsync({ id: share.id, action: "approve", by: approver, tier: wireTier, note: decisionNote || undefined });
+                              await decide.mutateAsync({ id: share.id, action: "approve", by: approver, ...actorIdentity, tier: wireTier, note: decisionNote || undefined });
                               // v1.1.108 — Flight Cmdr Approve when no
                               // upstream PC is registered: be explicit
                               // that the chain has paused here, so the
@@ -992,7 +1005,7 @@ export default function ScheduleChain() {
                           <button
                             onClick={async () => {
                               try {
-                                await decide.mutateAsync({ id: share.id, action: "reject", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined });
+                                await decide.mutateAsync({ id: share.id, action: "reject", by: user?.username ?? "ops", ...actorIdentity, tier: wireTier, note: decisionNote || undefined });
                                 toast({ title: "Rejected" }); setDecisionNote("");
                               } catch (e) {
                                 toast({
@@ -1061,7 +1074,7 @@ export default function ScheduleChain() {
                                   // and the final-schedules archive can
                                   // distinguish Wing-signed finals.
                                   await decide.mutateAsync({
-                                    id: share.id, action: "approve", by: user?.username ?? "cmd", tier: nt,
+                                    id: share.id, action: "approve", by: user?.username ?? "cmd", ...actorIdentity, tier: nt,
                                     note: decisionNote || undefined,
                                   });
                                   toast({ title: `Sent to ${t.squadronName || nextTierLabel}` });
@@ -1102,7 +1115,7 @@ export default function ScheduleChain() {
                           <button
                             onClick={async () => {
                               try {
-                                await decide.mutateAsync({ id: share.id, action: "hold", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined });
+                                await decide.mutateAsync({ id: share.id, action: "hold", by: user?.username ?? "ops", ...actorIdentity, tier: wireTier, note: decisionNote || undefined });
                                 toast({ title: "Held" }); setDecisionNote("");
                               } catch (e) {
                                 toast({
@@ -1127,7 +1140,7 @@ export default function ScheduleChain() {
                                     await decide.mutateAsync({
                                       id: share.id,
                                       action: "edit",
-                                      by: user?.username ?? "ops",
+                                      by: user?.username ?? "ops", ...actorIdentity,
                                       tier: wireTier,
                                       note: decisionNote || undefined,
                                       editedProgram: buf,
@@ -1174,7 +1187,7 @@ export default function ScheduleChain() {
                           <button
                             onClick={async () => {
                               try {
-                                await decide.mutateAsync({ id: share.id, action: "edit", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined, editedRows: share.rows });
+                                await decide.mutateAsync({ id: share.id, action: "edit", by: user?.username ?? "ops", ...actorIdentity, tier: wireTier, note: decisionNote || undefined, editedRows: share.rows });
                                 toast({ title: "Edits returned to originator" }); setDecisionNote("");
                               } catch (e) {
                                 toast({
@@ -1227,6 +1240,21 @@ export default function ScheduleChain() {
                 </div>
                 <div className="text-[11px] text-muted-foreground mb-2">
                   Now at: {share.currentPcName ?? "—"} ({share.currentTier})
+                  {(() => {
+                    // Task #137: surface the last actor on the chain so
+                    // an originator scanning sent shares can immediately
+                    // see "Maj. Ahmad · Flight Cmdr · NO.8 SQDN" instead
+                    // of inferring it from the audit log.
+                    const last = (share.history ?? [])[share.history.length - 1];
+                    if (!last) return null;
+                    const lbl = composeIdentityLabel({
+                      rank: last.byRank,
+                      displayName: last.byDisplayName,
+                      username: last.by,
+                      seatLabel: last.bySeatLabel,
+                    });
+                    return lbl ? <div>Last actor: {lbl} · {last.action}</div> : null;
+                  })()}
                 </div>
                 {share.program ? (
                   <FlightScheduleSheet
@@ -1242,7 +1270,7 @@ export default function ScheduleChain() {
                 {(share.editedRows || share.editedProgram) && (
                   <div className="mt-2 flex gap-2">
                     <button
-                      onClick={async () => { await acceptEdits.mutateAsync({ id: share.id, by: user?.username ?? "ops" }); toast({ title: "Accepted edits" }); }}
+                      onClick={async () => { await acceptEdits.mutateAsync({ id: share.id, by: user?.username ?? "ops", ...actorIdentity }); toast({ title: "Accepted edits" }); }}
                       className="px-3 py-1.5 rounded-md bg-emerald-500/20 border border-emerald-400/40 text-emerald-100 text-xs font-semibold inline-flex items-center gap-1"
                       data-testid={`accept-edits-${share.id}`}
                     >

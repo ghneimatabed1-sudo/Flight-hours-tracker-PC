@@ -56,7 +56,7 @@ function seatLabel(user: ReturnType<typeof useAuth>["user"]): string | null {
     if (user.scope === "squadron") return "Sqn Cmdr";
     if (user.scope === "wing") return "Wing Cmdr";
     if (user.scope === "base") return "Base Cmdr";
-    if (user.scope === "hq") return "HQ Cmdr";
+    if (user.scope === "hq") return "HQ";
   }
   return user.role;
 }

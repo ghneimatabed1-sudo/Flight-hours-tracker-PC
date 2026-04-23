@@ -828,7 +828,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           void recordAuditEvent({ type: "login.rolelock.blocked", actor: username, detail: { lock, attemptedRole: role } });
           return { ok: false, error: "role_locked" };
         }
-        const user: User = { username, role, displayName: (data.user.user_metadata?.displayName as string) ?? username };
+        const scope = ((refreshed.app_metadata?.scope as User["scope"])
+          ?? (refreshed.user_metadata?.scope as User["scope"])
+          ?? undefined);
+        const rank = (refreshed.user_metadata?.rank as string | undefined)
+          ?? (refreshed.app_metadata?.rank as string | undefined)
+          ?? undefined;
+        const user: User = {
+          username,
+          role,
+          scope,
+          rank,
+          displayName: (data.user.user_metadata?.displayName as string) ?? username,
+        };
         localStorage.setItem("rjaf.user", JSON.stringify(user));
         localStorage.removeItem("rjaf.fails");
         localStorage.removeItem("rjaf.lockUntil");

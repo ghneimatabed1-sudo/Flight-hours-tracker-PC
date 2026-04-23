@@ -9,6 +9,7 @@ import {
   type ScheduleShare,
 } from "@/lib/cross-pc";
 import { useAuth } from "@/lib/auth";
+import { composeIdentityLabel } from "@/lib/types";
 import FlightScheduleSheet from "@/components/FlightScheduleSheet";
 import { Eye, EyeOff, Check, X, History as HistoryIcon, Printer } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
@@ -192,7 +193,16 @@ function FragmentRows({ share, isOpen, isFinal, isReject, lastAction, onToggle, 
         <td className="px-2 py-1.5">{share.originSquadronName}</td>
         <td className="px-2 py-1.5 uppercase">{share.currentTier}</td>
         <td className="px-2 py-1.5">{lastAction?.action ?? "—"}</td>
-        <td className="px-2 py-1.5 text-muted-foreground">{lastAction?.by ?? "—"}</td>
+        <td className="px-2 py-1.5 text-muted-foreground">
+          {lastAction
+            ? (composeIdentityLabel({
+                rank: lastAction.byRank,
+                displayName: lastAction.byDisplayName,
+                username: lastAction.by,
+                seatLabel: lastAction.bySeatLabel,
+              }) || lastAction.by)
+            : "—"}
+        </td>
         <td className="px-2 py-1.5">
           {isFinal && (
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-200 text-[10px] font-semibold">
@@ -261,7 +271,12 @@ function FragmentRows({ share, isOpen, isFinal, isReject, lastAction, onToggle, 
                       </span>
                       <span className="font-semibold">{h.action}</span>
                       <span className="text-muted-foreground">
-                        {h.by} · {h.tier}
+                        {composeIdentityLabel({
+                          rank: h.byRank,
+                          displayName: h.byDisplayName,
+                          username: h.by,
+                          seatLabel: h.bySeatLabel,
+                        }) || h.by} · {h.tier}
                       </span>
                       <span className="flex-1 text-right truncate text-muted-foreground italic">
                         {h.note ?? ""}

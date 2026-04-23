@@ -1,5 +1,6 @@
-import { useEffect } from "react";
-import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
+import React, { useEffect } from "react";
+import { Switch, Route, Router as WouterRouter, Redirect, useLocation as useWouterLocation } from "wouter";
+import { loadSquadronDefaults, hydrateSquadronDefaultsFromDb } from "@/lib/squadron-defaults";
 import { useHashLocation } from "wouter/use-hash-location";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
@@ -78,6 +79,7 @@ import Archives from "@/pages/Archives";
 import OpsTeam from "@/pages/OpsTeam";
 import MonthlyReport from "@/pages/MonthlyReport";
 import MonthlyReportDefaults from "@/pages/MonthlyReportDefaults";
+import SetupWizard from "@/pages/SetupWizard";
 import NotFound from "@/pages/not-found";
 import AdminOverview from "@/pages/admin/Overview";
 import LicenseKeys from "@/pages/admin/LicenseKeys";
@@ -143,6 +145,7 @@ function SquadronOpsRoutes() {
       <Route path="/archives" component={Archives} />
       <Route path="/ops-team" component={OpsTeam} />
       <Route path="/monthly-report/defaults" component={MonthlyReportDefaults} />
+      <Route path="/setup/squadron" component={SetupWizard} />
       <Route path="/monthly-report" component={MonthlyReport} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/connections" component={Connections} />
@@ -267,9 +270,43 @@ function Shell() {
     <Layout>
       <ArchiveBootstrap />
       <SquadronSnapshotPublisher />
-      <SquadronOpsRoutes />
+      <SetupGate>
+        <SquadronOpsRoutes />
+      </SetupGate>
     </Layout>
   );
+}
+
+function SetupGate({ children }: { children: React.ReactNode }) {
+  const { squadron } = useAuth();
+  const [location] = useWouterLocation();
+  const sqKey = squadron?.number ?? squadron?.name ?? "default";
+  const [hydrated, setHydrated] = React.useState(false);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const ok = await hydrateSquadronDefaultsFromDb(sqKey);
+      if (!cancelled) {
+        if (ok) {
+          try { localStorage.setItem(`rjaf.setupWizard.${sqKey}.complete`, "1"); }
+          catch { /* noop */ }
+        }
+        setHydrated(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sqKey]);
+
+  const completeFlag = (() => {
+    try { return localStorage.getItem(`rjaf.setupWizard.${sqKey}.complete`) === "1"; }
+    catch { return false; }
+  })();
+  const defaults = loadSquadronDefaults(sqKey);
+  const needsSetup = hydrated && !completeFlag && defaults.airframes.length === 0;
+  if (needsSetup && location !== "/setup/squadron") {
+    return <Redirect to="/setup/squadron" />;
+  }
+  return <>{children}</>;
 }
 
 // Publishes this squadron's roster + unavailable list to xpc_squadron_snapshot

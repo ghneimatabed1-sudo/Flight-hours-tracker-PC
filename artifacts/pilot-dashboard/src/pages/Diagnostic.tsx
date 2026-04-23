@@ -247,7 +247,7 @@ function tierRoleLabel(tier: PcTier, isSelf: boolean): string {
     case "flight":   return "Flight Cmdr";
     case "wing":     return "Wing Cmdr";
     case "base":     return "Base Cmdr";
-    case "hq":       return "HQ Cmdr";
+    case "hq":       return "HQ";
     default:         return tier;
   }
 }

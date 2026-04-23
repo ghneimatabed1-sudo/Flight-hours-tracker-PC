@@ -1039,6 +1039,11 @@ export interface PendingSortie {
   sortie: Omit<Sortie, "id">;
   submittedAt: string;
   submittedBy: string;
+  // Task #137 — rich identity for the submitting ops officer.
+  // Optional for back-compat with rows written before migration 0039.
+  submittedByDisplayName?: string;
+  submittedByRank?: string;
+  submittedBySeatLabel?: string;
   status: PendingStatus;
   decidedAt?: string;
   decidedBy?: string;
@@ -1067,6 +1072,9 @@ function rowToPending(r: Record<string, unknown>): PendingSortie {
     sortie: (r.sortie ?? {}) as Omit<Sortie, "id">,
     submittedAt: String(r.submitted_at),
     submittedBy: String(r.submitted_by),
+    submittedByDisplayName: r.submitter_display_name ? String(r.submitter_display_name) : undefined,
+    submittedByRank:        r.submitter_rank         ? String(r.submitter_rank)         : undefined,
+    submittedBySeatLabel:   r.submitter_seat_label   ? String(r.submitter_seat_label)   : undefined,
     status: r.status as PendingStatus,
     decidedAt: r.decided_at ? String(r.decided_at) : undefined,
     decidedBy: r.decided_by ? String(r.decided_by) : undefined,
@@ -1088,6 +1096,9 @@ function pendingToRow(p: PendingSortie): Record<string, unknown> {
     sortie: p.sortie,
     submitted_at: p.submittedAt,
     submitted_by: p.submittedBy,
+    submitter_display_name: p.submittedByDisplayName ?? null,
+    submitter_rank:         p.submittedByRank        ?? null,
+    submitter_seat_label:   p.submittedBySeatLabel   ?? null,
     status: p.status,
     decided_at: p.decidedAt ?? null,
     decided_by: p.decidedBy ?? null,
@@ -1440,6 +1451,13 @@ export interface ScheduleShare {
     tier: ScheduleTier;
     action: ScheduleStatus;
     note?: string;
+    // Task #137 — rich actor identity stamped at the time of the
+    // decision so Schedule History / Schedule Chain can render
+    // "Maj. Ahmad · Flight Cmdr" instead of the bare auth username.
+    // Optional for back-compat with rows written before migration 0039.
+    byDisplayName?: string;
+    byRank?: string;
+    bySeatLabel?: string;
   }>;
   // Once edits round-trip, the originator sees them as a diff before
   // accepting. `editedRows` holds the proposed changes; once the
@@ -1765,6 +1783,12 @@ export function useSubmitSchedule() {
       // (Ops PC tier) for any legacy caller that forgets to set it.
       targetTier?: ScheduleTier;
       submittedBy: string;
+      // Task #137 — optional rich identity for the submitter so the
+      // first history entry renders "Maj. Ahmad · Flight Cmdr" instead
+      // of the bare auth username.
+      submittedByDisplayName?: string;
+      submittedByRank?: string;
+      submittedBySeatLabel?: string;
       // Optional full sheet snapshot — when present the recipient
       // renders the same RJAF flight schedule paper, not a stripped
       // table. The legacy `rows` payload is still derived for the
@@ -1782,7 +1806,16 @@ export function useSubmitSchedule() {
         status: "submitted",
         rows: input.rows,
         baselineRows: input.rows,
-        history: [{ at: nowIso(), by: input.submittedBy, tier: "squadron", action: "submitted", note: `→ ${input.targetPcName}` }],
+        history: [{
+          at: nowIso(),
+          by: input.submittedBy,
+          tier: "squadron",
+          action: "submitted",
+          note: `→ ${input.targetPcName}`,
+          byDisplayName: input.submittedByDisplayName,
+          byRank: input.submittedByRank,
+          bySeatLabel: input.submittedBySeatLabel,
+        }],
         program: input.program,
         chainPcIds: [input.originSquadronId, input.targetPcId],
       };
@@ -1862,6 +1895,10 @@ export function useDecideSchedule() {
       id: string;
       action: "approve" | "reject" | "hold" | "edit" | "forward";
       by: string;
+      // Task #137 — optional rich identity for the actor.
+      byDisplayName?: string;
+      byRank?: string;
+      bySeatLabel?: string;
       tier: ScheduleTier;
       note?: string;
       // For action=forward: the next PC up the chain (wing → base).
@@ -1888,7 +1925,16 @@ export function useDecideSchedule() {
       }
 
       const push = (action: ScheduleStatus, note?: string) =>
-        cur.history.push({ at: nowIso(), by: input.by, tier: input.tier, action, note });
+        cur.history.push({
+          at: nowIso(),
+          by: input.by,
+          tier: input.tier,
+          action,
+          note,
+          byDisplayName: input.byDisplayName,
+          byRank: input.byRank,
+          bySeatLabel: input.bySeatLabel,
+        });
 
       if (input.action === "approve") {
         cur.status = "approved";
@@ -2121,7 +2167,13 @@ export function useDismissScheduleShareForOriginator() {
 export function useAcceptScheduleEdit() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { id: string; by: string }) => {
+    mutationFn: async (input: {
+      id: string;
+      by: string;
+      byDisplayName?: string;
+      byRank?: string;
+      bySeatLabel?: string;
+    }) => {
       let cur: ScheduleShare;
       if (isLive()) {
         const { data, error } = await supabase!.from("xpc_schedule_shares").select("*").eq("id", input.id).single();
@@ -2144,7 +2196,16 @@ export function useAcceptScheduleEdit() {
       cur.editedProgram = undefined;
       cur.editedRows = undefined;
       cur.status = "approved";
-      cur.history.push({ at: nowIso(), by: input.by, tier: "squadron", action: "approved", note: "originator accepted edits" });
+      cur.history.push({
+        at: nowIso(),
+        by: input.by,
+        tier: "squadron",
+        action: "approved",
+        note: "originator accepted edits",
+        byDisplayName: input.byDisplayName,
+        byRank: input.byRank,
+        bySeatLabel: input.bySeatLabel,
+      });
       if (isLive()) {
         const { error } = await supabase!.from("xpc_schedule_shares")
           .update(shareToRow(cur)).eq("id", cur.id);
@@ -2213,6 +2274,12 @@ export interface PrivateMessage {
   fromPcName: string;
   fromTier: MessageTier;
   fromUser: string;
+  // Task #137 — rich sender identity. All optional so legacy rows
+  // (written before migration 0039) still parse; the renderer falls
+  // back to fromUser/fromPcName when these are absent.
+  fromDisplayName?: string;
+  fromRank?: string;
+  fromSeatLabel?: string;
   toPcId: string;
   toPcName: string;
   toTier: MessageTier;
@@ -2248,6 +2315,9 @@ function rowToMessage(r: Record<string, unknown>): PrivateMessage {
     fromPcName: String(r.from_pc_name),
     fromTier,
     fromUser: String(r.from_user),
+    fromDisplayName: r.from_display_name ? String(r.from_display_name) : undefined,
+    fromRank:        r.from_rank         ? String(r.from_rank)         : undefined,
+    fromSeatLabel:   r.from_seat_label   ? String(r.from_seat_label)   : undefined,
     toPcId,
     toPcName: String(r.to_pc_name),
     toTier,
@@ -2273,6 +2343,9 @@ function messageToRow(m: PrivateMessage): Record<string, unknown> {
     from_pc_name: m.fromPcName,
     from_tier: fromTierDb,
     from_user: m.fromUser,
+    from_display_name: m.fromDisplayName ?? null,
+    from_rank:         m.fromRank         ?? null,
+    from_seat_label:   m.fromSeatLabel    ?? null,
     to_pc_id: m.toPcId,
     to_pc_name: m.toPcName,
     to_tier: toTierDb,

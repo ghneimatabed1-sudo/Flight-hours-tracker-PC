@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useAuth } from "@/lib/auth";
+import { seatLabelFromRoleScope, composeIdentityLabel } from "@/lib/types";
 import {
   useMessages,
   useSendMessage,
@@ -330,6 +331,9 @@ export default function Messages() {
       fromPcName: myPcName,
       fromTier: myTier,
       fromUser: user?.username ?? "ops",
+      fromDisplayName: user?.displayName,
+      fromRank: user?.rank,
+      fromSeatLabel: seatLabelFromRoleScope(user?.role, user?.scope),
       toPcId: target.id,
       toPcName: target.squadronName,
       toTier: target.tier,
@@ -700,7 +704,17 @@ function MessageList({ items, onReply, onMark, myPcId, kind, activePcIds }: {
         const seenOK = seenAllowed(m);
         // Render "User · PC" so it's instantly clear who is talking from
         // which PC. The username comes from the sender's own login.
-        const fromLabel = `${m.fromUser} · ${m.fromPcName}`;
+        // Task #137: prefer the rich identity (rank + display name +
+        // seat label + PC name) when the row carries it; fall back to
+        // the legacy "user · pc" pair for messages written before
+        // migration 0039.
+        const fromLabel = composeIdentityLabel({
+          rank: m.fromRank,
+          displayName: m.fromDisplayName,
+          username: m.fromUser,
+          seatLabel: m.fromSeatLabel,
+          pcName: m.fromPcName,
+        }) || `${m.fromUser} · ${m.fromPcName}`;
         const toLabel   = `${m.toPcName}`;
         // The "counterpart" is whichever PC is on the other end of this
         // message — for inbox/history rows that's the sender, for sent

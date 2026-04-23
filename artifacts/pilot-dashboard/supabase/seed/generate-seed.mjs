@@ -22,7 +22,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const OUT = join(HERE, "seed.sql");
+// Task #137: production seed.sql is intentionally empty so a fresh
+// install runs the in-app Setup Wizard. The generator now writes the
+// 4-squadron demo block to seed.demo.sql; reset/reseed scripts that
+// want demo data must opt in via the SEED_FILE override.
+const OUT = join(HERE, "seed.demo.sql");
 
 // ── Demo squadron roster ──────────────────────────────────────────────────
 // pilotPrefix controls the pilot-ID numeric offset so IDs don't collide

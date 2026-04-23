@@ -18,7 +18,8 @@ import { showUndo } from "@/lib/undo-store";
 import { Plane, Pencil, Trash2, X, UserPlus, User, Lock, Unlock } from "lucide-react";
 import { useRegisteredPCs, useSubmitPending } from "@/lib/cross-pc";
 import { useAuth } from "@/lib/auth";
-import { loadSquadronDefaults } from "@/lib/squadron-defaults";
+import { seatLabelFromRoleScope } from "@/lib/types";
+import { loadSquadronDefaults, hydrateSquadronDefaultsFromDb } from "@/lib/squadron-defaults";
 import type { ExternalPilotRef } from "@/lib/mock";
 import { useFrozenAccess } from "@/lib/monthly-close";
 
@@ -138,18 +139,26 @@ export default function AddSortie() {
   // Squadron-level defaults: the operator-editable list of airframes the
   // squadron flies + the primary airframe used as the seed for new entries.
   // A NO.5 SQDN install with UH-60AIL configured shows that as the default
-  // here; an AH-1F squadron sees AH-1F. Falls back to the NO.8 list if the
-  // operator hasn't set anything yet.
+  // here; an AH-1F squadron sees AH-1F. Empty when the squadron has not
+  // run the Setup Wizard — the form is then disabled.
+  const [defaultsRev, setDefaultsRev] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    void hydrateSquadronDefaultsFromDb(auth.squadron?.number).then(ok => {
+      if (!cancelled && ok) setDefaultsRev(r => r + 1);
+    });
+    return () => { cancelled = true; };
+  }, [auth.squadron?.number]);
   const sqdnDefaults = useMemo(
     () => loadSquadronDefaults(auth.squadron?.number),
-    [auth.squadron?.number],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [auth.squadron?.number, defaultsRev],
   );
-  const acTypeOptions = sqdnDefaults.airframes.length
-    ? sqdnDefaults.airframes
-    : ["UH-60M", "UH-60L", "UH-60AIL", "AS332"];
+  const acTypeOptions = sqdnDefaults.airframes;
+  const noAircraftConfigured = acTypeOptions.length === 0;
   const [form, setForm] = useState<FormState>(() => ({
     ...blankForm(),
-    acType: sqdnDefaults.primaryAirframe || "UH-60M",
+    acType: sqdnDefaults.primaryAirframe || acTypeOptions[0] || "",
   }));
   const [confirmDel, setConfirmDel] = useState<Sortie | null>(null);
   // Pending edit waiting for the change-summary dialog. We capture both
@@ -222,6 +231,18 @@ export default function AddSortie() {
 
   const submit = async (e?: React.FormEvent) => {
     e?.preventDefault();
+    if (noAircraftConfigured) {
+      toast({
+        title: "No aircraft configured",
+        description: "Run the Squadron Setup Wizard before adding sorties.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!form.acType.trim()) {
+      toast({ title: "A/C Type required", variant: "destructive" });
+      return;
+    }
     const time = parseFloat(form.time || "0");
     const dual = parseFloat(form.dualHours || "0");
     if (!(time > 0) && !(dual > 0)) {
@@ -407,6 +428,9 @@ export default function AddSortie() {
             guestPilotMilitaryNumber: s.external.militaryNumber,
             guestSeat: which,
             submittedBy: auth.user?.username ?? mySquadronId,
+            submittedByDisplayName: auth.user?.displayName,
+            submittedByRank: auth.user?.rank,
+            submittedBySeatLabel: seatLabelFromRoleScope(auth.user?.role, auth.user?.scope),
             sortie: payload,
           });
         } catch {
@@ -577,8 +601,31 @@ export default function AddSortie() {
     <div>
       <PageHead title={t("nav_addsortie")} subtitle="New flight entry" />
 
+      {noAircraftConfigured && (
+        <Card className="mb-4 border-amber-400/40 bg-amber-500/10">
+          <div className="flex items-start gap-2 text-sm text-amber-100" data-testid="banner-no-aircraft">
+            <Plane className="h-4 w-4 mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <div className="font-semibold">No aircraft configured for this squadron yet.</div>
+              <div className="text-xs text-amber-200/90 mt-0.5">
+                Add the airframes your squadron flies on the Setup Wizard
+                so Add Sortie / Sortie Log / Flight Program can use them.
+              </div>
+            </div>
+            <a
+              href="/setup/squadron"
+              className="px-2.5 py-1 rounded-md bg-amber-500/30 border border-amber-400/50 text-amber-100 text-xs font-semibold"
+              data-testid="link-open-setup-wizard"
+            >
+              Open Setup Wizard
+            </a>
+          </div>
+        </Card>
+      )}
+
       <Card className="mb-4">
         <form onSubmit={submit} className="space-y-3" data-testid="form-add-sortie">
+          <fieldset disabled={noAircraftConfigured} className="space-y-3 contents">
           {/* Row 1: flight info */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             <Mini label="Date" type="date" value={form.date} onChange={v => set("date", v)} />
@@ -724,6 +771,7 @@ export default function AddSortie() {
               />
             </label>
           </div>
+          </fieldset>
         </form>
       </Card>
 

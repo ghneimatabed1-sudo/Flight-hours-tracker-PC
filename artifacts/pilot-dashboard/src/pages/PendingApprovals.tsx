@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useAuth } from "@/lib/auth";
+import { composeIdentityLabel } from "@/lib/types";
 import {
   usePendingApprovals,
   useDecidePending,
@@ -154,6 +155,22 @@ export default function PendingApprovals() {
                     <div className="text-xs text-muted-foreground">
                       hosted by <span className="text-foreground">{row.hostingSquadronName}</span> · {s.date} · {s.acType} {s.acNumber} · {time}h {s.condition}
                     </div>
+                    {(() => {
+                      // Task #137: render the rich submitter identity so
+                      // the home ops officer instantly sees which person
+                      // (rank + name + seat label) sent this entry.
+                      const lbl = composeIdentityLabel({
+                        rank: row.submittedByRank,
+                        displayName: row.submittedByDisplayName,
+                        username: row.submittedBy,
+                        seatLabel: row.submittedBySeatLabel,
+                      });
+                      return lbl ? (
+                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                          Submitted by <span className="text-foreground">{lbl}</span>
+                        </div>
+                      ) : null;
+                    })()}
                   </div>
                   <span className="text-[10px] uppercase tracking-wider px-2 py-1 rounded bg-amber-500/20 text-amber-200 border border-amber-400/30">PENDING</span>
                 </button>

@@ -24,7 +24,9 @@ import { createInterface } from "node:readline";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = join(HERE, "..", "migrations");
-const SEED_SQL = join(HERE, "seed.sql");
+// Task #137: dev/preview reseed loads the demo squadrons from
+// seed.demo.sql; production seed.sql is intentionally empty.
+const SEED_SQL = join(HERE, "seed.demo.sql");
 const GENERATOR = join(HERE, "generate-seed.mjs");
 
 function die(msg, code = 1) {

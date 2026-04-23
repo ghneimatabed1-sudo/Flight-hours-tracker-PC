@@ -381,7 +381,7 @@ export default function Squadrons() {
                 <Input
                   value={draft.base}
                   onChange={e => setDraft(d => ({ ...d, base: e.target.value }))}
-                  placeholder="e.g. King Abdullah II AB"
+                  placeholder="e.g. Main Air Base"
                   data-testid="input-sqn-base"
                 />
               </div>

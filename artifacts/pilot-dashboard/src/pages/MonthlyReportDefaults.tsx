@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { Save, Plus, Trash2, ArrowLeft } from "lucide-react";
 import { PageHead } from "@/components/Layout";
@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import {
   loadSquadronDefaults, saveSquadronDefaults, factoryDefaults,
+  hydrateSquadronDefaultsFromDb,
   type SquadronDefaults,
 } from "@/lib/squadron-defaults";
 
@@ -22,10 +23,25 @@ import {
 export default function MonthlyReportDefaults() {
   const { t } = useI18n();
   const { squadron, user } = useAuth();
-  const sqdnNumber = squadron?.number || "8";
+  // Task #137: no NO.8 fallback — if there is no bound squadron number
+  // we use the neutral "default" cache key so a fresh install is never
+  // pre-flavoured with NO.8 SQDN data.
+  const sqdnNumber = squadron?.number || "default";
 
   const [d, setD] = useState<SquadronDefaults>(() => loadSquadronDefaults(sqdnNumber));
   const [saved, setSaved] = useState(false);
+
+  // Task #137 — overlay DB-backed defaults (`squadrons.default_aircraft`,
+  // `squadrons.default_monthly_targets`) from migration 0039 on top of
+  // the local cache so a sibling PC sees the same config without
+  // re-running the Setup Wizard.
+  useEffect(() => {
+    let cancelled = false;
+    void hydrateSquadronDefaultsFromDb(sqdnNumber).then(ok => {
+      if (!cancelled && ok) setD(loadSquadronDefaults(sqdnNumber));
+    });
+    return () => { cancelled = true; };
+  }, [sqdnNumber]);
 
   if (user?.role !== "ops") {
     return (
@@ -46,8 +62,28 @@ export default function MonthlyReportDefaults() {
   const update = <K extends keyof SquadronDefaults>(k: K, v: SquadronDefaults[K]) =>
     setD(p => ({ ...p, [k]: v }));
 
-  const onSave = () => {
+  const onSave = async () => {
     saveSquadronDefaults(sqdnNumber, d);
+    try {
+      const { supabase, supabaseConfigured } = await import("@/lib/supabase");
+      if (supabaseConfigured && supabase && sqdnNumber) {
+        const aircraftPayload = d.airframes.map(model => ({
+          model,
+          fuelBurn: d.fuelBurnByAirframe[model] ?? 0,
+        }));
+        const monthlyPerPilot = Math.max(1, Math.round(d.minSixMonthHours / 6));
+        const targetsPayload: Record<string, number> = {};
+        for (const m of d.airframes) targetsPayload[m] = monthlyPerPilot;
+        await supabase.from("squadrons").upsert({
+          number: sqdnNumber,
+          name: squadron?.name || sqdnNumber,
+          base: d.base || d.airbase || "",
+          wing: d.wing || null,
+          default_aircraft: aircraftPayload,
+          default_monthly_targets: targetsPayload,
+        }, { onConflict: "number" });
+      }
+    } catch { /* offline-tolerant */ }
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
   };
@@ -63,7 +99,7 @@ export default function MonthlyReportDefaults() {
     <div className="p-6 max-w-4xl">
       <PageHead
         title="Monthly Report Defaults"
-        subtitle={`No ${sqdnNumber} SQDN — values that almost never change month-to-month, edit once and they prefill every report.`}
+        subtitle={`${squadron?.name || "Squadron"} — values that almost never change month-to-month, edit once and they prefill every report.`}
         actions={
           <div className="flex gap-2">
             <Link href="/monthly-report"
@@ -134,7 +170,7 @@ export default function MonthlyReportDefaults() {
               <input value={d.groupName} onChange={e => update("groupName", e.target.value)}
                 className="w-full bg-background border border-border rounded px-2 py-1.5 text-sm"
                 data-testid="input-default-group-name"
-                placeholder="QUICK REACTION FORCE GROUP" />
+                placeholder="e.g. ATTACK HELICOPTER GROUP" />
               <div className="text-[11px] text-muted-foreground mt-1">
                 Printed at the top of every Monthly Report sheet, above the
                 squadron name. Edit once per APK install for the unit.
@@ -144,7 +180,7 @@ export default function MonthlyReportDefaults() {
               <input value={d.groupAcronym} onChange={e => update("groupAcronym", e.target.value)}
                 className="w-full bg-background border border-border rounded px-2 py-1.5 text-sm"
                 data-testid="input-default-group-acronym"
-                placeholder="QRFG" />
+                placeholder="e.g. AHG" />
               <div className="text-[11px] text-muted-foreground mt-1">
                 Used as the prefix on every form name (e.g. <b>QRFG</b> RCN FORM 1,
                 <b>QRFG</b> FUEL, <b>QRFG</b> AUTHORIZATION) and on the unit block.
@@ -154,18 +190,19 @@ export default function MonthlyReportDefaults() {
               <input value={d.sortieLogLabel} onChange={e => update("sortieLogLabel", e.target.value)}
                 className="w-full bg-background border border-border rounded px-2 py-1.5 text-sm"
                 data-testid="input-default-sortie-log-label"
-                placeholder="QREG" />
+                placeholder="e.g. SQNLOG" />
               <div className="text-[11px] text-muted-foreground mt-1">
                 Short tag shown above the daily Sortie Log on Add Sortie
-                (e.g. <b>QREG</b> · 2026-04-23 · UH-60M). NO.8 SQDN uses
-                "QREG"; other squadrons may use "SQNREG", "FLTLOG", etc.
+                (e.g. <b>SQNLOG</b> · 2026-04-23 · {d.primaryAirframe || "your airframe"}).
+                Each squadron picks its own short tag — examples include
+                "SQNREG", "FLTLOG", or any short identifier.
               </div>
             </Field>
             <Field label="Primary airframe">
               <input value={d.primaryAirframe} onChange={e => update("primaryAirframe", e.target.value)}
                 className="w-full bg-background border border-border rounded px-2 py-1.5 text-sm"
                 data-testid="input-default-primary-airframe"
-                placeholder="UH-60M" />
+                placeholder="e.g. UH-60M / AH-1F / F-16C/D" />
               <div className="text-[11px] text-muted-foreground mt-1">
                 Squadron's main aircraft model. Used as the F1 unit-cell fallback,
                 the Arabic-roster column header, and the FUEL helper text. Add the
@@ -197,7 +234,7 @@ export default function MonthlyReportDefaults() {
 
         {/* Aircraft models the squadron flies */}
         <Section title="Aircraft models flown by this squadron"
-          hint="Drives the A/C Type dropdown on Add Sortie, the Sortie Log edit form, and the seed value on every new Flight Program row. NO.8 SQDN's defaults are UH-60M / UH-60L / UH-60AIL / AS332. An AH-1F squadron would replace the list entirely. Whatever you list here also feeds the fuel-burn table below — add a burn rate for each one.">
+          hint="Drives the A/C Type dropdown on Add Sortie, the Sortie Log edit form, and the seed value on every new Flight Program row. List every airframe your squadron flies — for example a UH-60 squadron might list UH-60M / UH-60L / UH-60AIL / AS332, while an AH-1F squadron would list its own variants. Whatever you list here also feeds the fuel-burn table below — add a burn rate for each one.">
           <ListEditor
             items={d.airframes}
             onChange={v => update("airframes", v)}
@@ -208,7 +245,7 @@ export default function MonthlyReportDefaults() {
 
         {/* Fuel-burn per airframe */}
         <Section title="Fuel burn rate (lb/hr) by airframe"
-          hint="Used in the Form 4 / FUEL block to compute total fuel: pilots × sorties/pilot × duration × lb/hr. Add a row for every airframe your squadron flies — each row's rate is editable. UH-60M factory rate is 576 lb/hr per the workbook.">
+          hint="Used in the Form 4 / FUEL block to compute total fuel: pilots × sorties/pilot × duration × lb/hr. Add a row for every airframe your squadron flies — each row's rate is editable.">
           <div className="space-y-1">
             {airframes.map(a => (
               <div key={a} className="grid grid-cols-12 gap-2 items-center text-xs">
