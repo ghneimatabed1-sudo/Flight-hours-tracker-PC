@@ -441,8 +441,25 @@ export default function ScheduleChain() {
   // them eliminates the drift risk where the message inbox and the
   // schedule inbox could disagree about which items belong to this seat.
   const matchesMe = useMemo(() => makePcMatcher(myPcId), [myPcId]);
-  const incomingAll = sharesQ.data.filter(s => matchesMe(s.currentPcId));
-  const sent = sharesQ.data.filter(s => matchesMe(s.originSquadronId) && !matchesMe(s.currentPcId));
+  // v1.1.108 — Program-style shares (full RJAF flight-schedule sheet)
+  // ALSO surface in the Flight Schedule page's inbox
+  // (FlightProgramShareInbox). For roles that have access to BOTH
+  // pages — Ops Pilot, Sqn Cmdr, Flight Cmdr, super_admin — the
+  // duplicate card was confusing and approving from one page left the
+  // other unchanged. So those roles get program shares HIDDEN here
+  // and acted on over there.
+  // Wing Cmdr and Base Cmdr do NOT have the Flight Schedule page in
+  // their sidebar, so for them program shares MUST stay in Schedule
+  // Chain — otherwise wing approval of a flight-schedule sheet is
+  // simply unreachable. Same applies to the chainCount badge below.
+  const seesFlightProgramInbox =
+    user?.role === "super_admin"
+    || user?.role === "ops"
+    || (user?.role === "commander" && (user?.scope === "flight" || user?.scope === "squadron"));
+  const dedupeProgram = (s: typeof sharesQ.data[number]) =>
+    seesFlightProgramInbox ? !s.program : true;
+  const incomingAll = sharesQ.data.filter(s => matchesMe(s.currentPcId) && dedupeProgram(s));
+  const sent = sharesQ.data.filter(s => matchesMe(s.originSquadronId) && !matchesMe(s.currentPcId) && dedupeProgram(s));
 
   // v1.1.65 — Wing-Cmdr inbox triage. With 15-20+ squadrons feeding
   // up the chain the flat list is overwhelming, so the wing operator
@@ -482,7 +499,11 @@ export default function ScheduleChain() {
     <div>
       <PageHead
         title="Flight Schedule Sharing"
-        subtitle={`Chain: Flight ↔ Squadron → Wing → Base · this PC: ${myPcName} (${myTier})`}
+        subtitle={
+          seesFlightProgramInbox
+            ? `Compact-row chain (program-style sheets are handled in Flight Schedule). This PC: ${myPcName} (${myTier})`
+            : `Chain: Flight ↔ Squadron → Wing → Base · this PC: ${myPcName} (${myTier})`
+        }
       />
 
       {/* Compose new schedule — available to Squadron, Flight and Ops
@@ -859,6 +880,17 @@ export default function ScheduleChain() {
                         <button
                           onClick={async () => {
                             const approver = user?.username ?? "cmd";
+                            // v1.1.108 — wrap the entire decide chain in
+                            // a try/catch with an explicit error toast.
+                            // Without this, a failing mutateAsync (RLS
+                            // rejection, network drop, stale claim)
+                            // silently aborted the click handler and
+                            // the operator saw NOTHING — no toast, no
+                            // state change, leaving them to wonder
+                            // whether the press registered. The success
+                            // toast already existed; the failure path
+                            // just needs the same visibility.
+                            try {
                             // Wing approval auto-forwards the program to a
                             // Base PC so the base sees the approved sheet
                             // in their inbox without an extra click. We
@@ -915,9 +947,27 @@ export default function ScheduleChain() {
                               toast({ title: `Approved · sent to ${wingTarget.squadronName}` });
                             } else {
                               await decide.mutateAsync({ id: share.id, action: "approve", by: approver, tier: wireTier, note: decisionNote || undefined });
-                              toast({ title: "Approved" });
+                              // v1.1.108 — Flight Cmdr Approve when no
+                              // upstream PC is registered: be explicit
+                              // that the chain has paused here, so the
+                              // operator doesn't sit waiting for a
+                              // forward that will never happen.
+                              if (myTier === "flight" && share.currentTier === "flight" && flightApproveForwardTargets.length === 0) {
+                                toast({ title: "Approved — no Sqn Cmdr PC registered, chain paused here" });
+                              } else if (myTier === "squadron" && isSqnCmdrPc && share.currentTier === "squadron" && wingPCs.length === 0) {
+                                toast({ title: "Approved — no Wing PC registered, chain paused here" });
+                              } else {
+                                toast({ title: "Approved" });
+                              }
                             }
                             setDecisionNote("");
+                            } catch (e) {
+                              toast({
+                                title: "Approve failed",
+                                description: (e as Error)?.message ?? String(e),
+                                variant: "destructive",
+                              });
+                            }
                           }}
                           className="px-3 py-1.5 rounded-md bg-emerald-500/20 border border-emerald-400/40 text-emerald-100 text-xs font-semibold inline-flex items-center gap-1"
                           data-testid={`approve-${share.id}`}
@@ -941,8 +991,16 @@ export default function ScheduleChain() {
                         {myTier !== "wing" && myTier !== "base" && (
                           <button
                             onClick={async () => {
-                              await decide.mutateAsync({ id: share.id, action: "reject", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined });
-                              toast({ title: "Rejected" }); setDecisionNote("");
+                              try {
+                                await decide.mutateAsync({ id: share.id, action: "reject", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined });
+                                toast({ title: "Rejected" }); setDecisionNote("");
+                              } catch (e) {
+                                toast({
+                                  title: "Reject failed",
+                                  description: (e as Error)?.message ?? String(e),
+                                  variant: "destructive",
+                                });
+                              }
                             }}
                             className="px-3 py-1.5 rounded-md bg-rose-500/20 border border-rose-400/40 text-rose-100 text-xs font-semibold inline-flex items-center gap-1"
                             data-testid={`reject-${share.id}`}
@@ -992,21 +1050,29 @@ export default function ScheduleChain() {
                           return (
                             <button
                               onClick={async () => {
-                                await decide.mutateAsync({
-                                  id: share.id, action: "forward", by: user?.username ?? "cmd", tier: wireTier,
-                                  forwardPcId: t.id, forwardPcName: t.squadronName,
-                                });
-                                // Stamp an approval event at the new
-                                // tier so the receiver sees "approved
-                                // by [upstream]" in the audit trail
-                                // and the final-schedules archive can
-                                // distinguish Wing-signed finals.
-                                await decide.mutateAsync({
-                                  id: share.id, action: "approve", by: user?.username ?? "cmd", tier: nt,
-                                  note: decisionNote || undefined,
-                                });
-                                toast({ title: `Sent to ${t.squadronName || nextTierLabel}` });
-                                setDecisionNote("");
+                                try {
+                                  await decide.mutateAsync({
+                                    id: share.id, action: "forward", by: user?.username ?? "cmd", tier: wireTier,
+                                    forwardPcId: t.id, forwardPcName: t.squadronName,
+                                  });
+                                  // Stamp an approval event at the new
+                                  // tier so the receiver sees "approved
+                                  // by [upstream]" in the audit trail
+                                  // and the final-schedules archive can
+                                  // distinguish Wing-signed finals.
+                                  await decide.mutateAsync({
+                                    id: share.id, action: "approve", by: user?.username ?? "cmd", tier: nt,
+                                    note: decisionNote || undefined,
+                                  });
+                                  toast({ title: `Sent to ${t.squadronName || nextTierLabel}` });
+                                  setDecisionNote("");
+                                } catch (e) {
+                                  toast({
+                                    title: "Forward failed",
+                                    description: e instanceof Error ? e.message : "Could not send to the next tier. Check your connection and try again.",
+                                    variant: "destructive",
+                                  });
+                                }
                               }}
                               className="px-3 py-1.5 rounded-md bg-indigo-500/20 border border-indigo-400/50 text-indigo-100 text-xs font-semibold inline-flex items-center gap-1"
                               data-testid={`send-next-${share.id}`}
@@ -1035,8 +1101,16 @@ export default function ScheduleChain() {
                         {myTier !== "wing" && myTier !== "base" && (
                           <button
                             onClick={async () => {
-                              await decide.mutateAsync({ id: share.id, action: "hold", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined });
-                              toast({ title: "Held" }); setDecisionNote("");
+                              try {
+                                await decide.mutateAsync({ id: share.id, action: "hold", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined });
+                                toast({ title: "Held" }); setDecisionNote("");
+                              } catch (e) {
+                                toast({
+                                  title: "Hold failed",
+                                  description: e instanceof Error ? e.message : "Could not record the hold. Check your connection and try again.",
+                                  variant: "destructive",
+                                });
+                              }
                             }}
                             className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs inline-flex items-center gap-1"
                           >
@@ -1049,18 +1123,26 @@ export default function ScheduleChain() {
                               <button
                                 onClick={async () => {
                                   const buf = editBuffer[share.id];
-                                  await decide.mutateAsync({
-                                    id: share.id,
-                                    action: "edit",
-                                    by: user?.username ?? "ops",
-                                    tier: wireTier,
-                                    note: decisionNote || undefined,
-                                    editedProgram: buf,
-                                    editedRows: programToShareRows(buf),
-                                  });
-                                  setEditBuffer(b => { const { [share.id]: _, ...rest } = b; return rest; });
-                                  setDecisionNote("");
-                                  toast({ title: "Edits returned to originator" });
+                                  try {
+                                    await decide.mutateAsync({
+                                      id: share.id,
+                                      action: "edit",
+                                      by: user?.username ?? "ops",
+                                      tier: wireTier,
+                                      note: decisionNote || undefined,
+                                      editedProgram: buf,
+                                      editedRows: programToShareRows(buf),
+                                    });
+                                    setEditBuffer(b => { const { [share.id]: _, ...rest } = b; return rest; });
+                                    setDecisionNote("");
+                                    toast({ title: "Edits returned to originator" });
+                                  } catch (e) {
+                                    toast({
+                                      title: "Edit failed",
+                                      description: e instanceof Error ? e.message : "Could not return edits to originator. Check your connection and try again.",
+                                      variant: "destructive",
+                                    });
+                                  }
                                 }}
                                 className="px-3 py-1.5 rounded-md bg-amber-500/20 border border-amber-400/40 text-amber-100 text-xs font-semibold inline-flex items-center gap-1"
                                 data-testid={`save-edit-${share.id}`}
@@ -1091,8 +1173,16 @@ export default function ScheduleChain() {
                         ) : (
                           <button
                             onClick={async () => {
-                              await decide.mutateAsync({ id: share.id, action: "edit", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined, editedRows: share.rows });
-                              toast({ title: "Edits returned to originator" }); setDecisionNote("");
+                              try {
+                                await decide.mutateAsync({ id: share.id, action: "edit", by: user?.username ?? "ops", tier: wireTier, note: decisionNote || undefined, editedRows: share.rows });
+                                toast({ title: "Edits returned to originator" }); setDecisionNote("");
+                              } catch (e) {
+                                toast({
+                                  title: "Edit failed",
+                                  description: e instanceof Error ? e.message : "Could not return edits to originator. Check your connection and try again.",
+                                  variant: "destructive",
+                                });
+                              }
                             }}
                             className="px-3 py-1.5 rounded-md bg-secondary border border-border text-xs inline-flex items-center gap-1"
                           >

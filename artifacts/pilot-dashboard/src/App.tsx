@@ -47,6 +47,7 @@ import PendingApprovals from "@/pages/PendingApprovals";
 import GuestBackfill from "@/pages/GuestBackfill";
 import Messages from "@/pages/Messages";
 import ScheduleChain from "@/pages/ScheduleChain";
+import ScheduleHistory from "@/pages/ScheduleHistory";
 import FinalSchedules from "@/pages/FinalSchedules";
 import { registerLocalPC, purgeExpiredMessages, getLocalPcId, setLocalPcId, getDeviceSuffix, publishSquadronFlightGroup, getLatestSquadronFlightGroup, publishSquadronSnapshot, type PcTier, type SquadronSnapshotPayload } from "@/lib/cross-pc";
 import { usePilots, useUnavailable } from "@/lib/squadron-data";
@@ -107,6 +108,7 @@ function SquadronOpsRoutes() {
       <Route path="/pending/backfill" component={GuestBackfill} />
       <Route path="/pending" component={PendingApprovals} />
       <Route path="/schedule-chain" component={ScheduleChain} />
+      <Route path="/schedule-history" component={ScheduleHistory} />
       <Route path="/messages" component={Messages} />
       <Route path="/roster" component={Roster} />
       <Route path="/pilot/:id" component={PilotDetail} />
@@ -205,6 +207,7 @@ function CommanderRoutes() {
       <Route path="/dashboard/unavailable" component={CommanderUnavailableGate} />
       <Route path="/dashboard/sticky" component={StickyNotes} />
       <Route path="/dashboard/schedule-chain" component={ScheduleChain} />
+      <Route path="/dashboard/schedule-history" component={ScheduleHistory} />
       {/* v1.1.64 — Wing-approved finals rollup. Mounted under the
           commander shell so Base + HQ Cmdrs (who use HQLayout) reach
           it from their sidebar. The page itself enforces canViewFinalSchedules. */}

@@ -4,8 +4,9 @@ import { useAuth } from "@/lib/auth";
 import { useI18n, type Key } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2, Bell, ClipboardCheck, Settings as SettingsIcon } from "lucide-react";
+import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2, Bell, ClipboardCheck, History, Settings as SettingsIcon } from "lucide-react";
 import { canUseMessages, canUseScheduleChain, canViewFinalSchedules } from "@/lib/cross-pc";
+import { useSidebarBadges } from "@/lib/sidebar-badges";
 import { FlightBindingGate, FlightBindingBadge } from "@/components/FlightBindingGate";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
 import emblem from "@assets/rjaf_emblem.png";
@@ -21,6 +22,18 @@ export function HQLayout({ children }: { children: ReactNode }) {
   const { user, logout, squadron } = useAuth();
   const { t, lang, setLang, dir } = useI18n();
   const [location] = useLocation();
+  // v1.1.108 — surface the same red-dot / counter pulse the squadron
+  // sidebar uses, so commander seats (Flight Cmdr, Sqn Cmdr, Wing,
+  // Base, HQ) actually notice an incoming schedule, message, or
+  // pending guest. The badge map is keyed by squadron-style paths
+  // (`/schedule-chain`, `/flight-program`, ...) — strip the
+  // `/dashboard` prefix when looking up commander-shell entries.
+  const badges = useSidebarBadges();
+  const badgeFor = (path: string): number => {
+    if (path === "/dashboard") return 0;
+    const stripped = path.replace(/^\/dashboard/, "") || "/";
+    return badges[stripped] ?? badges[path] ?? 0;
+  };
   // PC heartbeat is centralised in App.tsx → ArchiveBootstrap so that
   // every signed-in role (commander tiers, ops officers) registers
   // exactly once with a stable, tier-aware id. Don't duplicate it here.
@@ -85,7 +98,10 @@ export function HQLayout({ children }: { children: ReactNode }) {
         // base / HQ-scope commanders don't own a specific squadron's daily
         // sheet so they don't get this page in their sidebar.
         ...(canUseScheduleChain(user.role, user.scope)
-          ? [{ path: "/dashboard/schedule-chain", labelKey: "nav_schedule_chain" as Key, icon: <Share2 className="h-4 w-4" /> }]
+          ? [
+              { path: "/dashboard/schedule-chain", labelKey: "nav_schedule_chain" as Key, icon: <Share2 className="h-4 w-4" /> },
+              { path: "/dashboard/schedule-history", labelKey: "nav_schedule_history" as Key, icon: <History className="h-4 w-4" /> },
+            ]
           : []),
         // v1.1.64 — Base / HQ commanders are read-only viewers of every
         // Wing-approved flight schedule across every squadron, sorted
@@ -171,19 +187,40 @@ export function HQLayout({ children }: { children: ReactNode }) {
               const isActive = location === item.path || (item.path !== "/admin" && item.path !== "/dashboard" && location.startsWith(item.path));
               const isExactRoot = (item.path === "/admin" || item.path === "/dashboard") && location === item.path;
               const active = isActive || isExactRoot;
+              const count = badgeFor(item.path);
+              const showBadge = count > 0 && !active;
               return (
                 <li key={item.path}>
                   <Link
                     href={item.path}
-                    className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm whitespace-nowrap hover-elevate active-elevate-2 ${
+                    className={`relative flex items-center gap-2 rounded-md px-3 py-2 text-sm whitespace-nowrap hover-elevate active-elevate-2 ${
                       active
                         ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                        : showBadge
+                        ? "bg-rose-500/10 text-rose-100 ring-1 ring-rose-500/40"
                         : "text-sidebar-foreground/85"
                     }`}
                     data-testid={`nav-${item.path.split("/").pop()}`}
                   >
-                    {item.icon}
+                    <span className="relative shrink-0">
+                      {item.icon}
+                      {showBadge && (
+                        <span
+                          className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-rose-500 animate-pulse"
+                          aria-hidden
+                        />
+                      )}
+                    </span>
                     <span>{t(item.labelKey)}</span>
+                    {showBadge && (
+                      <span
+                        className="ms-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-rose-500 text-white text-[10px] font-bold leading-none animate-pulse"
+                        data-testid={`nav-badge-${item.path.split("/").pop()}`}
+                        aria-label={`${count} new`}
+                      >
+                        {count > 99 ? "99+" : count}
+                      </span>
+                    )}
                   </Link>
                 </li>
               );

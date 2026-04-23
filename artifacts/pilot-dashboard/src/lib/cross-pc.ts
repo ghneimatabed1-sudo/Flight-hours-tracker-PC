@@ -1444,13 +1444,40 @@ export function isWingApprovedFinal(s: ScheduleShare): boolean {
   return approvals[approvals.length - 1].tier === "wing";
 }
 
+// v1.1.108 — single source of truth for "this share is terminally
+// approved" used by both Schedule History (Final tag) and any other
+// surface that needs it. Wing approval auto-forwards to Base and the
+// auto-forward stamps a base-tier approval event, so the latest
+// approval tier can legitimately be "wing" OR "base" for a fully
+// finalized chain. This helper covers both so a base-stamped chain
+// doesn't get mis-tagged as in-flight.
+export function isFinalSchedule(s: ScheduleShare): boolean {
+  if (s.status !== "approved") return false;
+  const approvals = s.history.filter(h => h.action === "approved");
+  if (approvals.length === 0) return false;
+  const lastTier = approvals[approvals.length - 1].tier;
+  return lastTier === "wing" || lastTier === "base";
+}
+
 export function useScheduleShares(
   forPcId: string | null,
-  opts?: { viewAllApproved?: boolean },
+  opts?: { viewAllApproved?: boolean; includeHistoryParticipant?: boolean },
 ): UseQueryResult<ScheduleShare[]> & { data: ScheduleShare[] } {
   const viewAllApproved = !!opts?.viewAllApproved;
+  // v1.1.108 — for the Schedule History page we need every share this
+  // PC ever touched: rows we forwarded (no longer current), rows we
+  // rejected (status=rejected), rows we approved that later got
+  // forwarded onward, and rows still in flight further up the chain.
+  // The default `visible()` filter is too narrow because it only
+  // surfaces approved+chain rows. This option widens it to include
+  // any share where the PC appears in chain_pc_ids OR in history[],
+  // regardless of status.
+  const includeHistoryParticipant = !!opts?.includeHistoryParticipant;
   const q = useQuery<ScheduleShare[]>({
-    queryKey: ["xpc", "schedule", forPcId ?? "", viewAllApproved ? "all-approved" : "mine"],
+    queryKey: [
+      "xpc", "schedule", forPcId ?? "",
+      viewAllApproved ? "all-approved" : (includeHistoryParticipant ? "history" : "mine"),
+    ],
     queryFn: async () => {
       // Visibility rules (applied client-side so the same logic is used
       // for both Supabase and local-fallback paths):
@@ -1464,6 +1491,7 @@ export function useScheduleShares(
       //   - viewAllApproved (Base / HQ): see every Wing-approved final
       //     regardless of chain membership. They never see drafts,
       //     rejected cycles, or in-flight forwards.
+      const matcher = makePcMatcher(forPcId);
       const visible = (s: ScheduleShare): boolean => {
         if (viewAllApproved) {
           return isWingApprovedFinal(s);
@@ -1472,6 +1500,19 @@ export function useScheduleShares(
         const isOrigin = s.originSquadronId === forPcId;
         const isCurrent = s.currentPcId === forPcId;
         const wasRejecter = (s.rejectedByPcIds ?? []).includes(forPcId);
+        // v1.1.108 — Schedule History broadens visibility to every
+        // share this PC participated in (chain member or history
+        // actor) across all statuses, so the audit page can show
+        // forwarded / rejected / in-flight rows that the default
+        // "ball-in-my-court" filter would hide.
+        if (includeHistoryParticipant) {
+          if (isOrigin) return !s.originatorDismissedAt;
+          if (isCurrent) return true;
+          if ((s.chainPcIds ?? []).some(id => matcher(id))) return true;
+          if ((s.history ?? []).some(h => matcher(h.by))) return true;
+          if ((s.rejectedByPcIds ?? []).some(id => matcher(id))) return true;
+          return false;
+        }
         if (isOrigin) {
           if (s.originatorDismissedAt) return false;
           return true;
@@ -1523,12 +1564,25 @@ export function useScheduleShares(
               const orParts: string[] = [
                 `current_pc_id.eq.${forPcId}`,
                 `origin_squadron_id.eq.${forPcId}`,
-                `and(status.eq.approved,chain_pc_ids.cs.{${forPcId}})`,
+                // For the Schedule History audit page, drop the
+                // status=approved gate so chain participants see
+                // rejected + in-flight + forwarded rows too.
+                includeHistoryParticipant
+                  ? `chain_pc_ids.cs.{${forPcId}}`
+                  : `and(status.eq.approved,chain_pc_ids.cs.{${forPcId}})`,
               ];
               if (peerSquadronId !== null) {
                 orParts.push(
                   `current_pc_id.eq.${peerSquadronId}`,
                   `origin_squadron_id.eq.${peerSquadronId}`,
+                );
+                if (includeHistoryParticipant) {
+                  orParts.push(`chain_pc_ids.cs.{${peerSquadronId}}`);
+                }
+              }
+              if (includeHistoryParticipant && logicalSeat !== null) {
+                orParts.push(
+                  `chain_pc_ids.cs.{${logicalSeat}}`,
                 );
               }
               if (logicalSeat !== null) {

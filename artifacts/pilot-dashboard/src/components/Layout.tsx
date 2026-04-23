@@ -38,6 +38,7 @@ const ITEMS: readonly Item[] = [
   { p: "/pending", k: "nav_pending" as TKey, I: InboxIcon },
   { p: "/external-pilots", k: "nav_externalpilots", I: UserPlusIcon },
   { p: "/schedule-chain", k: "nav_schedule_chain" as TKey, I: Share2Icon },
+  { p: "/schedule-history", k: "nav_schedule_history" as TKey, I: History },
   { p: "/final-schedules", k: "nav_final_schedules" as TKey, I: ClipboardCheckIcon },
   { p: "/messages", k: "nav_messages" as TKey, I: MailIcon },
   { p: "/roster", k: "nav_roster", I: Users },
@@ -144,6 +145,15 @@ export default function Layout({ children }: { children: ReactNode }) {
               // the schedule chain (peer share with linked Flight Cmdrs
               // AND with the Squadron Cmdr, both directions). The label
               // is shown for every role canUseScheduleChain accepts.
+              return canUseScheduleChain(user?.role, user?.scope);
+            }
+            if (p === "/schedule-history") {
+              // v1.1.108: Schedule History is the read-only audit
+              // ledger for any PC that participates in the schedule
+              // chain (same gate as /schedule-chain). Decisions move
+              // off the active inbox once approved/rejected; this is
+              // where the operator goes to look up "what did the
+              // chain say about Sunday's sheet last week".
               return canUseScheduleChain(user?.role, user?.scope);
             }
             if (p === "/final-schedules") {

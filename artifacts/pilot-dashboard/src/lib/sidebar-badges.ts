@@ -21,6 +21,8 @@ export type SidebarBadgeMap = Record<string, number>;
 // expects for a desktop operator.
 const K_LAST_SEEN_FINALS = "rjaf.lastSeenFinals";
 const EVT_LAST_SEEN_FINALS = "rjaf:finals-seen";
+const K_LAST_SEEN_FLIGHT_PROGRAM = "rjaf.lastSeenFlightProgram";
+const EVT_LAST_SEEN_FLIGHT_PROGRAM = "rjaf:flight-program-seen";
 
 export function markFinalSchedulesSeen(): void {
   try {
@@ -31,9 +33,30 @@ export function markFinalSchedulesSeen(): void {
   }
 }
 
+// v1.1.108 — visiting /flight-program clears its red dot the same way
+// /final-schedules does. Without this the actionable Flight Schedule
+// inbox count would stay lit forever once a sheet landed; the operator
+// would learn to ignore the badge and miss the next arrival.
+export function markFlightProgramSeen(): void {
+  try {
+    window.localStorage.setItem(K_LAST_SEEN_FLIGHT_PROGRAM, new Date().toISOString());
+    window.dispatchEvent(new Event(EVT_LAST_SEEN_FLIGHT_PROGRAM));
+  } catch {
+    /* private mode / storage disabled — badge will just not clear */
+  }
+}
+
 function readLastSeenFinals(): string {
   try {
     return window.localStorage.getItem(K_LAST_SEEN_FINALS) ?? "1970-01-01T00:00:00Z";
+  } catch {
+    return "1970-01-01T00:00:00Z";
+  }
+}
+
+function readLastSeenFlightProgram(): string {
+  try {
+    return window.localStorage.getItem(K_LAST_SEEN_FLIGHT_PROGRAM) ?? "1970-01-01T00:00:00Z";
   } catch {
     return "1970-01-01T00:00:00Z";
   }
@@ -74,13 +97,18 @@ export function useSidebarBadges(): SidebarBadgeMap {
   // the red dot clears the moment the user visits that page, and
   // re-arms whenever a newer Wing-approved schedule lands.
   const [lastSeenFinals, setLastSeenFinals] = useState<string>(() => readLastSeenFinals());
+  const [lastSeenFP, setLastSeenFP] = useState<string>(() => readLastSeenFlightProgram());
   useEffect(() => {
-    const sync = () => setLastSeenFinals(readLastSeenFinals());
-    window.addEventListener(EVT_LAST_SEEN_FINALS, sync);
-    window.addEventListener("storage", sync);
+    const syncFinals = () => setLastSeenFinals(readLastSeenFinals());
+    const syncFP = () => setLastSeenFP(readLastSeenFlightProgram());
+    const syncStorage = () => { syncFinals(); syncFP(); };
+    window.addEventListener(EVT_LAST_SEEN_FINALS, syncFinals);
+    window.addEventListener(EVT_LAST_SEEN_FLIGHT_PROGRAM, syncFP);
+    window.addEventListener("storage", syncStorage);
     return () => {
-      window.removeEventListener(EVT_LAST_SEEN_FINALS, sync);
-      window.removeEventListener("storage", sync);
+      window.removeEventListener(EVT_LAST_SEEN_FINALS, syncFinals);
+      window.removeEventListener(EVT_LAST_SEEN_FLIGHT_PROGRAM, syncFP);
+      window.removeEventListener("storage", syncStorage);
     };
   }, []);
 
@@ -89,14 +117,49 @@ export function useSidebarBadges(): SidebarBadgeMap {
     const inbox = messagesQ.inbox ?? [];
     const pending = pendingQ.data ?? [];
 
+    // v1.1.108 — Schedule Chain dedup. Roles that ALSO have the Flight
+    // Schedule page in their sidebar (Ops Pilot, Sqn Cmdr, Flight Cmdr,
+    // super_admin) act on program-style sheets there, so the chain
+    // badge mustn't double-count them. Wing + Base commanders have no
+    // Flight Schedule sidebar entry, so for them program shares MUST
+    // remain visible/badged in Schedule Chain — otherwise wing
+    // approval of a flight-schedule sheet is unreachable.
+    const seesFlightProgramInbox =
+      user?.role === "super_admin"
+      || user?.role === "ops"
+      || (user?.role === "commander" && (user?.scope === "flight" || user?.scope === "squadron"));
+
     // Schedule chain: ball-in-my-court rows the user has not yet acted on.
     // Approved / rejected terminals don't count — they're history.
     const chainCount = shares.filter(s =>
       s.currentPcId !== null
       && matchesMe(s.currentPcId)
       && s.status !== "approved"
-      && s.status !== "rejected",
+      && s.status !== "rejected"
+      && (!seesFlightProgramInbox || !s.program),
     ).length;
+
+    // v1.1.108 — Flight Schedule page (program-style sheets) badge so
+    // Flight Cmdrs / Sqn Cmdrs / Ops actually notice that a sheet
+    // landed in the Flight Schedule inbox. Wing + Base never see
+    // /flight-program in their sidebar, so the badge is suppressed
+    // for them (the chain badge above carries the signal instead).
+    const flightProgramCount = seesFlightProgramInbox
+      ? shares.filter(s => {
+          if (!s.program) return false;
+          if (s.currentPcId === null || !matchesMe(s.currentPcId)) return false;
+          if (s.status === "approved" || s.status === "rejected") return false;
+          // Use the latest history timestamp (or fall back to the
+          // share's own date) to decide whether the row arrived AFTER
+          // this PC last opened /flight-program. Mirrors the finals
+          // "seen" pattern so the badge clears on visit and re-arms
+          // only when something genuinely new lands.
+          const arrivedAt =
+            (s.history && s.history.length > 0 ? s.history[s.history.length - 1].at : null)
+            ?? s.date;
+          return arrivedAt > lastSeenFP;
+        }).length
+      : 0;
 
     // Messages: inbox items still unread (no readAt) and not yet archived
     // to history. useMessages already filters out in-history items.
@@ -121,9 +184,10 @@ export function useSidebarBadges(): SidebarBadgeMap {
 
     return {
       "/schedule-chain": chainCount,
+      "/flight-program": flightProgramCount,
       "/messages": messageCount,
       "/pending": pendingCount,
       "/final-schedules": finalsCount,
     };
-  }, [sharesQ.data, messagesQ.inbox, pendingQ.data, matchesMe, finalsViewer, lastSeenFinals]);
+  }, [sharesQ.data, messagesQ.inbox, pendingQ.data, matchesMe, finalsViewer, lastSeenFinals, lastSeenFP, user?.role, user?.scope]);
 }

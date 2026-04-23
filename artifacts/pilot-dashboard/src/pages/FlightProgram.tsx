@@ -20,6 +20,7 @@ import {
   getFlightBinding,
 } from "@/lib/cross-pc";
 import { useToast } from "@/hooks/use-toast";
+import { markFlightProgramSeen } from "@/lib/sidebar-badges";
 
 type Mode = ScheduleProgram["mode"];
 
@@ -164,6 +165,14 @@ export default function FlightProgram() {
   const canPrint = canAccess;
   const isFlightCmdr = user?.role === "commander" && user?.scope === "flight";
 
+  // v1.1.108 — clear the /flight-program red dot on every visit. The
+  // useSidebarBadges() hook reads `rjaf.lastSeenFlightProgram` and
+  // re-arms only when a strictly-newer share lands afterwards.
+  useEffect(() => {
+    if (canAccess) markFlightProgramSeen();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const todayIso = new Date().toISOString().slice(0, 10);
   const [defaults, setDefaults]       = useState<Defaults>(() => loadDefaults(squadron));
   const [date, setDate]               = useState<string>(todayIso);
@@ -253,14 +262,35 @@ export default function FlightProgram() {
       // IS actually in the registry — the exact symptom reported at
       // NO.8 SQDN on 23-Apr.
       if (user?.role === "ops") {
+        // v1.1.108 — third widening clause for the legacy registry
+        // shape that NO.8 SQDN reported on 23-Apr-26: a Flight Cmdr
+        // PC was present in the registry, but its row predates the
+        // FLIGHT: prefix scheme AND its tier column was never
+        // back-filled (so it sat as plain `tier:"squadron"` with a
+        // bare id like "NO.8 #1"). Both prior clauses missed it and
+        // Ops saw "— pick a registered PC —" with nothing under it.
+        // The new clause accepts any non-Ops, non-Sqn-Cmdr, non-Wing,
+        // non-Base, non-HQ row — anything left over at squadron
+        // level that isn't another Ops desk is, by elimination, a
+        // flight-level seat. The existing `usingFallbackTargets`
+        // safety net stays in place for the truly-empty case.
+        const STRUCTURAL_PREFIXES = ["WING:", "BASE:", "HQ:", "SQDNCMD:", "OPS:"];
         return all.filter(p =>
           p.tier === "flight"
-          || p.id.startsWith("FLIGHT:"),
+          || p.id.startsWith("FLIGHT:")
+          || (
+            p.tier !== "wing"
+            && p.tier !== "base"
+            && p.tier !== "hq"
+            && !STRUCTURAL_PREFIXES.some(pref => p.id.startsWith(pref))
+            && p.id.includes(":") === false
+            && p.id !== (squadron?.name ?? "")
+          ),
         );
       }
       return all;
     },
-    [registry.data, isFlightCmdr, isSquadronCmdr, flightBinding?.pcId, user?.role],
+    [registry.data, isFlightCmdr, isSquadronCmdr, flightBinding?.pcId, user?.role, squadron?.name, boundSquadronBase],
   );
   // v1.1.38: forgiving fallback. When the strict tier filter yields zero
   // PCs (the Sqn Cmdr saw "— pick a registered PC —" and nothing else
@@ -354,8 +384,27 @@ export default function FlightProgram() {
     );
   }
 
+  // v1.1.108 — loud "PC still registering…" banner so a Flight Cmdr
+  // (or any operator) opening the page before the heartbeat lands sees
+  // an explicit explanation instead of a silently-empty inbox / picker.
+  // The badge for /flight-program also depends on a live registry, so
+  // this banner is the upstream signal that everything else is waiting
+  // on the first heartbeat to land.
+  const registryStillRegistering = registry.data.length === 0;
+
   return (
     <div className="space-y-3" dir={dir}>
+      {registryStillRegistering && (
+        <div
+          className="rounded-md border border-sky-400/40 bg-sky-500/10 p-3 text-xs text-sky-100"
+          data-testid="registry-still-registering"
+        >
+          <div className="font-semibold">PC still registering…</div>
+          <div className="text-sky-200/80">
+            Your PC's heartbeat hasn't published to the registry yet, so the recipient picker and the Incoming inbox can't populate. Give it a few seconds; this banner clears automatically once registration lands.
+          </div>
+        </div>
+      )}
       <FlightProgramShareInbox />
       {/* Toolbar — hidden on print. Date + mode + Save + Print + Submit + Defaults. */}
       <div className="no-print flex items-center gap-2 flex-wrap">
@@ -463,10 +512,37 @@ export default function FlightProgram() {
                       No PC matched the strict tier filter — showing every PC in the registry ({effectiveTargets.length}). Pick the right one manually.
                     </span>
                   )}
+                  {/* v1.1.108 — first-run / empty-registry card. When
+                      no recipient is reachable, give the operator a
+                      clear, dedicated panel that explains BOTH cases:
+                      (a) this PC's heartbeat hasn't landed yet
+                      ("PC still registering…"), and
+                      (b) other PCs simply haven't signed in.
+                      Without this dedicated card, an Ops Pilot just
+                      sees an empty dropdown and has no path forward. */}
                   {effectiveTargets.length === 0 && (
-                    <span className="text-[10px] text-amber-300">
-                      Registry is empty on this PC. Sign in once on the recipient PC with internet so this PC can see it.
-                    </span>
+                    <div
+                      className="mt-1 p-3 rounded-md bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-100 space-y-1"
+                      data-testid="empty-recipient-card"
+                    >
+                      <div className="font-semibold text-amber-200">
+                        No recipient PC is currently reachable.
+                      </div>
+                      {registry.data.length === 0 ? (
+                        <p className="text-sky-200">
+                          PC still registering… give it a few seconds and refresh — your own heartbeat hasn't landed yet, so the recipient list can't populate either.
+                        </p>
+                      ) : (
+                        <p>
+                          Registry is empty for the recipient tier. Have the destination PC sign in once with internet so its registration arrives, then click Submit again.
+                        </p>
+                      )}
+                      <ul className="pl-4 list-disc text-[10px] text-amber-200/80 space-y-0.5">
+                        <li>Make sure both PCs are on the network.</li>
+                        <li>The recipient must have signed in at least once with the dashboard open.</li>
+                        <li>If it still won't appear after 30s, ask the recipient to refresh their browser tab.</li>
+                      </ul>
+                    </div>
                   )}
                   {/* v1.1.102 — Ops diagnostic panel. When Ops sees zero
                       Flight Cmdr PCs but the registry DOES contain other
@@ -676,6 +752,81 @@ function FlightProgramShareInbox() {
     : user?.scope === "flight" ? "flight"
     : "squadron";
 
+  // v1.1.108 — auto-forward targets, mirroring ScheduleChain.tsx so
+  // Approve from THIS surface advances the chain the same way. Without
+  // this, after the program-share dedupe (Schedule Chain hides program
+  // rows for Flight/Sqn/Ops), the chain would silently stall here.
+  const registry = useRegisteredPCs();
+  const sqnCmdrPCs = useMemo(
+    () => registry.data.filter(p => p.id.startsWith("SQDNCMD:")),
+    [registry.data],
+  );
+  const wingPCs = useMemo(
+    () => registry.data.filter(p => p.tier === "wing" || p.id.startsWith("WING:")),
+    [registry.data],
+  );
+  const flightApproveForwardTargets = useMemo(
+    () => sqnCmdrPCs.length > 0 ? sqnCmdrPCs : wingPCs,
+    [sqnCmdrPCs, wingPCs],
+  );
+
+  const myTier: "flight" | "squadron" | "wing" | "base" | "ops" =
+    user?.role === "ops" ? "ops"
+    : user?.scope === "wing" ? "wing"
+    : user?.scope === "base" ? "base"
+    : user?.scope === "flight" ? "flight"
+    : "squadron";
+  const isSqnCmdrPc = (getLocalPcId() ?? "").startsWith("SQDNCMD:");
+
+  const handleApprove = async (share: typeof incoming[number]) => {
+    const approver = user?.username ?? "ops";
+    try {
+      // Flight Cmdr Approve → forward up to Sqn Cmdr (or Wing if no
+      // Sqn Cmdr PC is registered).
+      if (myTier === "flight" && share.currentTier === "flight" && flightApproveForwardTargets.length > 0) {
+        const target = flightApproveForwardTargets[0];
+        const nextTier: "squadron" | "wing" = target.id.startsWith("SQDNCMD:") ? "squadron" : "wing";
+        await decide.mutateAsync({
+          id: share.id, action: "forward", by: approver, tier: wireTier,
+          forwardPcId: target.id, forwardPcName: target.squadronName,
+        });
+        await decide.mutateAsync({
+          id: share.id, action: "approve", by: approver, tier: nextTier,
+        });
+        toast({ title: `Approved · sent to ${target.squadronName}` });
+        return;
+      }
+      // Sqn Cmdr Approve → forward up to Wing.
+      if (myTier === "squadron" && isSqnCmdrPc && share.currentTier === "squadron" && wingPCs.length > 0) {
+        const target = wingPCs[0];
+        await decide.mutateAsync({
+          id: share.id, action: "forward", by: approver, tier: wireTier,
+          forwardPcId: target.id, forwardPcName: target.squadronName,
+        });
+        await decide.mutateAsync({
+          id: share.id, action: "approve", by: approver, tier: "wing",
+        });
+        toast({ title: `Approved · sent to ${target.squadronName}` });
+        return;
+      }
+      // Plain approve — chain pauses here if no upstream PC exists.
+      await decide.mutateAsync({ id: share.id, action: "approve", by: approver, tier: wireTier });
+      if (myTier === "flight" && share.currentTier === "flight" && flightApproveForwardTargets.length === 0) {
+        toast({ title: "Approved — no Sqn Cmdr PC registered, chain paused here" });
+      } else if (myTier === "squadron" && isSqnCmdrPc && share.currentTier === "squadron" && wingPCs.length === 0) {
+        toast({ title: "Approved — no Wing PC registered, chain paused here" });
+      } else {
+        toast({ title: "Approved" });
+      }
+    } catch (e) {
+      toast({
+        title: "Approve failed",
+        description: (e as Error)?.message ?? String(e),
+        variant: "destructive",
+      });
+    }
+  };
+
   if (incoming.length === 0 && sent.length === 0) return null;
 
   return (
@@ -709,19 +860,36 @@ function FlightProgramShareInbox() {
                       {isOpen ? "Hide" : "View"}
                     </button>
                     <button
-                      onClick={async () => {
-                        await decide.mutateAsync({ id: share.id, action: "approve", by: user?.username ?? "ops", tier: wireTier });
-                        toast({ title: "Approved" });
-                      }}
+                      onClick={() => handleApprove(share)}
                       className="px-2 py-1 rounded bg-emerald-500/20 border border-emerald-400/40 text-emerald-100 text-[11px] font-semibold inline-flex items-center gap-1"
                       data-testid={`fp-approve-${share.id}`}
+                      title={
+                        myTier === "flight" && share.currentTier === "flight" && flightApproveForwardTargets.length > 0
+                          ? `Approve and forward to ${flightApproveForwardTargets[0].squadronName}`
+                          : myTier === "squadron" && isSqnCmdrPc && share.currentTier === "squadron" && wingPCs.length > 0
+                            ? `Approve and forward to ${wingPCs[0].squadronName}`
+                            : "Approve"
+                      }
                     >
-                      <Check className="h-3 w-3" /> Approve
+                      <Check className="h-3 w-3" />
+                      {myTier === "flight" && share.currentTier === "flight" && flightApproveForwardTargets.length > 0
+                        ? `Approve & send to ${sqnCmdrPCs.length > 0 ? "Sqn Cmdr" : "Wing"}`
+                        : myTier === "squadron" && isSqnCmdrPc && share.currentTier === "squadron" && wingPCs.length > 0
+                          ? "Approve & send to Wing"
+                          : "Approve"}
                     </button>
                     <button
                       onClick={async () => {
-                        await decide.mutateAsync({ id: share.id, action: "reject", by: user?.username ?? "ops", tier: wireTier });
-                        toast({ title: "Rejected" });
+                        try {
+                          await decide.mutateAsync({ id: share.id, action: "reject", by: user?.username ?? "ops", tier: wireTier });
+                          toast({ title: "Rejected" });
+                        } catch (e) {
+                          toast({
+                            title: "Reject failed",
+                            description: (e as Error)?.message ?? String(e),
+                            variant: "destructive",
+                          });
+                        }
                       }}
                       className="px-2 py-1 rounded bg-rose-500/20 border border-rose-400/40 text-rose-100 text-[11px] font-semibold inline-flex items-center gap-1"
                       data-testid={`fp-reject-${share.id}`}
