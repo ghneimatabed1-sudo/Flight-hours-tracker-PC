@@ -10,8 +10,9 @@ import {
 } from "@/lib/auth";
 import { useCurrencyWindow, DEFAULT_CURRENCY_WINDOW } from "@/lib/currency-settings";
 import { usePilots, useAllLinkedDevices, useRevokePilotDevices } from "@/lib/squadron-data";
-import { Smartphone, ShieldOff, Loader2, AlertTriangle, Eraser, ArrowRight } from "lucide-react";
+import { Smartphone, ShieldOff, Loader2, AlertTriangle, Eraser, ArrowRight, Sliders } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Link } from "wouter";
 
 function ReleaseLicenseButton({ onConfirm }: { onConfirm: () => void }) {
   const [open, setOpen] = useState(false);
@@ -749,6 +750,30 @@ export default function Settings() {
             </div>
             <button className="px-4 py-2 rounded-md bg-primary text-primary-foreground font-medium">{t("save_changes")}</button>
             {saved && <span className="text-emerald-300 text-sm ml-2">✔ Saved</span>}
+            <hr className="border-border my-3" />
+            {/* Squadron-portability defaults (lectures, exercises, group name,
+                group acronym, primary airframe, airframes list, sortie-log
+                label, fuel-burn rates, ...) live on their own page so the
+                editor can be wide. Surface a clear entry point here so the
+                operator can find it from Settings instead of having to dig
+                through Monthly Report → Defaults. */}
+            <div className="text-sm font-semibold flex items-center gap-2">
+              <Sliders className="h-4 w-4 text-primary" />
+              {lang === "ar" ? "إعدادات السرب الافتراضية" : "Squadron Defaults"}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {lang === "ar"
+                ? "كل ما يتغير عند نقل التطبيق إلى سرب آخر: اسم المجموعة الأم، الاختصار (QRFG)، طائرات السرب، عنوان سجل الطلعات (QREG)، استهلاك الوقود، المحاضرات، التمارين، والمزيد. تنعكس هذه الإعدادات تلقائياً على التقرير الشهري، البرنامج، ونماذج الطلعات."
+                : "Everything that changes when this install moves to another squadron: parent group name, acronym (QRFG), airframes, Sortie Log label (QREG), fuel-burn rates, lectures, exercises, and more. These flow automatically into Monthly Report, Flight Program, and the sortie forms."}
+            </p>
+            <Link href="/monthly-report/defaults"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm bg-primary/15 text-primary border border-primary/40 hover:bg-primary/25"
+              data-testid="link-open-squadron-defaults"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {lang === "ar" ? "فتح إعدادات السرب" : "Open Squadron Defaults"}
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
           </form>
         </Card>
         <Card className="space-y-3">
