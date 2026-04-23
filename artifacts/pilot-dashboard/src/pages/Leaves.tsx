@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import DateInput from "@/components/DateInput";
+import CalendarPickerInput from "@/components/CalendarPickerInput";
 import { Card, PageHead } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
@@ -344,7 +344,7 @@ export default function Leaves() {
               data-testid="button-leaves-prev-day"
               title="Previous day"
             ><ChevronLeft className="h-4 w-4" /></button>
-            <DateInput
+            <CalendarPickerInput
               value={dayIso}
               onChange={setDayIso}
               className="px-2 py-1 rounded bg-input border border-border text-sm font-mono"

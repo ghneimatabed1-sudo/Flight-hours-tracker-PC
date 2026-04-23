@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import ExcelJS from "exceljs";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
@@ -63,8 +64,51 @@ const isDate = (v: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(v);
 const PILOT_REQUIRED = ["id", "name", "rank"];
 const SORTIE_REQUIRED = ["id", "date", "pilotId", "acType"];
 
-function parsePilots(text: string): Parsed<Pilot> {
-  const recs = toRecords(text);
+async function xlsxToRecords(file: File): Promise<Record<string, string>[]> {
+  // Drop-in replacement for the CSV path: read the first worksheet,
+  // treat row 1 as the header row, and produce the same shape of
+  // Record<string,string> the CSV parser yields. Empty trailing rows
+  // (common in Excel) are skipped so the row counter doesn't lie.
+  const buf = await file.arrayBuffer();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf);
+  const ws = wb.worksheets[0];
+  if (!ws) return [];
+  const headers: string[] = [];
+  const headerRow = ws.getRow(1);
+  headerRow.eachCell({ includeEmpty: true }, (cell, col) => {
+    headers[col - 1] = String(cell.value ?? "").trim();
+  });
+  const out: Record<string, string>[] = [];
+  ws.eachRow({ includeEmpty: false }, (row, rowNum) => {
+    if (rowNum === 1) return;
+    const rec: Record<string, string> = {};
+    let hasAny = false;
+    headers.forEach((h, i) => {
+      if (!h) return;
+      const v = row.getCell(i + 1).value;
+      let s = "";
+      if (v == null) s = "";
+      else if (v instanceof Date) {
+        const p = (n: number) => String(n).padStart(2, "0");
+        s = `${v.getFullYear()}-${p(v.getMonth() + 1)}-${p(v.getDate())}`;
+      } else if (typeof v === "object" && "text" in (v as object)) {
+        s = String((v as { text: unknown }).text ?? "");
+      } else if (typeof v === "object" && "result" in (v as object)) {
+        s = String((v as { result: unknown }).result ?? "");
+      } else {
+        s = String(v);
+      }
+      s = s.trim();
+      if (s) hasAny = true;
+      rec[h] = s;
+    });
+    if (hasAny) out.push(rec);
+  });
+  return out;
+}
+
+function parsePilotsFromRecords(recs: Record<string, string>[]): Parsed<Pilot> {
   const errors: RowError[] = [];
   const rows: Pilot[] = [];
   recs.forEach((r, i) => {
@@ -122,8 +166,7 @@ function parsePilots(text: string): Parsed<Pilot> {
   return { rows, errors, rawCount: recs.length };
 }
 
-function parseSorties(text: string): Parsed<Sortie> {
-  const recs = toRecords(text);
+function parseSortiesFromRecords(recs: Record<string, string>[]): Parsed<Sortie> {
   const errors: RowError[] = [];
   const rows: Sortie[] = [];
   recs.forEach((r, i) => {
@@ -182,7 +225,7 @@ function DropZone({
     >
       <Upload className="h-6 w-6 mx-auto mb-2 text-muted-foreground" />
       <div className="text-sm font-medium">{label}</div>
-      <div className="text-xs text-muted-foreground mt-1">Drag &amp; drop a .csv file here, or</div>
+      <div className="text-xs text-muted-foreground mt-1">Drag &amp; drop a .csv or .xlsx file here, or</div>
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
@@ -194,7 +237,7 @@ function DropZone({
       <input
         ref={inputRef}
         type="file"
-        accept=".csv,text/csv"
+        accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.currentTarget.value = ""; }}
         data-testid={`${dataTestPrefix}-input`}
@@ -219,8 +262,12 @@ export default function HistoricalImport() {
   const importMut = useImportHistory();
   const undoMut = useUndoLastImport();
 
-  const [pilotFile, setPilotFile] = useState<{ name: string; text: string } | null>(null);
-  const [sortieFile, setSortieFile] = useState<{ name: string; text: string } | null>(null);
+  // Both CSV and XLSX paths converge on Record<string,string>[] before
+  // they hit the column-mapping logic, so the preview, validation, and
+  // write flows are identical regardless of how the file came in.
+  const [pilotFile, setPilotFile] = useState<{ name: string; recs: Record<string, string>[] } | null>(null);
+  const [sortieFile, setSortieFile] = useState<{ name: string; recs: Record<string, string>[] } | null>(null);
+  const [readError, setReadError] = useState<string | null>(null);
   const [result, setResult] = useState<{ pilots: number; sorties: number; mode: string } | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmUndo, setConfirmUndo] = useState(false);
@@ -230,16 +277,26 @@ export default function HistoricalImport() {
   const lastImportStamp = getLastImportStamp();
 
   const pilotsParsed = useMemo<Parsed<Pilot> | null>(
-    () => (pilotFile ? parsePilots(pilotFile.text) : null), [pilotFile]
+    () => (pilotFile ? parsePilotsFromRecords(pilotFile.recs) : null), [pilotFile]
   );
   const sortiesParsed = useMemo<Parsed<Sortie> | null>(
-    () => (sortieFile ? parseSorties(sortieFile.text) : null), [sortieFile]
+    () => (sortieFile ? parseSortiesFromRecords(sortieFile.recs) : null), [sortieFile]
   );
 
-  const readFile = (f: File, set: (v: { name: string; text: string }) => void) => {
-    const reader = new FileReader();
-    reader.onload = () => set({ name: f.name, text: String(reader.result ?? "") });
-    reader.readAsText(f);
+  const readFile = async (f: File, set: (v: { name: string; recs: Record<string, string>[] }) => void) => {
+    setReadError(null);
+    try {
+      const lower = f.name.toLowerCase();
+      if (lower.endsWith(".xlsx")) {
+        const recs = await xlsxToRecords(f);
+        set({ name: f.name, recs });
+      } else {
+        const text = await f.text();
+        set({ name: f.name, recs: toRecords(text) });
+      }
+    } catch (e) {
+      setReadError(`Could not read ${f.name}: ${(e as Error).message}`);
+    }
   };
 
   const totalErrors = (pilotsParsed?.errors.length ?? 0) + (sortiesParsed?.errors.length ?? 0);
@@ -299,7 +356,7 @@ export default function HistoricalImport() {
       <div className="grid md:grid-cols-2 gap-4 mb-4">
         <Card>
           <DropZone
-            label="Pilot CSV"
+            label="Pilots (CSV or XLSX)"
             fileName={pilotFile?.name}
             onFile={(f) => readFile(f, setPilotFile)}
             onClear={() => setPilotFile(null)}
@@ -321,7 +378,7 @@ export default function HistoricalImport() {
         </Card>
         <Card>
           <DropZone
-            label="Sortie CSV"
+            label="Sorties (CSV or XLSX)"
             fileName={sortieFile?.name}
             onFile={(f) => readFile(f, setSortieFile)}
             onClear={() => setSortieFile(null)}
@@ -422,9 +479,17 @@ export default function HistoricalImport() {
           rel="noreferrer"
           className="text-xs text-muted-foreground underline hover:text-foreground"
         >
-          CSV column reference
+          CSV / XLSX column reference
         </a>
       </div>
+
+      {readError && (
+        <Card className="mt-4 border border-rose-500/40">
+          <div className="text-sm text-rose-300 flex items-center gap-2" data-testid="read-error">
+            <AlertCircle className="h-4 w-4" /> {readError}
+          </div>
+        </Card>
+      )}
 
       {submitError && (
         <Card className="mt-4 border border-rose-500/40">

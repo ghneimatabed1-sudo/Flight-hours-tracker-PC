@@ -219,6 +219,19 @@ export default function MonthlyReport() {
           .form-page { page-break-after: always; padding: 12mm !important; }
           .form-page table { color: black !important; }
           .form-page table, .form-page th, .form-page td { border-color: #000 !important; }
+          /* Front-sheet duplex behaviour: Form 1 (and the optional NVG
+             section on its back) make up one duplex paper. The element
+             that closes the front sheet forces the next form onto the
+             FRONT of the next sheet (a right-side page), so when NVG
+             is empty the back stays blank and the operator can simply
+             print single-sided. When NVG is present, Form 1 → NVG → next
+             form lands on sheet 2 front naturally. */
+          .form-page-front-end { page-break-after: right !important; }
+          .nvg-back-page { display: none; }
+          .nvg-back-page.nvg-active { display: block; page-break-after: right !important; }
+        }
+        @media screen {
+          .nvg-back-page.nvg-empty { display: none; }
         }
         .form-page { background: white; color: #111; padding: 18px; border-radius: 8px; margin-bottom: 16px; }
         .form-page table { width: 100%; border-collapse: collapse; font-size: 10px; }
@@ -541,7 +554,7 @@ export default function MonthlyReport() {
       </section>
 
       {/* ───────── FORM 1 ───────── */}
-      <section className="form-page" data-testid="form1">
+      <section className={`form-page${form1Totals.nvg > 0 ? "" : " form-page-front-end"}`} data-testid="form1">
         <div className="form-meta">
           <div><b>{groupAcronym} RCN FORM 1</b><br/>{groupAcronym} HQ<br/>UNIT : NO {sqdnNumber} SQDN</div>
           <div className="text-center">
@@ -619,6 +632,59 @@ export default function MonthlyReport() {
                 <td></td>
               </tr>
             )}
+          </tbody>
+        </table>
+        <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
+      </section>
+
+      {/* ───────── NVG SECTION (back of front sheet) ─────────
+          Only flows onto paper when at least one pilot logged NVG hours
+          this period. The print stylesheet sends Form 2 to the next
+          sheet's front via `page-break-after: right` so a no-NVG month
+          prints as one front-only paper. */}
+      <section
+        className={`form-page nvg-back-page ${form1Totals.nvg > 0 ? "nvg-active" : "nvg-empty"}`}
+        data-testid="form-nvg"
+      >
+        <div className="form-meta">
+          <div><b>{groupAcronym} NVG</b><br/>MONTH : {monthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div className="text-center">
+            <div className="form-title">{groupName}<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-sub">NIGHT VISION GOGGLE HOURS — SUMMARY</div>
+          </div>
+          <div className="text-right"><b>FOR : {monthHeader}</b><br/><span style={{fontSize:9, color:"#555"}}>AUTO from sortie records</span></div>
+        </div>
+        <div className="secret">SECRET ( WHEN FILLED )</div>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>SERV NO</th>
+              <th>RANK</th>
+              <th>NAME</th>
+              <th>NVG HRS</th>
+              <th>NVG DUAL</th>
+            </tr>
+          </thead>
+          <tbody>
+            {form1.filter(r => r.nvg > 0 || (dualHours.find(d => d.pilot.id === r.pilot.id)?.nvgDual ?? 0) > 0).map((r, i) => {
+              const nvgDual = dualHours.find(d => d.pilot.id === r.pilot.id)?.nvgDual ?? 0;
+              return (
+                <tr key={r.pilot.id} data-testid={`nvg-row-${r.pilot.id}`}>
+                  <td className="center">{i+1}</td>
+                  <td className="center">{r.pilot.id}</td>
+                  <td className="center">{r.pilot.rank}</td>
+                  <td>{r.pilot.name}</td>
+                  <td className="num">{r.nvg.toFixed(1)}</td>
+                  <td className="num">{nvgDual.toFixed(1)}</td>
+                </tr>
+              );
+            })}
+            <tr data-testid="nvg-totals" style={{background:"#f3f4f6", fontWeight:700}}>
+              <td colSpan={4} className="center">TOTAL</td>
+              <td className="num">{form1Totals.nvg.toFixed(1)}</td>
+              <td className="num">{dualHours.reduce((a,r) => a + r.nvgDual, 0).toFixed(1)}</td>
+            </tr>
           </tbody>
         </table>
         <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
