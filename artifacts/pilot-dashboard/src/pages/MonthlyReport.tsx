@@ -1,40 +1,75 @@
 import { useEffect, useMemo, useState } from "react";
-import { Printer, Wand2, Save, ChevronDown, ChevronUp, FileText, Plus, Trash2 } from "lucide-react";
+import { Link } from "wouter";
+import { Printer, Wand2, Save, ChevronDown, ChevronUp, FileText, Plus, Trash2, Settings } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { PageHead } from "@/components/Layout";
 import { useAuth } from "@/lib/auth";
-import { usePilots, useSorties } from "@/lib/squadron-data";
+import { usePilots, useSorties, useLeaves, useUnavailable } from "@/lib/squadron-data";
 import {
   buildForm1Rows, buildForm2Rows, buildForm3, buildArabicRoster,
-  defaultInputs, lastCompletedPeriod, loadInputs, saveInputs,
+  lastCompletedPeriod, loadInputsOrPrefill, saveInputs,
   periodLabel, MISSION_BUCKETS, MISSION_LABEL,
-  deriveForm3Stats, suggestNextMonthPlanFrom,
+  deriveForm3Stats, suggestNextMonthPlanFrom, suggestRemarksFor,
   type ReportInputs,
 } from "@/lib/monthly-report";
+import { loadSquadronDefaults, fuelBurnFor } from "@/lib/squadron-defaults";
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
 export default function MonthlyReport() {
   const { t } = useI18n();
-  const { squadron } = useAuth();
+  const { squadron, user } = useAuth();
   const { data: pilots = [] } = usePilots();
   const { data: sorties = [] } = useSorties();
+  const { data: leaves = [] } = useLeaves();
+  const { data: unavail = [] } = useUnavailable();
+
+  const sqdnNumberForDefaults = squadron?.number || "8";
+  const defaults = useMemo(
+    () => loadSquadronDefaults(sqdnNumberForDefaults),
+    [sqdnNumberForDefaults],
+  );
+  // Primary airframe fuel-burn rate, used as the placeholder/default in the
+  // Form 4 / FUEL formula when a row has no explicit override. The operator
+  // edits both the rate (Squadron defaults page) and any per-row overrides.
+  const defaultFuelHr = useMemo(() => fuelBurnFor(defaults, "UH-60M"), [defaults]);
 
   const [period, setPeriod] = useState<string>(() => lastCompletedPeriod());
   const [inputs, setInputs] = useState<ReportInputs>(() =>
-    loadInputs(period) ?? defaultInputs(period, []));
+    loadInputsOrPrefill(period, [], defaults));
   const [wizardOpen, setWizardOpen] = useState(true);
   const [saved, setSaved] = useState(false);
 
-  // Reload persisted inputs whenever the period changes; if none exist,
-  // pre-fill from current pilot count.
+  // Reload persisted inputs whenever the period changes. Falls back to
+  // last-month-as-this-month prefill, then to squadron defaults.
   useEffect(() => {
-    const persisted = loadInputs(period);
-    setInputs(persisted ?? defaultInputs(period, pilots));
-  }, [period, pilots.length]);
+    setInputs(loadInputsOrPrefill(period, pilots, defaults));
+  }, [period, pilots.length, defaults]);
+
+  // Effective per-pilot REMARKS — when the operator hasn't typed anything
+  // and the squadron has auto-suggest enabled, fill from the leave/
+  // unavailability records so the printed Form 1 shows the suggested text
+  // automatically (operator can still override at any time by typing).
+  // The wizard's "Use" button still exists as an explicit accept gesture
+  // when the operator wants to lock the suggestion into saved inputs.
+  const effectiveRemarks = useMemo(() => {
+    if (!defaults.autoSuggestRemarks) return inputs.perPilotRemarks;
+    const next: Record<string, string> = { ...inputs.perPilotRemarks };
+    for (const p of pilots) {
+      if (next[p.id]) continue;
+      const s = suggestRemarksFor(p, period, leaves, unavail);
+      if (s) next[p.id] = s;
+    }
+    return next;
+  }, [defaults.autoSuggestRemarks, inputs.perPilotRemarks, pilots, period, leaves, unavail]);
+
+  const inputsForRender = useMemo(
+    () => ({ ...inputs, perPilotRemarks: effectiveRemarks }),
+    [inputs, effectiveRemarks],
+  );
 
   const form1 = useMemo(() =>
-    buildForm1Rows(pilots, sorties, period, inputs), [pilots, sorties, period, inputs.perPilotStatus, inputs.perPilotRemarks]);
+    buildForm1Rows(pilots, sorties, period, inputsForRender), [pilots, sorties, period, inputsForRender]);
   const form2 = useMemo(() =>
     buildForm2Rows(pilots, sorties, period, form1), [pilots, sorties, period, form1]);
   const form3 = useMemo(() =>
@@ -106,6 +141,28 @@ export default function MonthlyReport() {
   const monthHeader = periodLabel(period).toUpperCase();
   const nextMonthHeader = periodLabel(inputs.nextMonthPlanFor).toUpperCase();
 
+  // OPS-ONLY ACCESS LOCK
+  // Placed AFTER all hooks (above) so React's hook-call order is stable
+  // across role transitions on this PC. The Monthly Report is locked to
+  // the Operations Pilot account on the squadron PC; other roles never
+  // see it (commander tiers, deputy, HQ).
+  if (user?.role !== "ops") {
+    return (
+      <div className="p-6">
+        <PageHead
+          title={t("monthlyReportTitle")}
+          subtitle="Operations Pilot PC only"
+          actions={null}
+        />
+        <div className="bg-card border border-border rounded-lg p-8 text-center text-sm text-muted-foreground"
+          data-testid="monthly-report-ops-lock">
+          The Monthly Report is maintained by the Operations Pilot. Sign in
+          on the squadron's operations PC to view, edit, and print it.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="monthly-report print-area">
       <style>{`
@@ -137,6 +194,11 @@ export default function MonthlyReport() {
             <input type="month" value={period} onChange={e => setPeriod(e.target.value)}
               className="text-xs px-2 py-1.5 rounded-md border border-border bg-background"
               data-testid="input-monthly-period" />
+            <Link href="/monthly-report/defaults"
+              className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-secondary inline-flex items-center gap-1"
+              data-testid="link-monthly-defaults">
+              <Settings className="h-3.5 w-3.5" /> Squadron defaults
+            </Link>
             <button onClick={onAutoFill}
               className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-secondary inline-flex items-center gap-1"
               data-testid="button-monthly-autofill">
@@ -166,11 +228,26 @@ export default function MonthlyReport() {
           </span>
           {wizardOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
         </button>
-        <p className="text-xs text-muted-foreground mb-3">{t("monthlyWizardBlurb")}</p>
+        <p className="text-xs text-muted-foreground mb-2">{t("monthlyWizardBlurb")}</p>
+
+        {/* Provenance legend — explains where each kind of value comes from */}
+        <div className="flex flex-wrap gap-2 mb-3 text-[10px]" data-testid="provenance-legend">
+          <Badge tone="auto">AUTO</Badge>
+          <span className="text-muted-foreground">pulled from sortie log / roster / currency</span>
+          <span className="text-muted-foreground/50">·</span>
+          <Badge tone="default">DEFAULT</Badge>
+          <span className="text-muted-foreground">squadron baseline or last month — editable</span>
+          <span className="text-muted-foreground/50">·</span>
+          <Badge tone="manual">MANUAL</Badge>
+          <span className="text-muted-foreground">commander judgement — type each month</span>
+        </div>
 
         {wizardOpen && (
           <div className="space-y-4">
             {/* Squadron header values */}
+            <div className="text-[11px] font-semibold text-muted-foreground inline-flex items-center gap-2">
+              SQUADRON HEADER <Badge tone="manual">MANUAL</Badge> <Badge tone="default">DEFAULT</Badge>
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {[
                 ["squadronStrength","SQDN STRENGTH"],
@@ -195,6 +272,9 @@ export default function MonthlyReport() {
             </div>
 
             {/* Planned + aborts */}
+            <div className="text-[11px] font-semibold text-muted-foreground inline-flex items-center gap-2">
+              PLANNED &amp; ABORTS <Badge tone="manual">MANUAL</Badge>
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               <NumField label="PLANNED SORTIES" value={inputs.plannedSorties} onChange={v => updI("plannedSorties", v)} testId="input-mr-plannedS" />
               <NumField label="PLANNED HOURS" value={inputs.plannedHours} onChange={v => updI("plannedHours", v)} step={0.1} testId="input-mr-plannedH" />
@@ -207,7 +287,10 @@ export default function MonthlyReport() {
             {/* Lectures */}
             <div>
               <div className="flex items-center justify-between mb-1">
-                <div className="text-xs font-semibold">LECTURES</div>
+                <div className="text-xs font-semibold inline-flex items-center gap-2">
+                  LECTURES <Badge tone="default">DEFAULT</Badge> <Badge tone="manual">MANUAL</Badge>
+                  <span className="text-[10px] font-normal text-muted-foreground">topics from squadron defaults · hours/quiz typed each month</span>
+                </div>
                 <button onClick={() => updI("lectures", [...inputs.lectures, { name: "", hours: 0, quizPct: 0, remarks: "" }])}
                   className="text-[10px] px-2 py-0.5 rounded border border-border hover:bg-secondary inline-flex items-center gap-1"
                   data-testid="button-mr-add-lecture">
@@ -268,7 +351,12 @@ export default function MonthlyReport() {
             {/* Form 4 next-month plan */}
             <div>
               <div className="flex items-center justify-between mb-1">
-                <div className="text-xs font-semibold">PLAN FOR {nextMonthHeader}</div>
+                <div className="text-xs font-semibold inline-flex items-center gap-2">
+                  PLAN FOR {nextMonthHeader} <Badge tone="default">DEFAULT</Badge> <Badge tone="manual">MANUAL</Badge>
+                  <span className="text-[10px] font-normal text-muted-foreground">
+                    formulas: pilots × s/p = sorties · sorties × dur = hours · hours × fuel/hr = lb fuel
+                  </span>
+                </div>
                 <button onClick={() => updI("nextPlan", [...inputs.nextPlan, { exercise: "", pilots: 0, sortiesPerPilot: 0, durationPerSortie: 0, ammo275: "-", ammo127: "-", ammo762: "-", remarks: "" }])}
                   className="text-[10px] px-2 py-0.5 rounded border border-border hover:bg-secondary inline-flex items-center gap-1"
                   data-testid="button-mr-add-plan">
@@ -280,70 +368,125 @@ export default function MonthlyReport() {
                 <NumField label="OPS" value={inputs.opsNext} onChange={v => updI("opsNext", v)} testId="input-mr-ops-next" />
               </div>
               <div className="space-y-1">
-                {inputs.nextPlan.map((row, i) => (
-                  <div key={i} className="grid grid-cols-12 gap-2 items-center text-xs">
-                    <input value={row.exercise} placeholder="Exercise (EN/AR)"
-                      dir="auto"
-                      onChange={e => updPlan(inputs, updI, i, { exercise: e.target.value })}
-                      className="col-span-2 bg-background border border-border rounded px-2 py-1"
-                      data-testid={`input-mr-plan-ex-${i}`} />
-                    <input type="number" placeholder="Pilots" value={row.pilots}
-                      onChange={e => updPlan(inputs, updI, i, { pilots: parseInt(e.target.value)||0 })}
-                      className="col-span-1 bg-background border border-border rounded px-2 py-1"
-                      data-testid={`input-mr-plan-pilots-${i}`} />
-                    <input type="number" step="0.1" placeholder="S/Pilot" value={row.sortiesPerPilot}
-                      onChange={e => updPlan(inputs, updI, i, { sortiesPerPilot: parseFloat(e.target.value)||0 })}
-                      className="col-span-2 bg-background border border-border rounded px-2 py-1"
-                      data-testid={`input-mr-plan-spp-${i}`} />
-                    <input type="number" step="0.1" placeholder="Dur" value={row.durationPerSortie}
-                      onChange={e => updPlan(inputs, updI, i, { durationPerSortie: parseFloat(e.target.value)||0 })}
-                      className="col-span-2 bg-background border border-border rounded px-2 py-1"
-                      data-testid={`input-mr-plan-dur-${i}`} />
-                    <input placeholder="2.75 RKT" value={row.ammo275} dir="auto"
-                      onChange={e => updPlan(inputs, updI, i, { ammo275: e.target.value })}
-                      className="col-span-1 bg-background border border-border rounded px-2 py-1" />
-                    <input placeholder="12.7" value={row.ammo127} dir="auto"
-                      onChange={e => updPlan(inputs, updI, i, { ammo127: e.target.value })}
-                      className="col-span-1 bg-background border border-border rounded px-2 py-1" />
-                    <input placeholder="7.62" value={row.ammo762} dir="auto"
-                      onChange={e => updPlan(inputs, updI, i, { ammo762: e.target.value })}
-                      className="col-span-1 bg-background border border-border rounded px-2 py-1" />
-                    <input placeholder="Remarks (EN/AR)" value={row.remarks} dir="auto"
-                      onChange={e => updPlan(inputs, updI, i, { remarks: e.target.value })}
-                      className="col-span-1 bg-background border border-border rounded px-2 py-1" />
-                    <button onClick={() => {
-                        if (!confirm("Remove this exercise row?")) return;
-                        updI("nextPlan", inputs.nextPlan.filter((_, idx) => idx !== i));
-                      }}
-                      className="col-span-1 text-destructive hover:bg-secondary rounded p-1 inline-flex items-center justify-center"
-                      data-testid={`button-mr-del-plan-${i}`} title="Remove">
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
+                {inputs.nextPlan.map((row, i) => {
+                  const fuelHr = row.fuelPerHourOverride ?? defaultFuelHr;
+                  const totalSorties = row.pilots * row.sortiesPerPilot;
+                  const totalHours = totalSorties * row.durationPerSortie;
+                  const totalFuel = totalHours * fuelHr;
+                  const fuelOverridden = row.fuelPerHourOverride != null;
+                  return (
+                    <div key={i} className="space-y-0.5 border-b border-border/40 pb-1 last:border-b-0">
+                      <div className="grid grid-cols-12 gap-2 items-center text-xs">
+                        <input value={row.exercise} placeholder="Exercise (EN/AR)"
+                          dir="auto"
+                          onChange={e => updPlan(inputs, updI, i, { exercise: e.target.value })}
+                          className="col-span-2 bg-background border border-border rounded px-2 py-1"
+                          data-testid={`input-mr-plan-ex-${i}`} />
+                        <input type="number" placeholder="Pilots" value={row.pilots}
+                          onChange={e => updPlan(inputs, updI, i, { pilots: parseInt(e.target.value)||0 })}
+                          className="col-span-1 bg-background border border-border rounded px-2 py-1"
+                          data-testid={`input-mr-plan-pilots-${i}`} />
+                        <input type="number" step="0.1" placeholder="S/Pilot" value={row.sortiesPerPilot}
+                          onChange={e => updPlan(inputs, updI, i, { sortiesPerPilot: parseFloat(e.target.value)||0 })}
+                          className="col-span-1 bg-background border border-border rounded px-2 py-1"
+                          data-testid={`input-mr-plan-spp-${i}`} />
+                        <input type="number" step="0.1" placeholder="Dur" value={row.durationPerSortie}
+                          onChange={e => updPlan(inputs, updI, i, { durationPerSortie: parseFloat(e.target.value)||0 })}
+                          className="col-span-1 bg-background border border-border rounded px-2 py-1"
+                          data-testid={`input-mr-plan-dur-${i}`} />
+                        <input type="number" step="1" placeholder={`${defaultFuelHr} lb/hr`}
+                          value={row.fuelPerHourOverride ?? ""}
+                          onChange={e => updPlan(inputs, updI, i, {
+                            fuelPerHourOverride: e.target.value === "" ? undefined : (parseFloat(e.target.value) || 0),
+                          })}
+                          title={fuelOverridden ? "Override active" : `Inherits ${defaultFuelHr} lb/hr from squadron defaults`}
+                          className={`col-span-1 bg-background border rounded px-2 py-1 ${fuelOverridden ? "border-amber-500" : "border-border"}`}
+                          data-testid={`input-mr-plan-fuelhr-${i}`} />
+                        <input placeholder="2.75 RKT" value={row.ammo275} dir="auto"
+                          onChange={e => updPlan(inputs, updI, i, { ammo275: e.target.value })}
+                          className="col-span-1 bg-background border border-border rounded px-2 py-1" />
+                        <input placeholder="12.7" value={row.ammo127} dir="auto"
+                          onChange={e => updPlan(inputs, updI, i, { ammo127: e.target.value })}
+                          className="col-span-1 bg-background border border-border rounded px-2 py-1" />
+                        <input placeholder="7.62" value={row.ammo762} dir="auto"
+                          onChange={e => updPlan(inputs, updI, i, { ammo762: e.target.value })}
+                          className="col-span-1 bg-background border border-border rounded px-2 py-1" />
+                        <input placeholder="Remarks (EN/AR)" value={row.remarks} dir="auto"
+                          onChange={e => updPlan(inputs, updI, i, { remarks: e.target.value })}
+                          className="col-span-2 bg-background border border-border rounded px-2 py-1" />
+                        <button onClick={() => {
+                            if (!confirm("Remove this exercise row?")) return;
+                            updI("nextPlan", inputs.nextPlan.filter((_, idx) => idx !== i));
+                          }}
+                          className="col-span-1 text-destructive hover:bg-secondary rounded p-1 inline-flex items-center justify-center"
+                          data-testid={`button-mr-del-plan-${i}`} title="Remove">
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                      {/* Live formula trace — visible math so the operator (and any auditing officer) can see exactly how this row's totals were derived */}
+                      <div className="text-[10px] text-muted-foreground pl-1" data-testid={`formula-trace-${i}`}>
+                        <span className="font-mono">
+                          {row.pilots} × {row.sortiesPerPilot} = <b>{totalSorties.toFixed(0)}</b> sorties
+                          {"  ·  "}
+                          {totalSorties.toFixed(0)} × {row.durationPerSortie} = <b>{totalHours.toFixed(1)}</b> hrs
+                          {"  ·  "}
+                          {totalHours.toFixed(1)} × {fuelHr}{fuelOverridden ? "*" : ""} lb/hr = <b>{totalFuel.toFixed(0)}</b> lb fuel
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
             {/* Per-pilot remarks override */}
             {pilots.length > 0 && (
               <details className="border border-border rounded-md p-2">
-                <summary className="text-xs font-semibold cursor-pointer">{t("monthlyPerPilotOverrides")} ({pilots.length})</summary>
+                <summary className="text-xs font-semibold cursor-pointer inline-flex items-center gap-2">
+                  {t("monthlyPerPilotOverrides")} ({pilots.length})
+                  <Badge tone="default">DEFAULT</Badge> <Badge tone="manual">MANUAL</Badge>
+                  {defaults.autoSuggestRemarks && (
+                    <span className="text-[10px] font-normal text-muted-foreground">
+                      auto-suggesting REMARKS from leave / unavailability records
+                    </span>
+                  )}
+                </summary>
                 <div className="space-y-1 mt-2 max-h-64 overflow-y-auto">
-                  {pilots.map(p => (
-                    <div key={p.id} className="grid grid-cols-12 gap-2 items-center text-xs">
-                      <div className="col-span-3 truncate">{p.name}</div>
-                      <input placeholder="Status (EN/AR)" dir="auto"
-                        value={inputs.perPilotStatus[p.id] || ""}
-                        onChange={e => updI("perPilotStatus", { ...inputs.perPilotStatus, [p.id]: e.target.value })}
-                        className="col-span-3 bg-background border border-border rounded px-2 py-1"
-                        data-testid={`input-mr-status-${p.id}`} />
-                      <input placeholder="Remarks (EN/AR)" dir="auto"
-                        value={inputs.perPilotRemarks[p.id] || ""}
-                        onChange={e => updI("perPilotRemarks", { ...inputs.perPilotRemarks, [p.id]: e.target.value })}
-                        className="col-span-6 bg-background border border-border rounded px-2 py-1"
-                        data-testid={`input-mr-remarks-${p.id}`} />
-                    </div>
-                  ))}
+                  {pilots.map(p => {
+                    const suggestion = defaults.autoSuggestRemarks
+                      ? suggestRemarksFor(p, period, leaves, unavail)
+                      : "";
+                    const remarkValue = inputs.perPilotRemarks[p.id] || "";
+                    const showingSuggestion = !remarkValue && suggestion;
+                    return (
+                      <div key={p.id} className="grid grid-cols-12 gap-2 items-center text-xs">
+                        <div className="col-span-3 truncate">{p.name}</div>
+                        <input placeholder="Status (EN/AR)" dir="auto"
+                          value={inputs.perPilotStatus[p.id] || ""}
+                          onChange={e => updI("perPilotStatus", { ...inputs.perPilotStatus, [p.id]: e.target.value })}
+                          className="col-span-3 bg-background border border-border rounded px-2 py-1"
+                          data-testid={`input-mr-status-${p.id}`} />
+                        <input
+                          placeholder={suggestion || "Remarks (EN/AR)"}
+                          dir="auto"
+                          value={remarkValue}
+                          onChange={e => updI("perPilotRemarks", { ...inputs.perPilotRemarks, [p.id]: e.target.value })}
+                          className={`col-span-5 bg-background border rounded px-2 py-1 ${showingSuggestion ? "border-emerald-500/60 italic placeholder:text-emerald-700/80 placeholder:not-italic" : "border-border"}`}
+                          title={showingSuggestion ? `Auto-suggestion (placeholder). Click "Use" to apply, or type to override.` : undefined}
+                          data-testid={`input-mr-remarks-${p.id}`} />
+                        {showingSuggestion ? (
+                          <button onClick={() => updI("perPilotRemarks", { ...inputs.perPilotRemarks, [p.id]: suggestion })}
+                            className="col-span-1 text-[10px] px-1.5 py-1 rounded border border-emerald-500/60 text-emerald-700 hover:bg-emerald-50"
+                            data-testid={`button-mr-use-suggestion-${p.id}`}
+                            title="Apply suggested remark">
+                            Use
+                          </button>
+                        ) : (
+                          <div className="col-span-1" />
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </details>
             )}
@@ -670,6 +813,79 @@ export default function MonthlyReport() {
         <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
       </section>
 
+      {/* ───────── FUEL ─────────
+          Mirrors the workbook's separate FUEL sheet: same exercise grid as
+          Form 4, plus the burn-rate column and computed total fuel. Rows
+          come from inputs.nextPlan; per-row override (yellow border in the
+          wizard) wins, otherwise the squadron default lb/hr is used. Total
+          fuel = pilots × sorties/pilot × duration × lb/hr. */}
+      <section className="form-page" data-testid="form-fuel">
+        <div className="form-meta">
+          <div><b>QRFG FUEL</b><br/>MONTH : {nextMonthHeader}<br/>UNIT : NO {sqdnNumber} SQDN</div>
+          <div className="text-center">
+            <div className="form-title">QUICK REACTION FORCE GROUP<br/>NO {sqdnNumber} SQDN</div>
+            <div className="form-sub">FUEL CONSUMPTION FORECAST</div>
+          </div>
+          <div className="text-right"><b>PLANNED FOR : {nextMonthHeader}</b></div>
+        </div>
+        <div className="secret">SECRET ( WHEN FILLED )</div>
+        <table>
+          <thead>
+            <tr>
+              <th>NO</th><th>TYPE OF EXERCISE</th><th>NO OF PILOTS</th>
+              <th>NO OF SORTIES / PILOT</th><th>TIME (DURATION) / SORTIE</th>
+              <th>TOTAL SORTIES</th><th>TOTAL TIME (HRS)</th>
+              <th>FUEL / HOUR (LB)</th><th>TOTAL FUEL (LB)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {inputs.nextPlan.map((row, i) => {
+              const fuelHr = row.fuelPerHourOverride ?? defaultFuelHr;
+              const totalSorties = row.pilots * row.sortiesPerPilot;
+              const totalHours   = totalSorties * row.durationPerSortie;
+              const totalFuel    = totalHours * fuelHr;
+              return (
+                <tr key={i} data-testid={`fuel-row-${i}`}>
+                  <td className="center">{i+1}</td>
+                  <td className="center">{row.exercise}</td>
+                  <td className="num">{row.pilots}</td>
+                  <td className="num">{row.sortiesPerPilot.toFixed(1)}</td>
+                  <td className="num">{row.durationPerSortie.toFixed(1)}</td>
+                  <td className="num">{totalSorties.toFixed(0)}</td>
+                  <td className="num">{totalHours.toFixed(1)}</td>
+                  <td className="num">
+                    {fuelHr}
+                    {row.fuelPerHourOverride != null && <sup title="Per-row override">*</sup>}
+                  </td>
+                  <td className="num"><b>{totalFuel.toFixed(0)}</b></td>
+                </tr>
+              );
+            })}
+            <tr style={{background:"#f3f4f6", fontWeight:700}}>
+              <td colSpan={5} className="center">TOTAL</td>
+              <td className="num">
+                {inputs.nextPlan.reduce((a,r) => a + r.pilots * r.sortiesPerPilot, 0).toFixed(0)}
+              </td>
+              <td className="num">
+                {inputs.nextPlan.reduce((a,r) => a + r.pilots * r.sortiesPerPilot * r.durationPerSortie, 0).toFixed(1)}
+              </td>
+              <td></td>
+              <td className="num">
+                {inputs.nextPlan
+                  .reduce((a,r) => a + r.pilots * r.sortiesPerPilot * r.durationPerSortie * (r.fuelPerHourOverride ?? defaultFuelHr), 0)
+                  .toFixed(0)} lb
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div style={{marginTop:6, fontSize:10, color:"#444"}}>
+          Formula per row: <span style={{fontFamily:"monospace"}}>pilots × sorties/pilot × duration × fuel/hr</span>
+          {" "}— default fuel/hr from squadron settings (currently {defaultFuelHr} lb/hr for UH-60M),
+          per-row overrides marked with *. Edit defaults via Squadron defaults page.
+        </div>
+        <div className="secret" style={{marginTop:8}}>SECRET ( WHEN FILLED )</div>
+      </section>
+
       {/* ───────── ARABIC ROSTER ───────── */}
       <section className="form-page" data-testid="arabic-roster" dir="rtl">
         <div className="form-meta" dir="ltr">
@@ -777,4 +993,22 @@ function updPlan(
   const next = [...inputs.nextPlan];
   next[i] = { ...next[i], ...patch };
   updI("nextPlan", next);
+}
+
+/**
+ * Field-provenance badge — small coloured tag rendered next to section
+ * headers and the legend. Communicates at a glance whether a value comes
+ * from the app data, the squadron defaults, or commander judgement.
+ */
+function Badge({ tone, children }: { tone: "auto" | "default" | "manual"; children: React.ReactNode }) {
+  const colors = {
+    auto:    "bg-emerald-50 text-emerald-700 border-emerald-300",
+    default: "bg-amber-50 text-amber-800 border-amber-300",
+    manual:  "bg-slate-100 text-slate-700 border-slate-300",
+  } as const;
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[9px] font-semibold tracking-wide ${colors[tone]}`}>
+      {children}
+    </span>
+  );
 }

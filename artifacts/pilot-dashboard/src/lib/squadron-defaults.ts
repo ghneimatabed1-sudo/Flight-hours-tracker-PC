@@ -1,0 +1,120 @@
+/**
+ * Squadron-level Monthly Report defaults.
+ *
+ * Why this exists
+ * ───────────────
+ * The Monthly Report has three kinds of fields:
+ *   1. AUTO  — pulled from the Sortie log / Roster / Currency directly.
+ *   2. DEFAULT — values that almost never change month-to-month for a given
+ *      squadron (lecture topics, the standard exercise list, fuel-burn rate
+ *      per airframe, the standard incidents/accidents wording, ammo
+ *      placeholders). The operations pilot edits these once for their
+ *      squadron and they prefill every month after.
+ *   3. MANUAL — true commander judgement (sick rate, abort tallies, lecture
+ *      hours/quiz scores, planned-vs-achieved figures). Filled per-month.
+ *
+ * This module owns category 2. Each squadron has its own set of defaults
+ * keyed by `squadronNumber` so the same APK can be deployed to other
+ * squadrons (with different airframes, different fuel rates, different
+ * lecture syllabus) and each one keeps its own baseline.
+ *
+ * Storage is plain localStorage on the operations pilot PC — same scope as
+ * the per-period saved inputs in monthly-report.ts.
+ */
+
+const KEY_PREFIX = "rjaf.monthlyReport.defaults.";
+
+/** Default lecture topics taught every month at the squadron level. */
+const FACTORY_LECTURES = [
+  "EMERGENCY PROCEDURES",
+  "AIRCRAFT SYSTEMS",
+  "AERODYNAMICS",
+  "INSTRUMENT PROCEDURES",
+  "TACTICS",
+  "SAFETY",
+];
+
+/** Default exercise types in the next-month plan grid. */
+const FACTORY_EXERCISES = ["GH", "IF", "NVG", "NIGHT", "CONTINUATION TRNG", "MTF"];
+
+/**
+ * Per-airframe fuel burn rate (lb/hr). UH-60M is the squadron's primary
+ * airframe and burns 576 lb/hr per the workbook. Operators can add more
+ * airframe entries (e.g. UH-60AIL, AH-1, OH-58) on the defaults page.
+ */
+const FACTORY_FUEL_BURN: Record<string, number> = {
+  "UH-60M": 576,
+  "UH-60AIL": 576,
+};
+
+export interface SquadronDefaults {
+  /** Default lecture topics — operator can add/remove on the defaults page. */
+  lectures: string[];
+  /** Default exercise types in next-month plan grid. */
+  exercises: string[];
+  /** Default morale used when starting a brand-new period. */
+  morale: "HIGH" | "MEDIUM" | "LOW";
+  /** Default text for INCIDENTS field — almost always "NIL". */
+  incidentsDefault: string;
+  /** Default text for ACCIDENTS field — almost always "NIL". */
+  accidentsDefault: string;
+  /** Per-airframe fuel burn rate (lb/hr). Editable. */
+  fuelBurnByAirframe: Record<string, number>;
+  /** Default ammo placeholder text — workbook uses "-" or "NIL". */
+  ammoPlaceholder: string;
+  /** Default REMARKS suggestions enabled (auto-fill from leave/TDY records). */
+  autoSuggestRemarks: boolean;
+}
+
+export function factoryDefaults(): SquadronDefaults {
+  return {
+    lectures: [...FACTORY_LECTURES],
+    exercises: [...FACTORY_EXERCISES],
+    morale: "HIGH",
+    incidentsDefault: "NIL",
+    accidentsDefault: "NIL",
+    fuelBurnByAirframe: { ...FACTORY_FUEL_BURN },
+    ammoPlaceholder: "-",
+    autoSuggestRemarks: true,
+  };
+}
+
+export function loadSquadronDefaults(squadronNumber: string | undefined): SquadronDefaults {
+  const key = squadronNumber || "default";
+  try {
+    const raw = localStorage.getItem(KEY_PREFIX + key);
+    if (!raw) return factoryDefaults();
+    const parsed = JSON.parse(raw) as Partial<SquadronDefaults>;
+    // Merge with factory so newly-added fields survive an upgrade.
+    const f = factoryDefaults();
+    return {
+      lectures: parsed.lectures?.length ? parsed.lectures : f.lectures,
+      exercises: parsed.exercises?.length ? parsed.exercises : f.exercises,
+      morale: parsed.morale ?? f.morale,
+      incidentsDefault: parsed.incidentsDefault ?? f.incidentsDefault,
+      accidentsDefault: parsed.accidentsDefault ?? f.accidentsDefault,
+      fuelBurnByAirframe: { ...f.fuelBurnByAirframe, ...(parsed.fuelBurnByAirframe || {}) },
+      ammoPlaceholder: parsed.ammoPlaceholder ?? f.ammoPlaceholder,
+      autoSuggestRemarks: parsed.autoSuggestRemarks ?? f.autoSuggestRemarks,
+    };
+  } catch {
+    return factoryDefaults();
+  }
+}
+
+export function saveSquadronDefaults(squadronNumber: string | undefined, d: SquadronDefaults): void {
+  const key = squadronNumber || "default";
+  try {
+    localStorage.setItem(KEY_PREFIX + key, JSON.stringify(d));
+  } catch { /* noop */ }
+}
+
+/**
+ * Look up the burn rate for an airframe; fall back to UH-60M (576) and then
+ * to a reasonable global default. Used by the Form 4 fuel formula.
+ */
+export function fuelBurnFor(d: SquadronDefaults, airframe: string | undefined): number {
+  if (airframe && d.fuelBurnByAirframe[airframe] != null) return d.fuelBurnByAirframe[airframe];
+  if (d.fuelBurnByAirframe["UH-60M"] != null) return d.fuelBurnByAirframe["UH-60M"];
+  return 576;
+}

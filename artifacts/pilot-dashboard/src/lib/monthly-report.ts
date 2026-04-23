@@ -5,6 +5,8 @@
 // pilot to enter through a small wizard.
 
 import type { Pilot, Sortie } from "./mock";
+import type { LeaveRow, UnavailEntry } from "./squadron-data";
+import type { SquadronDefaults } from "./squadron-defaults";
 
 export type MissionBucket =
   | "GH" | "IF" | "NF_NVG" | "FORM_NAV" | "COURSES"
@@ -57,6 +59,11 @@ export interface ReportInputs {
     pilots: number;
     sortiesPerPilot: number;
     durationPerSortie: number;
+    /** Per-row override for fuel-burn rate (lb/hr). When undefined, the
+     *  squadron default for the primary airframe is used. Lets the operator
+     *  model an exercise on a different airframe without changing the
+     *  squadron-wide default. Math is shown live in the Form 4 / FUEL block. */
+    fuelPerHourOverride?: number;
     ammo275: string; ammo127: string; ammo762: string;
     remarks: string;
   }[];
@@ -82,6 +89,12 @@ export function monthBounds(period: string): { start: Date; endExclusive: Date; 
 export function nextPeriod(period: string): string {
   const [y, m] = period.split("-").map(Number);
   const d = new Date(y, m, 1); // m is 0-based for next month after period
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+}
+
+export function previousPeriod(period: string): string {
+  const [y, m] = period.split("-").map(Number);
+  const d = new Date(y, m - 2, 1);
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 }
 
@@ -369,29 +382,156 @@ export function saveInputs(period: string, inputs: ReportInputs): void {
   try { localStorage.setItem(KEY_PREFIX + period, JSON.stringify(inputs)); } catch { /* noop */ }
 }
 
-export function defaultInputs(period: string, pilots: Pilot[]): ReportInputs {
+export function defaultInputs(
+  period: string,
+  pilots: Pilot[],
+  defaults?: SquadronDefaults,
+): ReportInputs {
+  const lectures = (defaults?.lectures?.length ? defaults.lectures : LECTURE_NAMES as readonly string[])
+    .map(n => ({ name: n, hours: 0, quizPct: 0, remarks: "" }));
+  const exercises = defaults?.exercises?.length ? defaults.exercises : NEXT_PLAN_EXERCISES as readonly string[];
+  const ammoPh = defaults?.ammoPlaceholder ?? "-";
   return {
     squadronStrength: pilots.length,
     ops: 0, attached: 0, course: 0, sickLeave: 0,
     sickRatePct: 0,
-    morale: "HIGH",
-    incidents: "NIL", accidents: "NIL",
+    morale: defaults?.morale ?? "HIGH",
+    incidents: defaults?.incidentsDefault ?? "NIL",
+    accidents: defaults?.accidentsDefault ?? "NIL",
     plannedSorties: 0, plannedHours: 0,
     weatherAbortS: 0, weatherAbortH: 0,
     maintAbortS: 0,   maintAbortH: 0,
     opsAbortS: 0,     opsAbortH: 0,
     airAbortS: 0,     airAbortH: 0,
-    lectures: LECTURE_NAMES.map(n => ({ name: n, hours: 0, quizPct: 0, remarks: "" })),
+    lectures,
     nextMonthPlanFor: nextPeriod(period),
     pilotsAvailableNext: pilots.length,
     opsNext: 0,
-    nextPlan: NEXT_PLAN_EXERCISES.map(ex => ({
+    nextPlan: exercises.map(ex => ({
       exercise: ex, pilots: 0, sortiesPerPilot: 0, durationPerSortie: 0,
-      ammo275: "-", ammo127: "-", ammo762: "-", remarks: "",
+      ammo275: ammoPh, ammo127: ammoPh, ammo762: ammoPh, remarks: "",
     })),
-    ammoPrev: { rkt275: "-", mm127: "-", mm762: "-" },
-    ammoReq:  { rkt275: "-", mm127: "-", mm762: "-" },
+    ammoPrev: { rkt275: ammoPh, mm127: ammoPh, mm762: ammoPh },
+    ammoReq:  { rkt275: ammoPh, mm127: ammoPh, mm762: ammoPh },
     perPilotStatus: {},
     perPilotRemarks: {},
   };
+}
+
+/**
+ * Resolve the inputs for `period`. Behaviour, in priority order:
+ *
+ *   1. If the operator has saved inputs for this period before, return
+ *      those verbatim — never silently overwrite their work.
+ *   2. Otherwise, look up last month's saved inputs and reuse the SLOW-
+ *      moving fields (squadron strength, lectures structure, next-plan
+ *      exercise list, ammo, fuel rates, per-pilot status overrides) but
+ *      RESET the per-month achievement fields (sick rate, abort tallies,
+ *      planned-vs-achieved, lecture hours/quiz scores, per-pilot remarks).
+ *      This matches how the operations pilot has historically worked
+ *      ("take last month's report and edit it") — but without the trap of
+ *      accidentally publishing last month's incidents/abort counts.
+ *   3. If neither exists, fall back to a fresh blank seeded by squadron
+ *      defaults (lectures, exercises, morale, fuel rates, ammo placeholder).
+ */
+export function loadInputsOrPrefill(
+  period: string,
+  pilots: Pilot[],
+  defaults?: SquadronDefaults,
+): ReportInputs {
+  const saved = loadInputs(period);
+  if (saved) return saved;
+
+  const prev = loadInputs(previousPeriod(period));
+  if (prev) {
+    const fresh = defaultInputs(period, pilots, defaults);
+    return {
+      // Keep the structural / slow-moving choices from last month
+      squadronStrength: pilots.length || prev.squadronStrength,
+      ops: prev.ops, attached: prev.attached, course: prev.course,
+      sickLeave: 0,            // resets every month
+      sickRatePct: 0,           // resets
+      morale: prev.morale,
+      incidents: defaults?.incidentsDefault ?? prev.incidents,
+      accidents: defaults?.accidentsDefault ?? prev.accidents,
+      plannedSorties: 0, plannedHours: 0,                        // resets
+      weatherAbortS: 0, weatherAbortH: 0,
+      maintAbortS: 0,   maintAbortH: 0,
+      opsAbortS: 0,     opsAbortH: 0,
+      airAbortS: 0,     airAbortH: 0,
+      // Keep lecture topic list + remarks template, but zero hours+quiz so
+      // the operator visibly sees they need this month's numbers.
+      lectures: prev.lectures.map(l => ({ ...l, hours: 0, quizPct: 0 })),
+      nextMonthPlanFor: nextPeriod(period),
+      pilotsAvailableNext: pilots.length || prev.pilotsAvailableNext,
+      opsNext: prev.opsNext,
+      // Keep exercise list + fuel/hr overrides + ammo defaults, zero counts
+      nextPlan: prev.nextPlan.map(r => ({
+        ...r, pilots: 0, sortiesPerPilot: 0, durationPerSortie: 0, remarks: "",
+      })),
+      ammoPrev: { ...prev.ammoReq },              // last month's "required" rolls into this month's "available"
+      ammoReq:  { ...fresh.ammoReq },
+      perPilotStatus: { ...prev.perPilotStatus }, // qualification status carries forward
+      perPilotRemarks: {},                          // remarks always reset (will be auto-suggested)
+    };
+  }
+
+  return defaultInputs(period, pilots, defaults);
+}
+
+/* ───────────── per-pilot REMARKS auto-suggestion ───────────── */
+
+/**
+ * Generate a suggested REMARKS string for a pilot in the given report month
+ * based on their leave matrix and unavailability records. Used by the
+ * Monthly Report wizard as a placeholder — operator can accept by leaving
+ * it as-is (placeholder text becomes the value if no override is typed) or
+ * override by typing anything else. The wording style intentionally mirrors
+ * the workbook's hand-typed remarks: "11 DAYS ANNUAL LEAVE", "7 DAYS TDY",
+ * "48 HRS SICK LEAVE".
+ *
+ * Returns an empty string if nothing notable applies.
+ */
+export function suggestRemarksFor(
+  pilot: Pilot,
+  period: string,
+  leaves: LeaveRow[] | undefined,
+  unavail: UnavailEntry[] | undefined,
+): string {
+  const parts: string[] = [];
+  const [, mStr] = period.split("-");
+  const monthIdx = Math.max(0, Math.min(11, parseInt(mStr, 10) - 1));
+
+  // Annual leave from the per-pilot months matrix (days)
+  const lr = leaves?.find(r => r.pilotId === pilot.id);
+  const leaveDays = lr?.months?.[monthIdx] ?? 0;
+  if (leaveDays > 0) {
+    parts.push(`${leaveDays} DAY${leaveDays === 1 ? "" : "S"} ANNUAL LEAVE`);
+  }
+
+  // Unavailability that overlaps the report month
+  const { start, endExclusive } = monthBounds(period);
+  const overlapping = (unavail || []).filter(u => {
+    if (u.pilotId !== pilot.id) return false;
+    const f = new Date(u.from);
+    const t = new Date(u.to);
+    if (Number.isNaN(f.getTime()) || Number.isNaN(t.getTime())) return false;
+    return f < endExclusive && t >= start;
+  });
+  for (const u of overlapping) {
+    const f = new Date(u.from);
+    const t = new Date(u.to);
+    const winStart = f < start ? start : f;
+    const winEnd   = t >= endExclusive ? new Date(endExclusive.getTime() - 86400000) : t;
+    const days = Math.max(1, Math.round((winEnd.getTime() - winStart.getTime()) / 86400000) + 1);
+    const reason = (u.reason || "").toUpperCase();
+    let label = reason;
+    if (/SICK|MEDICAL/.test(reason)) label = `${days} DAY${days === 1 ? "" : "S"} SICK LEAVE`;
+    else if (/TDY|TEMPORARY DUTY|EXCHANGE|TRAVEL/.test(reason)) label = `${days} DAY${days === 1 ? "" : "S"} TDY`;
+    else if (/COURSE|TRAINING/.test(reason)) label = `${days} DAY${days === 1 ? "" : "S"} COURSE`;
+    else if (reason) label = `${days} DAY${days === 1 ? "" : "S"} ${reason}`;
+    if (label) parts.push(label);
+  }
+
+  return parts.join(" + ");
 }
