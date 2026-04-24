@@ -70,7 +70,15 @@ export default function Squadrons() {
   // the edit dialog opens, and re-published when the admin saves.
   const [linkedFlightIds, setLinkedFlightIds] = useState<string[]>([]);
   const [loadingGroup, setLoadingGroup] = useState(false);
-  const registeredPcs = useRegisteredPCs();
+  // v1.1.119 — Defer the cross-PC registry fetch until the edit dialog is
+  // actually opened. Previously this fired on every first paint of
+  // /admin/squadrons (and could surface as a 401 in the browser console
+  // when a stale auth token was attached), even though the squadron list
+  // itself is rendered from the local squadron store and does not need
+  // registry data. The picker only renders inside the edit dialog, so
+  // gating the query on `dialogOpen` removes the speculative call without
+  // changing UX.
+  const registeredPcs = useRegisteredPCs({ enabled: dialogOpen });
   // Show all flight commander PCs even when the strict squadron-name
   // match fails. v1.1.32: ports the v1.1.29 LicenseKeys helper so the
   // Super Admin sees the same forgiving same-squadron list and the same

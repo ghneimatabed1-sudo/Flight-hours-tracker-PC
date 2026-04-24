@@ -790,9 +790,13 @@ export async function ensureMyPcClaim(pcId: string | null | undefined): Promise<
   }
 }
 
-export function useRegisteredPCs(): UseQueryResult<RegisteredPC[]> & { data: RegisteredPC[] } {
+export function useRegisteredPCs(
+  opts: { enabled?: boolean } = {},
+): UseQueryResult<RegisteredPC[]> & { data: RegisteredPC[] } {
+  const enabled = opts.enabled ?? true;
   const q = useQuery<RegisteredPC[]>({
     queryKey: ["xpc", "registry"],
+    enabled,
     queryFn: async () => {
       const me = localPcId();
       const cutoff = Date.now() - ONLINE_WINDOW_MS;
