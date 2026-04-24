@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useDashPilots, useDashSquadrons } from "@/lib/dash-pilots";
+import { resolveScopedIds, useSquadronScope } from "@/lib/squadron-scope";
 import { currencyStatus, fmtDate } from "@/lib/format";
 import type { CurrencyStatus, Pilot } from "@/lib/types";
 import { Search, ArrowUpDown, Download, Printer, FileSpreadsheet, Gauge, Eye, EyeOff } from "lucide-react";
@@ -72,10 +73,23 @@ export default function Currencies() {
   const [sortKey, setSortKey] = useState<SortKey>("worst");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
+  const [scope] = useSquadronScope();
   if (!user) return null;
-  const myIds = new Set(user.squadronIds ?? []);
+  // Topbar scope picker (HQ / multi-squadron commanders) narrows the
+  // operator's authorized squadron list before we build the table.
+  // Falls back to the union when scope is "Combined" or stale.
+  const myIds = new Set(resolveScopedIds(scope, user.squadronIds));
   const mySqns = squadrons.filter(s => myIds.has(s.id));
   const canExport = user.role === "commander";
+
+  // Reset the in-page squadron filter when the topbar scope no longer
+  // contains it, so the table doesn't render empty after the operator
+  // narrows scope to a different squadron than they had filtered to.
+  useEffect(() => {
+    if (sqnFilter !== "__all" && !myIds.has(sqnFilter)) {
+      setSqnFilter("__all");
+    }
+  }, [scope, sqnFilter, myIds]);
 
   const list = useMemo(() => {
     let l = pilots.filter(p => myIds.has(p.squadronId));

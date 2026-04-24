@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { canUseMessages, canUseScheduleChain, canViewFinalSchedules } from "@/lib/cross-pc";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
+import { SquadronScopePicker } from "@/components/SquadronScopePicker";
 import HeartbeatFailureBanner from "@/components/HeartbeatFailureBanner";
 import { getHeartbeatStatus, isHeartbeatFresh, subscribeHeartbeatStatus } from "@/lib/cross-pc";
 import { IncomingAlertWatcher } from "@/components/IncomingAlertWatcher";
@@ -284,6 +285,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               {linkLabel}
             </Link>
             <LiveDataIndicator />
+            <SquadronScopePicker />
             <button onClick={() => setLang(lang === "en" ? "ar" : "en")} className="text-xs px-2 py-1 rounded-md border border-border hover:bg-secondary">
               {lang === "en" ? t("arabic") : t("english")}
             </button>

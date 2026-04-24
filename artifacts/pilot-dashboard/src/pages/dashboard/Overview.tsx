@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useDashPilots, useDashSquadrons } from "@/lib/dash-pilots";
+import { resolveScopedIds, useSquadronScope } from "@/lib/squadron-scope";
 import { pilotWorstStatus } from "@/lib/format";
 import { ChevronRight, Lock, Plane, Users, AlertTriangle, Clock, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -47,9 +48,14 @@ export default function CommanderOverview() {
   for (const pc of reg.data) {
     if (pc.tier === "squadron") opsPcByCode.set(pc.id, pc);
   }
+  const [scope] = useSquadronScope();
   if (!user) return null;
 
-  const myIds = new Set(user.squadronIds);
+  // HQ / multi-squadron commanders pick a squadron (or "Combined") in
+  // the topbar. resolveScopedIds collapses the choice against the
+  // operator's authorized list so this page only renders the squadrons
+  // they want to see right now.
+  const myIds = new Set(resolveScopedIds(scope, user.squadronIds));
   const mySqns = squadrons.filter(s => myIds.has(s.id));
   const myPilots = pilots.filter(p => myIds.has(p.squadronId));
   const expired = myPilots.filter(p => { const s = pilotWorstStatus(p); return s === "expired" || s === "critical"; }).length;

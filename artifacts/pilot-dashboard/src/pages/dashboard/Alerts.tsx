@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useDashPilots, useDashSquadrons } from "@/lib/dash-pilots";
+import { resolveScopedIds, useSquadronScope } from "@/lib/squadron-scope";
 import { currencyStatus, fmtDate } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { CurrencyStatus } from "@/lib/types";
@@ -15,8 +16,12 @@ export default function Alerts() {
   const { user } = useAuth();
   const squadrons = useDashSquadrons();
   const pilots = useDashPilots();
+  const [scope] = useSquadronScope();
   if (!user) return null;
-  const myIds = new Set(user.squadronIds);
+  // Topbar scope picker (HQ / multi-squadron commanders) narrows the
+  // operator's authorized squadron list before alerts are computed.
+  // Falls back to the union when scope is "Combined" or stale.
+  const myIds = new Set(resolveScopedIds(scope, user.squadronIds));
 
   type AlertItem = { pilotId: string; pilot: string; sqn: string; type: string; date: string; status: CurrencyStatus };
   const items: AlertItem[] = [];

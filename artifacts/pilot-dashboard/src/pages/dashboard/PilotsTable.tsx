@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useRoute } from "wouter";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { CurrencyCell, StatusBadge } from "@/components/StatusBadge";
 import { useDashPilots, useDashSquadrons } from "@/lib/dash-pilots";
+import { resolveScopedIds, useSquadronScope } from "@/lib/squadron-scope";
 import { pilotWorstStatus, pilotWorstDate, fmtDate, currencyStatus } from "@/lib/format";
 import type { CurrencyStatus, Pilot } from "@/lib/types";
 import { Search, ArrowUpDown, ChevronLeft, Download, Printer, FileSpreadsheet, UserX, Clock } from "lucide-react";
@@ -30,11 +31,30 @@ export default function PilotsTable() {
   const [sortKey, setSortKey] = useState<SortKey>("callSign");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
+  const [scope] = useSquadronScope();
   if (!user) return null;
-  const myIds = new Set(user.squadronIds);
+  // Squadron drill-down (/dashboard/squadron/:id) is intentional and
+  // takes precedence over the topbar scope picker — operators should
+  // always see the squadron they explicitly opened, even if their
+  // saved scope is narrower or set to a different sibling. Outside
+  // the drill-down, scope narrows the universe of pilots/squadrons.
+  const authorizedIds = user.squadronIds ?? [];
+  const baseIds = focusedSqnId ? authorizedIds : resolveScopedIds(scope, authorizedIds);
+  const myIds = new Set(baseIds);
   const mySqns = squadrons.filter(s => myIds.has(s.id));
   const focusedSqn = focusedSqnId ? squadrons.find(s => s.id === focusedSqnId) : null;
   const canExport = user.role === "commander";
+
+  // If the topbar scope changes (or restores), the per-page squadron
+  // filter can become stale (e.g. it points at squadron B while the
+  // operator just narrowed scope to squadron A) and would render an
+  // empty table. Reset the in-page filter to "All" the moment the
+  // scoped set no longer contains the previously-picked squadron.
+  useEffect(() => {
+    if (sqnFilter !== "__all" && !myIds.has(sqnFilter)) {
+      setSqnFilter("__all");
+    }
+  }, [scope, sqnFilter, myIds]);
 
   const list = useMemo(() => {
     let l = pilots.filter(p => myIds.has(p.squadronId));
