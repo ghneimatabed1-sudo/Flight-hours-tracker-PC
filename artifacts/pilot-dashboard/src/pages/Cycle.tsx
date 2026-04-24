@@ -13,8 +13,15 @@ export default function Cycle() {
   const { t, rankOf } = useI18n();
   const pilotsQ = usePilots();
   const sortiesQ = useSorties();
-  const { data: PILOTS } = pilotsQ;
-  const { data: SORTIES } = sortiesQ;
+  // Belt-and-suspenders. usePilots / useSorties promise to always return an
+  // array (the hook fills `data ?? fallback`), but if a future regression
+  // ever lets `data` be undefined the destructure used to make this page
+  // throw on first render — which surfaces as a "STARTUP ERROR (EARLY)"
+  // overlay because the inner ErrorBoundary unmounts the whole router.
+  // Default-coerce here so a hook-shape regression cannot take the
+  // dashboard down for ops users (Audit L, F-J-01).
+  const PILOTS = pilotsQ.data ?? [];
+  const SORTIES = sortiesQ.data ?? [];
   // The legacy `currencies` Supabase table was a silent dead-end (never
   // written to). With it removed, live status defaults to "missing" in
   // production and falls back to deterministic demo values offline so the

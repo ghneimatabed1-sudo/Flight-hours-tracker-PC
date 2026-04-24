@@ -42,9 +42,15 @@ import {
 // can confirm two PCs are talking to the same backend) and the optional
 // expected-host build constant (so we can flag a mismatch loudly when
 // someone ships an installer wired to the wrong project).
-const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? "";
-const EXPECTED_SUPABASE_HOST =
-  (import.meta.env.VITE_EXPECTED_SUPABASE_HOST as string | undefined) ?? "";
+// `import.meta.env` is a Vite-only construct; guard it so the page can
+// also be imported from a plain Node test runner (sidebar smoke test)
+// without throwing during module evaluation.
+const __viteEnv: Record<string, string | undefined> =
+  typeof import.meta !== "undefined" && (import.meta as { env?: Record<string, string | undefined> }).env
+    ? ((import.meta as { env: Record<string, string | undefined> }).env)
+    : {};
+const SUPABASE_URL = __viteEnv.VITE_SUPABASE_URL ?? "";
+const EXPECTED_SUPABASE_HOST = __viteEnv.VITE_EXPECTED_SUPABASE_HOST ?? "";
 
 function urlHost(u: string): string {
   if (!u) return "";
