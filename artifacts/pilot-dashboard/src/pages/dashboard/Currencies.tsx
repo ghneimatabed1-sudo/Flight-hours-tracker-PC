@@ -163,25 +163,91 @@ export default function Currencies() {
 
   async function exportXlsx() {
     const ExcelJS = (await import("exceljs")).default;
-    const rows = list.map(p => {
-      const sqn = squadrons.find(s => s.id === p.squadronId);
-      const worst = pilotWorst(p);
-      return {
-        [headers[0]]: p.callSign,
-        [headers[1]]: lang === "ar" ? p.fullNameAr : p.fullName,
-        [headers[2]]: sqn ? (lang === "ar" ? sqn.nameAr : sqn.code) : "",
-        [headers[3]]: p.dayCurrencyDate,
-        [headers[4]]: p.nightCurrencyDate,
-        [headers[5]]: p.nvgCurrencyDate ?? "",
-        [headers[6]]: p.irtCurrencyDate,
-        [headers[7]]: p.medicalCurrencyDate,
-        [headers[8]]: statusLabel(worst.status),
-      };
-    });
+    // Currency date columns are 1-indexed positions 4..8 in the headers
+    // array above. Tracked here so the styling pass below knows which
+    // cells to colour.
+    const currencyColIdxs = [4, 5, 6, 7, 8];
+
     const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("Currencies");
-    ws.columns = headers.map(h => ({ header: h, key: h, width: Math.max(12, Math.min(28, h.length + 4)) }));
-    rows.forEach(row => ws.addRow(row));
+    const ws = wb.addWorksheet("Currencies", {
+      // Freeze the header row so it stays visible while scrolling — matches
+      // the on-screen sticky header expectation for printed reports.
+      views: [{ state: "frozen", ySplit: 1 }],
+    });
+    ws.addRow(headers);
+
+    // ── ARGB fills matching the on-screen currency badge colours ──
+    // Excel uses ARGB (alpha first). We use light tints so the printed
+    // sheet remains readable in B&W as well as colour. Mirrors the
+    // pilot-table export so commanders see the same palette in both
+    // workbooks.
+    const fills: Record<string, { fill: string; font: string }> = {
+      red:    { fill: "FFFEE2E2", font: "FF991B1B" }, // expired / critical
+      amber:  { fill: "FFFEF3C7", font: "FF92400E" }, // warning / expiringSoon
+      green:  { fill: "FFDCFCE7", font: "FF166534" }, // current
+      grey:   { fill: "FFF1F5F9", font: "FF475569" }, // unset / blank
+    };
+    function colourFor(s: CurrencyStatus): keyof typeof fills {
+      if (s === "expired" || s === "critical") return "red";
+      if (s === "warning" || s === "expiringSoon") return "amber";
+      if (s === "unset") return "grey";
+      return "green";
+    }
+
+    list.forEach(p => {
+      const sqn = squadrons.find(s => s.id === p.squadronId);
+      const currencies: { date: string; status: CurrencyStatus }[] = [
+        { date: p.dayCurrencyDate, status: currencyStatus(p.dayCurrencyDate) },
+        { date: p.nightCurrencyDate, status: currencyStatus(p.nightCurrencyDate) },
+        { date: p.nvgCurrencyDate ?? "", status: currencyStatus(p.nvgCurrencyDate ?? "") },
+        { date: p.irtCurrencyDate, status: currencyStatus(p.irtCurrencyDate) },
+        { date: p.medicalCurrencyDate, status: currencyStatus(p.medicalCurrencyDate) },
+      ];
+      const worst = pilotWorst(p);
+      const row = ws.addRow([
+        p.callSign,
+        lang === "ar" ? p.fullNameAr : p.fullName,
+        sqn ? (lang === "ar" ? sqn.nameAr : sqn.code) : "",
+        currencies[0].date || "",
+        currencies[1].date || "",
+        currencies[2].date || "",
+        currencies[3].date || "",
+        currencies[4].date || "",
+        statusLabel(worst.status),
+      ]);
+      currencyColIdxs.forEach((colIdx, i) => {
+        const c = row.getCell(colIdx);
+        const tone = fills[colourFor(currencies[i].status)];
+        c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: tone.fill } };
+        c.font = { color: { argb: tone.font }, bold: currencies[i].status === "expired" || currencies[i].status === "critical" };
+        c.alignment = { horizontal: "center", vertical: "middle" };
+      });
+    });
+
+    // Bold header row with a darker fill so it reads as a banner.
+    const headerRow = ws.getRow(1);
+    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E293B" } };
+    headerRow.alignment = { vertical: "middle", horizontal: "center" };
+    headerRow.height = 20;
+
+    // Auto-size each column to fit its widest cell. ExcelJS has no native
+    // autofit, so we measure header + every value and pick a sensible width
+    // (clamped to keep absurdly long names from blowing the layout).
+    // We iterate by header count rather than ws.columns because exceljs
+    // sometimes omits trailing columns from ws.columns when they were only
+    // populated via addRow.
+    for (let idx = 0; idx < headers.length; idx++) {
+      const colNum = idx + 1;
+      let max = String(headers[idx] ?? "").length;
+      ws.eachRow({ includeEmpty: false }, row => {
+        const v = row.getCell(colNum).value;
+        const s = v == null ? "" : String(v);
+        if (s.length > max) max = s.length;
+      });
+      ws.getColumn(colNum).width = Math.max(10, Math.min(32, max + 2));
+    }
+
     const buffer = await wb.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const url = URL.createObjectURL(blob);
