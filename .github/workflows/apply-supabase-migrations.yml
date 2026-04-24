@@ -48,6 +48,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Task #249 — fail fast if a new migration introduces a duplicate
+      # `NNNN_` numeric prefix. Two unrelated `0052_…` files in 2026-04
+      # caused the live ledger to silently skip one of them; this guard
+      # makes the apply job refuse to run until the collision is resolved.
+      - name: Check migration prefix collisions
+        id: prefix_guard
+        run: node scripts/src/check-migration-prefixes.mjs
+
       - name: Sanity-check secret
         id: sanity
         run: |
@@ -331,6 +339,7 @@ jobs:
         if: ${{ always() && !success() }}
         env:
           WEBHOOK_URL: ${{ secrets.MIGRATION_ALERT_WEBHOOK_URL }}
+          PREFIX_GUARD_OUTCOME: ${{ steps.prefix_guard.conclusion }}
           SANITY_OUTCOME: ${{ steps.sanity.conclusion }}
           APPLY_OUTCOME: ${{ steps.apply.conclusion }}
           RELOAD_OUTCOME: ${{ steps.reload.conclusion }}
@@ -359,6 +368,7 @@ jobs:
           # produces today.
           failing_step="unknown step"
           for pair in \
+            "Check migration prefix collisions|${PREFIX_GUARD_OUTCOME:-}" \
             "Sanity-check secret|${SANITY_OUTCOME:-}" \
             "Apply pending migrations|${APPLY_OUTCOME:-}" \
             "Reload PostgREST schema cache|${RELOAD_OUTCOME:-}" \

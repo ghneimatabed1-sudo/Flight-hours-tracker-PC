@@ -61,6 +61,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Task #249 — fail fast if a new migration introduces a duplicate
+      # `NNNN_` numeric prefix. Two unrelated `0052_…` files in 2026-04
+      # caused the live ledger to silently skip one of them; this guard
+      # makes the apply job refuse to run until the collision is resolved.
+      - name: Check migration prefix collisions
+        run: node scripts/src/check-migration-prefixes.mjs
+
       - name: Apply pending migrations
         env:
           SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}

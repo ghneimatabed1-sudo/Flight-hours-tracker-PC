@@ -1,8 +1,31 @@
--- 0052_squadron_rename_xpc_sync_pending_shares.sql
+-- 0054_squadron_rename_xpc_sync_pending_shares.sql
 --
 -- Task #184 — Extend the squadron-rename sync trigger to cover the two
 -- remaining cross-PC tables that snapshot a squadron name at write
 -- time and would otherwise display the OLD name forever after a rename.
+--
+-- ── Renumbering note (Task #249) ────────────────────────────────────
+-- This file originally shipped as `0052_squadron_rename_xpc_sync_pending_shares.sql`
+-- but Audit H proved it never reached production: two unrelated migrations
+-- shared the `0052_` numeric prefix
+-- (`0052_backfill_ledger_sha256.sql` and
+-- `0052_xpc_messages_autoclaim_no_recipient_grant.sql`) and the live
+-- `_migration_ledger` recorded them as applied while this one stayed
+-- absent. Operators kept seeing the OLD squadron name on the Guest
+-- Officer history page and the Schedule Chain page after every rename.
+--
+-- Renumbering to `0054_…` (the next free numeric prefix above the
+-- already-applied `0053_*` pair) gives the apply-supabase-migrations
+-- workflow a brand-new ledger key, so the next push to `main` runs
+-- this migration once and only once. The legacy backfill in
+-- `0053_backfill_xpc_squadron_name_snapshots.sql` already corrects
+-- snapshots for squadrons renamed before this trigger ships, so we do
+-- not need to repeat that work here. A new prefix-collision guard
+-- (`scripts/check-migration-prefixes.mjs`) wired into both
+-- `.github/workflows/apply-migrations.yml` and
+-- `.github/workflows/apply-supabase-migrations.yml` fails the build
+-- whenever a new migration introduces a duplicate numeric prefix, so
+-- this class of silent drift cannot recur.
 --
 -- Background: migration 0050 (Task #173) installed
 -- public._sync_xpc_denorm_on_squadron_rename as an AFTER UPDATE OF name
@@ -124,8 +147,13 @@ end;
 $$;
 
 -- Migration ledger + PostgREST cache reload.
+-- Filename in the ledger MUST track the on-disk filename (the apply
+-- workflow keys the ledger by basename), so this row uses the
+-- post-renumber `0054_…` name from Task #249 even though the trigger
+-- logic itself originated in Task #184. The on-conflict clause keeps
+-- this idempotent if the file is ever re-applied.
 insert into public._migration_ledger (filename, applied_at, applied_by, sha256)
-values ('0052_squadron_rename_xpc_sync_pending_shares.sql', now(), 'task-184', null)
+values ('0054_squadron_rename_xpc_sync_pending_shares.sql', now(), 'task-184', null)
 on conflict (filename) do nothing;
 
 notify pgrst, 'reload schema';

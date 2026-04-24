@@ -3,11 +3,15 @@
 // Task #202 — Regression test for the squadron-rename cross-PC sync trigger.
 //
 // Migrations 0050_squadron_rename_xpc_sync.sql and
-// 0052_squadron_rename_xpc_sync_pending_shares.sql install
+// 0054_squadron_rename_xpc_sync_pending_shares.sql install
 // `public._sync_xpc_denorm_on_squadron_rename`, an AFTER UPDATE OF name
-// trigger on public.squadrons. The trigger propagates the new squadron
-// name into FIVE denormalised tables that snapshot squadron-name text
-// at write time:
+// trigger on public.squadrons. (The pending-shares migration originally
+// shipped as `0052_…` but Audit H / Task #249 renumbered it to `0054_…`
+// after a duplicate `0052_` prefix collision caused the live ledger to
+// silently skip the apply — see the file header for the full history.)
+//
+// The trigger propagates the new squadron name into FIVE denormalised
+// tables that snapshot squadron-name text at write time:
 //
 //   * xpc_registry         (squadron_name)
 //   * xpc_pair_links       (a_squadron, b_squadron)
