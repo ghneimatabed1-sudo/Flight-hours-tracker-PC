@@ -129,14 +129,23 @@ housekeeping".
 
 ## What is NOT in this snapshot
 
-- Production Supabase project (we deliberately did not touch
-  prod from the audit task).
-- Live cron job execution (`cron.job_run_details`) — needs SQL
-  console access.
-- Per-table RLS policy definitions — captured at code review time
-  in the migration files themselves.
+- Live cron job execution detail (`cron.job_run_details`) —
+  needs interactive SQL console access; the table-existence
+  check above only confirms pgcron is installed and the schedules
+  are registered, not that they fired.
+- Per-table RLS policy definitions, predicate expressions, and
+  GRANT matrix — these are captured directly in the migration
+  files (0001..0044) and were code-reviewed there rather than
+  re-introspected via the catalog.
+- Per-edge-function payload examples or rate-limit observations.
+- Any data write — every probe was read-only HEAD/SELECT via the
+  service role.
 
-To probe production for the corresponding numbers, switch
-`SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` to the production
-project and re-run `.local/scripts/sb-final.mjs`. **Do not write
-to production from any audit script.**
+> **Single-environment note:** Hawk Eye runs against ONE Supabase
+> project (`nklrdhfsbevckovqqkah`). There is no separate "dev" /
+> "staging" / "prod" split today — all PCs and the audit harness
+> point at this project. Re-running `.local/scripts/sb-final.mjs`
+> always probes this same production environment. **Audit scripts
+> must never write.** If a future split is introduced (e.g. a
+> dedicated dev project for migration dry-runs), update this file
+> and the script's allow-list at the same time.
