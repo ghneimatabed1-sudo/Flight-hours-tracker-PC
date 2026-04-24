@@ -1,7 +1,14 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+// `import.meta.env` is a Vite-only construct; guard it so the module can
+// also be imported from a plain Node test runner (see
+// supabase-auth-wrap.test.ts) without crashing on first read.
+const env: Record<string, string | undefined> =
+  typeof import.meta !== "undefined" && (import.meta as { env?: Record<string, string | undefined> }).env
+    ? ((import.meta as { env: Record<string, string | undefined> }).env)
+    : {};
+const url = env.VITE_SUPABASE_URL;
+const anonKey = env.VITE_SUPABASE_ANON_KEY;
 
 export const supabaseConfigured = Boolean(url && anonKey);
 
@@ -10,6 +17,84 @@ export const supabase: SupabaseClient | null = supabaseConfigured
       auth: { persistSession: true, autoRefreshToken: true, storageKey: "rjaf.sb" },
     })
   : null;
+
+// ── Stale-token 401 handling ────────────────────────────────────────────
+// supabase-js auto-refreshes JWTs every ~hour, but on the FIRST paint after
+// returning to a tab that has been idle long enough for the cached token to
+// expire, the very first .from(...).select() can race the refresh and come
+// back with a 401 / PGRST301 / "JWT expired". Without a centralised guard,
+// every page that issues a background read on mount (Overview, Squadrons,
+// Commanders, License Keys, …) emits a noisy red error in the console even
+// though supabase-js will quietly recover within a second.
+//
+// The contract:
+//   • `isAuthError(err)` — best-effort predicate for the family of stale-
+//     JWT errors that supabase-js / PostgREST return.
+//   • `refreshSessionOnce()` — coalesces concurrent refresh attempts so a
+//     burst of background reads on first paint only triggers a single
+//     `auth.refreshSession()` round-trip, not one per query.
+//   • `withFreshSession(fn)` — runs `fn()`; on auth error, refreshes
+//     exactly once and retries `fn()` exactly once. Returns a tagged
+//     result so callers can decide whether to fall back silently
+//     (auth still bad → no session) or surface the error normally.
+export function isAuthError(err: unknown): boolean {
+  if (!err) return false;
+  const e = err as { code?: string | number; status?: number; statusCode?: number; message?: string };
+  const code = typeof e.code === "string" ? e.code.toUpperCase() : e.code;
+  if (code === 401 || code === "401" || code === "PGRST301" || code === "PGRST302") return true;
+  if (e.status === 401 || e.statusCode === 401) return true;
+  const msg = err instanceof Error ? err.message : typeof err === "string" ? err : (e.message ?? "");
+  if (!msg) return false;
+  return /jwt (expired|is expired|missing|malformed)|invalid jwt|token.*expired|unauthorized|not authenticated|auth session missing/i.test(msg);
+}
+
+let refreshInflight: Promise<boolean> | null = null;
+export async function refreshSessionOnce(): Promise<boolean> {
+  if (!supabase) return false;
+  if (refreshInflight) return refreshInflight;
+  refreshInflight = (async () => {
+    try {
+      const { data } = await supabase.auth.getSession();
+      // No session at all (signed out, or never signed in). Refresh would
+      // 400 with "Auth session missing" and surface another red console
+      // error — treat it as "not refreshable" so the caller silently
+      // falls back to local data instead of retrying.
+      if (!data?.session?.refresh_token) return false;
+      const { error } = await supabase.auth.refreshSession();
+      return !error;
+    } catch {
+      return false;
+    }
+  })();
+  try {
+    return await refreshInflight;
+  } finally {
+    // Clear shortly after so a stable failure can be re-attempted on the
+    // next 401 burst (e.g. user re-authenticated in another tab).
+    setTimeout(() => { refreshInflight = null; }, 500);
+  }
+}
+
+export type FreshSessionResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: "auth"; error: unknown }
+  | { ok: false; reason: "other"; error: unknown };
+
+export async function withFreshSession<T>(fn: () => Promise<T>): Promise<FreshSessionResult<T>> {
+  try {
+    return { ok: true, value: await fn() };
+  } catch (err) {
+    if (!isAuthError(err)) return { ok: false, reason: "other", error: err };
+    const refreshed = await refreshSessionOnce();
+    if (!refreshed) return { ok: false, reason: "auth", error: err };
+    try {
+      return { ok: true, value: await fn() };
+    } catch (err2) {
+      if (isAuthError(err2)) return { ok: false, reason: "auth", error: err2 };
+      return { ok: false, reason: "other", error: err2 };
+    }
+  }
+}
 
 export interface LicenseValidationResult {
   ok: boolean;
@@ -244,19 +329,28 @@ export async function recordAuditEvent(event: {
   // ever fails again (network blip, future policy regression, retention
   // race), an audit failure must not make the user's real action look
   // like it failed. Log to console for forensics and move on.
-  try {
-    const { error } = await supabase.from("audit_log").insert({
+  //
+  // Task #234 — wrap the insert in `withFreshSession` so a stale-JWT
+  // 401 on the first audit write after a tab has been idle silently
+  // refreshes the token and retries once. If the session is genuinely
+  // gone (user signed out) the write is dropped at debug level rather
+  // than a red console error — same final behaviour as before, just
+  // without the noise.
+  const result = await withFreshSession(async () => {
+    const { error } = await supabase!.from("audit_log").insert({
       type: event.type,
       actor: event.actor ?? null,
       detail: event.detail ?? {},
       occurred_at: new Date().toISOString(),
     });
-    if (error) {
-      console.warn("[audit] insert failed (non-fatal)", { type: event.type, error });
-      return;
+    if (error) throw error;
+  });
+  if (!result.ok) {
+    if (result.reason === "auth") {
+      console.debug("[audit] insert skipped (no valid session)", { type: event.type });
+    } else {
+      console.warn("[audit] insert failed (non-fatal)", { type: event.type, error: result.error });
     }
-  } catch (e) {
-    console.warn("[audit] insert threw (non-fatal)", { type: event.type, error: e });
     return;
   }
   // Opportunistic retention eviction — runs fire-and-forget so it NEVER

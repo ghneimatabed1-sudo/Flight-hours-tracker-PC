@@ -21,7 +21,7 @@
 
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import type { Sortie } from "./mock";
-import { supabase, supabaseConfigured, recordAuditEvent } from "./supabase";
+import { supabase, supabaseConfigured, recordAuditEvent, withFreshSession } from "./supabase";
 import { recordDataError } from "./query-client";
 
 const isLive = () => supabaseConfigured && supabase !== null;
@@ -156,13 +156,31 @@ function isMissingTableError(err: unknown): boolean {
 
 // Wrap a Supabase query so PGRST205 (missing table) is swallowed and a
 // caller-supplied local fallback runs instead. Other errors still throw.
+//
+// Task #234 — also routes the call through `withFreshSession` so a
+// stale-JWT 401 on first paint (the cached access token expired but
+// supabase-js has not yet auto-refreshed) triggers exactly ONE silent
+// `auth.refreshSession()` + retry. If the retry still 401s — or there
+// is no session at all to refresh — we fall back to the local mirror
+// silently (debug log) instead of letting a noisy red 401 bubble up
+// through React Query's onError handler. Without this guard, every
+// admin page that issues a background read on mount (Overview,
+// Squadrons, Commanders, License Keys, Messages, Schedule chain, …)
+// would emit a "Couldn't reach the server" toast in the narrow window
+// between an expired cached token and the next auto-refresh tick.
 async function liveOrLocal<T>(remote: () => Promise<T>, local: () => T | Promise<T>): Promise<T> {
-  try {
-    return await remote();
-  } catch (err) {
-    if (isMissingTableError(err)) return await local();
-    throw err;
+  const result = await withFreshSession(remote);
+  if (result.ok) return result.value;
+  if (result.reason === "auth") {
+    // Stale token + refresh failed (or no session to refresh). The
+    // network 401 is unavoidable but we keep the JS console clean —
+    // the caller's local mirror keeps the UI responsive while
+    // supabase-js sorts itself out on the next auth-state event.
+    console.debug("[xpc] silenced stale-JWT 401 — using local fallback");
+    return await local();
   }
+  if (isMissingTableError(result.error)) return await local();
+  throw result.error;
 }
 
 // ── shared helpers ──────────────────────────────────────────────────────
