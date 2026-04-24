@@ -10,6 +10,7 @@ import { ChevronRight, Lock, Plane, Users, AlertTriangle, Clock, Printer } from 
 import { Button } from "@/components/ui/button";
 import { useRegisteredPCs, type RegisteredPC } from "@/lib/cross-pc";
 import { CommanderEmptyState } from "@/components/CommanderEmptyState";
+import { SnapshotStalenessBanner } from "@/components/SnapshotStalenessBanner";
 
 // Wing / Base / HQ commanders use this Overview as their landing pad.
 // v1.1.25: each squadron card now shows a live connectivity badge
@@ -85,6 +86,7 @@ export default function CommanderOverview() {
           empty roster) is the cause. Renders nothing for squadron and
           flight scopes. */}
       <CommanderEmptyState surface="overview" />
+      <SnapshotStalenessBanner />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((s, i) => (
           <Card key={i}>

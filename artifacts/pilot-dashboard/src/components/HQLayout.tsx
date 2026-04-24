@@ -76,13 +76,22 @@ export function HQLayout({ children }: { children: ReactNode }) {
               { path: "/dashboard/simulator", labelKey: "simulator", icon: <Gauge className="h-4 w-4" /> },
             ] satisfies NavItem[])
           : []),
-        // Flight commanders also create the daily flight schedule sheet —
-        // it's the same FlightProgram editor the squadron commander uses,
-        // and submissions still flow up the chain (Flight → Squadron →
-        // Wing → Base) via Schedule Chain. Without this entry the flight
-        // commander has no way to start a sheet, only to forward one.
+        // Flight commanders own the same authoring surface as the squadron
+        // commander for their flight: the daily flight schedule sheet
+        // (FlightProgram), the read-only Flight Records browser for sorties
+        // already entered by the Ops officer, and the Simulator log used to
+        // record / sign off sim rides. Audit J F-J-05 noted these three
+        // entries were missing from the flight-cmdr sidebar — the operator
+        // had no way to reach them even though the routes existed. We mount
+        // the same trio used by the squadron block above so a flight cmdr's
+        // sidebar matches the spec (Flight Records · Flight Program ·
+        // Simulator) without giving them squadron-wide cross-flight scope.
         ...(user.scope === "flight"
-          ? ([{ path: "/dashboard/flight-program", labelKey: "nav_flight_program", icon: <ClipboardList className="h-4 w-4" /> }] satisfies NavItem[])
+          ? ([
+              { path: "/dashboard/flights", labelKey: "flightRecords", icon: <CalendarDays className="h-4 w-4" /> },
+              { path: "/dashboard/flight-program", labelKey: "nav_flight_program", icon: <ClipboardList className="h-4 w-4" /> },
+              { path: "/dashboard/simulator", labelKey: "simulator", icon: <Gauge className="h-4 w-4" /> },
+            ] satisfies NavItem[])
           : []),
         // Squadron + Flight commanders get a read-only Unavailable list
         // (see who in the squadron is on leave / grounded). Wing / base /

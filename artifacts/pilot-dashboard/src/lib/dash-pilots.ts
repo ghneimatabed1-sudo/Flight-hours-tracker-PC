@@ -15,11 +15,27 @@
 // `fullNameAr`, `dayCurrencyDate` etc. and a `squadronId` field that
 // doesn't exist on the real type — this PC is bound to a single squadron
 // so we stamp every pilot with the commander's authorized squadron ID.
+//
+// ROUND 3 O (audit J F-J-03/04, task #263): a wing / base / HQ commander,
+// or a squadron-tier commander whose license authorizes more than one
+// squadron, has NO local roster on their PC and must roll up across
+// squadrons. We resolve their roster from `xpc_squadron_snapshot` (one
+// row per squadron, published by the canonical Ops PC) instead of the
+// local DB. Hours fields are absent in the snapshot payload — they
+// default to 0 because the rollup view doesn't yet ship hours; the
+// per-squadron drill-down still uses the dedicated snapshot card on
+// PilotsTable, which renders the same data. The single-squadron ops
+// commander path is unchanged.
 
 import { useMemo } from "react";
 import { useAuth } from "./auth";
 import { usePilots, type Pilot as RealPilot } from "./squadron-data";
 import { useSquadrons } from "./squadron-store";
+import {
+  useAllSquadronSnapshots,
+  type SquadronSnapshotPilot,
+  type SquadronSnapshotRow,
+} from "./cross-pc";
 import type { Pilot as DashPilot, Squadron } from "./types";
 
 // Resolve which squadronId to stamp on every pilot for the signed-in
@@ -35,6 +51,23 @@ function resolveSquadronId(user: { squadronIds?: string[] } | null): string {
     if (bound) return bound;
   } catch { /* noop */ }
   return "SQDN";
+}
+
+// True when the signed-in user needs the snapshot rollup (cross-squadron
+// commander) rather than the local-DB roster (single-squadron ops). Wing,
+// base and HQ scope ALWAYS roll up. Squadron-scope commanders roll up
+// only when their license authorizes more than one squadron — single
+// squadron stays on the local DB so the ops officer + commander share
+// the same source of truth on the squadron PC.
+function needsSnapshotRollup(user: {
+  role?: string;
+  scope?: string;
+  squadronIds?: string[];
+} | null): boolean {
+  if (!user || user.role !== "commander") return false;
+  if (user.scope === "wing" || user.scope === "base" || user.scope === "hq") return true;
+  const ids = user.squadronIds ?? [];
+  return ids.length > 1;
 }
 
 export function adaptPilot(real: RealPilot, squadronId: string): DashPilot {
@@ -78,27 +111,98 @@ export function adaptPilot(real: RealPilot, squadronId: string): DashPilot {
   };
 }
 
+// Snapshot → DashPilot adapter. The snapshot payload only carries the
+// roster (callsign, name, flight, rank) and the five expiry dates the
+// commander rollup actually displays. Hours columns default to 0 — the
+// per-squadron drill-down already uses a dedicated snapshot card and
+// the rollup view never advertised hours for cross-sqn pilots.
+export function adaptSnapshotPilot(
+  snap: SquadronSnapshotPilot,
+  squadronId: string,
+): DashPilot {
+  return {
+    id: snap.id,
+    callSign: snap.callSign ?? "",
+    flightName: snap.flightName ?? undefined,
+    rank: snap.rank ?? "",
+    rankAr: snap.rank ?? "",
+    fullName: snap.name ?? "",
+    fullNameAr: snap.name ?? "",
+    squadronId,
+    monthlyHours: 0,
+    grandTotalHours: 0,
+    nvgTotalHours: 0,
+    dayHours: 0,
+    nightHours: 0,
+    simHours: 0,
+    captainHours: 0,
+    instrumentHours: undefined,
+    dayCurrencyDate: snap.expDay ?? "",
+    nightCurrencyDate: snap.expNight ?? "",
+    nvgCurrencyDate: snap.expNvg ?? "",
+    irtCurrencyDate: snap.expIrt ?? "",
+    medicalCurrencyDate: snap.expMedical ?? "",
+    qualifications: undefined,
+    lastSimDate: undefined,
+  };
+}
+
 export function useDashPilots(): DashPilot[] {
   const { user } = useAuth();
-  const q = usePilots();
-  const raw = q.data;
+  const rollup = needsSnapshotRollup(user);
+  // Local DB roster for single-squadron ops commanders. The query is
+  // always wired so the hooks order stays stable across renders, but
+  // we ignore the result on the rollup path.
+  const localQ = usePilots();
+  const localRaw = localQ.data;
   const sqnId = resolveSquadronId(user);
-  return useMemo(() => raw.map(p => adaptPilot(p, sqnId)), [raw, sqnId]);
+  // Snapshot rollup for cross-squadron commanders. `enabled: false`
+  // when the user is on the local-DB path so we don't burn quota.
+  const snapQ = useAllSquadronSnapshots({ enabled: rollup });
+  const snapRows = snapQ.data;
+  const authorizedKey = (user?.squadronIds ?? []).join(",");
+  return useMemo(() => {
+    if (rollup) {
+      const authorized = new Set(user?.squadronIds ?? []);
+      const out: DashPilot[] = [];
+      for (const row of snapRows) {
+        // When the JWT carries an explicit squadron_ids allow-list the
+        // RLS migration (0056) already filters server-side, but we
+        // double-filter on the client to defend against legacy / wide
+        // policies and to match the licensed scope exactly.
+        if (authorized.size > 0 && !authorized.has(row.squadronId)) continue;
+        for (const sp of row.payload.roster ?? []) {
+          out.push(adaptSnapshotPilot(sp, row.squadronId));
+        }
+      }
+      return out;
+    }
+    return localRaw.map(p => adaptPilot(p, sqnId));
+  }, [rollup, snapRows, localRaw, sqnId, authorizedKey, user?.squadronIds]);
 }
 
 // Guarantees the commander's authorized squadron is always represented in
 // the list — even when `rjaf.squadrons` hasn't been populated on this PC
 // yet. Without this, `squadrons.filter(s => myIds.has(s.id))` comes back
 // empty and the Overview page renders zero squadron cards.
+//
+// ROUND 3 O: for rollup commanders we ALSO pull squadron ids out of the
+// snapshot rows so wing / base / HQ surfaces have a usable squadron
+// list even when the local `rjaf.squadrons` mirror is empty (which it
+// always is on a freshly-licensed wing PC). The squadron name falls
+// back to the id when we don't have anything richer to show.
 export function useDashSquadrons(): Squadron[] {
   const { user, squadron } = useAuth();
   const list = useSquadrons();
+  const rollup = needsSnapshotRollup(user);
+  const snapQ = useAllSquadronSnapshots({ enabled: rollup });
+  const snapRows: SquadronSnapshotRow[] = snapQ.data;
   return useMemo(() => {
     const ids = user?.squadronIds ?? [];
-    if (ids.length === 0) return list;
     const out: Squadron[] = [...list];
-    for (const id of ids) {
-      if (out.some(s => s.id === id)) continue;
+    const ensure = (id: string) => {
+      if (!id) return;
+      if (out.some(s => s.id === id)) return;
       out.push({
         id,
         name: squadron?.name || id,
@@ -111,7 +215,15 @@ export function useDashSquadrons(): Squadron[] {
         enabled: true,
         keyHolder: null,
       });
+    };
+    for (const id of ids) ensure(id);
+    if (rollup) {
+      const authorized = new Set(ids);
+      for (const row of snapRows) {
+        if (authorized.size > 0 && !authorized.has(row.squadronId)) continue;
+        ensure(row.squadronId);
+      }
     }
     return out;
-  }, [list, user?.squadronIds, squadron?.name, squadron?.base]);
+  }, [list, user?.squadronIds, squadron?.name, squadron?.base, rollup, snapRows]);
 }

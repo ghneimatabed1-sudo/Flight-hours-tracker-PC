@@ -14,6 +14,7 @@ import type { CurrencyStatus, Pilot } from "@/lib/types";
 import { Search, ArrowUpDown, ChevronLeft, Download, Printer, FileSpreadsheet, UserX, Clock } from "lucide-react";
 import { useSquadronSnapshot } from "@/lib/cross-pc";
 import { CommanderEmptyState } from "@/components/CommanderEmptyState";
+import { SnapshotStalenessBanner } from "@/components/SnapshotStalenessBanner";
 
 type SortKey = keyof Pick<Pilot, "callSign" | "fullName" | "monthlyHours" | "grandTotalHours" | "nvgTotalHours">;
 
@@ -311,7 +312,10 @@ export default function PilotsTable() {
           only on the all-squadrons view; the squadron drill-down below
           already has its own "Daily picture" card from the snapshot. */}
       {isCrossSqnViewer && !focusedSqn && (
-        <CommanderEmptyState surface="pilots" />
+        <>
+          <CommanderEmptyState surface="pilots" />
+          <SnapshotStalenessBanner />
+        </>
       )}
 
       {isCrossSqnViewer && focusedSqn && (

@@ -204,6 +204,14 @@ function CommanderRoutes() {
       <Route path="/dashboard/flight-program" component={FlightProgram} />
       <Route path="/dashboard/unavailable" component={CommanderUnavailableGate} />
       <Route path="/dashboard/sticky" component={StickyNotes} />
+      {/* Audit J finding F-J-02: bare paths for the three legacy
+          shortcuts the squadron commander sidebar / external links
+          still hit. We canonicalize on the /dashboard/* routes above
+          and bounce the bare paths so a stale hash, hand-typed URL,
+          or in-app link to /alerts no longer 404s. */}
+      <Route path="/alerts"><Redirect to="/dashboard/alerts" /></Route>
+      <Route path="/simulator"><Redirect to="/dashboard/simulator" /></Route>
+      <Route path="/sticky"><Redirect to="/dashboard/sticky" /></Route>
       <Route path="/dashboard/schedule-chain" component={ScheduleChain} />
       <Route path="/dashboard/schedule-history" component={ScheduleHistory} />
       {/* v1.1.64 — Wing-approved finals rollup. Mounted under the

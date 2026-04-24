@@ -2808,6 +2808,59 @@ export function useCommanderSnapshotProbe(opts: {
   };
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// All-snapshots fetch — Round 3 O Part B (audit J F-J-03/04).
+// ──────────────────────────────────────────────────────────────────────
+// `useSquadronSnapshot` reads ONE squadron's snapshot at a time (used by
+// the squadron drill-down). Wing / Base / HQ commanders need the rollup
+// view: every snapshot row their JWT is allowed to read, which is what
+// 0056_snapshot_rls_lockdown.sql restricts SELECT to.
+//
+// Returns the full row including payload so the dashboard can render
+// rollup pilot lists (PilotsTable, Currencies, Alerts) directly from
+// snapshots without any local DB rows. The query is enabled only when
+// requested by the caller — squadron-tier ops PCs don't need this and
+// would just churn quota.
+export function useAllSquadronSnapshots(opts: {
+  enabled: boolean;
+}): UseQueryResult<SquadronSnapshotRow[]> & { data: SquadronSnapshotRow[] } {
+  const enabled = !!opts.enabled && isLive();
+  const q = useQuery<SquadronSnapshotRow[]>({
+    queryKey: ["xpc", "squadron-snapshot", "all"],
+    queryFn: async () => {
+      if (!isLive() || !supabase) return [];
+      const { data, error } = await supabase
+        .from("xpc_squadron_snapshot")
+        .select("squadron_id, ops_pc_id, snapshot_at, payload");
+      if (error || !Array.isArray(data)) return [];
+      return data.map(row => {
+        const r = row as {
+          squadron_id: unknown;
+          ops_pc_id: unknown;
+          snapshot_at: unknown;
+          payload?: Record<string, unknown> | null;
+        };
+        const payload = (r.payload ?? {
+          roster: [],
+          unavailable: [],
+          counts: { pilots: 0, unavailToday: 0, expired: 0, expiringSoon: 0 },
+        }) as unknown as SquadronSnapshotPayload;
+        return {
+          squadronId: String(r.squadron_id ?? ""),
+          opsPcId: String(r.ops_pc_id ?? ""),
+          snapshotAt: String(r.snapshot_at ?? ""),
+          payload,
+        } as SquadronSnapshotRow;
+      });
+    },
+    enabled,
+    staleTime: 30_000,
+    refetchInterval: enabled ? 60_000 : false,
+    retry: isLive() ? 1 : false,
+  });
+  return { ...q, data: q.data ?? [] } as UseQueryResult<SquadronSnapshotRow[]> & { data: SquadronSnapshotRow[] };
+}
+
 // Role helper: which roles are allowed to use the messages UI at all.
 // Commanders (Flight / Squadron / Wing / Base) AND the squadron Ops
 // Pilot. v1.1.58: Ops is included because in the live deployment the
