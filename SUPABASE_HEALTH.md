@@ -1,5 +1,5 @@
 # Hawk Eye — Supabase Health Snapshot
-**Snapshot date:** 2026-04-24 · **Project:** dev (`nklrdhfsbevckovqqkah`)
+**Snapshot date:** 2026-04-24 · **Project:** production (`nklrdhfsbevckovqqkah`) — single Supabase project, no separate dev environment exists
 **How to refresh this file:**
 ```
 node_modules/.bin/tsx .local/scripts/sb-final.mjs > .local/reports/supabase-snapshot-$(date +%F).json
@@ -33,24 +33,24 @@ orphans.
 
 ---
 
-## Tables (dev DB row counts)
+## Tables (production row counts — read-only HEAD probes via service role)
 
 | Table | Row count | Notes |
 | ----- | --------- | ----- |
 | pilots                          | 2 | TEST_ rows from prior audits |
 | sorties                         | 0 | clean |
-| squadrons                       | 1 | dev only — wing field is NULL → D3 |
+| squadrons                       | 1 | production — wing field is NULL → D3 (real prod gap) |
 | commanders                      | (RLS) | counts hidden from PostgREST head request |
 | license_keys                    | (RLS) | same |
 | xpc_pcs                         | (RLS) | same |
-| xpc_pair_links                  | 0 | no live cross-PC pairs in dev |
+| xpc_pair_links                  | 0 | no live cross-PC pairs (production is currently single-squadron at NO.8 SQDN) |
 | xpc_pair_codes                  | 0 | |
 | xpc_pair_audit                  | 0 | |
 | user_pcs                        | (RLS) | |
 | reminders                       | (RLS) | |
 | notams                          | 0 | |
 | alerts                          | 1 | |
-| wings                           | 0 | dev project never seeded a wing — D3 root cause |
+| wings                           | 0 | production never seeded a wing row — D3 root cause |
 | bases                           | 1 | |
 | org_chart_nodes                 | (RLS) | |
 | squadron_defaults               | (RLS) | |
@@ -119,7 +119,7 @@ public.
 
 ## Backups
 
-The dev project relies on Supabase platform backups (daily, 7-day
+This Supabase project relies on platform backups (daily, 7-day
 retention on the free tier; 30-day on Pro). A `backup_snapshots`
 table exists for application-level snapshots but the cadence is
 operator-managed — see `MAINTENANCE_RUNBOOK.md` § "Monthly
