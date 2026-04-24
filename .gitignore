@@ -47,3 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# AA2 audit binary blobs (raw eszip dumps)
+audit-evidence/2026-04-27/AA2/*.bin
