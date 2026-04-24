@@ -178,6 +178,30 @@ jobs:
           PROJECT_REF: ${{ env.PROJECT_REF }}
         run: node .local/scripts/regression-task-171-redeem-pair.mjs
 
+      # Task #193 — companion regression for the two PAIR REVOKE RPCs.
+      #
+      # The redeem-pair script above only exercises the CREATE side
+      # (xpc_redeem_pair_code × 3 kinds + xpc_admin_create_pair). The
+      # two revoke surfaces — xpc_admin_revoke_pair (super-admin force)
+      # and xpc_revoke_my_pair (participant withdrawal) — share the
+      # same RLS / DEFINER risk class and need their own regression
+      # gate so a future #variable_conflict-class defect or RLS
+      # regression can't slip past the migrations job.
+      #
+      # Provisions a TEST_T171_-fenced universe (admin user, participant
+      # user, stranger user, two PCs, one PC claim), exercises both
+      # revoke RPCs end-to-end, asserts revoked_at + audit row both
+      # times, AND probes the negative case (a non-owner stranger
+      # calling xpc_revoke_my_pair must be denied with the ownership
+      # error AND must not flip revoked_at). All TEST_T171_* rows are
+      # purged in finally{} so a partial failure cannot litter prod.
+      - name: Regression — pair revocation RPCs (Task #193)
+        id: revoke_regression
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ env.PROJECT_REF }}
+        run: node .local/scripts/regression-task-193-revoke-pair.mjs
+
       # Task #192 — fast-path operator alert for ordinary step failures.
       #
       # This step is the in-job notifier: it fires within seconds when
@@ -205,6 +229,7 @@ jobs:
           APPLY_OUTCOME: ${{ steps.apply.conclusion }}
           RELOAD_OUTCOME: ${{ steps.reload.conclusion }}
           REGRESSION_OUTCOME: ${{ steps.regression.conclusion }}
+          REVOKE_REGRESSION_OUTCOME: ${{ steps.revoke_regression.conclusion }}
           JOB_STATUS: ${{ job.status }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT_SHA: ${{ github.sha }}
@@ -230,7 +255,8 @@ jobs:
             "Sanity-check secret|${SANITY_OUTCOME:-}" \
             "Apply pending migrations|${APPLY_OUTCOME:-}" \
             "Reload PostgREST schema cache|${RELOAD_OUTCOME:-}" \
-            "Regression — cross-PC pair redemption|${REGRESSION_OUTCOME:-}"
+            "Regression — cross-PC pair redemption|${REGRESSION_OUTCOME:-}" \
+            "Regression — pair revocation RPCs|${REVOKE_REGRESSION_OUTCOME:-}"
           do
             name="${pair%%|*}"
             outcome="${pair##*|}"
