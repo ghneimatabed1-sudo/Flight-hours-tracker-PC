@@ -23,12 +23,12 @@ import {
 } from "@/lib/cross-pc";
 import { Users, Plus, Trash2, KeyRound, Copy, Info, Link2 } from "lucide-react";
 
-const scopeKeys: Record<CommanderScope, "scopeSquadron" | "scopeFlight" | "scopeWing" | "scopeBase" | "scopeHQ"> = {
+const scopeKeys: Record<CommanderScope, "scopeSquadron" | "scopeFlight" | "scopeWing" | "scopeBase" | "scopeHq"> = {
   squadron: "scopeSquadron",
   flight: "scopeFlight",
   wing: "scopeWing",
   base: "scopeBase",
-  hq: "scopeHQ",
+  hq: "scopeHq",
 };
 
 // A "tier" is a single selector that combines role + scope for the UI.
@@ -198,7 +198,7 @@ export default function Commanders() {
               <Select value={tier} onValueChange={(v: string) => setTier(v as Tier)}>
                 <SelectTrigger data-testid="select-role"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="hq">{t("scopeHQ")}</SelectItem>
+                  <SelectItem value="hq">{t("scopeHq")}</SelectItem>
                   <SelectItem value="base">{t("scopeBase")}</SelectItem>
                   <SelectItem value="wing">{t("scopeWing")}</SelectItem>
                   <SelectItem value="squadron">{t("scopeSquadron")}</SelectItem>

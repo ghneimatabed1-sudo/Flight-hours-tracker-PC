@@ -3,7 +3,7 @@ import { pilotRank } from "./ranks";
 
 export type Lang = "en" | "ar";
 
-const dict = {
+export const dict = {
   en: {
     nav_flight_program: "Flight Schedule",
     nav_sticky: "Sticky Notes",
@@ -762,7 +762,7 @@ const dict = {
     scopeFlight: "Flight Cdr",
     scopeWing: "Wing Cdr",
     scopeBase: "Base Cdr",
-    scopeHQ: "HQ",
+    scopeHq: "HQ",
     classifiedFooter: "CLASSIFIED — For official use only",
     sessionTimeout: "Developed by Capt. Abedalqader Ghunmat",
     squadronStatus: "Currency Status",
@@ -1602,7 +1602,7 @@ const dict = {
     scopeFlight: "قائد رحلة",
     scopeWing: "قائد جناح",
     scopeBase: "قائد قاعدة",
-    scopeHQ: "القيادة العامة",
+    scopeHq: "القيادة العامة",
     classifiedFooter: "سري — للاستخدام الرسمي فقط",
     sessionTimeout: "تطوير النقيب عبدالقادر غنيمات",
     squadronStatus: "حالة الصلاحيات",

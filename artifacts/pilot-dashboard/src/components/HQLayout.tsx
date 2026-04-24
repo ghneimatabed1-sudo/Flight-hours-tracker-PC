@@ -53,10 +53,10 @@ export function HQLayout({ children }: { children: ReactNode }) {
         { path: "/admin/reminders", labelKey: "remindersSchedule", icon: <AlarmClock className="h-4 w-4" /> },
         { path: "/admin/audit", labelKey: "auditLog", icon: <ListChecks className="h-4 w-4" /> },
         { path: "/admin/security", labelKey: "nav_security", icon: <Lock className="h-4 w-4" /> },
-        { path: "/admin/connection-map", labelKey: "nav_connection_map" as Key, icon: <Network className="h-4 w-4" /> },
-        { path: "/connections", labelKey: "nav_connections" as Key, icon: <Link2Icon className="h-4 w-4" /> },
+        { path: "/admin/connection-map", labelKey: "nav_connection_map", icon: <Network className="h-4 w-4" /> },
+        { path: "/connections", labelKey: "nav_connections", icon: <Link2Icon className="h-4 w-4" /> },
         { path: "/settings", labelKey: "nav_settings", icon: <SettingsIcon className="h-4 w-4" /> },
-        { path: "/diagnostic", labelKey: "nav_diagnostic" as Key, icon: <Activity className="h-4 w-4" /> },
+        { path: "/diagnostic", labelKey: "nav_diagnostic", icon: <Activity className="h-4 w-4" /> },
       ]
     : [
         { path: "/dashboard", labelKey: "overview", icon: <BarChart3 className="h-4 w-4" /> },
@@ -70,11 +70,11 @@ export function HQLayout({ children }: { children: ReactNode }) {
         // has entered, filterable by day. Intentionally hidden for HQ / base
         // / wing scope (they don't own a single squadron's local data store).
         ...(user.scope === "squadron"
-          ? [
-              { path: "/dashboard/flights", labelKey: "flightRecords" as Key, icon: <CalendarDays className="h-4 w-4" /> },
-              { path: "/dashboard/flight-program", labelKey: "nav_flight_program" as Key, icon: <ClipboardList className="h-4 w-4" /> },
-              { path: "/dashboard/simulator", labelKey: "simulator" as Key, icon: <Gauge className="h-4 w-4" /> },
-            ]
+          ? ([
+              { path: "/dashboard/flights", labelKey: "flightRecords", icon: <CalendarDays className="h-4 w-4" /> },
+              { path: "/dashboard/flight-program", labelKey: "nav_flight_program", icon: <ClipboardList className="h-4 w-4" /> },
+              { path: "/dashboard/simulator", labelKey: "simulator", icon: <Gauge className="h-4 w-4" /> },
+            ] satisfies NavItem[])
           : []),
         // Flight commanders also create the daily flight schedule sheet —
         // it's the same FlightProgram editor the squadron commander uses,
@@ -82,48 +82,48 @@ export function HQLayout({ children }: { children: ReactNode }) {
         // Wing → Base) via Schedule Chain. Without this entry the flight
         // commander has no way to start a sheet, only to forward one.
         ...(user.scope === "flight"
-          ? [{ path: "/dashboard/flight-program", labelKey: "nav_flight_program" as Key, icon: <ClipboardList className="h-4 w-4" /> }]
+          ? ([{ path: "/dashboard/flight-program", labelKey: "nav_flight_program", icon: <ClipboardList className="h-4 w-4" /> }] satisfies NavItem[])
           : []),
         // Squadron + Flight commanders get a read-only Unavailable list
         // (see who in the squadron is on leave / grounded). Wing / base /
         // HQ scope skip it — they don't drill into a single squadron's
         // operational availability from this surface.
         ...(user.scope === "squadron" || user.scope === "flight"
-          ? [{ path: "/dashboard/unavailable", labelKey: "nav_unavail" as Key, icon: <UserX className="h-4 w-4" /> }]
+          ? ([{ path: "/dashboard/unavailable", labelKey: "nav_unavail", icon: <UserX className="h-4 w-4" /> }] satisfies NavItem[])
           : []),
         // Pilot Alerts — squadron + flight commanders push short messages
         // straight to pilots' phones. Other commander scopes don't have a
         // direct line to pilot mobiles, so they don't see this entry.
         ...(user.scope === "squadron" || user.scope === "flight"
-          ? [{ path: "/dashboard/pilot-alerts", labelKey: "nav_pilot_alerts" as Key, icon: <Bell className="h-4 w-4" /> }]
+          ? ([{ path: "/dashboard/pilot-alerts", labelKey: "nav_pilot_alerts", icon: <Bell className="h-4 w-4" /> }] satisfies NavItem[])
           : []),
         // Sticky notes calendar is a per-PC scratchpad for every commander.
-        { path: "/dashboard/sticky", labelKey: "nav_sticky" as Key, icon: <StickyNote className="h-4 w-4" /> },
+        { path: "/dashboard/sticky", labelKey: "nav_sticky", icon: <StickyNote className="h-4 w-4" /> },
         // Flight Schedule creation is squadron-level only. Flight / wing /
         // base / HQ-scope commanders don't own a specific squadron's daily
         // sheet so they don't get this page in their sidebar.
         ...(canUseScheduleChain(user.role, user.scope)
-          ? [
-              { path: "/dashboard/schedule-chain", labelKey: "nav_schedule_chain" as Key, icon: <Share2 className="h-4 w-4" /> },
-              { path: "/dashboard/schedule-history", labelKey: "nav_schedule_history" as Key, icon: <History className="h-4 w-4" /> },
-            ]
+          ? ([
+              { path: "/dashboard/schedule-chain", labelKey: "nav_schedule_chain", icon: <Share2 className="h-4 w-4" /> },
+              { path: "/dashboard/schedule-history", labelKey: "nav_schedule_history", icon: <History className="h-4 w-4" /> },
+            ] satisfies NavItem[])
           : []),
         // v1.1.64 — Base / HQ commanders are read-only viewers of every
         // Wing-approved flight schedule across every squadron, sorted
         // per squadron with the originating Sqn Cmdr name visible.
         ...(canViewFinalSchedules(user.role, user.scope)
-          ? [{ path: "/dashboard/final-schedules", labelKey: "nav_final_schedules" as Key, icon: <ClipboardCheck className="h-4 w-4" /> }]
+          ? ([{ path: "/dashboard/final-schedules", labelKey: "nav_final_schedules", icon: <ClipboardCheck className="h-4 w-4" /> }] satisfies NavItem[])
           : []),
         ...(canUseMessages(user.role, user.scope)
-          ? [{ path: "/dashboard/messages", labelKey: "nav_messages" as Key, icon: <Mail className="h-4 w-4" /> }]
+          ? ([{ path: "/dashboard/messages", labelKey: "nav_messages", icon: <Mail className="h-4 w-4" /> }] satisfies NavItem[])
           : []),
         // Settings: every commander scope (squadron / flight / wing / base
         // / HQ) needs the auto-updater toggle and the manual "Check for
         // app update" button. Without this entry the operator on a flight
         // commander PC has no way to pull a new installer build.
-        { path: "/dashboard/connections", labelKey: "nav_connections" as Key, icon: <Link2Icon className="h-4 w-4" /> },
-        { path: "/dashboard/settings", labelKey: "nav_settings" as Key, icon: <SettingsIcon className="h-4 w-4" /> },
-        { path: "/dashboard/diagnostic", labelKey: "nav_diagnostic" as Key, icon: <Activity className="h-4 w-4" /> },
+        { path: "/dashboard/connections", labelKey: "nav_connections", icon: <Link2Icon className="h-4 w-4" /> },
+        { path: "/dashboard/settings", labelKey: "nav_settings", icon: <SettingsIcon className="h-4 w-4" /> },
+        { path: "/dashboard/diagnostic", labelKey: "nav_diagnostic", icon: <Activity className="h-4 w-4" /> },
       ];
 
   return (
