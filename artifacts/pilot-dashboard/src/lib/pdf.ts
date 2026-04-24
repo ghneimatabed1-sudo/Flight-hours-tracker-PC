@@ -245,8 +245,52 @@ function footer(doc: jsPDF, lang: PdfLang) {
   }
 }
 
+// ---------- Capture-mode helper ----------
+// Every export function in this file funnels through the local `save()`
+// helper below. The "Preview before download" feature on the PdfExports
+// page needs the same rendered PDF as a Blob so it can be shown in an
+// iframe modal before the operator commits to saving it. Rather than
+// thread an `output: "save" | "blob"` parameter through 21 export
+// signatures (and risk drift), we install a module-level capture slot
+// that the local `save()` consults: when a slot is set, `save()` writes
+// the (Blob, filename) into it and skips the browser download; when no
+// slot is set, behavior is unchanged (immediate download).
+//
+// We deliberately do NOT monkey-patch `jsPDF.prototype.save` here —
+// jsPDF copies its `save` method onto each instance at construction
+// time, so prototype patches never fire for already-built docs.
+//
+// captureExport restores the previous slot in `finally` so nested or
+// concurrent captures behave correctly. The wrapped exporter MUST call
+// `save()` exactly once (every exporter in this file does); if it
+// doesn't we throw so the caller can surface a clear error rather than
+// open an empty preview.
+export interface PdfCapture { blob: Blob; filename: string }
+type CaptureSlot = { blob: Blob | null; filename: string | null };
+let captureSlot: CaptureSlot | null = null;
+
 function save(doc: jsPDF, filename: string) {
+  if (captureSlot) {
+    captureSlot.blob = doc.output("blob");
+    captureSlot.filename = filename;
+    return;
+  }
   doc.save(filename);
+}
+
+export async function captureExport(fn: () => Promise<void>): Promise<PdfCapture> {
+  const slot: CaptureSlot = { blob: null, filename: null };
+  const prev = captureSlot;
+  captureSlot = slot;
+  try {
+    await fn();
+  } finally {
+    captureSlot = prev;
+  }
+  if (!slot.blob || !slot.filename) {
+    throw new Error("PDF export did not produce a file");
+  }
+  return { blob: slot.blob, filename: slot.filename };
 }
 
 // Common autoTable styles per language so the Arabic font is applied to every

@@ -8,7 +8,7 @@ import {
   useSchedule, useAuditLog, useReminderOverview,
 } from "@/lib/squadron-data";
 import { supabaseConfigured } from "@/lib/supabase";
-import { FileDown, FileText, Loader2, Globe, AlertTriangle, Info } from "lucide-react";
+import { FileDown, FileText, Loader2, Globe, AlertTriangle, Info, Eye, X } from "lucide-react";
 import {
   exportAuthorizationReport,
   exportPilotDataPages,
@@ -31,6 +31,7 @@ import {
   exportCycle,
   exportIndividualPilotRecord,
   exportPeriodicSummary,
+  captureExport,
   type PdfLang,
   type PeriodicScope,
   type NavRouteLine,
@@ -81,6 +82,23 @@ export default function PdfExports() {
 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Preview-modal state. We hold the generated PDF as both a Blob (for the
+  // Download button — re-uses the same render, no second pass) and as an
+  // object URL (for the iframe src). The URL is revoked on close so we
+  // don't leak. `previewTitle` is the human-readable export name shown in
+  // the modal header.
+  const [preview, setPreview] = useState<{
+    url: string;
+    blob: Blob;
+    filename: string;
+    title: string;
+  } | null>(null);
+  useEffect(() => {
+    return () => {
+      if (preview) URL.revokeObjectURL(preview.url);
+    };
+  }, [preview]);
 
   // PDF language defaults to the app language but the operator can flip
   // per-export — useful when the squadron commander wants an Arabic copy
@@ -166,12 +184,12 @@ export default function PdfExports() {
     { key: "reminders", group: "admin", title: lang === "ar" ? "سجل التذكيرات" : "Reminders Log", desc: lang === "ar" ? "تذكيرات الطيارين المسجلة." : "Configured pilot reminders + last sent." },
   ];
 
-  async function run(spec: ExportSpec) {
-    if (dataUnavailable) { setError(t("pdf_data_unavailable")); return; }
-    setBusy(spec.key);
-    setError(null);
-    try {
-      const r = { from, to };
+  // Build the per-spec export closure. Used by both `run` (direct save)
+  // and `runPreview` (captured into a Blob via captureExport so the modal
+  // can show the same render before the operator commits to download).
+  function buildExporter(spec: ExportSpec): () => Promise<void> {
+    const r = { from, to };
+    return async () => {
       switch (spec.key) {
         case "auth": await exportAuthorizationReport(sqdn, pilots, pdfLang); break;
         case "data": await exportPilotDataPages(sqdn, pilots, pdfLang); break;
@@ -276,11 +294,59 @@ export default function PdfExports() {
           await exportRemindersLog(sqdn, rows, pdfLang); break;
         }
       }
+    };
+  }
+
+  // Direct save — preserves the original "click PDF, file lands in
+  // Downloads" flow for operators who don't want a preview step.
+  async function run(spec: ExportSpec) {
+    if (dataUnavailable) { setError(t("pdf_data_unavailable")); return; }
+    setBusy(spec.key);
+    setError(null);
+    try {
+      await buildExporter(spec)();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to generate PDF");
     } finally {
       setBusy(null);
     }
+  }
+
+  // Preview — render the PDF into a Blob and open the modal viewer. The
+  // same Blob backs the modal's Download button so the operator sees the
+  // exact bytes that will be saved (no second render, no risk of drift
+  // between preview and download).
+  async function runPreview(spec: ExportSpec) {
+    if (dataUnavailable) { setError(t("pdf_data_unavailable")); return; }
+    setBusy(`preview:${spec.key}`);
+    setError(null);
+    try {
+      const cap = await captureExport(buildExporter(spec));
+      const url = URL.createObjectURL(cap.blob);
+      setPreview({ url, blob: cap.blob, filename: cap.filename, title: spec.title });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to generate PDF");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Download the previewed PDF. Re-uses the captured Blob so it's exactly
+  // what the operator just verified — no re-render.
+  function downloadPreview() {
+    if (!preview) return;
+    const a = document.createElement("a");
+    a.href = preview.url;
+    a.download = preview.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  function closePreview() {
+    // The useEffect cleanup above revokes the object URL when `preview`
+    // changes (or the component unmounts), so we just clear the state.
+    setPreview(null);
   }
 
   const groups: { id: Group; title: string }[] = [
@@ -388,6 +454,7 @@ export default function PdfExports() {
             <div className="grid md:grid-cols-2 gap-3">
               {items.map((e) => {
                 const isBusy = busy === e.key;
+                const isPreviewBusy = busy === `preview:${e.key}`;
                 const disabled = busy !== null || dataUnavailable || dataLoading || (e.needsPilot && !pickedPilot);
                 return (
                   <Card key={e.key} className="flex items-start gap-3">
@@ -402,14 +469,24 @@ export default function PdfExports() {
                         <div className="text-[10px] text-muted-foreground/70 mt-1">{lang === "ar" ? "يستخدم الطيار المحدد أعلاه" : "Uses the selected pilot above"}</div>
                       )}
                     </div>
-                    <button onClick={() => run(e)}
-                      disabled={disabled}
-                      title={dataUnavailable ? t("pdf_data_unavailable") : undefined}
-                      data-testid={`button-pdf-${e.key}`}
-                      className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed">
-                      {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
-                      PDF
-                    </button>
+                    <div className="flex flex-col gap-1.5 shrink-0">
+                      <button onClick={() => run(e)}
+                        disabled={disabled}
+                        title={dataUnavailable ? t("pdf_data_unavailable") : undefined}
+                        data-testid={`button-pdf-${e.key}`}
+                        className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed">
+                        {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+                        PDF
+                      </button>
+                      <button onClick={() => runPreview(e)}
+                        disabled={disabled}
+                        title={dataUnavailable ? t("pdf_data_unavailable") : (lang === "ar" ? "معاينة قبل التنزيل" : "Preview before downloading")}
+                        data-testid={`button-pdf-preview-${e.key}`}
+                        className="px-3 py-1.5 rounded-md border border-border bg-secondary text-foreground text-sm inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed">
+                        {isPreviewBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+                        {lang === "ar" ? "معاينة" : "Preview"}
+                      </button>
+                    </div>
                   </Card>
                 );
               })}
@@ -417,6 +494,59 @@ export default function PdfExports() {
           </section>
         );
       })}
+
+      {/* Preview modal — shows the freshly generated PDF in an iframe so
+          operators can verify Arabic shaping, layout, and pilot names
+          before committing the file to disk. The Download button reuses
+          the same Blob (no second render) so what they see is exactly
+          what they get. */}
+      {preview && (
+        <div
+          data-testid="modal-pdf-preview"
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+          onClick={closePreview}
+        >
+          <div
+            className="bg-card border border-border rounded-lg shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 p-3 border-b border-border">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText className="h-5 w-5 text-amber-400 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold truncate" data-testid="text-pdf-preview-title">{preview.title}</div>
+                  <div className="text-xs text-muted-foreground truncate">{preview.filename}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={downloadPreview}
+                  data-testid="button-pdf-preview-download"
+                  className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm inline-flex items-center gap-1.5"
+                >
+                  <FileDown className="h-4 w-4" />
+                  {pdfLang === "ar" ? "تنزيل" : "Download"}
+                </button>
+                <button
+                  onClick={closePreview}
+                  data-testid="button-pdf-preview-close"
+                  aria-label={pdfLang === "ar" ? "إغلاق" : "Close"}
+                  className="px-2 py-1.5 rounded-md border border-border bg-secondary text-foreground text-sm inline-flex items-center gap-1.5"
+                >
+                  <X className="h-4 w-4" />
+                  <span>{pdfLang === "ar" ? "إغلاق" : "Close"}</span>
+                </button>
+              </div>
+            </div>
+            <iframe
+              src={preview.url}
+              title={preview.title}
+              data-testid="iframe-pdf-preview"
+              className="flex-1 w-full bg-white rounded-b-lg"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
