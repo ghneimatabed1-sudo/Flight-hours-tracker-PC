@@ -302,3 +302,23 @@ If a PC fails to appear on the others, the Diagnostic page on THAT PC tells you 
 **`notify pgrst, 'reload schema'` is now the standard tail** of every migration that adds a function, table, or column. Retro-appended to 0038 / 0039 / 0040 (which previously needed a manual REST-API restart before new RPCs were callable). Documented in 0041's header so future migrations follow the convention.
 
 **Production state after this task:** single registry row, single squadrons row with `wing='8 WG'`, all 5 user_pcs re-pointed to the survivor, 8 active cron jobs (4 from 0032 + 3 new + 1 pre-existing pair-sweep), 46 ledger entries. Trigger guards are live and reject whitespace-polluted inserts with named, actionable error messages.
+
+
+## Task #152 — Full role + 15-year hardening audit (2026-04-24)
+
+**Audit-only task; no production code fixes** — defects become individually-approved follow-up tasks. Three deliverables shipped:
+
+- **`.local/reports/full-role-audit-2026-04-24.md`** — the audit report, with explicit go/no-go verdict, two confidence axes (Executed PASS vs Code-review confidence), 38-row DEFERRED-MANUAL inventory each with its clear-procedure, and 3 confirmed defects.
+- **`MAINTENANCE_RUNBOOK.md`** — operator-facing, plain-English, 15-year horizon. Covers adding a new squadron, per-role smoke test, monthly housekeeping, audit-log reading, cron-job purpose, super-admin password recovery, annual close, disaster recovery.
+- **`SUPABASE_HEALTH.md`** — current dev-DB snapshot (47 ledger rows vs 44 disk files = D2; 19/19 expected tables; 11 edge functions; 0 hash drift; RLS posture).
+
+**3 defects confirmed:**
+- **D1 (HIGH)** `commander-store.ts:114` `createCommander()` writes only localStorage — never invokes `provision-commander` edge function. License-key activation already does it correctly. Cross-PC commander login is broken.
+- **D2 (LOW–MED, hygiene)** Migration ledger has 47 rows; disk has 44. Three orphan ledger filenames (`0041_identity_normalization_and_automation`, `0042_canon_strip_squadron_suffix`, `0043_canon_scope_and_merge_safety`) are not on disk; the actual 0041–0043 disk files have different names. **No production apply impact today** (workflow keys on filename match, real files are also in ledger).
+- **D3 (LOW, dev-DB data)** `squadrons` row has `wing = null` in dev — runbook fix.
+
+**New automated coverage:** `artifacts/pilot-dashboard/src/lib/calculations.audit.test.ts` — 20 pure-function fixtures pinning captain credit (with per-seat flag + legacy fallback), NVG independence, H1/H2 split (June cutoff, current-year-only), `actual` fallback to day+night+nvg+sim, backdated sortie semantics, NaN/Infinity guards, numeric coercion, initial-hours folding. All 20 pass; runs in ~0.7 s. Should be added to CI.
+
+**Audit harness:** `.local/scripts/sb-final.mjs` — read-only Supabase snapshot (ledger drift, hash drift, table inventory). Re-run any time with `node_modules/.bin/tsx .local/scripts/sb-final.mjs`. JSON snapshot kept at `.local/reports/supabase-snapshot-2026-04-24.json`.
+
+**Verdict:** GO with two caveats. Calc engine, ledger mechanism, RLS architecture, RPC SECURITY DEFINER posture, role/sidebar matrix all sound at source. Only D1 affects day-to-day multi-PC operation. Operator clears the 38 DEFERRED-MANUAL rows during next quarterly smoke test on real hardware.
