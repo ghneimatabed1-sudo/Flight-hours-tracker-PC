@@ -150,12 +150,20 @@ begin
   -- the management-API role (postgres) which the trigger short-
   -- circuits via xpc_skip_autoclaim() on bypass roles, so we set
   -- ops_pc_id explicitly to avoid depending on that.
+  --
+  -- AA1 (Round 4) note: live prod has an updated_by uuid NOT NULL
+  -- column (default auth.uid()) on xpc_squadron_snapshot that is NOT
+  -- declared in any version-controlled migration (live-vs-source
+  -- schema drift — flagged as a follow-up alongside the AA1 report).
+  -- Inserting via the management-API role makes auth.uid() return
+  -- NULL which trips the NOT NULL. We supply v_user explicitly so
+  -- this test stays green until the drift itself is reconciled.
   insert into public.xpc_squadron_snapshot
-    (squadron_id, ops_pc_id, snapshot_at, payload)
+    (squadron_id, ops_pc_id, snapshot_at, payload, updated_by)
   values
-    (v_sq_a_id, v_sq_a_id, now(), '{"roster":[],"unavailable":[]}'::jsonb),
-    (v_sq_b_id, v_sq_b_id, now(), '{"roster":[],"unavailable":[]}'::jsonb),
-    (v_sq_c_id, v_sq_c_id, now(), '{"roster":[],"unavailable":[]}'::jsonb);
+    (v_sq_a_id, v_sq_a_id, now(), '{"roster":[],"unavailable":[]}'::jsonb, v_user),
+    (v_sq_b_id, v_sq_b_id, now(), '{"roster":[],"unavailable":[]}'::jsonb, v_user),
+    (v_sq_c_id, v_sq_c_id, now(), '{"roster":[],"unavailable":[]}'::jsonb, v_user);
 
   -- 1c. Single PC claim for v_user — Alpha only. xpc_my_pc_ids()
   -- reads this directly. We deliberately do NOT seed Bravo/Charlie

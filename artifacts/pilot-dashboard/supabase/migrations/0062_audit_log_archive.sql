@@ -174,3 +174,18 @@ begin
 end $$;
 
 notify pgrst, 'reload schema';
+
+-- Self-insert into the migration ledger (Audit AA1 — Round 4).
+-- This file was originally numbered 0056_audit_log_archive.sql and
+-- shipped without a self-insert; the apply workflow's own ledger
+-- write picked up the slack on the live row. After the AA1 prefix
+-- surgery renumbered the file to 0062 and the live ledger row was
+-- updated to match, we add this self-insert so any future operator
+-- pasting the file through the SQL editor (i.e. without the apply
+-- workflow's surrounding ledger logic) still records the apply. The
+-- on-conflict clause makes this a no-op on every subsequent run; the
+-- apply workflow's own ledger update will overwrite the NULL sha
+-- with the disk hash on the next CI run (Task #195 self-heal).
+insert into public._migration_ledger (filename, applied_by, sha256)
+values ('0062_audit_log_archive.sql', 'manual-task-AA1', null)
+on conflict (filename) do nothing;

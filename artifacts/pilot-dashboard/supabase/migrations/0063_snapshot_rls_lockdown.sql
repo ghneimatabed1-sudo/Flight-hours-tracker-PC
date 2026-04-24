@@ -1,5 +1,12 @@
--- 0056_snapshot_rls_lockdown.sql
--- Round 3 O — Part A (subsumes task #246).
+-- 0063_snapshot_rls_lockdown.sql
+-- Round 3 O — Part A (subsumes task #246). Renumbered from 0056 by
+-- Audit AA1 (Round 4) — see audit-evidence/2026-04-27/AA1/AA1-report.md.
+-- The original file shipped under prefix 0056_ which collided with N's
+-- 0056_schedchain_align_current_tier.sql and Q's 0056_audit_log_archive.sql,
+-- and additionally wrote to a non-existent ledger table
+-- (public.migration_ledger — no underscore). Both bugs are fixed here:
+-- the file is renumbered to 0063 (next free) and the ledger insert
+-- now matches the canonical 3-column shape on public._migration_ledger.
 --
 -- Audit J finding F-J-03/04 root cause: a wing or base commander could
 -- read every squadron's xpc_squadron_snapshot row regardless of which
@@ -123,11 +130,13 @@ using (
   )
 );
 
-insert into public.migration_ledger (migration, run_at, ticket, notes)
-values (
-  '0056_snapshot_rls_lockdown.sql',
-  now(),
-  'task-263',
-  'Round 3 O Part A: tighten xpc_squadron_snapshot SELECT to super_admin OR squadron-owned-pc OR JWT app_metadata.squadron_ids allow-list. Wing/base/HQ tier without the claim falls through to permissive read so legacy provisioning still functions; once provisioning backfills the claim the allow-list takes precedence and the regression test (wing assigned X+Y reads Z = 0 rows) passes.'
-)
-on conflict (migration) do nothing;
+-- Self-insert into the canonical public._migration_ledger table so
+-- the apply workflow treats this file as already applied if a future
+-- operator pastes it through the SQL editor instead of via CI.
+-- Matches N's idempotency pattern in 0056_schedchain_align_current_tier.sql.
+-- The original file (under the old 0056 prefix) used the wrong table
+-- name (public.migration_ledger — no underscore) and a 4-column shape
+-- that does not exist; AA1 corrects both.
+insert into public._migration_ledger (filename, applied_by, sha256)
+values ('0063_snapshot_rls_lockdown.sql', 'manual-task-AA1', null)
+on conflict (filename) do nothing;
