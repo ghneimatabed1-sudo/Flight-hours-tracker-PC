@@ -282,9 +282,12 @@ async function ensureSuperAdminAuthUser(
   // builds shipped role:"admin" here which silently failed every
   // super-admin RPC on the Connection Map ("Reset failed — reset
   // requires super_admin" in the operator's screenshot). Migration 0067
-  // widens xpc_is_super_admin() to accept the legacy shape too, so
-  // already-signed-in sessions are unblocked immediately, but new
-  // sign-ins should mint the canonical shape from now on.
+  // temporarily widened xpc_is_super_admin() to accept the legacy
+  // role:"admin" + tier:"hq" shape so already-signed-in sessions kept
+  // working through the v8 rollout; once every PC had re-signed in,
+  // migration 0068 removed that branch and restored the canonical-only
+  // gate. Going forward this function MUST mint role:"super_admin" — no
+  // other shape is accepted.
   const appMeta = {
     squadron_id: null,
     role: "super_admin",
