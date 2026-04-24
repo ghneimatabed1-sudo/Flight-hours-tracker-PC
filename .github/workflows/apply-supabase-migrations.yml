@@ -249,6 +249,36 @@ jobs:
             -d '{"query":"notify pgrst, '"'"'reload schema'"'"'"}'
           echo "schema cache reload signaled."
 
+      # Task #252 — defect-class sweep for the 42702 ambiguous-column
+      # bug fixed by 0046 + 0048. Enumerates every public.* SECURITY
+      # DEFINER PL/pgSQL function whose RETURNS TABLE(...)/OUT-param
+      # names collide with columns in any table the body INSERTs into,
+      # and fails the job if any of those functions is missing
+      # `#variable_conflict use_column`. The two known offenders
+      # (xpc_admin_create_pair, xpc_redeem_pair_code) already carry
+      # the directive, so this step's role is forward-looking: a future
+      # migration that adds a new RPC matching the same shape can no
+      # longer ship to prod undetected.
+      #
+      # The same enumeration also runs in pure SQL inside migration
+      # 0055_assert_pair_code_out_collision_class.sql (which raises at
+      # apply time). This Node step is defence-in-depth: it catches
+      # vulnerable functions that landed in prod via a path OTHER than
+      # the migration workflow (manual SQL, hot-fix, etc.).
+      - name: Sweep — pair-code OUT/column collisions (Task #252)
+        id: out_collision_sweep
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ env.PROJECT_REF }}
+        # Run the offline parser self-test FIRST so a regression in the
+        # `proargnames` / `proargmodes` array normalizer fails fast and
+        # locally — without consuming the management API quota or
+        # blaming a real prod problem on a parser bug. Only after the
+        # parser passes do we run the live sweep against prod.
+        run: |
+          node scripts/src/check-pair-code-out-collisions.mjs --self-test
+          node scripts/src/check-pair-code-out-collisions.mjs
+
       # Task #180 — end-to-end regression for the cross-PC pair handshake.
       #
       # The migration in 0048 only re-checks the function source carries
@@ -343,6 +373,7 @@ jobs:
           SANITY_OUTCOME: ${{ steps.sanity.conclusion }}
           APPLY_OUTCOME: ${{ steps.apply.conclusion }}
           RELOAD_OUTCOME: ${{ steps.reload.conclusion }}
+          OUT_COLLISION_SWEEP_OUTCOME: ${{ steps.out_collision_sweep.conclusion }}
           REGRESSION_OUTCOME: ${{ steps.regression.conclusion }}
           REVOKE_REGRESSION_OUTCOME: ${{ steps.revoke_regression.conclusion }}
           RENAME_REGRESSION_OUTCOME: ${{ steps.rename_regression.conclusion }}
@@ -372,6 +403,7 @@ jobs:
             "Sanity-check secret|${SANITY_OUTCOME:-}" \
             "Apply pending migrations|${APPLY_OUTCOME:-}" \
             "Reload PostgREST schema cache|${RELOAD_OUTCOME:-}" \
+            "Sweep — pair-code OUT/column collisions|${OUT_COLLISION_SWEEP_OUTCOME:-}" \
             "Regression — cross-PC pair redemption|${REGRESSION_OUTCOME:-}" \
             "Regression — pair revocation RPCs|${REVOKE_REGRESSION_OUTCOME:-}" \
             "Regression — squadron rename xpc sync|${RENAME_REGRESSION_OUTCOME:-}"
