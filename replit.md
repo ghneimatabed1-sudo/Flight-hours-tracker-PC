@@ -64,7 +64,7 @@ The system is built as a pnpm workspace monorepo.
 - **Audit Logging:** System-wide logging for key actions.
 - **Data Preservation Policy:** Strict adherence to additive updates; existing data and localStorage keys must be stable.
 - **Identity Normalization:** Database-level canonicalization for `xpc_registry.id` and `squadrons.name` to prevent duplicate entries, enforced by unique indexes and triggers.
-- **Automated Migrations:** GitHub Actions workflow applies pending Supabase migrations to production upon push to `main`.
+- **Automated Migrations:** GitHub Actions workflow applies pending Supabase migrations to production upon push to `main`. After each apply + PostgREST cache reload, the workflow runs `.local/scripts/regression-task-171-redeem-pair.mjs`, which exercises every self-service `xpc_redeem_pair_code` path (in_squadron / sqn_to_wing / wing_to_base) plus `xpc_admin_create_pair` end-to-end under a `TEST_T171_`-fenced namespace and fails the job if any scenario regresses.
 - **Scheduled Background Jobs:** `pg_cron` schedules for `xpc_pair_links_sweep`, `xpc-purge-archived-messages`, and `ops-backup-audit-ping`.
 
 # External Dependencies

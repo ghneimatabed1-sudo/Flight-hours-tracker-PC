@@ -144,3 +144,20 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"query":"notify pgrst, '"'"'reload schema'"'"'"}'
           echo "schema cache reload signaled."
+
+      # Task #180 — end-to-end regression for the cross-PC pair handshake.
+      #
+      # The migration in 0048 only re-checks the function source carries
+      # `#variable_conflict use_column`; it does not actually call the
+      # RPC. This step exercises xpc_redeem_pair_code (in_squadron,
+      # sqn_to_wing, wing_to_base) and xpc_admin_create_pair against
+      # the live database under a TEST_T171_-fenced namespace, and
+      # fails the job if any scenario returns the wrong kind, leaks
+      # state, or accepts a replayed code. The script auto-tears down
+      # every TEST_T171_* row in finally{} so a partial failure cannot
+      # litter prod with dangling test pairs.
+      - name: Regression — cross-PC pair redemption (Task #171/180)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ env.PROJECT_REF }}
+        run: node .local/scripts/regression-task-171-redeem-pair.mjs
