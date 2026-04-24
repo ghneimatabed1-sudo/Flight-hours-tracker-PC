@@ -207,6 +207,13 @@ function rowToPilot(r: Record<string, unknown>): Pilot {
       }
       return undefined;
     })(),
+    // Migration provenance — `imported`/`importedAt` are stamped onto every
+    // row by the legacy CSV import (see `useImportLegacy`) and consumed by
+    // the roster/sortie "Imported only" filters and the row-level badge.
+    // Round-tripped through the JSONB blob so a plain edit never strips
+    // the flag from a migrated record.
+    imported: data.imported === true ? true : undefined,
+    importedAt: typeof data.importedAt === "string" ? data.importedAt : undefined,
   };
 }
 
@@ -383,6 +390,12 @@ export function useUpdatePilot() {
           lastSimDate: p.lastSimDate,
           otherAircraft: p.otherAircraft,
           initialHours: p.initialHours,
+          // Preserve legacy-import provenance across edits — without
+          // these the JSONB blob would be rewritten on every save and
+          // the "Imported only" filter / row badge would silently drop
+          // the pilot from the migrated set.
+          imported: p.imported,
+          importedAt: p.importedAt,
         },
       };
       let { data, error } = await supabase!.from("pilots").update(updatePayload).eq("id", p.id).select().single();
@@ -505,6 +518,12 @@ export function useCreatePilot() {
           lastSimDate: p.lastSimDate,
           otherAircraft: p.otherAircraft,
           initialHours: p.initialHours,
+          // New pilots created through Add Pilot are NOT imported, but
+          // we still pass the flags through verbatim for symmetry with
+          // useUpdatePilot — defaulting `imported` to undefined keeps
+          // the Roster's "Imported only" toggle accurate.
+          imported: p.imported,
+          importedAt: p.importedAt,
         },
       });
 
@@ -798,6 +817,11 @@ function rowToSortie(r: Record<string, unknown>): Sortie {
     ifAct: data.ifAct != null ? Number(data.ifAct) : undefined,
     ils: data.ils != null ? Number(data.ils) : undefined,
     vor: data.vor != null ? Number(data.vor) : undefined,
+    // See `rowToPilot` — the legacy-import provenance flags. Surfaced so
+    // the Sortie Log "Imported only" toggle and the row-level badge can
+    // distinguish migrated rows from sorties entered through the UI.
+    imported: data.imported === true ? true : undefined,
+    importedAt: typeof data.importedAt === "string" ? data.importedAt : undefined,
   };
 }
 
@@ -999,6 +1023,12 @@ async function applyCurrencyRefresh(
           lastSimDate: p.lastSimDate,
           otherAircraft: p.otherAircraft,
           initialHours: p.initialHours,
+          // Preserve provenance — currency refresh after a sortie save
+          // rewrites the entire JSONB blob, and would otherwise strip
+          // the "imported" tag from migrated pilots whose currencies
+          // happen to roll over.
+          imported: p.imported,
+          importedAt: p.importedAt,
         },
       }).eq("id", p.id);
       if (error) throw error;
@@ -1063,6 +1093,10 @@ export function useCreateSortie() {
           msnDuty: s.msnDuty,
           instrumentFlight: s.instrumentFlight,
           ifSim: s.ifSim, ifAct: s.ifAct, ils: s.ils, vor: s.vor,
+          // Provenance — round-tripped so the Sortie Log "Imported only"
+          // filter stays accurate. New entries leave both undefined.
+          imported: s.imported,
+          importedAt: s.importedAt,
         },
       }).select().single();
       if (error) throw error;
@@ -1178,6 +1212,12 @@ export function useUpdateSortie() {
           msnDuty: s.msnDuty,
           instrumentFlight: s.instrumentFlight,
           ifSim: s.ifSim, ifAct: s.ifAct, ils: s.ils, vor: s.vor,
+          // Preserve legacy-import provenance across edits — without
+          // these the JSONB blob is rewritten on every save and the
+          // "Imported only" filter / row badge would silently drop the
+          // sortie from the migrated set.
+          imported: s.imported,
+          importedAt: s.importedAt,
         },
       }).eq("id", s.id);
       if (error) throw error;

@@ -332,7 +332,20 @@ export default function Roster() {
                       aria-label={dot.label}
                     />
                   </td>
-                  <td className="px-3 py-2 font-mono">{p.militaryNumber || p.id}</td>
+                  <td className="px-3 py-2 font-mono">
+                    <span className="inline-flex items-center gap-1.5">
+                      {p.militaryNumber || p.id}
+                      {p.imported && (
+                        <span
+                          className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-400/15 border border-amber-400/40 text-amber-300 font-medium uppercase tracking-wider"
+                          title={p.importedAt ? `Imported ${fmtDateTimeDDMM(p.importedAt)}` : t("importedBadge")}
+                          data-testid={`badge-imported-${p.id}`}
+                        >
+                          {t("importedBadge")}
+                        </span>
+                      )}
+                    </span>
+                  </td>
                   <td className="px-3 py-2">{rankOf(p)}</td>
                   <td className="px-3 py-2"><Link href={`/pilot/${p.id}`} className="hover:text-primary">{p.name}</Link></td>
                   <td className="px-3 py-2 text-right rtl:text-left">{p.arabicName}</td>

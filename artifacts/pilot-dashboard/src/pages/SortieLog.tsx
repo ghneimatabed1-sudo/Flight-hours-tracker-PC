@@ -9,7 +9,8 @@ import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 import { SortieDiffDialog } from "@/components/SortieDiffDialog";
 import { showUndo } from "@/lib/undo-store";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Filter, Pencil, Trash2, Lock, Unlock, Calendar, X as XIcon, Printer } from "lucide-react";
+import { Search, Filter, Pencil, Trash2, Lock, Unlock, Calendar, X as XIcon, Printer, FileDown } from "lucide-react";
+import { fmtDateTimeDDMM } from "@/lib/format";
 import { PrintHeader } from "@/components/PrintHeader";
 import type { Pilot, Sortie } from "@/lib/mock";
 import { useFrozenAccess } from "@/lib/monthly-close";
@@ -26,6 +27,11 @@ export default function SortieLog() {
     : ["UH-60M", "UH-60L", "UH-60AIL", "AS332"];
   const [q, setQ] = useState("");
   const [type, setType] = useState("All");
+  // "Imported only" toggle — mirrors the same control on the Roster page so
+  // operators reviewing a fresh CSV migration can flick to just the rows
+  // tagged by `useImportLegacy`. Disabled while no migrated sorties exist
+  // so the chip never lies about what it'll filter to.
+  const [importedOnly, setImportedOnly] = useState(false);
   // Sortie date picker — defaults to today, blank means "all days".
   // Operators flick this to review any past day's flying or to peek at
   // pre-scheduled sorties on a future date.
@@ -76,8 +82,10 @@ export default function SortieLog() {
   const rows = SORTIES
     .filter(s => !pickedDate || s.date === pickedDate)
     .filter(s => type === "All" || s.sortieType === type)
+    .filter(s => !importedOnly || s.imported)
     .filter(s => !q || (nameOf(s.pilotId, s.pilotExternal) + " " + nameOf(s.coPilotId, s.coPilotExternal) + " " + s.acNumber + " " + s.name).toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => b.date.localeCompare(a.date));
+  const importedCount = useMemo(() => SORTIES.filter(s => s.imported).length, [SORTIES]);
 
   // ── Paper-form field derivations ───────────────────────────────────────
   // The Squadron Sortie Log on paper uses a specific column layout
@@ -241,6 +249,15 @@ export default function SortieLog() {
               </select>
             </div>
             <button
+              onClick={() => setImportedOnly(v => !v)}
+              disabled={importedCount === 0}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border ${importedOnly ? "bg-primary text-primary-foreground border-primary" : "bg-secondary text-foreground border-border"} disabled:opacity-40 disabled:cursor-not-allowed`}
+              title={importedCount === 0 ? t("noImportedYet") : ""}
+              data-testid="toggle-imported-only"
+            >
+              <FileDown className="h-3.5 w-3.5" /> {t("importedOnly")} ({importedCount})
+            </button>
+            <button
               onClick={() => window.print()}
               className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90"
               data-testid="button-sortielog-print"
@@ -321,7 +338,20 @@ export default function SortieLog() {
                 const captain = captainPilot(s);
                 return (
                 <tr key={s.id} className={`border-t border-border row-hover ${locked ? "opacity-90" : ""}`} data-testid={`row-sortie-${s.id}`}>
-                  <Td mono center>{idx + 1}</Td>
+                  <Td mono center>
+                    <span className="inline-flex items-center gap-1.5">
+                      {idx + 1}
+                      {s.imported && (
+                        <span
+                          className="text-[9px] px-1 py-0.5 rounded-full bg-amber-400/15 border border-amber-400/40 text-amber-300 font-medium uppercase tracking-wider"
+                          title={s.importedAt ? `Imported ${fmtDateTimeDDMM(s.importedAt)}` : t("importedBadge")}
+                          data-testid={`badge-imported-sortie-${s.id}`}
+                        >
+                          {t("importedBadge")}
+                        </span>
+                      )}
+                    </span>
+                  </Td>
                   <Td mono center>
                     <span className="inline-flex items-center gap-1">
                       {s.date}
