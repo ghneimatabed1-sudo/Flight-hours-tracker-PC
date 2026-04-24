@@ -1,0 +1,54 @@
+name: Supabase Health Checks
+
+# CI guards that exercise the deployed Supabase project end-to-end so a
+# silent backend regression is caught before operators see it. Each
+# step here corresponds to a defect class that has bitten production
+# at least once and where the only existing safety net was "an
+# operator notices and files a bug".
+#
+# Triggers:
+#   - push to main         — every code/migration change is checked
+#   - manual dispatch      — re-run on demand without committing
+#   - daily schedule       — catches drift from out-of-band changes
+#                            (manual SQL edits, secret rotations, etc)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  schedule:
+    # 03:17 UTC daily — outside the operator workday, after the
+    # nightly cron jobs in the Supabase project have settled.
+    - cron: "17 3 * * *"
+
+jobs:
+  super-admin-jwt-gate:
+    name: Super-admin JWT vs xpc_is_super_admin() gate
+    runs-on: ubuntu-latest
+    # The probe never mutates production data — it calls
+    # xpc_admin_create_pair with intentionally-invalid inputs that
+    # bail before any INSERT — so it is safe to run on every push.
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run super-admin JWT-vs-gate probe
+        # Task #290 — fails the build if the JWT minted by the
+        # `super-admin-2fa` edge function does not satisfy
+        # xpc_is_super_admin(). This is the regression class that
+        # produced the operator-reported "Reset failed: reset
+        # requires super_admin" defect (Task #289).
+        env:
+          SUPABASE_URL:               ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY:          ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPER_ADMIN_PASSWORD:       ${{ secrets.SUPER_ADMIN_PASSWORD }}
+          SUPER_ADMIN_TOTP_SECRET:    ${{ secrets.SUPER_ADMIN_TOTP_SECRET }}
+          SUPER_ADMIN_USERNAME:       ${{ secrets.SUPER_ADMIN_USERNAME }}
+        run: node scripts/src/check-super-admin-jwt-gate.mjs --require

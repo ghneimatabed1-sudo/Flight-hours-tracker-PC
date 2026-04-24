@@ -7,7 +7,8 @@
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
-    "check:migration-prefixes": "node scripts/src/check-migration-prefixes.mjs"
+    "check:migration-prefixes": "node scripts/src/check-migration-prefixes.mjs",
+    "check:super-admin-jwt-gate": "node scripts/src/check-super-admin-jwt-gate.mjs"
   },
   "private": true,
   "devDependencies": {
