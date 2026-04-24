@@ -374,6 +374,100 @@ jobs:
           PROJECT_REF: ${{ env.PROJECT_REF }}
         run: node artifacts/pilot-dashboard/supabase/tests/test-schedchain-submit.mjs
 
+      # Task #270 / #273 (wired in Round 4 AA4 / Task #281) — strict
+      # scoped-SELECT regression for `xpc_squadron_snapshot`.
+      #
+      # Migration 0061_snapshot_rls_select_strict.sql removed the
+      # permissive wing/base/HQ-tier fallback that Audit P proved was
+      # silently leaking a multi-squadron commander's whole snapshot
+      # set across squadron boundaries. Without a regression test
+      # gating apply, the next migration that re-introduces a
+      # "fail-open for legacy commanders" branch (and there will be
+      # one — under-provisioned commanders' dashboards look broken
+      # until the claim lands, so the temptation to fall back is
+      # real) loses the scope-isolation contract again with no
+      # signal.
+      #
+      # The script provisions three squadrons + one snapshot row each
+      # + a fresh auth user, then drives SELECT through the
+      # `authenticated` Postgres role under four distinct JWT
+      # shapes (single PC claim, multi-squadron allow-list,
+      # neither-claim-nor-allow-list, super_admin). All fixtures live
+      # under a T270-<run>- prefix and the whole DO block runs in
+      # Supabase's implicit transaction, so a failed assertion rolls
+      # back without polluting prod.
+      - name: Regression — snapshot RLS scoped SELECT (Task #270 / #273)
+        id: snapshot_rls_regression
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ env.PROJECT_REF }}
+        run: node artifacts/pilot-dashboard/supabase/tests/test-snapshot-rls-scoped-select.mjs
+
+      # Round 4 AA3 (Task #281 sibling) drops three additional
+      # in-tree regression tests that gate apply once they land:
+      #
+      #   * test-xpc-pending-rls.mjs       — Audit P defect P-3 (the
+      #     `xpc_pending` SELECT policy compared squadron-id columns
+      #     against `xpc_my_pc_ids()`, a PC-id namespace mismatch
+      #     that reduced every commander's pending-guest list to
+      #     zero rows).
+      #   * test-schema-drift-restored.mjs — schema-drift fixes
+      #     (audit_log.action column + reminder_schedules table) so
+      #     a future migration that drops one of them fails apply.
+      #   * test-snapshot-payload-hours.mjs — #268 commander rollup
+      #     hours surfaced through the snapshot payload (without
+      #     this test, a publisher regression would silently
+      #     re-zero every commander's per-pilot hours).
+      #
+      # Each step uses `if: hashFiles(...)` so the apply workflow
+      # remains green during the brief window where AA4 has merged
+      # but AA3 has not yet — the moment AA3 lands the file under
+      # the path below, the corresponding step starts running and
+      # gating apply. AA-Z removes the hashFiles guard once all
+      # three are in tree.
+      - name: Regression — xpc_pending commander RLS (Round 4 AA3)
+        id: xpc_pending_regression
+        if: ${{ hashFiles('artifacts/pilot-dashboard/supabase/tests/test-xpc-pending-rls.mjs') != '' }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ env.PROJECT_REF }}
+        run: node artifacts/pilot-dashboard/supabase/tests/test-xpc-pending-rls.mjs
+
+      - name: Regression — schema drift restored (Round 4 AA3)
+        id: schema_drift_regression
+        if: ${{ hashFiles('artifacts/pilot-dashboard/supabase/tests/test-schema-drift-restored.mjs') != '' }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ env.PROJECT_REF }}
+        run: node artifacts/pilot-dashboard/supabase/tests/test-schema-drift-restored.mjs
+
+      - name: Regression — snapshot payload hours (Round 4 AA3 / #268)
+        id: snapshot_payload_hours_regression
+        if: ${{ hashFiles('artifacts/pilot-dashboard/supabase/tests/test-snapshot-payload-hours.mjs') != '' }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ env.PROJECT_REF }}
+        run: node artifacts/pilot-dashboard/supabase/tests/test-snapshot-payload-hours.mjs
+
+      # Round 4 AA4 (Task #281) — audit-evidence mirror guard.
+      #
+      # Enforces the convention documented in
+      # `audit-evidence/README.md`: every commit whose message
+      # contains `audit-NNNN-MM-DD` must also touch
+      # `audit-evidence/NNNN-MM-DD/`. The guard runs in --mode
+      # warning for the first cycle (one CI pass after AA-Z lands
+      # all sibling reports, no spurious failures) and is promoted
+      # to --mode blocker afterwards.
+      #
+      # The guard scans only the most recent commit by default —
+      # cheap, no-network, no Supabase calls — so it adds <1s to
+      # apply runs.
+      - name: Audit-evidence mirror guard (Round 4 AA4 / Task #281)
+        id: evidence_mirror_guard
+        # never block the apply itself in warning mode; promote later
+        continue-on-error: true
+        run: node scripts/src/check-audit-evidence-mirror.mjs --mode warning --commits 1
+
       # Task #192 — fast-path operator alert for ordinary step failures.
       #
       # This step is the in-job notifier: it fires within seconds when
@@ -406,6 +500,11 @@ jobs:
           REVOKE_REGRESSION_OUTCOME: ${{ steps.revoke_regression.conclusion }}
           RENAME_REGRESSION_OUTCOME: ${{ steps.rename_regression.conclusion }}
           SCHEDCHAIN_REGRESSION_OUTCOME: ${{ steps.schedchain_regression.conclusion }}
+          SNAPSHOT_RLS_REGRESSION_OUTCOME: ${{ steps.snapshot_rls_regression.conclusion }}
+          XPC_PENDING_REGRESSION_OUTCOME: ${{ steps.xpc_pending_regression.conclusion }}
+          SCHEMA_DRIFT_REGRESSION_OUTCOME: ${{ steps.schema_drift_regression.conclusion }}
+          SNAPSHOT_PAYLOAD_HOURS_REGRESSION_OUTCOME: ${{ steps.snapshot_payload_hours_regression.conclusion }}
+          EVIDENCE_MIRROR_GUARD_OUTCOME: ${{ steps.evidence_mirror_guard.conclusion }}
           JOB_STATUS: ${{ job.status }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT_SHA: ${{ github.sha }}
@@ -436,7 +535,12 @@ jobs:
             "Regression — cross-PC pair redemption|${REGRESSION_OUTCOME:-}" \
             "Regression — pair revocation RPCs|${REVOKE_REGRESSION_OUTCOME:-}" \
             "Regression — squadron rename xpc sync|${RENAME_REGRESSION_OUTCOME:-}" \
-            "Regression — schedule chain submit walk|${SCHEDCHAIN_REGRESSION_OUTCOME:-}"
+            "Regression — schedule chain submit walk|${SCHEDCHAIN_REGRESSION_OUTCOME:-}" \
+            "Regression — snapshot RLS scoped SELECT|${SNAPSHOT_RLS_REGRESSION_OUTCOME:-}" \
+            "Regression — xpc_pending commander RLS|${XPC_PENDING_REGRESSION_OUTCOME:-}" \
+            "Regression — schema drift restored|${SCHEMA_DRIFT_REGRESSION_OUTCOME:-}" \
+            "Regression — snapshot payload hours|${SNAPSHOT_PAYLOAD_HOURS_REGRESSION_OUTCOME:-}" \
+            "Audit-evidence mirror guard|${EVIDENCE_MIRROR_GUARD_OUTCOME:-}"
           do
             name="${pair%%|*}"
             outcome="${pair##*|}"

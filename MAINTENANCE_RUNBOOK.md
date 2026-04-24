@@ -751,6 +751,85 @@ is performed only after the rehearsal completes cleanly.
 
 ---
 
+## Migration prefix allocation for parallel agents
+
+(Established by Round-4 AA4 — task #281 — after three round-3 sibling
+agents independently picked the same `0056_` prefix and the resulting
+collision blocked the apply workflow for an entire round.)
+
+### Why this matters
+
+The Supabase migration apply workflow (`.github/workflows/apply-supabase-migrations.yml`)
+treats migration filenames as the unit of idempotency. Two unrelated
+files that share the same `NNNN_` numeric prefix break that contract:
+the live `_migration_ledger` records ONE of them as applied while the
+other silently never reaches production. The author of the second
+migration thinks it shipped because the apply workflow reports
+success, but operators keep seeing the bug the migration was meant to
+fix. The prefix-collision guard at `scripts/src/check-migration-prefixes.mjs`
+(Task #249) catches new collisions at apply time, but every collision
+that the guard catches still costs a round of cleanup surgery — and
+every round of cleanup surgery is one full audit cycle wasted.
+
+### The rule
+
+**When the planner authors a multi-agent round where N parallel agents
+will all write SQL migrations, the planner MUST pre-allocate a
+contiguous numeric prefix range to each agent in their task plan
+file.** Agents may NOT pick prefixes themselves — they use the range
+the planner gave them. Concretely:
+
+1. The planner reads the live ledger to find the highest applied
+   prefix. Call it `P_max`.
+2. The planner counts how many migrations each parallel agent will
+   write. Call those counts `n_1, n_2, …, n_k`.
+3. The planner allocates contiguous prefix windows:
+   - Agent 1 gets `P_max + 1 … P_max + n_1`.
+   - Agent 2 gets `P_max + n_1 + 1 … P_max + n_1 + n_2`.
+   - …and so on.
+4. Each agent's task plan file (`.local/tasks/audit-*.md` or
+   equivalent) records its allocated window in the **header** under
+   "Allocated migration prefixes" — explicitly, by number, with a
+   note that the agent may NOT use any prefix outside that window.
+5. If an agent finds it needs more prefixes than allocated, it stops
+   and calls the planner — it does NOT silently grab the next free
+   number. Two agents both grabbing "the next free number" is the
+   exact path that produced the round-3 `0056_` collision.
+
+### Coordinator pre-merge check
+
+The coordinator agent (Z / AA-Z) verifies prefix uniqueness BEFORE
+merging, not after, by running:
+
+```
+node scripts/src/check-migration-prefixes.mjs
+```
+
+A non-zero exit means at least one agent broke the allocation
+contract. The coordinator must hold the merge until the offending
+agent renumbers — even if every other piece of the round is green.
+This is exactly how round-3 ended up at NO-GO: nobody ran the prefix
+guard until the apply workflow itself tried to.
+
+### Reference
+
+The first audit round to follow this convention is Round 4 (2026-04-27,
+tasks #278–#282). The allocations:
+
+| Sibling | Allocated prefixes | Source (`audit-2026-04-27-*.md`) |
+| ------- | ------------------ | -------------------------------- |
+| AA1     | 0062, 0063 only    | AA1 — migration prefix surgery + reapply |
+| AA2     | NONE (Edge Function redeploy only) | AA2 — redeploy provision-commander |
+| AA3     | 0064, 0065, 0066 only | AA3 — patch every hole the audits found |
+| AA4     | NONE (CI hardening + e2e + convention only) | AA4 — CI hardening + e2e + evidence-mirror |
+| AA-Z    | NONE (coordinator) | AA-Z — final GO and push |
+
+If you are reading this section because you are about to author a new
+round of parallel migrations, copy the table above as the template
+for the new round.
+
+---
+
 ## Versions of record
 
 | Component | Current version | Notes |

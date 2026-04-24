@@ -66,6 +66,7 @@
     "framer-motion": "catalog:",
     "input-otp": "^1.4.2",
     "jsdom": "^29.0.2",
+    "@playwright/test": "^1.48.2",
     "lucide-react": "catalog:",
     "next-themes": "^0.4.6",
     "react": "catalog:",
