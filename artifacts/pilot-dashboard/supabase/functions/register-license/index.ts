@@ -14,7 +14,10 @@
 //      obtain a JWT carrying app_metadata.squadron_id + role="ops". Without
 //      this every operational-table read/write is silently filtered out by
 //      RLS and PCs cannot share data.
-//   6. Mirrors the auth user into public.users.
+//   6. Mirrors the auth user into public.users (REQUIRED — failure here is
+//      surfaced as `user_mirror_failed` so the client retries; without this
+//      row, dashboard joins on public.users (audit actor display, member
+//      lists, role lookups) silently miss the ops account).
 //   7. Returns { ok, squadronId, supabaseEmail, supabasePassword } — the
 //      client persists the supabase creds locally and uses them to sign into
 //      Supabase right after the local password verify on every login.
@@ -196,26 +199,44 @@ Deno.serve(async (req: Request) => {
     userId = created.user.id;
   }
 
-  // ── Mirror into public.users (best-effort; not fatal) ────────────────────
-  try {
-    await admin.from("users").upsert(
-      {
-        id: userId,
-        squadron_id: squadronId,
-        username,
-        display_name: displayName || username,
-        role: "ops",
-      },
-      { onConflict: "id" },
+  // ── Mirror into public.users (REQUIRED; fail loudly) ─────────────────────
+  // Every dashboard feature that joins public.users to display ops accounts
+  // (audit-log actor lookups, squadron member listings, role checks against
+  // public.users instead of app_metadata) silently misses ops accounts when
+  // this row is absent. Previous versions swallowed the error here, which is
+  // exactly how the gap audited in audit-2026-04-25 went undetected. If this
+  // upsert fails we MUST surface the error so the client retries — the auth
+  // user has already been created/updated and updateUserById is idempotent,
+  // so the next call repairs the state.
+  const { error: mirrorErr } = await admin.from("users").upsert(
+    {
+      id: userId,
+      squadron_id: squadronId,
+      username,
+      display_name: displayName || username,
+      role: "ops",
+    },
+    { onConflict: "id" },
+  );
+  if (mirrorErr) {
+    return reply(
+      { ok: false, error: "user_mirror_failed", detail: mirrorErr.message },
+      500,
     );
-  } catch (_) { /* swallow */ }
+  }
 
-  await admin.from("audit_log").insert({
+  const { error: auditErr } = await admin.from("audit_log").insert({
     squadron_id: squadronId,
     type: "license.register",
     actor: username,
     detail: { key: key.slice(0, 8) + "…", squadronNumber: sqnNumber },
   });
+  if (auditErr) {
+    return reply(
+      { ok: false, error: "audit_write_failed", detail: auditErr.message },
+      500,
+    );
+  }
 
   return reply({
     ok: true,
