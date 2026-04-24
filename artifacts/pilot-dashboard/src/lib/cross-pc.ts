@@ -2625,6 +2625,15 @@ export interface SquadronSnapshotPilot {
   expNvg?: string | null;
   expIrt?: string | null;
   expMedical?: string | null;
+  // Round 4 AA3 / #268 — lifetime hour totals carried in the payload so
+  // wing/base/HQ commander rollups can show real hours instead of "0h".
+  // Optional so legacy snapshots (published by pre-AA3 dashboards)
+  // still parse — `adaptSnapshotPilot` defaults missing fields to 0.
+  dayHours?: number | null;
+  nightHours?: number | null;
+  nvgHours?: number | null;
+  simHours?: number | null;
+  captainHours?: number | null;
 }
 export interface SquadronSnapshotUnavail {
   id: string;

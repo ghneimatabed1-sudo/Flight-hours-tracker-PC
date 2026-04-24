@@ -111,15 +111,32 @@ export function adaptPilot(real: RealPilot, squadronId: string): DashPilot {
   };
 }
 
-// Snapshot → DashPilot adapter. The snapshot payload only carries the
-// roster (callsign, name, flight, rank) and the five expiry dates the
-// commander rollup actually displays. Hours columns default to 0 — the
-// per-squadron drill-down already uses a dedicated snapshot card and
-// the rollup view never advertised hours for cross-sqn pilots.
+// Snapshot → DashPilot adapter. The snapshot payload now carries the
+// roster (callsign, name, flight, rank), the five expiry dates the
+// commander rollup displays, AND the lifetime hour totals (Round 4
+// AA3 / #268). Hour fields are optional in the snapshot payload —
+// legacy snapshots published by pre-AA3 dashboards omit them, in which
+// case we fall through to 0. Once the squadron's Ops PC publishes its
+// next tick (~2 minutes after the new dashboard loads), commander
+// rollups (PilotsTable, Currencies, Alerts) show real hours.
 export function adaptSnapshotPilot(
   snap: SquadronSnapshotPilot,
   squadronId: string,
 ): DashPilot {
+  // Coerce + finite-guard each hour field. `Number(null) === 0` but
+  // `Number(undefined) === NaN` and a malformed legacy payload can
+  // hand us non-numeric junk — the `?? 0` covers null/undefined and
+  // `Number.isFinite` stops NaN/Infinity propagating into the rollup
+  // arithmetic.
+  const safe = (raw: unknown): number => {
+    const n = Number(raw ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const day = safe(snap.dayHours);
+  const night = safe(snap.nightHours);
+  const nvg = safe(snap.nvgHours);
+  const sim = safe(snap.simHours);
+  const captain = safe(snap.captainHours);
   return {
     id: snap.id,
     callSign: snap.callSign ?? "",
@@ -129,13 +146,18 @@ export function adaptSnapshotPilot(
     fullName: snap.name ?? "",
     fullNameAr: snap.name ?? "",
     squadronId,
+    // monthlyHours is not carried in the snapshot payload (the publisher
+    // would need to compute month-bounded sums per pilot, and the rollup
+    // view does not yet surface monthly figures for cross-squadron
+    // pilots). grandTotalHours is the sum of day+night+nvg, mirroring
+    // adaptPilot above.
     monthlyHours: 0,
-    grandTotalHours: 0,
-    nvgTotalHours: 0,
-    dayHours: 0,
-    nightHours: 0,
-    simHours: 0,
-    captainHours: 0,
+    grandTotalHours: day + night + nvg,
+    nvgTotalHours: nvg,
+    dayHours: day,
+    nightHours: night,
+    simHours: sim,
+    captainHours: captain,
     instrumentHours: undefined,
     dayCurrencyDate: snap.expDay ?? "",
     nightCurrencyDate: snap.expNight ?? "",

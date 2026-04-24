@@ -360,6 +360,16 @@ function SquadronSnapshotPublisher() {
           expNvg: p.expiry?.nvg ?? null,
           expIrt: p.expiry?.irt ?? null,
           expMedical: p.expiry?.medical ?? null,
+          // Round 4 AA3 / #268 — lifetime hour totals so commander
+          // rollups (PilotsTable, Currencies, Alerts) can render real
+          // hours instead of "0h". Numbers come straight from the local
+          // Pilot row; the rollup adapter (`adaptSnapshotPilot`) reads
+          // them on the consumer side.
+          dayHours: Number(p.totalDay ?? 0),
+          nightHours: Number(p.totalNight ?? 0),
+          nvgHours: Number(p.totalNvg ?? 0),
+          simHours: Number(p.totalSim ?? 0),
+          captainHours: Number(p.totalCaptain ?? 0),
         })),
         unavailable: todayUnavail.map(u => ({
           id: u.id,
