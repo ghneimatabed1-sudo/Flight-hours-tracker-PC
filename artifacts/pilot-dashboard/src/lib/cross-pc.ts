@@ -2680,6 +2680,112 @@ export function useSquadronSnapshot(
   return { ...q, data: q.data ?? null } as UseQueryResult<SquadronSnapshotRow | null> & { data: SquadronSnapshotRow | null };
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Multi-squadron commander empty-state probe (audit finding F-B-01).
+// ──────────────────────────────────────────────────────────────────────
+// Wing / Base / HQ commanders have `squadron_id = NULL` in their JWT,
+// so RLS on `pilots` / `sorties` returns zero rows for them by design.
+// Their dashboard is meant to consume aggregated reads from
+// xpc_squadron_snapshot. Without this hook the UI cannot tell a
+// freshly provisioned commander whether their dashboard is empty
+// because (a) no squadron PC has registered yet, (b) one has
+// registered but never published, (c) the latest snapshot is stale,
+// or (d) the snapshot rosters are genuinely empty — they all look
+// identical to the operator (a blank page).
+//
+// This hook returns the inputs the pure `computeCommanderEmptyState`
+// reasoner needs to classify the cause. The UI side then renders the
+// matching explainer copy via `<CommanderEmptyState>`.
+//
+// Reads two cross-tenant tables (both broadly readable per
+// migration 0024 / the snapshot RLS comment):
+//   • xpc_registry            — count squadron-tier rows
+//   • xpc_squadron_snapshot   — pull (squadron_id, snapshot_at,
+//                               payload.counts.pilots) for every row
+//
+// In demo mode (no Supabase) we surface the local registry mirror but
+// no snapshots — the empty-state classifier will say "no_snapshots"
+// or "no_registry", which is honest for that mode.
+export interface CommanderSnapshotProbe {
+  registeredSquadronCount: number;
+  snapshots: Array<{
+    squadronId: string;
+    snapshotAt: string;
+    pilotCount: number;
+  }>;
+  isLoading: boolean;
+}
+
+export function useCommanderSnapshotProbe(opts: {
+  enabled: boolean;
+}): CommanderSnapshotProbe {
+  const enabled = !!opts.enabled;
+
+  // Squadron-tier registry rows, used to distinguish "no PC online"
+  // from "PC online but never published". We re-use the same registry
+  // poll cadence (30s staleTime) the rest of the app uses.
+  const regQ = useQuery<number>({
+    queryKey: ["xpc", "commander-empty", "registry-count"],
+    queryFn: async () => {
+      if (!isLive() || !supabase) {
+        // Fall back to the localStorage mirror so the demo / offline
+        // preview shows a sensible answer rather than always
+        // "no_registry".
+        try {
+          const rows = readRegistry();
+          return rows.filter(r => r.tier === "squadron").length;
+        } catch {
+          return 0;
+        }
+      }
+      const { count, error } = await supabase
+        .from("xpc_registry")
+        .select("id", { count: "exact", head: true })
+        .eq("tier", "squadron");
+      if (error) return 0;
+      return count ?? 0;
+    },
+    enabled,
+    staleTime: 30_000,
+    refetchInterval: enabled ? 60_000 : false,
+    retry: isLive() ? 1 : false,
+  });
+
+  const snapQ = useQuery<CommanderSnapshotProbe["snapshots"]>({
+    queryKey: ["xpc", "commander-empty", "snapshots"],
+    queryFn: async () => {
+      if (!isLive() || !supabase) return [];
+      const { data, error } = await supabase
+        .from("xpc_squadron_snapshot")
+        .select("squadron_id, snapshot_at, payload");
+      if (error || !Array.isArray(data)) return [];
+      return data.map(row => {
+        const r = row as {
+          squadron_id: unknown;
+          snapshot_at: unknown;
+          payload?: { counts?: { pilots?: unknown } } | null;
+        };
+        const pilots = Number(r.payload?.counts?.pilots ?? 0);
+        return {
+          squadronId: String(r.squadron_id ?? ""),
+          snapshotAt: String(r.snapshot_at ?? ""),
+          pilotCount: Number.isFinite(pilots) ? pilots : 0,
+        };
+      });
+    },
+    enabled,
+    staleTime: 30_000,
+    refetchInterval: enabled ? 60_000 : false,
+    retry: isLive() ? 1 : false,
+  });
+
+  return {
+    registeredSquadronCount: regQ.data ?? 0,
+    snapshots: snapQ.data ?? [],
+    isLoading: regQ.isLoading || snapQ.isLoading,
+  };
+}
+
 // Role helper: which roles are allowed to use the messages UI at all.
 // Commanders (Flight / Squadron / Wing / Base) AND the squadron Ops
 // Pilot. v1.1.58: Ops is included because in the live deployment the

@@ -12,6 +12,7 @@ import { pilotWorstStatus, pilotWorstDate, fmtDate } from "@/lib/format";
 import type { CurrencyStatus, Pilot } from "@/lib/types";
 import { Search, ArrowUpDown, ChevronLeft, Download, Printer, FileSpreadsheet, UserX, Clock } from "lucide-react";
 import { useSquadronSnapshot } from "@/lib/cross-pc";
+import { CommanderEmptyState } from "@/components/CommanderEmptyState";
 
 type SortKey = keyof Pick<Pilot, "callSign" | "fullName" | "monthlyHours" | "grandTotalHours" | "nvgTotalHours">;
 
@@ -214,6 +215,13 @@ export default function PilotsTable() {
           )}
         </div>
       </div>
+
+      {/* Wing/Base/HQ tier empty-state explainer (audit F-B-01). Shown
+          only on the all-squadrons view; the squadron drill-down below
+          already has its own "Daily picture" card from the snapshot. */}
+      {isCrossSqnViewer && !focusedSqn && (
+        <CommanderEmptyState surface="pilots" />
+      )}
 
       {isCrossSqnViewer && focusedSqn && (
         <Card className="no-print">

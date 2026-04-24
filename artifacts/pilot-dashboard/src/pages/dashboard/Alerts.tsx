@@ -8,6 +8,7 @@ import { currencyStatus, fmtDate } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { CurrencyStatus } from "@/lib/types";
 import { AlertTriangle, Printer } from "lucide-react";
+import { CommanderEmptyState } from "@/components/CommanderEmptyState";
 
 export default function Alerts() {
   const { t, lang } = useI18n();
@@ -62,6 +63,9 @@ export default function Alerts() {
           <Printer className="h-3.5 w-3.5 me-1" />{t("print")}
         </Button>
       </div>
+
+      {/* Wing/Base/HQ tier empty-state explainer (audit F-B-01). */}
+      <CommanderEmptyState surface="alerts" />
 
       <Section title={`${t("expired")} (${expired.length})`} items={expired} t={t} />
       <Section title={`${t("expiringSoon")} (${warning.length})`} items={warning} t={t} />

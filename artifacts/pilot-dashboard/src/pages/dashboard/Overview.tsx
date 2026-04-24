@@ -8,6 +8,7 @@ import { pilotWorstStatus } from "@/lib/format";
 import { ChevronRight, Lock, Plane, Users, AlertTriangle, Clock, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useRegisteredPCs, type RegisteredPC } from "@/lib/cross-pc";
+import { CommanderEmptyState } from "@/components/CommanderEmptyState";
 
 // Wing / Base / HQ commanders use this Overview as their landing pad.
 // v1.1.25: each squadron card now shows a live connectivity badge
@@ -72,6 +73,12 @@ export default function CommanderOverview() {
           </Button>
         </div>
       </div>
+      {/* Wing / Base / HQ tiers see no operational rows by RLS design
+          and feed off xpc_squadron_snapshot. The empty-state explains
+          which of (no PC registered / no snapshot published / stale /
+          empty roster) is the cause. Renders nothing for squadron and
+          flight scopes. */}
+      <CommanderEmptyState surface="overview" />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((s, i) => (
           <Card key={i}>
