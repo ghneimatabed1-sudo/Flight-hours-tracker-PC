@@ -283,6 +283,31 @@ jobs:
           PROJECT_REF: ${{ env.PROJECT_REF }}
         run: node .local/scripts/regression-task-193-revoke-pair.mjs
 
+      # Task #202 — regression for the squadron-rename cross-PC sync trigger.
+      #
+      # Migrations 0050 and 0052 install a single AFTER UPDATE trigger
+      # on public.squadrons that propagates a name change into FIVE
+      # denormalised tables (xpc_registry, xpc_pair_links, xpc_messages,
+      # xpc_pending, xpc_schedule_shares). Without an automated test, a
+      # future migration could silently miss one of the snapshot
+      # columns — or accidentally widen the equality match so unrelated
+      # rows get clobbered too — and nobody would notice until an
+      # operator reported stale labels in the Connection Map / chat
+      # history / Guest Officer inbox / Schedule Chain page.
+      #
+      # The script seeds two squadrons (one TARGET, one CONTROL) plus
+      # one row per table per squadron, renames the TARGET squadron,
+      # and asserts every TARGET snapshot column flipped to the new
+      # name AND every CONTROL row was left untouched. The whole test
+      # runs as a single DO block so a partial failure rolls back the
+      # entire transaction and cannot litter prod.
+      - name: Regression — squadron rename xpc sync (Task #202)
+        id: rename_regression
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ env.PROJECT_REF }}
+        run: node artifacts/pilot-dashboard/supabase/tests/test-squadron-rename-xpc-sync.mjs
+
       # Task #192 — fast-path operator alert for ordinary step failures.
       #
       # This step is the in-job notifier: it fires within seconds when
@@ -311,6 +336,7 @@ jobs:
           RELOAD_OUTCOME: ${{ steps.reload.conclusion }}
           REGRESSION_OUTCOME: ${{ steps.regression.conclusion }}
           REVOKE_REGRESSION_OUTCOME: ${{ steps.revoke_regression.conclusion }}
+          RENAME_REGRESSION_OUTCOME: ${{ steps.rename_regression.conclusion }}
           JOB_STATUS: ${{ job.status }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT_SHA: ${{ github.sha }}
@@ -337,7 +363,8 @@ jobs:
             "Apply pending migrations|${APPLY_OUTCOME:-}" \
             "Reload PostgREST schema cache|${RELOAD_OUTCOME:-}" \
             "Regression — cross-PC pair redemption|${REGRESSION_OUTCOME:-}" \
-            "Regression — pair revocation RPCs|${REVOKE_REGRESSION_OUTCOME:-}"
+            "Regression — pair revocation RPCs|${REVOKE_REGRESSION_OUTCOME:-}" \
+            "Regression — squadron rename xpc sync|${RENAME_REGRESSION_OUTCOME:-}"
           do
             name="${pair%%|*}"
             outcome="${pair##*|}"
