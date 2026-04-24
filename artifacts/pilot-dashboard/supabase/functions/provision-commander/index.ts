@@ -188,7 +188,20 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  const appRole = role === "ops" ? "ops" : role === "deputy" ? "deputy" : "admin";
+  // Map the requested role to a database/JWT role. Commander tiers (wing /
+  // base / squadron / flight) get role='commander' so the strict snapshot
+  // SELECT policy on xpc_squadron_snapshot (migration 0061) admits them with
+  // their squadron_ids claim. HQ tier and explicit admin requests get
+  // role='admin' (system-wide). 'ops' and 'deputy' keep their own roles.
+  // Fix for #285 (round-4 audit AA-Z): previously every commander tier
+  // was written as 'admin', which bypassed the scoped policy and let a
+  // wing commander read every snapshot in the database.
+  const appRole =
+    role === "ops" ? "ops"
+    : role === "deputy" ? "deputy"
+    : role === "admin" ? "admin"
+    : tier === "hq" ? "admin"
+    : "commander";
   const email = `${username}@${sqnSlug(sqnNumber)}.rjaf.local`;
   const password = randomPassword();
 
