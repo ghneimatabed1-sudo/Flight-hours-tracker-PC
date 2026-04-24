@@ -1,6 +1,7 @@
 // Supabase Edge Function: provision-commander
 //
-// POST { username, displayName, role, tier, squadronNumber, squadronName, squadronBase }
+// POST { username, displayName, role, tier, squadronNumber, squadronName,
+//        squadronBase, squadronNames? }
 //
 // Creates (or refreshes) a Supabase auth user for a non-ops account
 // (Squadron / Flight commander or deputy) so the browser can obtain a JWT
@@ -8,8 +9,16 @@
 // operational-table query is filtered out by RLS and the commander sees
 // nothing.
 //
-// HQ Commander (tier="hq") has no squadron — provisioned with squadron_id
-// null; they will not pass squadron-RLS by design.
+// `squadronNames` is the multi-squadron allow-list for wing/base/HQ
+// commanders — written verbatim into app_metadata.squadron_ids so the
+// xpc_squadron_snapshot SELECT policy (migration 0061) admits the rows
+// the commander is meant to monitor. The values must match the
+// snapshot.squadron_id text column (= squadron name). Single-squadron
+// commanders (squadron/flight) fall back to [squadronName] automatically.
+//
+// HQ Commander (tier="hq") has no single squadron — provisioned with
+// squadron_id null; the squadron_ids allow-list is what unblocks their
+// dashboard reads.
 //
 // Deploy with:
 //   supabase functions deploy provision-commander
@@ -31,6 +40,9 @@ interface Body {
   squadronNumber?: string;
   squadronName?: string;
   squadronBase?: string;
+  // Multi-squadron allow-list: array of squadron names (matching
+  // public.squadrons.name and xpc_squadron_snapshot.squadron_id).
+  squadronNames?: string[];
 }
 
 function reply(payload: Record<string, unknown>, status = 200) {
@@ -190,12 +202,43 @@ Deno.serve(async (req: Request) => {
   } else if (tier === "hq" || tier === "flight") {
     pcId = `HQ:${displayName}`;
   }
+  // Resolve the squadron_ids allow-list that gates the snapshot SELECT
+  // policy (migration 0061). For multi-squadron tiers we trust the caller-
+  // supplied list but validate each name against public.squadrons so a
+  // typo can't smuggle a bogus claim into a JWT. For single-squadron
+  // tiers we fall back to [squadronName] so the commander still sees their
+  // own snapshot row without a separate caller change.
+  let squadronIdsClaim: string[] | null = null;
+  const rawNames = Array.isArray(body.squadronNames) ? body.squadronNames : [];
+  const cleanedNames = Array.from(
+    new Set(
+      rawNames
+        .map((n) => (typeof n === "string" ? n.trim() : ""))
+        .filter((n) => n.length > 0),
+    ),
+  );
+  if (cleanedNames.length > 0) {
+    const { data: validRows } = await admin
+      .from("squadrons")
+      .select("name")
+      .in("name", cleanedNames);
+    const valid = new Set((validRows ?? []).map((r: any) => r.name as string));
+    const accepted = cleanedNames.filter((n) => valid.has(n));
+    if (accepted.length > 0) squadronIdsClaim = accepted.sort();
+  }
+  // Squadron/flight commanders typically don't pass squadronNames — fall
+  // back to their single squadron so the snapshot RLS still admits them.
+  if (!squadronIdsClaim && sqnName && (tier === "squadron" || tier === "flight")) {
+    squadronIdsClaim = [sqnName];
+  }
+
   const appMeta = {
     squadron_id: squadronId,
     role: appRole,
     tier,
     squadron_number: sqnNumber || null,
     pc_id: pcId,
+    squadron_ids: squadronIdsClaim,
   };
   const userMeta = { displayName };
 
@@ -248,7 +291,13 @@ Deno.serve(async (req: Request) => {
     squadron_id: squadronId,
     type: "user.provision",
     actor: callerUser.id,
-    detail: { provisionedUsername: username, role: appRole, tier, squadronNumber: sqnNumber || null },
+    detail: {
+      provisionedUsername: username,
+      role: appRole,
+      tier,
+      squadronNumber: sqnNumber || null,
+      squadronIds: squadronIdsClaim,
+    },
   });
 
   return reply({

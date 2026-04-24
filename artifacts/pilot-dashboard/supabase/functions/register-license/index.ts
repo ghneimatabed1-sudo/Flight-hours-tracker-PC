@@ -160,12 +160,18 @@ Deno.serve(async (req: Request) => {
   // ── Provision the Supabase auth user for this ops account ────────────────
   const email = `${username}@${sqnSlug(sqnNumber)}.rjaf.local`;
   const password = randomPassword();
+  // squadron_ids is the JWT allow-list the snapshot SELECT policy
+  // (migration 0061) checks. Ops accounts only ever monitor their own
+  // squadron, so the allow-list is the single squadron name. We populate
+  // it here for parity with provision-commander so every freshly issued
+  // ops account passes the same RLS check that wing/base/HQ commanders do.
   const appMeta = {
     squadron_id: squadronId,
     role: "ops",
     tier: "ops",
     squadron_number: sqnNumber,
     pc_id: sqnName,
+    squadron_ids: sqnName ? [sqnName] : null,
   };
   const userMeta = { displayName };
 

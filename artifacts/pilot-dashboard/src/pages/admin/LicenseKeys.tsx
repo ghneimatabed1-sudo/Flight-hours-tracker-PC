@@ -623,6 +623,18 @@ export default function LicenseKeys() {
             : setupRole === "wing_commander" ? "wing"
             : setupRole === "flight_commander" ? "flight"
             : "squadron";
+          // Build the JWT squadron_ids allow-list — the values must match
+          // public.squadrons.name (= xpc_squadron_snapshot.squadron_id).
+          // For wing/base/squadron(multi) tiers monitoredSquadronIds is
+          // already a list of squadron pc_ids (= names). For HQ tier we
+          // translate the local Squadron records (whose .id is a uuid)
+          // to names so HQ commanders see every squadron.
+          const sqnNamesForJwt: string[] =
+            tierForSb === "hq"
+              ? squadrons.map(s => s.name).filter(Boolean)
+              : (monitoredSquadronIds.length > 0
+                  ? [...monitoredSquadronIds]
+                  : (sqnName ? [sqnName] : []));
           try {
             const prov = await provisionCommanderRemote({
               username: accountUsername,
@@ -632,6 +644,7 @@ export default function LicenseKeys() {
               squadronNumber: tierForSb === "hq" ? "" : sqnNumber,
               squadronName: tierForSb === "hq" ? "" : sqnName,
               squadronBase: tierForSb === "hq" ? "" : sqnBase,
+              squadronNames: sqnNamesForJwt,
             });
             if (prov.ok && prov.supabaseEmail && prov.supabasePassword) {
               storeSupabaseCreds(accountUsername, prov.supabaseEmail, prov.supabasePassword);

@@ -198,6 +198,12 @@ export interface ProvisionCommanderArgs {
   squadronNumber?: string;
   squadronName?: string;
   squadronBase?: string;
+  // Multi-squadron allow-list of squadron NAMES (matches
+  // public.squadrons.name and xpc_squadron_snapshot.squadron_id). Required
+  // for wing/base/HQ commanders so the snapshot SELECT policy admits the
+  // squadrons they monitor; optional for squadron/flight tiers (the
+  // edge function falls back to [squadronName]).
+  squadronNames?: string[];
 }
 
 export interface ProvisionCommanderResult {
