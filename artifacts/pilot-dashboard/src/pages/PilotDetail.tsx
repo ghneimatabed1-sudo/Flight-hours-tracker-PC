@@ -17,6 +17,7 @@ import { useDashSquadrons } from "@/lib/dash-pilots";
 import type { OtherAircraftEntry } from "@/lib/mock";
 import { computePilotTotals } from "@/lib/calculations";
 import { useAuth } from "@/lib/auth";
+import { canTransferPilot } from "@/lib/pilot-transfer-policy";
 import { TransferPilotDialog } from "./Roster";
 import {
   ArrowLeft,
@@ -74,15 +75,10 @@ export default function PilotDetail() {
   if (!p || !totals) return <div className="p-6">Pilot not found.</div>;
   const sorties = SORTIES.filter(s => s.pilotId === p.id || s.coPilotId === p.id).sort((a, b) => b.date.localeCompare(a.date));
 
-  // Same gate as Roster.tsx — only ops/deputy/admin/super_admin can move
-  // a pilot between squadrons. Squadron commanders are intentionally
-  // read-mostly for transfers per RJAF practice (transfer is an orderly
-  // room paperwork action). The current squadron is taken from the
-  // signed-in user's first squadron id (RLS guarantees they only see
-  // pilots from squadrons they're in).
-  const canTransfer =
-    !!user && (user.role === "ops" || user.role === "deputy" ||
-               user.role === "admin" || user.role === "super_admin");
+  // Same gate as Roster.tsx — sourced from the shared
+  // pilot-transfer-policy module so the regression test in
+  // supabase/tests/test-pilot-transfer-rpc.ts catches drift.
+  const canTransfer = canTransferPilot(user);
   const currentSquadronId = user?.squadronIds?.[0];
   const actor = user?.username;
 

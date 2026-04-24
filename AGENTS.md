@@ -51,6 +51,7 @@
 | `node .local/tests/rls-policy-audit.mjs` | Scans every public.* policy for the WITH-CHECK gap. Exit 0 = safe, 1 = problem, names the table. |
 | `node .local/tests/cross-pc-e2e.mjs` | Runs the full Squadron→Wing→Base→HQ chain + messages across the live Supabase. ~30 checks. |
 | `node .local/tests/guest-pilot-e2e.mjs` | Hosting Ops → Home Ops guest-pilot handoff (pending → accept/reject/edit/backfill). 8 checks. |
+| `pnpm --filter @workspace/pilot-dashboard exec tsx supabase/tests/test-pilot-transfer-rpc.ts` | Inter-squadron pilot transfer via the `transfer_pilot` RPC (migration 0053). Asserts pilot + sorties + currencies/leaves/unavailable/link_codes/devices all re-home, paired audit rows land, authority gate rejects foreign-squadron callers, super-admin works from anywhere, and the UI predicates from `pilot-transfer-policy.ts` (the same module Roster.tsx + PilotDetail.tsx import) still match. 11 checks. |
 | `pnpm --filter @workspace/pilot-dashboard exec tsx .local/tests/full-simulation.ts` | 11-surface calculation engine simulation. ~115 checks. |
 
 **After any change that touches RLS, schema, or cross-PC code, re-run the relevant tests above.**

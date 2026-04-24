@@ -7,6 +7,7 @@ import { useI18n } from "@/lib/i18n";
 import { usePilots, useUpdatePilot, useCreatePilot, useDeletePilot, useTransferPilot, type Pilot } from "@/lib/squadron-data";
 import { useDashSquadrons } from "@/lib/dash-pilots";
 import { useAuth } from "@/lib/auth";
+import { canTransferPilot, transferDestinationCandidates } from "@/lib/pilot-transfer-policy";
 import { EMPTY_INITIAL_HOURS, sumInitialHours, type InitialHours } from "@/lib/mock";
 import { getCurrencyWindow } from "@/lib/currency-settings";
 import { supabase, supabaseConfigured, recordAuditEvent } from "@/lib/supabase";
@@ -108,13 +109,10 @@ export default function Roster() {
   const [confirmDelete, setConfirmDelete] = useState<Pilot | null>(null);
   const [transferring, setTransferring] = useState<Pilot | null>(null);
   const [err, setErr] = useState("");
-  // Who can move a pilot between squadrons? Ops officers, admins, and
-  // the super-admin. Squadron commanders are intentionally read-mostly
-  // for roster moves — promotion-and-transfer is a paperwork action
-  // that lives with the orderly room (ops) per RJAF practice.
-  const canTransfer =
-    !!user && (user.role === "ops" || user.role === "deputy" ||
-               user.role === "admin" || user.role === "super_admin");
+  // Who can move a pilot between squadrons? See pilot-transfer-policy.ts —
+  // ops/deputy/admin/super_admin only. The same predicate is asserted by
+  // supabase/tests/test-pilot-transfer-rpc.ts so any drift fails the test.
+  const canTransfer = canTransferPilot(user);
   const actor = user?.username;
 
   const blankPilot = (): Pilot => {
@@ -445,7 +443,9 @@ export function TransferPilotDialog({
   busy: boolean;
 }) {
   const { lang } = useI18n();
-  const candidates = squadrons.filter(s => s.id !== fromSquadronId);
+  // Same source-squadron exclusion the regression test asserts. See
+  // pilot-transfer-policy.ts.
+  const candidates = transferDestinationCandidates(squadrons, fromSquadronId);
   const [target, setTarget] = useState<string>(candidates[0]?.id ?? "");
   const targetSqn = candidates.find(s => s.id === target);
   return (
