@@ -4,14 +4,16 @@ import MultiSegmentField, { splitQualificationSegments, joinQualificationSegment
 import { RJAF_RANKS, lookupRankEn } from "@/lib/ranks";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { usePilots, useUpdatePilot, useCreatePilot, useDeletePilot, type Pilot } from "@/lib/squadron-data";
+import { usePilots, useUpdatePilot, useCreatePilot, useDeletePilot, useTransferPilot, type Pilot } from "@/lib/squadron-data";
+import { useDashSquadrons } from "@/lib/dash-pilots";
+import { useAuth } from "@/lib/auth";
 import { EMPTY_INITIAL_HOURS, sumInitialHours, type InitialHours } from "@/lib/mock";
 import { getCurrencyWindow } from "@/lib/currency-settings";
 import { supabase, supabaseConfigured, recordAuditEvent } from "@/lib/supabase";
 import { fmtDateTimeDDMM } from "@/lib/format";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { Plus, Search, Pencil, Trash2, X, Loader2, FileDown } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, X, Loader2, FileDown, ArrowRightLeft } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 
@@ -98,10 +100,22 @@ export default function Roster() {
   const updatePilot = useUpdatePilot();
   const createPilot = useCreatePilot();
   const deletePilot = useDeletePilot();
+  const transferPilot = useTransferPilot();
+  const allSquadrons = useDashSquadrons();
+  const { user } = useAuth();
   const [editing, setEditing] = useState<Pilot | null>(null);
   const [adding, setAdding] = useState<Pilot | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Pilot | null>(null);
+  const [transferring, setTransferring] = useState<Pilot | null>(null);
   const [err, setErr] = useState("");
+  // Who can move a pilot between squadrons? Ops officers, admins, and
+  // the super-admin. Squadron commanders are intentionally read-mostly
+  // for roster moves — promotion-and-transfer is a paperwork action
+  // that lives with the orderly room (ops) per RJAF practice.
+  const canTransfer =
+    !!user && (user.role === "ops" || user.role === "deputy" ||
+               user.role === "admin" || user.role === "super_admin");
+  const actor = user?.username;
 
   const blankPilot = (): Pilot => {
     const nextId = (() => {
@@ -171,7 +185,15 @@ export default function Roster() {
     const v = validateMilitaryNumber(next);
     if (v) { setErr(v); return; }
     try {
-      await updatePilot.mutateAsync({ ...next, militaryNumber: (next.militaryNumber ?? "").trim() });
+      // Pass the original pilot (`prev`) so the audit log can compute a
+      // precise field-level diff instead of a full-row dump. `actor` is
+      // the current operator's username — surfaces in the audit feed as
+      // the responsible party.
+      await updatePilot.mutateAsync({
+        pilot: { ...next, militaryNumber: (next.militaryNumber ?? "").trim() },
+        prev: editing ?? undefined,
+        actor,
+      });
       setEditing(null);
     } catch (e) {
       setErr((e as Error).message || "Update failed");
@@ -183,7 +205,10 @@ export default function Roster() {
     const v = validateMilitaryNumber(next);
     if (v) { setErr(v); return; }
     try {
-      await createPilot.mutateAsync({ ...next, militaryNumber: (next.militaryNumber ?? "").trim() });
+      await createPilot.mutateAsync({
+        pilot: { ...next, militaryNumber: (next.militaryNumber ?? "").trim() },
+        actor,
+      });
       setAdding(null);
     } catch (e) {
       setErr((e as Error).message || "Create failed");
@@ -194,10 +219,43 @@ export default function Roster() {
     if (!confirmDelete) return;
     setErr("");
     try {
-      await deletePilot.mutateAsync(confirmDelete.id);
+      await deletePilot.mutateAsync({
+        id: confirmDelete.id,
+        pilotName: confirmDelete.name,
+        actor,
+      });
       setConfirmDelete(null);
     } catch (e) {
       setErr((e as Error).message || "Delete failed");
+    }
+  };
+
+  // The Roster always reflects the operator's own squadron (RLS gates
+  // every pilots query to `squadron_id = public.squadron_id()`), so the
+  // pilot's current home is the first squadron id on the signed-in
+  // user. Used to filter the destination picker so the operator can't
+  // accidentally "transfer" a pilot to where they already are.
+  const currentSquadronId = user?.squadronIds?.[0];
+
+  // Confirm + execute an inter-squadron transfer. Defers all the heavy
+  // lifting to the SECURITY DEFINER `transfer_pilot` RPC (see
+  // 0053_pilot_transfer.sql) which atomically re-homes the pilot's
+  // sorties / currencies / leaves / unavailable rows and writes paired
+  // audit_log entries on both squadrons.
+  const onTransfer = async (toSquadronId: string) => {
+    if (!transferring) return;
+    setErr("");
+    try {
+      await transferPilot.mutateAsync({
+        pilotId: transferring.id,
+        toSquadronId,
+        pilotName: transferring.name,
+        fromSquadronId: currentSquadronId,
+        actor,
+      });
+      setTransferring(null);
+    } catch (e) {
+      setErr((e as Error).message || "Transfer failed");
     }
   };
 
@@ -285,6 +343,16 @@ export default function Roster() {
                     <button onClick={() => setEditing(p)} className="p-1.5 rounded hover:bg-secondary" title={t("edit")} data-testid={`button-edit-${p.id}`}>
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
+                    {canTransfer && (
+                      <button
+                        onClick={() => setTransferring(p)}
+                        className="p-1.5 rounded hover:bg-secondary"
+                        title="Transfer to another squadron"
+                        data-testid={`button-transfer-${p.id}`}
+                      >
+                        <ArrowRightLeft className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                     <button onClick={() => setConfirmDelete(p)} className="p-1.5 rounded hover:bg-destructive/20 text-destructive" title={t("delete")} data-testid={`button-delete-${p.id}`}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -327,6 +395,116 @@ export default function Roster() {
           danger
         />
       )}
+
+      {transferring && (
+        <TransferPilotDialog
+          pilot={transferring}
+          fromSquadronId={currentSquadronId}
+          squadrons={allSquadrons}
+          onCancel={() => setTransferring(null)}
+          onConfirm={onTransfer}
+          busy={transferPilot.isPending}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Inter-squadron transfer dialog ────────────────────────────────────
+// Lists every squadron the operator's PC knows about (minus the
+// pilot's current home), with a confirmation step that spells out
+// exactly what will move (sorties + currencies + leaves +
+// unavailable). The actual transfer is one transactional RPC — see
+// 0053_pilot_transfer.sql — so partial moves are impossible.
+export function TransferPilotDialog({
+  pilot,
+  fromSquadronId,
+  squadrons,
+  onCancel,
+  onConfirm,
+  busy,
+}: {
+  pilot: Pilot;
+  fromSquadronId: string | undefined;
+  squadrons: { id: string; name: string; nameAr: string; code: string }[];
+  onCancel: () => void;
+  onConfirm: (toSquadronId: string) => void | Promise<void>;
+  busy: boolean;
+}) {
+  const { lang } = useI18n();
+  const candidates = squadrons.filter(s => s.id !== fromSquadronId);
+  const [target, setTarget] = useState<string>(candidates[0]?.id ?? "");
+  const targetSqn = candidates.find(s => s.id === target);
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+      onClick={onCancel}
+      data-testid="overlay-pilot-transfer"
+    >
+      <div
+        className="bg-card border border-border rounded-lg shadow-2xl w-full max-w-md"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <div className="text-base font-semibold gold-grad">Transfer pilot — {pilot.id}</div>
+          <button onClick={onCancel} className="p-1 rounded hover:bg-secondary"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="p-4 space-y-4 text-sm">
+          <div>
+            Move <span className="font-medium">{pilot.name}</span> ({pilot.id}) to a different
+            squadron. Their full record — sorties, currencies, leaves, and unavailable periods
+            — is moved atomically and a transfer entry is written to the audit log on both
+            squadrons.
+          </div>
+          {candidates.length === 0 ? (
+            <div className="text-xs text-muted-foreground italic">
+              No other squadrons available on this PC. Add a squadron first.
+            </div>
+          ) : (
+            <label className="block text-xs">
+              <span className="text-muted-foreground">Destination squadron</span>
+              <select
+                value={target}
+                onChange={e => setTarget(e.target.value)}
+                className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm"
+                data-testid="select-transfer-destination"
+              >
+                {candidates.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {(lang === "ar" ? s.nameAr : s.name) || s.code} ({s.code})
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {targetSqn && (
+            <div className="text-xs text-muted-foreground">
+              Confirming will hand pilot <span className="font-mono">{pilot.id}</span> to{" "}
+              <span className="font-medium">{lang === "ar" ? targetSqn.nameAr : targetSqn.name}</span>.
+              They will disappear from this roster immediately.
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 p-4 border-t border-border">
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-md text-sm bg-secondary text-foreground border border-border disabled:opacity-50"
+            data-testid="button-transfer-cancel"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => target && onConfirm(target)}
+            disabled={!target || busy}
+            className="px-3 py-1.5 rounded-md text-sm bg-primary text-primary-foreground font-medium disabled:opacity-50 inline-flex items-center gap-1.5"
+            data-testid="button-transfer-confirm"
+          >
+            {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            Transfer
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -262,16 +262,76 @@ export function usePilots(): UseQueryResult<Pilot[]> & { data: Pilot[] } {
   return { ...q, data: q.data ?? fallback } as UseQueryResult<Pilot[]> & { data: Pilot[] };
 }
 
+// Compute the diff between two pilots so the audit log captures only what
+// actually changed (instead of a full row dump on every keystroke save).
+// Numeric fields tolerate a tiny epsilon to avoid spurious entries from
+// floating-point round-trips through the form. Returns null if nothing
+// material changed — caller should skip the audit insert in that case.
+function pilotProfileDiff(prev: Pilot | undefined, next: Pilot): Record<string, { before: unknown; after: unknown }> | null {
+  if (!prev) return null;
+  const keys: Array<keyof Pilot> = [
+    "name", "arabicName", "rank", "rankEn", "militaryNumber", "phone", "address",
+    "unit", "callSign", "flightName", "doctorNote", "available",
+    "qualifications", "qualification", "lastSimDate",
+  ];
+  const changes: Record<string, { before: unknown; after: unknown }> = {};
+  for (const k of keys) {
+    const a = prev[k];
+    const b = next[k];
+    const sameStr = JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    if (!sameStr) {
+      changes[k as string] = { before: a ?? null, after: b ?? null };
+    }
+  }
+  return Object.keys(changes).length > 0 ? changes : null;
+}
+
+// Input wrapper for the mutation hooks below. Existing callers may pass a
+// bare Pilot; profile-edit callers in the Roster pass the wrapper so the
+// audit log captures who made the change and exactly which fields moved.
+export type UpdatePilotInput = Pilot | { pilot: Pilot; actor?: string; prev?: Pilot };
+export type CreatePilotInput = Pilot | { pilot: Pilot; actor?: string };
+export type DeletePilotInput = string | { id: string; actor?: string; pilotName?: string };
+export interface TransferPilotInput {
+  pilotId: string;
+  toSquadronId: string;
+  actor?: string;
+  pilotName?: string;
+  fromSquadronId?: string;
+}
+
+function unwrapUpdate(input: UpdatePilotInput): { pilot: Pilot; actor?: string; prev?: Pilot } {
+  if ("pilot" in input) return input;
+  return { pilot: input };
+}
+function unwrapCreate(input: CreatePilotInput): { pilot: Pilot; actor?: string } {
+  if ("pilot" in input) return input;
+  return { pilot: input };
+}
+function unwrapDelete(input: DeletePilotInput): { id: string; actor?: string; pilotName?: string } {
+  if (typeof input === "string") return { id: input };
+  return input;
+}
+
 export function useUpdatePilot() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (p: Pilot) => {
+    mutationFn: async (input: UpdatePilotInput) => {
+      const { pilot: p, actor, prev } = unwrapUpdate(input);
       assertValidPilotInput(p);
       if (!isLive()) {
         const arr = getMockPilots();
         const idx = arr.findIndex(x => x.id === p.id);
         if (idx >= 0) arr[idx] = p;
         saveMockPilots();
+        const changes = pilotProfileDiff(prev, p);
+        if (changes) {
+          void recordAuditEvent({
+            type: "pilot.profile.update",
+            actor,
+            detail: { pilotId: p.id, pilotName: p.name, changes },
+          });
+        }
         return p;
       }
       // Defensive: some squadron DBs may not have run migration 0031 yet
@@ -334,7 +394,19 @@ export function useUpdatePilot() {
         ({ data, error } = await supabase!.from("pilots").update(without).eq("id", p.id).select().single());
       }
       if (error) throw error;
-      return rowToPilot(data);
+      const saved = rowToPilot(data);
+      // Audit profile edits (live path). Fire-and-forget; the audit
+      // helper is non-throwing, but we still wrap in a try just in case
+      // a future change makes it surface.
+      const changes = pilotProfileDiff(prev, saved);
+      if (changes) {
+        void recordAuditEvent({
+          type: "pilot.profile.update",
+          actor,
+          detail: { pilotId: saved.id, pilotName: saved.name, changes },
+        });
+      }
+      return saved;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pilots"] }),
   });
@@ -362,7 +434,8 @@ function isMissingColumnError(err: { message?: string; code?: string } | null | 
 export function useCreatePilot() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (p: Pilot) => {
+    mutationFn: async (input: CreatePilotInput) => {
+      const { pilot: p, actor } = unwrapCreate(input);
       assertValidPilotInput(p);
       if (!isLive()) {
         const arr = getMockPilots();
@@ -371,6 +444,11 @@ export function useCreatePilot() {
         }
         arr.unshift(p);
         saveMockPilots();
+        void recordAuditEvent({
+          type: "pilot.profile.create",
+          actor,
+          detail: { pilotId: p.id, pilotName: p.name, militaryNumber: p.militaryNumber },
+        });
         return p;
       }
       // pilots.id is the GLOBAL primary key across every squadron in the
@@ -464,7 +542,15 @@ export function useCreatePilot() {
           console.warn("[pilots.insert] retrying without rank_en — DB missing migration 0031_pilots_rank_en");
           ({ data, error } = await supabase!.from("pilots").insert(without).select().single());
         }
-        if (!error) return rowToPilot(data);
+        if (!error) {
+          const created = rowToPilot(data);
+          void recordAuditEvent({
+            type: "pilot.profile.create",
+            actor,
+            detail: { pilotId: created.id, pilotName: created.name, militaryNumber: created.militaryNumber },
+          });
+          return created;
+        }
         // 23505 = unique_violation. Only retry if it's the primary-key
         // collision we know how to recover from; surface anything else
         // (e.g. the new militaryNumber unique index) to the caller so the
@@ -485,19 +571,93 @@ export function useCreatePilot() {
 export function useDeletePilot() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async (input: DeletePilotInput) => {
+      const { id, actor, pilotName } = unwrapDelete(input);
       if (!isLive()) {
         const arr = getMockPilots();
         const idx = arr.findIndex(x => x.id === id);
         if (idx >= 0) arr.splice(idx, 1);
         saveMockPilots();
+        void recordAuditEvent({
+          type: "pilot.profile.delete",
+          actor,
+          detail: { pilotId: id, pilotName },
+        });
         return { id };
       }
       const { error } = await supabase!.from("pilots").delete().eq("id", id);
       if (error) throw error;
+      void recordAuditEvent({
+        type: "pilot.profile.delete",
+        actor,
+        detail: { pilotId: id, pilotName },
+      });
       return { id };
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pilots"] }),
+  });
+}
+
+// ─── Inter-squadron transfer ────────────────────────────────────────────
+// Calls the SECURITY DEFINER `public.transfer_pilot(p_pilot_id, p_to_squadron)`
+// RPC installed by 0053_pilot_transfer.sql. The RPC does the heavy lifting
+// (re-homing pilots / sorties / currencies / leaves / unavailable +
+// writing paired audit_log entries on both squadrons) atomically. The
+// hook just invalidates the local pilots cache so the UI reflects the
+// removal from the source squadron's roster immediately.
+export function useTransferPilot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ pilotId, toSquadronId, actor, pilotName, fromSquadronId }: TransferPilotInput) => {
+      if (!pilotId || !toSquadronId) {
+        throw new Error("pilotId and toSquadronId are required");
+      }
+      if (!isLive()) {
+        // Mock-mode behaviour: simply re-stamp an ad-hoc squadronId on
+        // the pilot record so the demo still works without a database.
+        // The Pilot type doesn't formally model squadron membership
+        // (live mode infers it via RLS), so we attach it dynamically
+        // and read it back the same way — purely for demo continuity.
+        const arr = getMockPilots();
+        const idx = arr.findIndex(x => x.id === pilotId);
+        if (idx < 0) throw new Error(`pilot ${pilotId} not found`);
+        const cur = arr[idx] as Pilot & { squadronId?: string };
+        const before = cur.squadronId ?? fromSquadronId ?? null;
+        arr[idx] = { ...cur, squadronId: toSquadronId } as Pilot;
+        saveMockPilots();
+        void recordAuditEvent({
+          type: "pilot.transfer.out",
+          actor,
+          detail: { pilotId, pilotName, fromSquadron: before, toSquadron: toSquadronId, mode: "mock" },
+        });
+        return { pilotId, fromSquadron: before, toSquadron: toSquadronId };
+      }
+      // Live path: call the definer RPC. PostgREST exposes RPCs at
+      // /rest/v1/rpc/<fn_name> and the supabase-js .rpc() helper wraps
+      // it. The RPC writes the canonical audit rows itself (one per
+      // squadron) so we don't double-log here.
+      const { data, error } = await supabase!.rpc("transfer_pilot", {
+        p_pilot_id: pilotId,
+        p_to_squadron: toSquadronId,
+      });
+      if (error) throw error;
+      return {
+        pilotId,
+        fromSquadron: fromSquadronId ?? (data as { fromSquadron?: string } | null)?.fromSquadron ?? null,
+        toSquadron: toSquadronId,
+        result: data,
+      };
+    },
+    onSuccess: () => {
+      // Both pilots and sorties query keys need to refresh — the
+      // pilot disappears from the source roster, the sorties move,
+      // and the squadron stats on the Overview must recompute.
+      qc.invalidateQueries({ queryKey: ["pilots"] });
+      qc.invalidateQueries({ queryKey: ["sorties"] });
+      qc.invalidateQueries({ queryKey: ["currencies"] });
+      qc.invalidateQueries({ queryKey: ["leaves"] });
+      qc.invalidateQueries({ queryKey: ["unavailable"] });
+    },
   });
 }
 

@@ -70,8 +70,16 @@ export default function PilotsTable() {
   // daily snapshot the squadron's Ops PC publishes to xpc_squadron_snapshot.
   // The squadron's own commander/ops PC ignores this — they have the real
   // local data already. Squadron drill-down only.
+  // Task #26 — a squadron commander provisioned to oversee 2–3 squadrons
+  // is just as much a cross-squadron viewer as the wing/base tier (they
+  // only physically sit at one of those squadrons), so we also let
+  // multi-squadron sqn-cmdrs read the published snapshot for the squadron
+  // they're not at right now.
   const isCrossSqnViewer =
-    user.role === "commander" && (user.scope === "wing" || user.scope === "base" || user.scope === "hq");
+    user.role === "commander" && (
+      user.scope === "wing" || user.scope === "base" || user.scope === "hq" ||
+      (user.scope === "squadron" && (user.squadronIds ?? []).length > 1)
+    );
   const snapshotQ = useSquadronSnapshot(isCrossSqnViewer && focusedSqn ? focusedSqn.code : null);
   const snapshot = snapshotQ.data;
 

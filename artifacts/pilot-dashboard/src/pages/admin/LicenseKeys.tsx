@@ -144,6 +144,14 @@ export default function LicenseKeys() {
   // this commander will monitor. Stored on the commander record as
   // squadronIds so RLS / pickers can scope reads.
   const [setupMonitoredPcIds, setSetupMonitoredPcIds] = useState<string[]>([]);
+  // Task #26 — a single squadron commander can also be the local
+  // commander for 2-3 squadrons (a small unit shares one CO across
+  // multiple SQDNs). Toggle below switches the squadron-commander setup
+  // from a single-PC dropdown to the wing/base-style multi-PC checkbox
+  // list. When enabled, the commander gets all ticked squadron ids on
+  // their Supabase JWT so the Overview / Pilots Table multi-squadron
+  // filtering already shipped works for them too.
+  const [setupSqnCmdrMulti, setSetupSqnCmdrMulti] = useState<boolean>(false);
   // For squadron commander setup: the list of flight commander PCs inside
   // the picked ops squadron that this squadron commander is officially
   // linked to. Persisted to `rjaf.linkedFlightPcIds` so the Messages and
@@ -430,6 +438,7 @@ export default function LicenseKeys() {
     setSetupAccountPassword("");
     setSetupLinkedPcId("");
     setSetupMonitoredPcIds([]);
+    setSetupSqnCmdrMulti(false);
     setSetupLinkedFlightPcIds([]);
   }
   // True when the current license-key record assigned a role from the admin
@@ -469,11 +478,30 @@ export default function LicenseKeys() {
       // Squadron / flight commander must be bound to a registered ops PC
       // (chosen from the picker). Without this, cross-PC reads have no
       // squadron id to filter by and the commander would see nothing.
-      if ((setupRole === "squadron_commander" || setupRole === "flight_commander") && !setupLinkedPcId) {
+      // Multi-squadron mode (squadron commander only — task #26) replaces
+      // the single-PC requirement with the same "tick at least one"
+      // gate wing/base commanders use, since the JWT will then carry
+      // every ticked squadron id.
+      if (setupRole === "flight_commander" && !setupLinkedPcId) {
         setSetupErr(lang === "ar"
           ? "اختر جهاز سرب العمليات المرتبط بهذا القائد."
           : "Pick the ops squadron PC this commander is linked to.");
         return;
+      }
+      if (setupRole === "squadron_commander") {
+        if (setupSqnCmdrMulti) {
+          if (setupMonitoredPcIds.length === 0) {
+            setSetupErr(lang === "ar"
+              ? "اختر سرباً واحداً على الأقل لمراقبته."
+              : "Pick at least one squadron PC to monitor.");
+            return;
+          }
+        } else if (!setupLinkedPcId) {
+          setSetupErr(lang === "ar"
+            ? "اختر جهاز سرب العمليات المرتبط بهذا القائد."
+            : "Pick the ops squadron PC this commander is linked to.");
+          return;
+        }
       }
       // Wing / base commander must monitor at least one ops squadron PC.
       if ((setupRole === "wing_commander" || setupRole === "base_commander") && setupMonitoredPcIds.length === 0) {
@@ -540,11 +568,15 @@ export default function LicenseKeys() {
         const monitoredSquadronIds: string[] =
           setupRole === "wing_commander" || setupRole === "base_commander"
             ? [...setupMonitoredPcIds]
-            : (setupRole === "squadron_commander" || setupRole === "flight_commander")
-              ? (setupLinkedPcId ? [setupLinkedPcId] : [])
-              : setupRole === "hq_commander"
-                ? squadrons.map(s => s.id)
-                : [];
+            : setupRole === "squadron_commander"
+              ? (setupSqnCmdrMulti
+                  ? [...setupMonitoredPcIds]
+                  : (setupLinkedPcId ? [setupLinkedPcId] : []))
+              : setupRole === "flight_commander"
+                ? (setupLinkedPcId ? [setupLinkedPcId] : [])
+                : setupRole === "hq_commander"
+                  ? squadrons.map(s => s.id)
+                  : [];
         const create = await createCommander({
           username: accountUsername,
           displayName: commanderName || accountUsername,
@@ -1340,15 +1372,87 @@ export default function LicenseKeys() {
               {(setupRole === "squadron_commander" || setupRole === "flight_commander") && (
                 <div className="space-y-1.5 rounded-md border border-emerald-300/40 bg-emerald-50/60 dark:bg-emerald-950/20 p-3">
                   <label className="text-sm font-medium text-emerald-900 dark:text-emerald-200">
-                    {lang === "ar" ? "جهاز سرب العمليات المرتبط" : "Linked ops squadron PC"}
+                    {setupRole === "squadron_commander" && setupSqnCmdrMulti
+                      ? (lang === "ar" ? "أسراب العمليات التي يقودها (متعدد)" : "Ops squadrons commanded (multiple)")
+                      : (lang === "ar" ? "جهاز سرب العمليات المرتبط" : "Linked ops squadron PC")}
                     <span className="text-red-500 ms-1">*</span>
                   </label>
+                  {/* Task #26 — squadron commander only: opt into the
+                      multi-squadron picker so one CO can oversee 2–3
+                      SQDNs from a single PC. Flight commanders are still
+                      single-PC by design (a flight is contained in one
+                      squadron, so multi never applies). */}
+                  {setupRole === "squadron_commander" && (
+                    <label className="flex items-center gap-2 text-[11px] text-emerald-900 dark:text-emerald-200">
+                      <Checkbox
+                        checked={setupSqnCmdrMulti}
+                        onCheckedChange={(v) => {
+                          const next = !!v;
+                          setSetupSqnCmdrMulti(next);
+                          if (next) {
+                            // Migrating from single → multi: seed the
+                            // multi-list with whatever single PC was
+                            // already picked so the operator doesn't
+                            // lose their choice.
+                            if (setupLinkedPcId && !setupMonitoredPcIds.includes(setupLinkedPcId)) {
+                              setSetupMonitoredPcIds(prev => Array.from(new Set([...prev, setupLinkedPcId])));
+                            }
+                          }
+                        }}
+                        data-testid="checkbox-sqn-cmdr-multi"
+                      />
+                      <span>
+                        {lang === "ar"
+                          ? "هذا القائد يقود أكثر من سرب (2–3 أسراب)"
+                          : "This commander oversees multiple squadrons (2–3 SQDNs)"}
+                      </span>
+                    </label>
+                  )}
                   {opsSquadronPcs.length === 0 ? (
                     <p className="text-[11px] text-amber-700 dark:text-amber-300">
                       {lang === "ar"
                         ? "لا توجد أجهزة سرب عمليات مسجلة بعد. أعدّ جهاز سرب العمليات أولاً ثم أعد فتح هذه النافذة."
                         : "No ops squadron PCs are registered yet. Set up the ops squadron PC first, then re-open this dialog."}
                     </p>
+                  ) : setupRole === "squadron_commander" && setupSqnCmdrMulti ? (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pe-1">
+                      {opsSquadronPcs.map(pc => {
+                        const checked = setupMonitoredPcIds.includes(pc.id);
+                        return (
+                          <label
+                            key={pc.id}
+                            className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-emerald-100/40 dark:hover:bg-emerald-900/20 cursor-pointer"
+                            data-testid={`row-sqn-cmdr-multi-${pc.id}`}
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(v) => {
+                                setSetupMonitoredPcIds(prev =>
+                                  v
+                                    ? Array.from(new Set([...prev, pc.id]))
+                                    : prev.filter(x => x !== pc.id),
+                                );
+                                // Mirror the first-picked PC into the
+                                // squadron name/base inputs so the rest
+                                // of the form (which references a single
+                                // squadron label) shows something sensible.
+                                if (v && !setupSqnName) {
+                                  setSetupSqnName(pc.squadronName);
+                                  if (pc.base) setSetupSqnBase(pc.base);
+                                }
+                              }}
+                              data-testid={`checkbox-sqn-cmdr-multi-${pc.id}`}
+                            />
+                            <span className="text-sm flex-1">
+                              {pc.deviceName || pc.squadronName}
+                            </span>
+                            {pc.online && (
+                              <span className="text-[10px] text-emerald-600 dark:text-emerald-400">●</span>
+                            )}
+                          </label>
+                        );
+                      })}
+                    </div>
                   ) : (
                     <Select
                       value={setupLinkedPcId}
@@ -1374,9 +1478,13 @@ export default function LicenseKeys() {
                     </Select>
                   )}
                   <p className="text-[10px] text-emerald-900/70 dark:text-emerald-200/70">
-                    {lang === "ar"
-                      ? "هذا القائد سيرى بيانات هذا السرب فقط."
-                      : "This commander will only see data from the squadron picked here."}
+                    {setupRole === "squadron_commander" && setupSqnCmdrMulti
+                      ? (lang === "ar"
+                          ? `محدد: ${setupMonitoredPcIds.length} من ${opsSquadronPcs.length} — لوحة المقر تتيح التبديل بين الأسراب أو عرضها مجتمعة.`
+                          : `Selected: ${setupMonitoredPcIds.length} of ${opsSquadronPcs.length} — the HQ dashboard allows switching between squadrons or viewing them combined.`)
+                      : (lang === "ar"
+                          ? "هذا القائد سيرى بيانات هذا السرب فقط."
+                          : "This commander will only see data from the squadron picked here.")}
                   </p>
                 </div>
               )}

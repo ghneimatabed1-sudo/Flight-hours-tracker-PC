@@ -9,14 +9,18 @@ import {
   usePilotLinkStatus,
   useIssueLinkCode,
   useRevokePilotDevices,
+  useTransferPilot,
   type Pilot,
   type PilotLinkStatus,
 } from "@/lib/squadron-data";
+import { useDashSquadrons } from "@/lib/dash-pilots";
 import type { OtherAircraftEntry } from "@/lib/mock";
 import { computePilotTotals } from "@/lib/calculations";
 import { useAuth } from "@/lib/auth";
+import { TransferPilotDialog } from "./Roster";
 import {
   ArrowLeft,
+  ArrowRightLeft,
   Smartphone,
   KeyRound,
   Copy,
@@ -57,6 +61,11 @@ export default function PilotDetail() {
   const [, params] = useRoute<{ id: string }>("/pilot/:id");
   const { data: PILOTS } = usePilots();
   const { data: SORTIES } = useSorties();
+  const { user } = useAuth();
+  const transferPilot = useTransferPilot();
+  const allSquadrons = useDashSquadrons();
+  const [transferring, setTransferring] = useState(false);
+  const [transferErr, setTransferErr] = useState("");
   const p = PILOTS.find(x => x.id === params?.id);
   const totals = useMemo(
     () => (p ? computePilotTotals(p, SORTIES) : null),
@@ -65,11 +74,67 @@ export default function PilotDetail() {
   if (!p || !totals) return <div className="p-6">Pilot not found.</div>;
   const sorties = SORTIES.filter(s => s.pilotId === p.id || s.coPilotId === p.id).sort((a, b) => b.date.localeCompare(a.date));
 
+  // Same gate as Roster.tsx — only ops/deputy/admin/super_admin can move
+  // a pilot between squadrons. Squadron commanders are intentionally
+  // read-mostly for transfers per RJAF practice (transfer is an orderly
+  // room paperwork action). The current squadron is taken from the
+  // signed-in user's first squadron id (RLS guarantees they only see
+  // pilots from squadrons they're in).
+  const canTransfer =
+    !!user && (user.role === "ops" || user.role === "deputy" ||
+               user.role === "admin" || user.role === "super_admin");
+  const currentSquadronId = user?.squadronIds?.[0];
+  const actor = user?.username;
+
+  const onTransfer = async (toSquadronId: string) => {
+    setTransferErr("");
+    try {
+      await transferPilot.mutateAsync({
+        pilotId: p.id,
+        toSquadronId,
+        pilotName: p.name,
+        fromSquadronId: currentSquadronId,
+        actor,
+      });
+      setTransferring(false);
+    } catch (e) {
+      setTransferErr((e as Error).message || "Transfer failed");
+    }
+  };
+
   return (
     <div>
       <PageHead title={`${rankOf(p)} ${p.name}`} subtitle={`${p.arabicName} · ${t("militaryNumber")}: ${p.militaryNumber || p.id} · ${p.unit}`} actions={
-        <Link href="/roster" className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-secondary inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" />Back</Link>
+        <div className="flex items-center gap-2">
+          {canTransfer && (
+            <button
+              onClick={() => { setTransferErr(""); setTransferring(true); }}
+              className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-secondary inline-flex items-center gap-1"
+              data-testid="button-transfer-pilot-detail"
+            >
+              <ArrowRightLeft className="h-3.5 w-3.5" />
+              Transfer
+            </button>
+          )}
+          <Link href="/roster" className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-secondary inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" />Back</Link>
+        </div>
       } />
+
+      {transferErr && (
+        <div className="mb-3 px-3 py-2 rounded-md bg-rose-500/15 border border-rose-500/40 text-xs text-rose-200" data-testid="text-transfer-error">
+          {transferErr}
+        </div>
+      )}
+      {transferring && (
+        <TransferPilotDialog
+          pilot={p}
+          fromSquadronId={currentSquadronId}
+          squadrons={allSquadrons}
+          onCancel={() => setTransferring(false)}
+          onConfirm={onTransfer}
+          busy={transferPilot.isPending}
+        />
+      )}
 
       {/* System ID — used to identify the pilot when revoking their mobile
           device link. Surfaced here so the operator can copy it without
