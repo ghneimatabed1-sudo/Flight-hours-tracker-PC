@@ -1,3 +1,14 @@
+// Canonical totals contract — kept byte-for-byte equivalent to the
+// dashboard's `computePilotTotals` (artifacts/pilot-dashboard/src/lib/
+// calculations.ts). A pilot looking at his phone must see the SAME
+// lifetime / monthly / half-year numbers as his squadron commander
+// sees on the PC. If you change any rule below — captain credit, NVG
+// independence, opening-hours folding, half-year bucket totals, or the
+// 1-decimal rounding shape — change the dashboard equivalent in the
+// same commit AND extend the parity fixtures in
+// `artifacts/pilot-dashboard/src/lib/calculations.parity.test.ts`.
+// See `.local/reports/audit-2026-04-27/M-mobile-dashboard-totals.md`
+// for the diagnosis that locked this contract in (Audit M, G-C2 fix).
 import type { PilotProfile, SortieRecord } from "./types";
 
 export interface HalfYearBreakdown {
@@ -114,7 +125,14 @@ export function computeTotals(
         bucket.nvg += nvg;
         bucket.sim += sim;
         bucket.captain += cap;
-        bucket.total += day + night;
+        // Audit M (Round 3) — half-year `total` previously summed only
+        // Day + Night, so the pilot's H1/H2 cards on the phone hid NVG
+        // and Sim hours and never matched the squadron commander's
+        // dashboard. Now mirrors the full bucket so totals reconcile
+        // with `artifacts/pilot-dashboard/src/lib/calculations.ts`
+        // byte-for-byte. See `.local/reports/audit-2026-04-27/
+        // M-mobile-dashboard-totals.md`.
+        bucket.total += day + night + nvg + sim;
         bucket.sorties += 1;
       }
     }
@@ -133,21 +151,30 @@ export function computeTotals(
   // Grand Total *does* include NVG + Sim so it matches the squadron PC
   // dashboard exactly. Canonical formula, kept identical on both surfaces.
   const grandTotal = flyingTotal + totalNvg + totalSim;
+  // Audit M (Round 3) — `monthTotal` previously summed only Day + Night,
+  // hiding NVG/Sim hours flown this month from the pilot. Dashboard's
+  // `monthTotal` includes all four categories; mobile now matches.
+  const monthTotal = mDay + mNight + mNvg + mSim;
+  // Audit M (Round 3) — round to 1 decimal at the return surface to
+  // match the dashboard's `+x.toFixed(1)` shape exactly so a JSON.stringify
+  // diff between the two engines yields zero bytes for the projected
+  // common keys. `h1` / `h2` stay raw (mirrors dashboard).
+  const r1 = (v: number) => +v.toFixed(1);
   return {
-    totalDay,
-    totalNight,
-    totalNvg,
-    totalSim,
-    totalCaptain,
-    totalSecondPilot: Math.max(0, flyingTotal - totalCaptain),
-    grandTotal,
+    totalDay: r1(totalDay),
+    totalNight: r1(totalNight),
+    totalNvg: r1(totalNvg),
+    totalSim: r1(totalSim),
+    totalCaptain: r1(totalCaptain),
+    totalSecondPilot: r1(Math.max(0, flyingTotal - totalCaptain)),
+    grandTotal: r1(grandTotal),
     totalSorties: sorties.length,
-    monthDay: mDay,
-    monthNight: mNight,
-    monthNvg: mNvg,
-    monthSim: mSim,
-    monthCaptain: mCap,
-    monthTotal: mDay + mNight,
+    monthDay: r1(mDay),
+    monthNight: r1(mNight),
+    monthNvg: r1(mNvg),
+    monthSim: r1(mSim),
+    monthCaptain: r1(mCap),
+    monthTotal: r1(monthTotal),
     sortiesThisMonth: mCount,
     h1,
     h2,

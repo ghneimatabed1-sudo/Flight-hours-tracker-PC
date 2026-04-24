@@ -1,8 +1,19 @@
-// Mirrors the clean totals logic used by the RJAF mobile app
-// (artifacts/pilot-mobile/lib/calculations.ts) so both apps report the
-// same numbers for the same pilot. Totals = opening balance + sum of
-// sorties the pilot appeared in (as P1 OR P2). Captain hours credit
-// only when the pilot was P1 on the sortie.
+// CANONICAL totals contract — `computePilotTotals` is the source of
+// truth for every per-pilot total in this product. The RJAF mobile app
+// (artifacts/pilot-mobile/lib/calculations.ts → `computeTotals`) is
+// kept byte-for-byte equivalent for the projected common keys so a
+// pilot's phone never disagrees with the squadron commander's PC.
+// Totals = opening balance + sum of sorties the pilot appeared in
+// (as P1 OR P2). Captain hours credit only when the pilot was the
+// captain on the sortie (per-seat flag, with legacy P1=captain
+// fallback for pre-rebuild rows). NVG is a fully independent column
+// and never folds into Night. Half-year `bucket.total` and the
+// monthly `monthTotal` both include Day + Night + NVG + Sim.
+// If you change any rule here, change the mobile equivalent in the
+// same commit AND extend the parity fixtures in
+// `artifacts/pilot-dashboard/src/lib/calculations.parity.test.ts`.
+// See `.local/reports/audit-2026-04-27/M-mobile-dashboard-totals.md`
+// for the diagnosis that locked this contract in (Audit M, G-C2 fix).
 import type { Pilot, Sortie } from "./mock";
 
 export interface HalfYearBreakdown {

@@ -159,3 +159,35 @@ test("M15 yearHours = h1Hours + h2Hours", () => {
   const t = computeTotals(profile(), [a, b]);
   assert.equal(t.yearHours, t.h1Hours + t.h2Hours);
 });
+
+// ─── Audit M (Round 3) — G-C2 fix lock-in ───────────────────────
+// These pin the canonical contract that mobile and dashboard agree
+// on `monthTotal`, the half-year `bucket.total`, and 1-decimal
+// rounding. Drift here breaks parity with the dashboard. See
+// `.local/reports/audit-2026-04-27/M-mobile-dashboard-totals.md`.
+
+test("M16 monthTotal includes Day + Night + NVG + Sim (matches dashboard)", () => {
+  const s = sortie({ date: inThisMonth, day: 1, night: 1, nvg: 1, sim: 1, total: 4 });
+  const t = computeTotals(profile(), [s]);
+  assert.equal(t.monthTotal, 4);
+});
+
+test("M17 half-year bucket.total includes Day + Night + NVG + Sim", () => {
+  const s = sortie({ id: "H1", date: thisYearH1, day: 1, night: 1, nvg: 1, sim: 1, total: 4 });
+  const t = computeTotals(profile(), [s]);
+  assert.equal(t.h1.total, 4);
+  assert.equal(t.h1Hours, 4);
+  assert.equal(t.yearHours, 4);
+});
+
+test("M18 outputs are rounded to 1 decimal at the return surface", () => {
+  // 0.1 + 0.2 famously yields 0.30000000000000004 in IEEE-754. The
+  // mobile engine must round to 0.3 so JSON.stringify against the
+  // dashboard projection is byte-equal.
+  const a = sortie({ id: "A", day: 0.1, total: 0.1 });
+  const b = sortie({ id: "B", day: 0.2, total: 0.2 });
+  const t = computeTotals(profile(), [a, b]);
+  assert.equal(t.totalDay, 0.3);
+  assert.equal(t.monthDay, 0.3);
+  assert.equal(t.grandTotal, 0.3);
+});
