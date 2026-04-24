@@ -37,6 +37,68 @@ import {
 
 export type { Pilot, Sortie } from "./mock";
 
+// Client-side mirrors of the CHECK constraints + normalize trigger added
+// in migration 0045_round4_fixes.sql. Catching these in the form layer
+// produces a friendly error before the network round-trip and keeps the
+// 400 from PostgREST out of the user's face. The server is still the
+// source of truth — if these helpers ever fall behind, the DB will reject
+// the row and the existing toast handler surfaces the Postgres message.
+const MIN_DATE = new Date("1990-01-01T00:00:00Z");
+function maxDate(): Date {
+  const d = new Date();
+  d.setUTCFullYear(d.getUTCFullYear() + 1);
+  return d;
+}
+function trimNorm(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  const s = String(v).replace(/\s+/g, " ").trim();
+  return s.length === 0 ? null : s;
+}
+function assertLen(field: string, v: unknown, min: number, max: number, required: boolean) {
+  const s = trimNorm(v);
+  if (s === null) {
+    if (required) throw new Error(`${field} is required.`);
+    return;
+  }
+  if (s.length < min) throw new Error(`${field} must be at least ${min} character${min === 1 ? "" : "s"}.`);
+  if (s.length > max) throw new Error(`${field} must be ${max} characters or fewer.`);
+}
+function assertDate(field: string, v: unknown) {
+  if (v === null || v === undefined || v === "") throw new Error(`${field} is required.`);
+  const d = typeof v === "string" || typeof v === "number" ? new Date(v) : v as Date;
+  if (!(d instanceof Date) || isNaN(d.getTime())) throw new Error(`${field} is not a valid date.`);
+  if (d < MIN_DATE || d > maxDate()) {
+    throw new Error(`${field} must be between 1990-01-01 and one year from today.`);
+  }
+}
+export function assertValidPilotInput(p: Partial<Pilot> & { id?: string }) {
+  assertLen("Pilot ID", p.id, 1, 60, true);
+  assertLen("Rank", p.rank, 1, 30, true);
+  assertLen("Name", p.name, 1, 200, true);
+  assertLen("Arabic name", p.arabicName, 1, 200, false);
+  assertLen("Unit", p.unit, 1, 50, false);
+  assertLen("Phone", p.phone, 1, 30, false);
+  assertLen("English rank", p.rankEn, 1, 30, false);
+}
+export function assertValidSortieInput(s: {
+  pilotId?: string | null; coPilotId?: string | null; acType?: string | null;
+  acNumber?: string | null; sortieType?: string | null; sortieName?: string | null;
+  date?: string | Date | null;
+}) {
+  assertLen("Pilot ID", s.pilotId, 1, 60, true);
+  assertLen("Co-pilot ID", s.coPilotId, 1, 60, false);
+  assertLen("Aircraft type", s.acType, 1, 30, false);
+  assertLen("Aircraft number", s.acNumber, 1, 30, false);
+  assertLen("Sortie type", s.sortieType, 1, 50, false);
+  assertLen("Sortie name", s.sortieName, 1, 200, false);
+  assertDate("Sortie date", s.date);
+}
+export function assertValidNotamInput(n: { notamNo?: string | null; body?: string | null; postedOn?: string | Date | null }) {
+  assertLen("NOTAM number", n.notamNo, 1, 100, true);
+  assertLen("NOTAM body", n.body, 1, 8000, true);
+  assertDate("Posted-on date", n.postedOn);
+}
+
 // Shared 3-level priority used by alerts, notams and private messages.
 // DB stores 'normal' | 'medium' | 'urgent'; UI labels them Normal / High /
 // Very High and colours them green / yellow / red.
@@ -204,6 +266,7 @@ export function useUpdatePilot() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (p: Pilot) => {
+      assertValidPilotInput(p);
       if (!isLive()) {
         const arr = getMockPilots();
         const idx = arr.findIndex(x => x.id === p.id);
@@ -300,6 +363,7 @@ export function useCreatePilot() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (p: Pilot) => {
+      assertValidPilotInput(p);
       if (!isLive()) {
         const arr = getMockPilots();
         if (arr.some(x => x.id === p.id)) {
@@ -789,6 +853,10 @@ export function useCreateSortie() {
       // Backwards-compat: callers may pass a bare sortie OR { sortie, actor }.
       const s = ("sortie" in input ? input.sortie : input) as Omit<Sortie, "id">;
       const actor = "sortie" in input ? input.actor : undefined;
+      assertValidSortieInput({
+        pilotId: s.pilotId, coPilotId: s.coPilotId, acType: s.acType,
+        acNumber: s.acNumber, sortieType: s.sortieType, sortieName: s.name, date: s.date,
+      });
       const frozenOverride = enforceMonthlyClose([s.date]);
       if (!isLive()) {
         const created = { ...s, id: "S" + Date.now() } as Sortie;
@@ -892,6 +960,10 @@ export function useUpdateSortie() {
   return useMutation({
     mutationFn: async (input: { sortie: Sortie; actor?: string; reason?: string }) => {
       const s = input.sortie;
+      assertValidSortieInput({
+        pilotId: s.pilotId, coPilotId: s.coPilotId, acType: s.acType,
+        acNumber: s.acNumber, sortieType: s.sortieType, sortieName: s.name, date: s.date,
+      });
       // Honour the original sortie's date for the close check too — if a
       // historical row is being moved into another month, BOTH the old and
       // the new month must be open. Without this, an operator could shift
@@ -1356,6 +1428,7 @@ export function useCreateNotam() {
       const priority: ItemPriority = (typeof input === "string" ? "normal" : (input.priority ?? "normal"));
       const id = "N" + Date.now();
       const date = new Date().toISOString().slice(0, 10);
+      assertValidNotamInput({ notamNo: id, body: text, postedOn: date });
       if (!isLive()) {
         const row: NotamRow = { id, date, text, priority };
         getMockNotams().unshift(row);
@@ -1386,6 +1459,7 @@ export function useUpdateNotam() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (n: NotamRow) => {
+      assertValidNotamInput({ notamNo: n.id, body: n.text, postedOn: n.date });
       if (!isLive()) {
         const arr = getMockNotams();
         const idx = arr.findIndex(x => x.id === n.id);
