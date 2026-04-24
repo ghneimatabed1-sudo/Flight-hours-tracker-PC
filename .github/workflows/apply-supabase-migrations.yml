@@ -13,6 +13,18 @@ name: Apply Supabase migrations to production
 #                           database write access on the project ref
 #                           below. Generate at
 #                           https://supabase.com/dashboard/account/tokens
+#
+# Optional repository secret (Task #192):
+#   MIGRATION_ALERT_WEBHOOK_URL — incoming webhook for the operator's
+#                                 alert channel. Both Slack and Discord
+#                                 incoming-webhook URLs work as-is; the
+#                                 notify step posts a payload carrying
+#                                 both `text` (Slack) and `content`
+#                                 (Discord) so either side picks it up
+#                                 and the other ignores the extra key.
+#                                 If the secret is unset, the notify
+#                                 step degrades to a workflow warning
+#                                 instead of failing the run.
 
 on:
   push:
@@ -37,6 +49,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Sanity-check secret
+        id: sanity
         run: |
           if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
             echo "::error::SUPABASE_ACCESS_TOKEN repo secret is not set."
@@ -45,6 +58,7 @@ jobs:
           fi
 
       - name: Apply pending migrations
+        id: apply
         run: |
           set -euo pipefail
 
@@ -138,6 +152,7 @@ jobs:
           echo "all migrations up to date."
 
       - name: Reload PostgREST schema cache
+        id: reload
         run: |
           curl -sS -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
             -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
@@ -157,7 +172,101 @@ jobs:
       # every TEST_T171_* row in finally{} so a partial failure cannot
       # litter prod with dangling test pairs.
       - name: Regression — cross-PC pair redemption (Task #171/180)
+        id: regression
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           PROJECT_REF: ${{ env.PROJECT_REF }}
         run: node .local/scripts/regression-task-171-redeem-pair.mjs
+
+      # Task #192 — fast-path operator alert for ordinary step failures.
+      #
+      # This step is the in-job notifier: it fires within seconds when
+      # any earlier step ends in failure, cancelled, or timed_out. It
+      # is intentionally NOT the only safety net — GitHub may stop
+      # in-job steps from running when the whole workflow is cancelled
+      # or hits a run-level timeout, so a separate workflow_run-
+      # triggered alert in `migration-completion-alert.yml` posts the
+      # authoritative message after the run finishes (covering run-
+      # level cancellations and timeouts the always() guard cannot
+      # reach). The two alerts are tagged "(in-job)" vs "(post-run)"
+      # so the on-call operator can recognise a duplicate as the same
+      # incident rather than two separate failures.
+      #
+      # The failing-step lookup walks the step IDs in execution order
+      # and reports the first one whose conclusion is not 'success'
+      # or 'skipped'; that matches GitHub's own "first failure stops
+      # the job" semantics so the operator sees the real culprit, not
+      # a downstream cascade.
+      - name: Notify operators on failure
+        if: ${{ always() && !success() }}
+        env:
+          WEBHOOK_URL: ${{ secrets.MIGRATION_ALERT_WEBHOOK_URL }}
+          SANITY_OUTCOME: ${{ steps.sanity.conclusion }}
+          APPLY_OUTCOME: ${{ steps.apply.conclusion }}
+          RELOAD_OUTCOME: ${{ steps.reload.conclusion }}
+          REGRESSION_OUTCOME: ${{ steps.regression.conclusion }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -u
+
+          if [ -z "${WEBHOOK_URL:-}" ]; then
+            echo "::warning::MIGRATION_ALERT_WEBHOOK_URL secret is not set; skipping operator notification."
+            echo "::warning::Add it under Settings → Secrets and variables → Actions to enable Slack/Discord alerts."
+            exit 0
+          fi
+
+          # Walk steps in execution order and report the first one that
+          # didn't succeed. Empty/skipped IDs (e.g. checkout, which has
+          # no id) are intentionally not in the list — they don't run
+          # any project code and aren't useful to surface. We treat
+          # failure, cancelled, and timed_out as actionable — that
+          # matches every non-success terminal step conclusion GitHub
+          # produces today.
+          failing_step="unknown step"
+          for pair in \
+            "Sanity-check secret|${SANITY_OUTCOME:-}" \
+            "Apply pending migrations|${APPLY_OUTCOME:-}" \
+            "Reload PostgREST schema cache|${RELOAD_OUTCOME:-}" \
+            "Regression — cross-PC pair redemption|${REGRESSION_OUTCOME:-}"
+          do
+            name="${pair%%|*}"
+            outcome="${pair##*|}"
+            case "$outcome" in
+              failure|cancelled|timed_out)
+                failing_step="$name"
+                break
+                ;;
+            esac
+          done
+
+          short_sha="${COMMIT_SHA:0:7}"
+          text=$(printf ':rotating_light: Apply Supabase migrations — %s (in-job)\nRepo: %s\nFailing step: %s\nSHA: %s\nRun: %s' \
+            "$JOB_STATUS" "$REPO" "$failing_step" "$short_sha" "$RUN_URL")
+
+          # Slack incoming-webhooks read the `text` key; Discord
+          # incoming-webhooks read `content`. Sending both means a
+          # single secret value works for either platform without
+          # branching on URL shape.
+          payload=$(node -e '
+            const text = process.argv[1];
+            process.stdout.write(JSON.stringify({ text, content: text }));
+          ' "$text")
+
+          http_code=$(curl -sS -o /tmp/notify-resp.txt -w "%{http_code}" \
+            -X POST -H "Content-Type: application/json" \
+            -d "$payload" "$WEBHOOK_URL")
+
+          if [ "$http_code" != "200" ] && [ "$http_code" != "204" ]; then
+            echo "::warning::Operator notification webhook returned HTTP $http_code"
+            cat /tmp/notify-resp.txt || true
+            # Don't fail the job for a notification delivery problem —
+            # the underlying migration/regression failure is what the
+            # operator needs to act on, and masking it with a notify
+            # error would hurt triage.
+            exit 0
+          fi
+
+          echo "operator notification posted (HTTP $http_code)."

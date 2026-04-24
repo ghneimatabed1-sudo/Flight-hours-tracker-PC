@@ -1,0 +1,139 @@
+name: Migration completion alert
+
+# Task #192 — authoritative post-run notifier for the
+# Apply Supabase migrations workflow.
+#
+# Why a separate workflow?
+#   The in-job notifier inside `apply-supabase-migrations.yml` only
+#   fires when an earlier step in the same job ends in failure /
+#   cancelled / timed_out AND the runner stays alive long enough to
+#   reach the always() guard. When the entire workflow run is
+#   cancelled by an operator (or by `concurrency: cancel-in-progress`)
+#   or hits a run-level timeout, GitHub may stop the runner before
+#   the in-job step executes — which is exactly the silent-regression
+#   case Task #192 was opened to fix.
+#
+#   workflow_run with type `completed` is the only trigger GitHub
+#   guarantees fires for every terminal conclusion of the upstream
+#   run, regardless of how the run ended. This job filters on
+#   `conclusion != 'success'` so a clean run produces zero
+#   notifications, and reads the failing step from the Jobs API so
+#   the operator sees the same "which step blew up" detail the in-
+#   job notifier prints.
+#
+# Required repository secret:
+#   MIGRATION_ALERT_WEBHOOK_URL — same secret consumed by the in-job
+#                                 notifier; works for either Slack or
+#                                 Discord incoming-webhook URLs.
+#
+# Permissions:
+#   Needs `actions: read` to call the Jobs API for the upstream run.
+
+on:
+  workflow_run:
+    workflows: ["Apply Supabase migrations to production"]
+    types: [completed]
+
+jobs:
+  alert:
+    if: ${{ github.event.workflow_run.conclusion != 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: Post operator alert
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WEBHOOK_URL: ${{ secrets.MIGRATION_ALERT_WEBHOOK_URL }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -u
+
+          if [ -z "${WEBHOOK_URL:-}" ]; then
+            echo "::warning::MIGRATION_ALERT_WEBHOOK_URL secret is not set; skipping post-run notification."
+            echo "::warning::Add it under Settings → Secrets and variables → Actions to enable Slack/Discord alerts."
+            exit 0
+          fi
+
+          # Pull every job + step for the upstream run so we can name
+          # the first non-success step. Paginate up to 3 pages (300
+          # jobs) defensively — the migrations workflow only has one
+          # job today, but matrix expansion later shouldn't break this.
+          jobs_payload="{\"jobs\":[]}"
+          page=1
+          while [ "$page" -le 3 ]; do
+            page_resp=$(curl -sS \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100&page=$page")
+            count=$(node -e "
+              try {
+                const r = JSON.parse(process.argv[1]);
+                console.log((r.jobs || []).length);
+              } catch (e) { console.log(0); }
+            " "$page_resp")
+            jobs_payload=$(node -e "
+              const acc = JSON.parse(process.argv[1]);
+              const next = JSON.parse(process.argv[2]);
+              acc.jobs = (acc.jobs || []).concat(next.jobs || []);
+              process.stdout.write(JSON.stringify(acc));
+            " "$jobs_payload" "$page_resp")
+            if [ "$count" -lt 100 ]; then
+              break
+            fi
+            page=$((page + 1))
+          done
+
+          # Find the first step with a non-success conclusion. The
+          # GitHub Jobs API documents these terminal step conclusions:
+          # success, failure, cancelled, skipped, timed_out,
+          # action_required, neutral. We surface every non-success
+          # conclusion except `skipped` and `neutral`, which never
+          # represent a regression.
+          failing_step=$(node -e "
+            const r = JSON.parse(process.argv[1]);
+            const bad = new Set(['failure','cancelled','timed_out','action_required']);
+            for (const j of (r.jobs || [])) {
+              for (const s of (j.steps || [])) {
+                if (bad.has(s.conclusion)) {
+                  process.stdout.write(s.name);
+                  process.exit(0);
+                }
+              }
+            }
+            // No step-level non-success — likely a run-level
+            // cancellation that killed the runner before the first
+            // step recorded a conclusion.
+            process.stdout.write('run-level ' + (process.argv[2] || 'non-success'));
+          " "$jobs_payload" "$CONCLUSION")
+
+          short_sha="${HEAD_SHA:0:7}"
+          text=$(printf ':rotating_light: Apply Supabase migrations — %s (post-run)\nRepo: %s\nFailing step: %s\nSHA: %s\nRun: %s' \
+            "$CONCLUSION" "$REPO" "$failing_step" "$short_sha" "$RUN_URL")
+
+          # Slack reads `text`, Discord reads `content`. Sending both
+          # keeps this workflow webhook-flavor-agnostic.
+          payload=$(node -e '
+            const text = process.argv[1];
+            process.stdout.write(JSON.stringify({ text, content: text }));
+          ' "$text")
+
+          http_code=$(curl -sS -o /tmp/notify-resp.txt -w "%{http_code}" \
+            -X POST -H "Content-Type: application/json" \
+            -d "$payload" "$WEBHOOK_URL")
+
+          if [ "$http_code" != "200" ] && [ "$http_code" != "204" ]; then
+            echo "::warning::Operator notification webhook returned HTTP $http_code"
+            cat /tmp/notify-resp.txt || true
+            # Don't fail this job — there's nothing actionable for the
+            # operator beyond what the upstream run already shows in
+            # the Actions tab.
+            exit 0
+          fi
+
+          echo "post-run operator notification posted (HTTP $http_code)."
