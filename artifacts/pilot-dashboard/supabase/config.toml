@@ -1,0 +1,65 @@
+# Supabase project configuration.
+#
+# This file pins per-function `verify_jwt` settings so that every deploy
+# (CLI, GitHub Actions, manual `supabase functions deploy <name>`) lands
+# with the intended authorization model. Without this file, a deploy that
+# omits or fat-fingers `--no-verify-jwt` can silently flip a privileged
+# function from "JWT required" to "open to the internet" — exactly the
+# defect Audit A (audit-2026-04-25) caught on `provision-commander`.
+#
+# Two buckets:
+#   verify_jwt = true   → Supabase rejects requests without a valid user
+#                         JWT before the function ever runs. The function
+#                         itself ALSO inspects claims for fine-grained
+#                         authorization (defence in depth).
+#   verify_jwt = false  → Bootstrap / login functions that must accept
+#                         requests from a browser that does not yet have
+#                         a Supabase session. These compensate with their
+#                         own gates (pre-shared `x-provisioning-secret`,
+#                         password+TOTP challenge, etc.) and must NEVER
+#                         be used to perform privileged auth.users writes
+#                         without their own gate.
+
+project_id = "nklrdhfsbevckovqqkah"
+
+# ── Authenticated functions (JWT REQUIRED) ───────────────────────────────
+# Every privileged write path lives here. Adding a new function that does
+# auth.users / app_metadata mutations? It belongs in this list.
+
+[functions.provision-commander]
+verify_jwt = true
+
+[functions.provision-user]
+verify_jwt = true
+
+[functions.heal-claims]
+verify_jwt = true
+
+[functions.link-pilot-device]
+verify_jwt = true
+
+[functions.manage-reminder-schedule]
+verify_jwt = true
+
+[functions.notify-alert]
+verify_jwt = true
+
+[functions.notify-currency-expiry]
+verify_jwt = true
+
+[functions.notify-notam]
+verify_jwt = true
+
+# ── Bootstrap / login functions (NO JWT — see notes above) ───────────────
+# These are the only functions that may be deployed without JWT
+# verification. Each one MUST enforce its own gate (shared secret, password
+# challenge, etc.) before doing anything privileged.
+
+[functions.register-license]
+verify_jwt = false
+
+[functions.super-admin-2fa]
+verify_jwt = false
+
+[functions.validate-license]
+verify_jwt = false

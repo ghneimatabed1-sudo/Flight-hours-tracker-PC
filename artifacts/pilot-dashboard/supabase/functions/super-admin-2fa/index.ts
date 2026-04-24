@@ -55,6 +55,13 @@ const corsHeaders = {
 
 const ISSUER = "RJAF Pilot Dashboard";
 const ALLOWED_USERNAME = "admin";          // only principal this function serves
+// Synthetic email used to register the super admin in auth.users. The local
+// part is the username and the domain is hard-coded to a non-routable RJAF
+// host so the address can never collide with a real squadron user (those
+// live under <sqnSlug>.rjaf.local). Stable across deploys — DO NOT change
+// without a migration: the row is keyed by email.
+const SUPER_ADMIN_EMAIL_DOMAIN = "hq.rjaf.local";
+const SUPER_ADMIN_DISPLAY_NAME = "System Owner";
 const LOCKOUT_THRESHOLD = 5;                // bad TOTP codes → TOTP lockout
 const LOCKOUT_MS = 5 * 60_000;
 const PW_FAIL_THRESHOLD = 10;               // bad passwords in window → pw lockout
@@ -217,6 +224,96 @@ function otpauthURL(secret: string, account: string): string {
     secret, issuer: ISSUER, algorithm: "SHA1", digits: "6", period: "30",
   });
   return `otpauth://totp/${label}?${params.toString()}`;
+}
+
+// ── Super-admin Supabase auth user ────────────────────────────────────────
+// The super admin signs into the dashboard via password + TOTP; that gives
+// us proof of identity but does NOT, by itself, produce a Supabase JWT. We
+// need a JWT so that JWT-gated edge functions like `provision-commander`
+// can actually be called by the legitimate caller (this is the D-00 issue
+// from Audit A — the deployed `provision-commander` accepted unauth'd
+// requests precisely because the legitimate flow had no JWT to present).
+//
+// Strategy: after a successful 2FA verify, we ensure an `auth.users` row
+// exists for the super admin with `app_metadata.role = "admin"` and
+// `tier = "hq"`, with a deterministic password derived from the
+// server-side CHALLENGE_SECRET. The deterministic password means:
+//   * Every PC the same admin signs into can use the SAME credentials
+//     (no per-PC drift).
+//   * The credentials NEVER need to be persisted server-side beyond what
+//     `auth.users` already holds; the function regenerates them on demand.
+//   * If CHALLENGE_SECRET is rotated, the next 2FA verify silently
+//     re-syncs the password (updateUserById is idempotent).
+//
+// The derived password is returned to the client over HTTPS in the verify
+// response so the browser can immediately call
+// `supabase.auth.signInWithPassword` and obtain a real JWT. The password
+// derivation key (CHALLENGE_SECRET) is server-only — clients cannot
+// re-derive it themselves.
+async function deriveSupabasePassword(secret: string, username: string): Promise<string> {
+  return await hmacSha256Hex(secret, `supabase-pw|${username}`);
+}
+
+interface SupabaseAdminClient {
+  auth: {
+    admin: {
+      // deno-lint-ignore no-explicit-any
+      listUsers: (opts?: any) => Promise<any>;
+      // deno-lint-ignore no-explicit-any
+      createUser: (opts: any) => Promise<any>;
+      // deno-lint-ignore no-explicit-any
+      updateUserById: (id: string, opts: any) => Promise<any>;
+    };
+  };
+}
+
+interface SuperAdminCreds { email: string; password: string }
+
+async function ensureSuperAdminAuthUser(
+  admin: SupabaseAdminClient,
+  challengeSecret: string,
+  username: string,
+): Promise<SuperAdminCreds | null> {
+  const email = `${username}@${SUPER_ADMIN_EMAIL_DOMAIN}`;
+  const password = await deriveSupabasePassword(challengeSecret, username);
+  const appMeta = {
+    squadron_id: null,
+    role: "admin",
+    tier: "hq",
+    squadron_number: null,
+    pc_id: `HQ:${SUPER_ADMIN_DISPLAY_NAME}`,
+  };
+  const userMeta = { displayName: SUPER_ADMIN_DISPLAY_NAME };
+
+  // Find any existing row by email. listUsers paginates at 1000 which is
+  // far above the cap for this deployment (one super admin) so a single
+  // page is sufficient.
+  let userId: string | null = null;
+  try {
+    const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    // deno-lint-ignore no-explicit-any
+    const match = list?.users?.find((u: any) => (u.email ?? "").toLowerCase() === email);
+    if (match) userId = match.id;
+  } catch (_) { /* best effort — fall through to createUser */ }
+
+  if (userId) {
+    const { error } = await admin.auth.admin.updateUserById(userId, {
+      password,
+      app_metadata: appMeta,
+      user_metadata: userMeta,
+    });
+    if (error) return null;
+  } else {
+    const { data: created, error } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      app_metadata: appMeta,
+      user_metadata: userMeta,
+    });
+    if (error || !created?.user) return null;
+  }
+  return { email, password };
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────
@@ -486,12 +583,35 @@ Deno.serve(async (req: Request) => {
       actor: username, detail: {},
     }).then(() => {}, () => {});
 
+    // Mint / refresh the super admin's Supabase auth user so the browser
+    // can sign in and obtain a real JWT. Without this, the dashboard's
+    // "Create commander" flow (which calls the JWT-gated
+    // `provision-commander` function) would 401 the legitimate caller.
+    // Returning null here is treated as "skip silently" — the verify still
+    // succeeds and the user can reach the dashboard, but JWT-gated
+    // features will fail until the auth.users row can be repaired.
+    let supabaseEmail: string | undefined;
+    let supabasePassword: string | undefined;
+    const creds = await ensureSuperAdminAuthUser(admin, challengeSecret, username);
+    if (creds) {
+      supabaseEmail = creds.email;
+      supabasePassword = creds.password;
+    } else {
+      await admin.from("audit_log").insert({
+        squadron_id: null,
+        type: "super_admin.auth_user.ensure_failed",
+        actor: username,
+        detail: {},
+      }).then(() => {}, () => {});
+    }
+
     return reply({
       ok: true,
       enrolled: true,
       ...(recoveryCodes ? { recoveryCodes } : {}),
       ...(recoveryMatched ? { usedRecoveryCode: true } : {}),
       ...(typeof recoveryRemaining === "number" ? { recoveryRemaining } : {}),
+      ...(supabaseEmail && supabasePassword ? { supabaseEmail, supabasePassword } : {}),
     });
   }
 

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
-import { supabase, supabaseConfigured, validateLicenseRemote, recordAuditEvent, getSupabaseCreds, resyncSupabaseCreds } from "./supabase";
+import { supabase, supabaseConfigured, validateLicenseRemote, recordAuditEvent, getSupabaseCreds, storeSupabaseCreds, resyncSupabaseCreds } from "./supabase";
 import { lookupLicenseKey } from "./license-registry";
 import { SUPER_ADMIN } from "./mockData";
 import { findCommanderByUsername, verifyCommanderPassword } from "./commander-store";
@@ -446,8 +446,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!supabaseConfigured || !supabase) return;
     if (!state.user) return;
-    if (state.user.role === "super_admin") return;
     let cancelled = false;
+    // Super admin uses a separate silent-restore path: their auth.users
+    // row is provisioned by `super-admin-2fa` (not `provision-commander`),
+    // and the resync fallback below would call provision-commander, which
+    // is JWT-gated and would 401 the unauth'd resync attempt. Instead, the
+    // super admin gets one shot: live Supabase session, or cached
+    // deterministic creds from the last 2FA verify. Anything else forces a
+    // full re-auth via 2FA.
+    const isSuperAdmin = state.user.role === "super_admin";
     void (async () => {
       const username = state.user!.username;
       const logFailure = (reason: string) => {
@@ -489,12 +496,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (!sbErr) signedIn = true;
           else lastErr = sbErr.message;
         }
-        if (!signedIn) {
+        if (!signedIn && !isSuperAdmin) {
           // Cached creds either missing or stale. Re-provision via the
           // server (rotates the password and returns the new one) and
           // try once more before giving up. This covers the case where
           // the user has signed in successfully on another PC since,
           // or where a Super Admin reset their auth user.
+          //
+          // Only attempted for non-super-admin: provision-commander is now
+          // JWT-gated, and an unauth'd resync attempt would 401. Super
+          // admin instead falls through to forceSignOut so the operator
+          // is steered back through the 2FA path that mints a fresh JWT.
           const role = state.user?.role === "ops" ? "ops" : "commander";
           const sqn = state.squadron ? { number: state.squadron.number, name: state.squadron.name, base: state.squadron.base } : undefined;
           const resync = await resyncSupabaseCreds(username, role, sqn);
@@ -912,6 +924,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               actor: hqUser.username,
               detail: {},
             });
+          }
+          // Sign the super admin into Supabase using the credentials minted
+          // by the edge function. Without this step the dashboard has no
+          // Supabase JWT, and JWT-gated functions like `provision-commander`
+          // (which is now correctly enforcing JWT verification — see Audit
+          // A defect D-A-01) would 401 the legitimate "Create commander"
+          // call. Failure here is non-fatal: the dashboard still renders,
+          // but the operator will see a clear error if they try to use a
+          // JWT-gated feature, and the next 2FA verify will retry.
+          const sbEmail = typeof data.supabaseEmail === "string" ? data.supabaseEmail : "";
+          const sbPassword = typeof data.supabasePassword === "string" ? data.supabasePassword : "";
+          if (sbEmail && sbPassword) {
+            try {
+              const { error: sbErr } = await supabase.auth.signInWithPassword({
+                email: sbEmail,
+                password: sbPassword,
+              });
+              if (sbErr) {
+                console.warn("[super-admin signInWithPassword]", sbErr.message);
+                void recordAuditEvent({
+                  type: "super_admin.supabase_signin.failed",
+                  actor: hqUser.username,
+                  detail: { reason: sbErr.message },
+                });
+              } else {
+                // Cache for silent re-auth on the next dashboard launch.
+                storeSupabaseCreds(hqUser.username, sbEmail, sbPassword);
+              }
+            } catch (e: unknown) {
+              const msg = e instanceof Error ? e.message : String(e);
+              console.warn("[super-admin signInWithPassword] threw", msg);
+            }
           }
           localStorage.removeItem("rjaf.fails");
           localStorage.removeItem("rjaf.lockUntil");
