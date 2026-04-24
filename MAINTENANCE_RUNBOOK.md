@@ -107,6 +107,9 @@ ops log. If anything is off, raise a ticket with IT.
 | Confirm Supabase backups are happening | monthly | Supabase project dashboard → Backups |
 | Walk the per-role smoke test above | quarterly | — |
 | Replace TOTP secret if a super-admin device is lost | as needed | Settings → Super Admin → Reset 2FA |
+| Run the **Backup Restore Drill** (R-A) | annually | see below |
+| Run **Secret Rotation** (R-E) | every 12 months | see below |
+| Review **runtime_errors digest** in audit log | weekly | Audit Log → filter `ops.runtime_errors.digest` |
 
 ---
 
@@ -127,18 +130,41 @@ The audit log is **append-only**. No one — not even the super
 admin — can edit or delete an entry through the dashboard. If a
 row looks wrong, raise a ticket; do not try to "correct" it.
 
+Useful audit `type` filters introduced by Task #265:
+
+| `type` | What it means |
+| ------ | ------------- |
+| `ops.audit_log.size`           | Daily size snapshot of the audit log table. |
+| `ops.audit_log.alert`          | Audit log breached the size threshold (5M rows / 2 GiB). Investigate. |
+| `ops.outbox.alert`             | A cross-PC outbox row has been retried >8 times without success. |
+| `ops.runtime_errors.digest`    | Daily roll-up of UI crashes from the dashboard + mobile apps. |
+| `ops.schema.drift`             | Live Postgres schema diverged from the previous day's snapshot. |
+| `ops.backup.completed`         | Daily ping confirming the backup window elapsed. |
+| `monthly.report.close`         | A squadron month was closed. |
+| `monthly.report.reopen`        | A closed squadron month was re-opened by super_admin. |
+
 ---
 
 ## What the cron jobs do
 
-The system runs three scheduled jobs in Supabase (see
-migration 0043_pgcron_long_term.sql):
+The system runs the following scheduled jobs in Supabase. All are
+declared in migration files; do not register or unschedule them by
+hand.
 
 | Job | When | What it does |
 | --- | ---- | ------------ |
-| `xpc_pair_links_sweep` | nightly | Revokes pair links that have been inactive for 90 days; expires links past their `expires_at`. |
-| Currency expiry notifier | daily | Pushes a notification to any pilot whose Day / Night / NVG / IRT / Medical currency is within 30 days of expiry. |
-| Reminder dispatcher | hourly | Fires any one-shot or recurring reminder created by ops officers. |
+| `xpc_pair_links_sweep_weekly` | Sun 03:30 UTC | Revokes pair links idle >90 days, expires time-bound cross-squadron links. |
+| `xpc-purge-archived-messages` | daily 03:15 UTC | Deletes read+archived xpc_messages older than 3 months. |
+| `xpc-outbox-process` (Task #265 Part C) | every minute | Drains the cross-PC outbox; exponential backoff on failure. |
+| `xpc-outbox-monitor` (Task #265 Part C) | hourly :15 | Logs `ops.outbox.alert` for any outbox row stuck >8 attempts. |
+| `pilot-purge-dead-link-codes` | daily 03:20 UTC | Deletes pilot link codes 7 days past expiry. |
+| `audit-log-archive-sweep` (Task #265 Part B) | daily 03:25 UTC | Moves audit_log rows older than 2 years into `audit_log_archive`. |
+| `audit-log-size-monitor` (Task #265 Part B) | daily 03:40 UTC | Logs row count + bytes; alerts if over threshold. |
+| `runtime-errors-digest` (Task #265 Part F) | daily 04:05 UTC | Aggregates last 24h of UI crashes into a single audit row. |
+| `runtime-errors-purge` (Task #265 Part F) | daily 04:10 UTC | Deletes runtime_errors rows older than 90 days. |
+| `schema-drift-check-daily` (Task #265 Part H) | daily 03:50 UTC | Snapshots the public schema; alerts on drift from yesterday. |
+| `ops-backup-audit-ping` | daily 04:00 UTC | Emits an `ops.backup.completed` row so operators can confirm the backup window elapsed. |
+| `xpc-purge-archived-messages-weekly` | Sun 03:35 UTC | Belt-and-braces weekly run of the daily message purge. |
 
 To confirm a job ran, the super admin can check
 `cron.job_run_details` in the Supabase SQL editor. Most operators
@@ -249,11 +275,488 @@ If the Supabase project itself is lost:
 
 ---
 
+# 15-Year Hardening Runbooks (Task #265)
+
+These nine sections were added to give the operator confidence the
+system can run unattended for the full 15-year service life. They
+are the canonical reference; do not improvise.
+
+---
+
+## R-A · Backup Restore Drill (run annually)
+
+**Why.** Supabase makes daily managed backups, but a backup that
+has never been restored is a backup that does not exist. Run this
+drill once per calendar year and file the result in the ops log.
+
+**Pre-flight.**
+- You will need the super_admin Supabase login.
+- You will need ~30 minutes of uninterrupted attention.
+- Pick a low-traffic window (Friday afternoon Jordan time is
+  ideal — pilots are off rotation, weekend is starting).
+
+**Step 1 — Confirm the project is on Daily Backups.**
+1. Sign in to Supabase → project `nklrdhfsbevckovqqkah`.
+2. Navigate to **Database → Backups**.
+3. Confirm the "Daily Backups" plan tile shows "Enabled". If not,
+   enable it before proceeding (Pro plan or higher required).
+4. Note the retention window. As of 2026-04-27 the retention is
+   **7 days** at the Pro tier; the operator should consider Team
+   plan (28 days) if the squadron count exceeds 10.
+
+**Step 2 — Take a snapshot of canonical row counts.**
+Run this in SQL Editor against the live project. Save the output
+to the drill file (`/ops/drill-YYYY-MM-DD.txt`).
+```sql
+select 'pilots' as tbl, count(*) from public.pilots
+union all select 'sorties', count(*) from public.sorties
+union all select 'currencies', count(*) from public.currencies
+union all select 'audit_log', count(*) from public.audit_log
+union all select 'xpc_messages', count(*) from public.xpc_messages
+union all select 'xpc_registry', count(*) from public.xpc_registry
+union all select 'xpc_user_pcs', count(*) from public.xpc_user_pcs
+union all select '_migration_ledger', count(*) from public._migration_ledger;
+```
+Pick a representative pilot and capture their lifetime totals via
+the dashboard's Pilot → Hours summary card. Save the screenshot.
+
+**Step 3 — Spin up a shadow project and restore into it.**
+1. In the Supabase dashboard, create a brand-new project named
+   `nklrdhfsbevckovqqkah-restore-test-YYYY-MM-DD`. Pick the same
+   region as production (`eu-central-1` for the canonical
+   project).
+2. Wait for the project to provision (2–3 minutes).
+3. From the production project's Database → Backups screen, choose
+   the most recent daily backup.
+4. Click **Restore to project…** and pick the shadow project.
+5. The restore takes 5–20 minutes depending on database size.
+
+**Step 4 — Verify on the shadow project.**
+Run the exact same row-count query against the shadow project. The
+counts must match the production snapshot from Step 2 (small
+deltas in `audit_log` are OK — those rows accumulated between
+snapshot time and backup time).
+
+Spot-check the canonical pilot's lifetime totals: open the shadow
+project's SQL editor and run the calculation by hand:
+```sql
+-- Replace <pilot_id> with the captured pilot's id.
+select sum((data->>'totalHours')::numeric) as lifetime_hours
+  from public.sorties
+ where pilot_id = '<pilot_id>';
+```
+Confirm the result equals what the dashboard showed in Step 2.
+
+**Step 5 — Tear down.**
+1. In the shadow project: **Settings → General → Pause Project**
+   (cheaper than delete during a 24h cooling-off window) OR
+   delete it outright once verified.
+2. File the drill: row counts (before + after), pilot total
+   reconciliation, restore wall-clock time, who ran it, any
+   surprises. Filed under `/ops/drill-YYYY-MM-DD.txt` and a
+   paper copy in the safe.
+
+**Acceptance.** The drill is considered passed only when the
+shadow project's row counts and the pilot reconciliation match
+production within the expected delta.
+
+---
+
+## R-B · Audit Log Retention
+
+**Policy (effective 2026-04-27, migration 0056):**
+- Hot rows (last 2 years) live in `public.audit_log`.
+- Older rows are moved to `public.audit_log_archive` by the
+  daily cron `audit-log-archive-sweep` at 03:25 UTC.
+- A second daily cron `audit-log-size-monitor` at 03:40 UTC
+  inserts an `ops.audit_log.size` row tracking row count and
+  bytes, and an additional `ops.audit_log.alert` row if the live
+  log exceeds **5,000,000 rows** OR **2 GiB** on disk.
+
+**To check the trend** (super admin → SQL editor):
+```sql
+select detail->>'rows' as rows, detail->>'bytes' as bytes,
+       occurred_at::date as day
+  from public.audit_log
+ where type = 'ops.audit_log.size'
+ order by day desc limit 30;
+```
+
+**To force an out-of-band sweep** (e.g. operator just imported a
+huge legacy log):
+```sql
+select public.audit_log_archive_sweep();
+```
+Returns the count of rows moved.
+
+**To read archived rows** (super admin only):
+```sql
+select * from public.audit_log_archive
+ where squadron_id = '<id>' and occurred_at >= '2024-01-01'
+ order by occurred_at;
+```
+The archive table is RLS-restricted to `super_admin`. Commanders
+and ops officers cannot see it from the dashboard.
+
+**Adjusting the thresholds** (rare). Edit migration 0056's
+`v_threshold_rows` / `v_threshold_bytes` constants and write a
+follow-up migration that re-`create or replace`s the
+`audit_log_size_monitor()` function. Do **not** edit migration
+0056 in place.
+
+---
+
+## R-C · Outbox Operations
+
+**What it is.** A transactional outbox table
+`public.xpc_outbox` plus a per-minute processor cron
+(`xpc-outbox-process`) that delivers cross-PC events. Senders
+that route through `public.xpc_outbox_send(target, payload)`
+get at-least-once delivery with exponential backoff (max
+backoff 256 s, attempts capped at 8 before alerting).
+
+**Currently wired targets:** `xpc_message`. Future event types
+(pair create, share publish) will be added by extending
+`_xpc_outbox_dispatch_one` in a follow-up migration.
+
+**To send a cross-PC message via the outbox** (recommended for
+any new code path; the existing Edge Function `xpc-messages` will
+gradually migrate):
+```sql
+select public.xpc_outbox_send(
+  'xpc_message',
+  jsonb_build_object(
+    'from_pc_id', 'NO. 8 SQDN',
+    'to_pc_id',   'HQ',
+    'from_user',  'commander.eyad',
+    'subject',    'today's sortie pack',
+    'body',       'attached',
+    'priority',   'normal'
+  )
+);
+```
+
+**To inspect the outbox** (super admin only):
+```sql
+select id, target, attempts, sent_at, last_error,
+       created_at::time, last_attempted_at::time
+  from public.xpc_outbox
+ order by created_at desc limit 50;
+```
+
+**Stuck rows.** A row with `attempts > 8 AND sent_at IS NULL`
+will trigger an `ops.outbox.alert` audit row every hour until
+it is resolved.
+
+**To replay a stuck row**:
+```sql
+update public.xpc_outbox
+   set attempts = 0, last_error = null, last_attempted_at = null
+ where id = '<outbox-id>';
+```
+The next minute-tick will retry it.
+
+**To abandon a stuck row** (after manual investigation):
+```sql
+-- write an audit_log entry FIRST so the trail is complete
+insert into public.audit_log (type, actor, detail)
+  values ('ops.outbox.abandon', 'super_admin',
+          jsonb_build_object('outbox_id', '<id>', 'reason', '...'));
+delete from public.xpc_outbox where id = '<id>';
+```
+
+---
+
+## R-D · Closed-Month Procedure
+
+**What it is.** A `public.monthly_report_close(squadron_id,
+year_month, closed_at, closed_by, reason)` table plus a
+trigger on `public.sorties` that rejects INSERT/UPDATE/DELETE
+on rows whose date falls within a closed month for that
+squadron. Trigger bypasses for the `super_admin` role only.
+
+**To close a month** (commander or super_admin for that
+squadron):
+```sql
+select public.monthly_report_close_close(
+  '<squadron_id>',
+  '2026-04',
+  'monthly report Forms 1-4 published 2026-05-02'
+);
+```
+Writes a `monthly.report.close` audit row.
+
+**To re-open a closed month** (super_admin only — requires a
+≥5-character justification):
+```sql
+select public.monthly_report_close_reopen(
+  '<squadron_id>',
+  '2026-04',
+  'discovered missing sortie 2026-04-29; re-opening to add'
+);
+```
+Writes a `monthly.report.reopen` audit row.
+
+**Operator workflow** (recommended monthly cadence):
+1. Generate the monthly report (Reports → Monthly Wizard).
+2. Confirm the PDF/Excel matches expectations.
+3. From the Reports page → **Lock Month** button → confirm.
+   (The dashboard UI calls `monthly_report_close_close`.)
+4. From this point any direct DB attempt to mutate that month's
+   sorties — accidental UI bug, stray import, malicious actor —
+   is rejected with `SQLSTATE P0001`.
+
+**If the dashboard shows "Month is closed" when the operator
+expected it to be open:** check `public.monthly_report_close`
+for that squadron + month and re-open via the RPC above.
+
+---
+
+## R-E · Secret Rotation
+
+Rotate every 12 months OR immediately if a credential is
+suspected leaked. The order matters — do NOT rotate the
+service-role key without first updating downstream consumers,
+or you will break the GitHub Actions migration workflow.
+
+| Secret | Where it lives | Who needs the new value | Rotation order |
+| ------ | -------------- | ----------------------- | -------------- |
+| `SUPABASE_SERVICE_ROLE_KEY` | GitHub repo secrets, Edge Function secrets, server env | GitHub Actions, all Edge Functions, server scripts | **(1)** rotate in Supabase, **(2)** update GitHub secret, **(3)** update each Edge Function secret, **(4)** restart any pinned local scripts |
+| `SUPABASE_ANON_KEY` (also published as `EXPO_PUBLIC_SUPABASE_ANON_KEY` and `VITE_SUPABASE_ANON_KEY`) | Public client builds (mobile + dashboard installer) | Build pipeline | Rotate in Supabase → re-run dashboard installer build → re-run mobile EAS build → publish new versions to operators. Old anon key is rejected immediately, so old clients stop syncing on next refresh. |
+| `SUPABASE_ACCESS_TOKEN` (sbp_…) | GitHub repo secrets, local migration scripts | GitHub Actions only | Generate a new personal access token in Supabase → update GitHub secret → revoke the old token. Local scripts must update their env. |
+| `SUPABASE_PROJECT_REF` | Constant; only changes if the project is replaced | n/a | n/a — almost never rotated |
+| Super-admin TOTP seed | `public.super_admin_2fa` table (seed) + a printed recovery sheet | The single super-admin person | Reset via Settings → Super Admin → Reset 2FA. Generates a new QR + 10 recovery codes. Print and store the recovery codes in two physically separate locked safes. |
+| Edge Function secrets (e.g. `EXPO_PUSH_ACCESS_TOKEN`, `RESEND_API_KEY`) | Supabase project → Edge Functions → Settings → Secrets | None — the function reads from process.env | Rotate at the source provider → update Supabase secret. Edge Functions auto-pick up new env on next cold start (≤60 s). |
+| GitHub fine-grained PAT for `apply-migrations.yml` | GitHub repo secrets | n/a | Generate new PAT with minimum scopes (`contents: read`, `secrets: read`); update repo secret; revoke old. |
+
+**Procedure for the service-role key rotation (worst case — be
+careful):**
+1. In Supabase → Settings → API → click **"Reset"** next to the
+   service role key. Copy the new value to a temporary secure
+   note.
+2. Open GitHub repo → Settings → Secrets → Actions →
+   `SUPABASE_SERVICE_ROLE_KEY` → Update.
+3. For each Edge Function: Functions → `<name>` → Settings →
+   Secrets → set `SUPABASE_SERVICE_ROLE_KEY` to the new value.
+4. Restart any local desktop scripts that hold the old value.
+5. Trigger a no-op migration workflow run (Actions → Apply
+   Migrations → "Run workflow") to confirm the GitHub side picks
+   up the new value cleanly.
+6. Wait 24h, then explicitly invalidate the old key in Supabase
+   (Settings → API → "Revoke previous").
+
+**Acceptance.** A subsequent Migration Workflow run is green AND
+all Edge Functions respond to a synthetic ping AND the dashboard
++ mobile app continue to sign in successfully.
+
+---
+
+## R-F · Runtime Error Triage
+
+**Where errors come from.** Both the dashboard (React/Vite SPA)
+and the mobile app (Expo React Native) catch runtime
+exceptions and POST them to `public.runtime_errors` via the
+`runtime_error_capture` RPC. The reporter dedupes identical
+errors to once per minute and caps each session to 30 reports.
+
+**Daily cadence.**
+- Cron `runtime-errors-digest` runs at 04:05 UTC and writes
+  one `ops.runtime_errors.digest` audit row summarising the
+  prior 24h: total count, count by app, count by error name,
+  and the top 10 distinct messages.
+- Cron `runtime-errors-purge` runs at 04:10 UTC and deletes
+  rows older than 90 days. Long-term aggregates live in the
+  digest audit rows (which themselves age out via the
+  audit_log retention policy after 2 years).
+
+**To read the digest** (super admin → Audit Log → filter
+type=`ops.runtime_errors.digest`). The detail jsonb has
+exactly the structure needed to triage at a glance.
+
+**To drill into a specific error** (super admin / commander
+for own squadron):
+```sql
+select occurred_at, app, page, name, message, role,
+       detail->>'componentStack' as stack
+  from public.runtime_errors
+ where message ilike '%TypeError%'
+   and occurred_at >= now() - interval '24 hours'
+ order by occurred_at desc limit 50;
+```
+
+**When to act.**
+- Daily count <5 → noise. Skim the digest, move on.
+- Daily count 5–30 → check the top messages; if the same
+  error appears across multiple PCs, file a defect ticket.
+- Daily count >30 → emergency. Either an update broke the
+  app for everyone OR something on the cluster is misbehaving.
+  Compare the previous day's digest; if the spike correlates
+  with a recent dashboard installer rollout, suspect that
+  build.
+
+**Suppressing a known-noisy error** is **not supported** by
+design — every spurious row makes the digest noisier and
+forces operators to look. Fix the root cause; do not silence
+the report.
+
+---
+
+## R-G · Cost Alerts
+
+The Supabase project lives on the **Pro** plan as of
+2026-04-27. Expected baseline monthly spend at current scale
+(1 squadron, ~18 pilots, ~0 sorties/day, 13 PCs paired):
+**~$25/month** (Pro plan flat fee).
+
+When the squadron count grows to 20:
+- Expected database size: **~10 GB** (pro tier ceiling 8 GB
+  → upgrade to Team Plan at $599/month before that point).
+- Expected daily Edge Function invocations: **~50 k**
+  (well within the included 2M).
+- Expected daily auth signin: **~1 k** (well within 50 k MAU).
+- Expected egress: **<5 GB/day**.
+
+**Alerts to configure** in Supabase Dashboard → Project Settings
+→ Billing & Usage → Spend Cap & Alerts:
+1. **50% of monthly spend** — informational, email only.
+2. **80% of monthly spend** — warning, email + Slack channel.
+3. **100% of monthly spend** — hard cap; project becomes
+   read-only until the operator approves an overage. The
+   operator MUST decide consciously to allow overages.
+
+**If an alert fires:**
+1. Check the Usage page for the metric breakdown.
+2. The most likely culprits are (in descending probability):
+   - Runaway sortie inserts (a buggy import script).
+   - Audit log growth past the cron's ability to keep up.
+   - Edge Function infinite loops (e.g. a webhook retrying).
+3. For each, a corresponding mitigation:
+   - Sortie inserts: audit `INSERT public.sorties` traffic
+     in `audit_log`; suspend the offending PC via license-key
+     revocation.
+   - Audit log: run `select public.audit_log_archive_sweep();`
+     manually; consider tightening the threshold in 0056.
+   - Edge Functions: pause the offending function via the
+     dashboard until the bug is fixed.
+
+**Acceptance.** All three thresholds are configured in the
+Supabase project and emails route to a monitored mailbox.
+
+---
+
+## R-H · Schema Drift
+
+**Why two layers exist.**
+- The **per-migration sha256 ledger** (`_migration_ledger`,
+  migration 0044) catches the case where someone *edits* a
+  migration file after it was applied. The GitHub Actions
+  workflow fails fast on hash mismatch.
+- The **daily schema snapshot** (Task #265 Part H, migration
+  0060) catches the inverse: someone runs ad-hoc SQL in the
+  Supabase SQL editor that mutates the live schema without
+  a corresponding migration file.
+
+**How the daily check works.**
+1. Cron `schema-drift-check-daily` runs at 03:50 UTC.
+2. `schema_fingerprint_public()` builds a deterministic
+   text dump of every table, column, index, foreign key,
+   trigger, and RLS policy in the `public` schema.
+3. The fingerprint is hashed (sha256). The hash is compared
+   against yesterday's snapshot.
+4. On mismatch, an `ops.schema.drift` audit row is written
+   and today's snapshot is recorded.
+5. Snapshots older than 60 entries (60 days) are purged.
+
+**What to do when drift is detected.**
+1. Filter the Audit Log for `ops.schema.drift`. The detail
+   jsonb has the previous and current sha256 plus the
+   `previous_taken_at` timestamp.
+2. Run `select fingerprint from public._schema_snapshots
+   order by taken_at desc limit 2;` and diff the two
+   fingerprints (in your editor of choice — they are
+   line-oriented).
+3. The diff tells you exactly what changed. Common causes:
+   - Someone added a column via SQL editor → write a forward
+     migration that creates the same column with `if not exists`,
+     then update the ledger sha256 to match the live state.
+   - Someone added an index → write a forward migration with
+     `create index if not exists`, then ledger update.
+   - Someone created or dropped a policy → URGENT, this is
+     likely a security regression. Investigate audit_log
+     within the previous 24h for who has the access token.
+4. Always remediate via a forward-only migration. Never
+   "fix" the drift by mutating the live schema again.
+
+---
+
+## R-I · Postgres Major-Version Upgrade Rehearsal
+
+Supabase periodically requires major-version upgrades
+(15 → 16, 16 → 17, …). The procedure below is the
+**rehearsal** template; do NOT actually upgrade prod
+without a successful rehearsal first.
+
+**Pre-flight.**
+- Confirm via Supabase Dashboard → Project Settings →
+  Infrastructure which major version production is on,
+  and which version Supabase is offering as the upgrade
+  target.
+- Read the Supabase migration notes for that target
+  version (link from the dashboard banner). Note any
+  extension compatibility flags (pg_cron, pgcrypto,
+  pgsodium have historically been the gotchas).
+
+**Step 1 — Take a fresh backup.**
+Supabase will take an automatic backup before the upgrade
+begins, but trigger a manual one anyway from the Backups
+page. Note the snapshot id.
+
+**Step 2 — Restore that backup into a shadow project.**
+Same procedure as **R-A**, steps 3–4. The shadow project
+will be on the OLD Postgres version.
+
+**Step 3 — Trigger the upgrade on the SHADOW project only.**
+1. Shadow project → Settings → Infrastructure → "Upgrade
+   to Postgres N+1".
+2. Wait. The upgrade typically takes 5–15 minutes; the
+   shadow project is unavailable for the duration.
+
+**Step 4 — Smoke-test the shadow project against a
+production-like workload.**
+- Sign in via the dashboard pointed at the shadow URL.
+- Walk the per-role smoke test list above.
+- Confirm every cron job shows in `cron.job` after the
+  upgrade (extensions sometimes need re-enabling).
+- Run the calculation test suite from a developer
+  workstation pointed at the shadow.
+
+**Step 5 — Document any deltas.**
+Anything that misbehaved on the shadow project will
+misbehave on production. Write the remediation steps
+into `R-I addendum YYYY-MM-DD.md` BEFORE doing the
+production upgrade.
+
+**Step 6 — Tear down the shadow project.**
+
+**Step 7 — Schedule the production upgrade for a low-
+traffic window.** Friday 18:00 Jordan time is ideal.
+
+**Step 8 — Production upgrade.** Same UI flow as Step 3,
+but on the production project. Have the rehearsal addendum
+on screen the whole time.
+
+**Acceptance.** Rehearsal procedure is on file and has
+been walked at least once. The actual upgrade procedure
+is performed only after the rehearsal completes cleanly.
+
+---
+
 ## Versions of record
 
 | Component | Current version | Notes |
 | --------- | --------------- | ----- |
 | Desktop installer | v1.1.109 | Windows-signed, auto-update enabled |
-| Mobile app        | v1.1.x   | TestFlight + Play Store internal track |
-| Database migrations | 0001..0044 (44 files; ledger has 47 rows — see defect D2) |
+| Mobile app        | v1.0.10  | TestFlight + Play Store internal track |
+| Database migrations | 0001..0060 (the ledger should match the on-disk file list; the GitHub Actions workflow fails any push that diverges) |
 | Edge functions | 11 (heal-claims, link-pilot-device, manage-reminder-schedule, notify-alert, notify-currency-expiry, notify-notam, provision-commander, provision-user, register-license, super-admin-2fa, validate-license) |
+| Hardening migrations (Task #265) | 0056 audit_log archive · 0057 xpc_outbox · 0058 monthly_close_immutability · 0059 runtime_errors · 0060 schema_drift_check |

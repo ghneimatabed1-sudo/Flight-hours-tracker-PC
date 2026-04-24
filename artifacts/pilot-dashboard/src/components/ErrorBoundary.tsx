@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { reportRuntimeError } from "@/lib/runtimeErrorReporter";
 
 /**
  * Top-level crash net. Without this, ANY runtime exception in a child
@@ -31,6 +32,14 @@ export default class ErrorBoundary extends Component<{ children: ReactNode }, St
     try {
       console.error("[ErrorBoundary]", error, info);
     } catch { /* ignore */ }
+    // Task #265 Part F — surface React component crashes centrally so
+    // super_admin can see what broke without walking every page.
+    try {
+      reportRuntimeError(error, {
+        source: "errorBoundary",
+        componentStack: info.componentStack ?? undefined,
+      });
+    } catch { /* reporter must never throw */ }
   }
 
   componentDidMount() {

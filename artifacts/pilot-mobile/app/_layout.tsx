@@ -19,6 +19,7 @@ import WingsIntro from "@/components/WingsIntro";
 import { AppDataProvider } from "@/lib/data";
 import { I18nProvider } from "@/lib/i18n";
 import { configureNotificationHandler } from "@/lib/notifications";
+import { reportRuntimeError } from "@/lib/runtimeErrorReporter";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -113,7 +114,16 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <ErrorBoundary>
+      <ErrorBoundary
+        onError={(error, stack) => {
+          // Task #265 Part F — surface mobile crashes centrally so the
+          // super_admin can triage them from the Audit Log page.
+          reportRuntimeError(error, {
+            source: "errorBoundary",
+            componentStack: stack,
+          });
+        }}
+      >
         <QueryClientProvider client={queryClient}>
           <GestureHandlerRootView>
             <KeyboardProvider>

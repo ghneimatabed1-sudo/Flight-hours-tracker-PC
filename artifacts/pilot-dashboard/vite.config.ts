@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import crypto from "crypto";
+import { readFileSync } from "fs";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
 // CSP plugin: in DEV, removes the meta tag entirely so Vite's HMR client
@@ -70,8 +71,22 @@ if (!basePath) {
   );
 }
 
+// Read package.json version once at config time so the runtime error
+// reporter (Task #265 Part F) can tag rows with the build version.
+const pkgVersion = (() => {
+  try {
+    const pkg = JSON.parse(
+      readFileSync(path.resolve(import.meta.dirname, "package.json"), "utf8"),
+    ) as { version?: string };
+    return pkg.version ?? "unknown";
+  } catch { return "unknown"; }
+})();
+
 export default defineConfig({
   base: basePath,
+  define: {
+    __APP_VERSION__: JSON.stringify(pkgVersion),
+  },
   plugins: [
     react(),
     tailwindcss(),

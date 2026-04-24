@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import { startOutboxWorker } from "./lib/offlineQueue";
+import { reportRuntimeError } from "./lib/runtimeErrorReporter";
 
 // Visible diagnostic overlay shown if anything synchronous below throws or
 // if the bundle errors during evaluation. Without this the user sees a
@@ -73,11 +74,16 @@ window.addEventListener("error", (e) => {
   // Post-mount: discrete toast so the user knows something went wrong
   // even if the page itself didn't unmount.
   showPostMountError(e.error ?? e.message);
+  // Task #265 Part F — fire-and-forget POST to public.runtime_errors
+  // so super_admin can see crashes from the Audit Log page even when
+  // no operator manually walks the screen.
+  reportRuntimeError(e.error ?? e.message, { source: "window.error" });
 });
 window.addEventListener("unhandledrejection", (e) => {
   const root = document.getElementById("root");
   if (root && root.children.length === 0) { showFatal(e.reason); return; }
   showPostMountError(e.reason);
+  reportRuntimeError(e.reason, { source: "unhandledrejection" });
 });
 
 // ─────────────────────────────────────────────────────────────────────
