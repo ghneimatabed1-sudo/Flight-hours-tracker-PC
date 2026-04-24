@@ -346,6 +346,34 @@ jobs:
           PROJECT_REF: ${{ env.PROJECT_REF }}
         run: node artifacts/pilot-dashboard/supabase/tests/test-squadron-rename-xpc-sync.mjs
 
+      # Audit N (Task #262) — regression for the schedule-chain
+      # submit-state-machine on xpc_schedule_shares.
+      #
+      # Migration 0056_schedchain_align_current_tier.sql widens the
+      # CHECK on xpc_schedule_shares.current_tier so the canonical
+      # initial state `submitted` (and every other lifecycle value
+      # the sibling status_check already enumerates) inserts cleanly.
+      # Audit G hit this constraint head-on and could not bootstrap a
+      # cross-PC schedule share. Without this regression a future
+      # tightening of the constraint would silently re-block the
+      # legitimate happy path and the next audit would surface it the
+      # same way Audit G did — as an unactionable CHECK failure deep
+      # inside a multi-step driver.
+      #
+      # The script provisions an AUD_FIX_N_<run>-* universe (xpc_registry
+      # rows, one schedule share), inserts the `current_tier='submitted'`
+      # row, walks every lifecycle transition end-to-end, and tears
+      # down every AUD_FIX_N_* row in finally{} (the test runs as a
+      # single DO block so any failure rolls the whole transaction
+      # back). A post-run probe also re-asserts no AUD_FIX_N_* rows
+      # leaked into prod.
+      - name: Regression — schedule chain submit walk (Task #262 / Audit N)
+        id: schedchain_regression
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ env.PROJECT_REF }}
+        run: node artifacts/pilot-dashboard/supabase/tests/test-schedchain-submit.mjs
+
       # Task #192 — fast-path operator alert for ordinary step failures.
       #
       # This step is the in-job notifier: it fires within seconds when
@@ -377,6 +405,7 @@ jobs:
           REGRESSION_OUTCOME: ${{ steps.regression.conclusion }}
           REVOKE_REGRESSION_OUTCOME: ${{ steps.revoke_regression.conclusion }}
           RENAME_REGRESSION_OUTCOME: ${{ steps.rename_regression.conclusion }}
+          SCHEDCHAIN_REGRESSION_OUTCOME: ${{ steps.schedchain_regression.conclusion }}
           JOB_STATUS: ${{ job.status }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT_SHA: ${{ github.sha }}
@@ -406,7 +435,8 @@ jobs:
             "Sweep — pair-code OUT/column collisions|${OUT_COLLISION_SWEEP_OUTCOME:-}" \
             "Regression — cross-PC pair redemption|${REGRESSION_OUTCOME:-}" \
             "Regression — pair revocation RPCs|${REVOKE_REGRESSION_OUTCOME:-}" \
-            "Regression — squadron rename xpc sync|${RENAME_REGRESSION_OUTCOME:-}"
+            "Regression — squadron rename xpc sync|${RENAME_REGRESSION_OUTCOME:-}" \
+            "Regression — schedule chain submit walk|${SCHEDCHAIN_REGRESSION_OUTCOME:-}"
           do
             name="${pair%%|*}"
             outcome="${pair##*|}"
