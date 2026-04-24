@@ -235,8 +235,8 @@ function otpauthURL(secret: string, account: string): string {
 // requests precisely because the legitimate flow had no JWT to present).
 //
 // Strategy: after a successful 2FA verify, we ensure an `auth.users` row
-// exists for the super admin with `app_metadata.role = "admin"` and
-// `tier = "hq"`, with a deterministic password derived from the
+// exists for the super admin with `app_metadata.role = "super_admin"`
+// and `tier = "hq"`, with a deterministic password derived from the
 // server-side CHALLENGE_SECRET. The deterministic password means:
 //   * Every PC the same admin signs into can use the SAME credentials
 //     (no per-PC drift).
@@ -276,9 +276,18 @@ async function ensureSuperAdminAuthUser(
 ): Promise<SuperAdminCreds | null> {
   const email = `${username}@${SUPER_ADMIN_EMAIL_DOMAIN}`;
   const password = await deriveSupabasePassword(challengeSecret, username);
+  // role MUST be "super_admin" — every SQL gate protecting super-admin
+  // RPCs (xpc_is_super_admin and the inline RLS predicates in migrations
+  // 0044/0057/0059/0060/0062) checks for this exact string. Earlier
+  // builds shipped role:"admin" here which silently failed every
+  // super-admin RPC on the Connection Map ("Reset failed — reset
+  // requires super_admin" in the operator's screenshot). Migration 0067
+  // widens xpc_is_super_admin() to accept the legacy shape too, so
+  // already-signed-in sessions are unblocked immediately, but new
+  // sign-ins should mint the canonical shape from now on.
   const appMeta = {
     squadron_id: null,
-    role: "admin",
+    role: "super_admin",
     tier: "hq",
     squadron_number: null,
     pc_id: `HQ:${SUPER_ADMIN_DISPLAY_NAME}`,
