@@ -114,11 +114,20 @@ jobs:
           shopt -s nullglob
           for f in $(ls "$MIGRATIONS_DIR"/*.sql | sort); do
             fn=$(basename "$f")
+            # Compute the file's SHA-256 once, up front. We reuse it for
+            # both the apply-time ledger insert (Task #145 / #195) AND
+            # for the drift check on already-applied files below.
+            sha=$(sha256sum "$f" | awk '{print $1}')
+            if [ -z "$sha" ] || [ "${#sha}" != "64" ]; then
+              echo "::error::Could not compute sha256 for $f (got '$sha')"
+              exit 1
+            fi
+
             if [ -n "$applied_set" ] && echo "|$applied_set|" | grep -q "|$fn|"; then
-              echo "skip $fn (already applied)"
+              echo "skip $fn (already applied; sha=${sha:0:12}…)"
               continue
             fi
-            echo "applying $fn"
+            echo "applying $fn (sha=${sha:0:12}…)"
 
             payload_file=$(mktemp)
             node -e "
@@ -136,20 +145,92 @@ jobs:
               exit 1
             fi
 
-            sha=$(sha256sum "$f" | awk '{print $1}')
+            # Insert / update the ledger row. The ON CONFLICT clause is
+            # what catches migrations that include their own
+            # self-insert with sha256=NULL (e.g. 0045_round4_fixes.sql,
+            # 0050_squadron_rename_xpc_sync.sql) — without it those rows
+            # would land in production with NULL sha and the drift
+            # warning would never fire on them. See Task #195.
             ledger_payload=$(node -e "
               const o = {
                 query: \"insert into public._migration_ledger (filename, applied_by, sha256) values (\" +
                        \"'\" + process.argv[1] + \"', 'github-actions', '\" + process.argv[2] + \"') \" +
-                       \"on conflict (filename) do update set sha256 = excluded.sha256, applied_at = now()\"
+                       \"on conflict (filename) do update set sha256 = excluded.sha256, applied_at = now(), applied_by = excluded.applied_by\"
               };
               process.stdout.write(JSON.stringify(o));
             " "$fn" "$sha")
             run_query "$ledger_payload" "ledger insert for $fn" > /dev/null
 
+            # Verify the ledger now actually carries the right sha. This
+            # is belt-and-suspenders against any future regression where
+            # the on-conflict update silently fails to overwrite a NULL
+            # (Task #195: the original Task #145 workflow shipped with
+            # the ledger curl piped to /dev/null and 6 rows in
+            # production ended up with sha=NULL forever).
+            check_payload=$(node -e "
+              const o = {
+                query: \"select sha256 as s from public._migration_ledger where filename = '\" +
+                       process.argv[1].replace(/'/g, \"''\") + \"'\"
+              };
+              process.stdout.write(JSON.stringify(o));
+            " "$fn")
+            check_resp=$(run_query "$check_payload" "ledger verify for $fn")
+            recorded=$(node -e "
+              try {
+                const r = JSON.parse(process.argv[1]);
+                console.log((Array.isArray(r) && r[0] && r[0].s) ? r[0].s : '');
+              } catch(e) { console.log(''); }
+            " "$check_resp")
+            if [ "$recorded" != "$sha" ]; then
+              echo "::error::Ledger sha for $fn did not persist (expected $sha, got '$recorded')."
+              exit 1
+            fi
+
             echo "✓ applied $fn"
           done
           echo "all migrations up to date."
+
+          # Self-heal pass (Task #195): for any ledger row whose .sql
+          # file we have on disk but whose sha256 is currently NULL,
+          # backfill the disk hash. This catches:
+          #
+          #   • Pre-Task-#195 rows that the original (sha-blind) ledger
+          #     curl never populated (the migration in
+          #     0052_backfill_ledger_sha256.sql also covers these, but
+          #     this pass lets us heal future occurrences without a new
+          #     migration).
+          #   • Any migration that self-inserts with sha=NULL and that
+          #     somehow slipped past the on-conflict update above
+          #     (e.g. a transient API failure on the verify step that
+          #     somehow still passed; defence in depth).
+          #
+          # We only write when sha256 IS NULL so we never mask drift on
+          # rows that already have a recorded hash to compare against.
+          echo "self-heal: checking ledger for NULL sha rows…"
+          for f in $(ls "$MIGRATIONS_DIR"/*.sql | sort); do
+            fn=$(basename "$f")
+            sha=$(sha256sum "$f" | awk '{print $1}')
+            heal_payload=$(node -e "
+              const o = {
+                query: \"update public._migration_ledger set sha256 = '\" +
+                       process.argv[2] + \"' where filename = '\" +
+                       process.argv[1].replace(/'/g, \"''\") +
+                       \"' and sha256 is null returning filename\"
+              };
+              process.stdout.write(JSON.stringify(o));
+            " "$fn" "$sha")
+            heal_resp=$(run_query "$heal_payload" "self-heal for $fn")
+            healed=$(node -e "
+              try {
+                const r = JSON.parse(process.argv[1]);
+                console.log(Array.isArray(r) ? r.length : 0);
+              } catch(e) { console.log(0); }
+            " "$heal_resp")
+            if [ "$healed" != "0" ]; then
+              echo "  healed $fn (was NULL, now ${sha:0:12}…)"
+            fi
+          done
+          echo "self-heal complete."
 
       - name: Reload PostgREST schema cache
         id: reload
