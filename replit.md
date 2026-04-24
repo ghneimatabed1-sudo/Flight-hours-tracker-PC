@@ -2,6 +2,8 @@
 
 This project, "Hawk Eye" (عين الصقر), is a pnpm workspace monorepo using TypeScript, designed for the Royal Jordanian Air Force (RJAF). It provides a comprehensive flight hours management system, including a web-based command dashboard ("Hawk Eye HQ") for super administrators and commanders, and a mobile application for pilots.
 
+**Latest audit verdict (2026-04-26 round, task #245 / Audit Y):** **NO-GO** — process NO-GO because predecessor audits G/H/I/J/K did not deliver report files into this environment. The system itself remains under the prior **R5 GO (2026-04-24)** with two accepted residuals (Sunday-only weekly cron jobs + operator-driven sidebar walks). Master report: [`audit-evidence/2026-04-26/MASTER-GO-NO-GO.md`](./audit-evidence/2026-04-26/MASTER-GO-NO-GO.md) (duplicate at `.local/reports/audit-2026-04-26/MASTER-GO-NO-GO.md` per original task spec — `.local/` is gitignored). Recommendation: re-dispatch G/H/I/J in parallel, then K, then re-run Y before bringing a second squadron online.
+
 Key capabilities include:
 - **Centralized Administration:** Super admin panel for system overview, license key management, commander accounts, squadron control, and audit logging.
 - **Operational Oversight:** Commander dashboard for multi-squadron overview, pilot tracking, and alerts.
