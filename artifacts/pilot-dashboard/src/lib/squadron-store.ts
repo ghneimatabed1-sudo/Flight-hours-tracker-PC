@@ -13,16 +13,57 @@
 // into the activation payload, so commander/wing/HQ PCs receive their
 // squadron context indirectly through the keys they activate.
 //
-// Storage: localStorage on the Super Admin PC under "rjaf.squadrons".
-// We deliberately do NOT round-trip squadrons through Supabase yet because
-// the publishable anon key cannot read RLS-protected tables and adding
-// service-role credentials to a client bundle would leak admin access.
+// Storage: localStorage cache on the Super Admin PC under "rjaf.squadrons".
+// Source of truth is now Supabase when configured; we mirror reads/writes to
+// localStorage for offline resilience and same-tab reactivity.
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { Squadron } from "./types";
+import { supabase, supabaseConfigured } from "./supabase";
 
 const STORAGE_KEY = "rjaf.squadrons";
 const CHANGE_EVENT = "rjaf:squadrons-changed";
+const DB_CHANGE_EVENT = "rjaf:squadrons-db-changed";
+
+function toRow(s: Squadron): {
+  id: string;
+  number: string;
+  name: string;
+  base: string;
+  wing: string;
+} {
+  return {
+    id: s.id,
+    number: s.code,
+    name: s.name,
+    base: s.base,
+    wing: s.wing,
+  };
+}
+
+function fromRow(row: {
+  id: string;
+  number: string;
+  name: string;
+  base: string;
+  wing?: string | null;
+}): Squadron {
+  const nm = String(row.name ?? "").trim();
+  const base = String(row.base ?? "").trim();
+  const wing = String(row.wing ?? "").trim();
+  return {
+    id: String(row.id),
+    name: nm,
+    nameAr: nm,
+    code: String(row.number ?? "").trim().toUpperCase(),
+    base,
+    baseAr: base,
+    wing: wing || "—",
+    wingAr: wing || "—",
+    enabled: true,
+    keyHolder: null,
+  };
+}
 
 function read(): Squadron[] {
   if (typeof window === "undefined") return [];
@@ -53,6 +94,25 @@ export function listSquadrons(): Squadron[] {
   return read();
 }
 
+export async function refreshSquadronsFromDb(): Promise<Squadron[]> {
+  if (!supabaseConfigured || !supabase) return read();
+  const { data, error } = await supabase
+    .from("squadrons")
+    .select("id, number, name, base, wing")
+    .order("name", { ascending: true });
+  if (error) throw error;
+  const mapped = (data ?? []).map((r) => fromRow(r as {
+    id: string;
+    number: string;
+    name: string;
+    base: string;
+    wing?: string | null;
+  }));
+  write(mapped);
+  window.dispatchEvent(new Event(DB_CHANGE_EVENT));
+  return mapped;
+}
+
 export function getSquadron(id: string): Squadron | undefined {
   return read().find(s => s.id === id);
 }
@@ -67,7 +127,7 @@ export interface CreateSquadronInput {
   wingAr?: string;
 }
 
-export function addSquadron(input: CreateSquadronInput): { ok: boolean; error?: string; squadron?: Squadron } {
+export async function addSquadron(input: CreateSquadronInput): Promise<{ ok: boolean; error?: string; squadron?: Squadron }> {
   const name = input.name.trim();
   const code = input.code.trim().toUpperCase();
   const base = input.base.trim();
@@ -76,12 +136,8 @@ export function addSquadron(input: CreateSquadronInput): { ok: boolean; error?: 
   if (!code) return { ok: false, error: "code_required" };
   if (!base) return { ok: false, error: "base_required" };
   if (!wing) return { ok: false, error: "wing_required" };
-  const list = read();
-  if (list.some(s => s.code.toUpperCase() === code)) {
-    return { ok: false, error: "duplicate_code" };
-  }
   const sqn: Squadron = {
-    id: `sqn-${code.toLowerCase()}-${Date.now().toString(36)}`,
+    id: crypto.randomUUID(),
     name,
     nameAr: (input.nameAr ?? "").trim() || name,
     code,
@@ -92,11 +148,41 @@ export function addSquadron(input: CreateSquadronInput): { ok: boolean; error?: 
     enabled: true,
     keyHolder: null,
   };
+  if (supabaseConfigured && supabase) {
+    const { error } = await supabase
+      .from("squadrons")
+      .insert(toRow(sqn));
+    if (error) {
+      const msg = (error.message || "").toLowerCase();
+      if (msg.includes("duplicate") || msg.includes("unique")) {
+        return { ok: false, error: "duplicate_code" };
+      }
+      return { ok: false, error: "db_write_failed" };
+    }
+    await refreshSquadronsFromDb();
+    return { ok: true, squadron: sqn };
+  }
+  const list = read();
+  if (list.some(s => s.code.toUpperCase() === code)) {
+    return { ok: false, error: "duplicate_code" };
+  }
   write([...list, sqn]);
   return { ok: true, squadron: sqn };
 }
 
-export function updateSquadron(id: string, patch: Partial<Squadron>): boolean {
+export async function updateSquadron(id: string, patch: Partial<Squadron>): Promise<boolean> {
+  if (supabaseConfigured && supabase) {
+    const base = read().find((s) => s.id === id);
+    if (!base) return false;
+    const next = { ...base, ...patch, id: base.id };
+    const { error } = await supabase
+      .from("squadrons")
+      .update(toRow(next))
+      .eq("id", id);
+    if (error) return false;
+    await refreshSquadronsFromDb();
+    return true;
+  }
   const list = read();
   const idx = list.findIndex(s => s.id === id);
   if (idx === -1) return false;
@@ -105,7 +191,16 @@ export function updateSquadron(id: string, patch: Partial<Squadron>): boolean {
   return true;
 }
 
-export function deleteSquadron(id: string): boolean {
+export async function deleteSquadron(id: string): Promise<boolean> {
+  if (supabaseConfigured && supabase) {
+    const { error } = await supabase
+      .from("squadrons")
+      .delete()
+      .eq("id", id);
+    if (error) return false;
+    await refreshSquadronsFromDb();
+    return true;
+  }
   const list = read();
   const next = list.filter(s => s.id !== id);
   if (next.length === list.length) return false;
@@ -113,7 +208,7 @@ export function deleteSquadron(id: string): boolean {
   return true;
 }
 
-export function setSquadronEnabled(id: string, enabled: boolean): boolean {
+export async function setSquadronEnabled(id: string, enabled: boolean): Promise<boolean> {
   return updateSquadron(id, { enabled });
 }
 
@@ -123,9 +218,11 @@ export function setSquadronEnabled(id: string, enabled: boolean): boolean {
 function subscribe(cb: () => void): () => void {
   const handler = () => cb();
   window.addEventListener(CHANGE_EVENT, handler);
+  window.addEventListener(DB_CHANGE_EVENT, handler);
   window.addEventListener("storage", handler);
   return () => {
     window.removeEventListener(CHANGE_EVENT, handler);
+    window.removeEventListener(DB_CHANGE_EVENT, handler);
     window.removeEventListener("storage", handler);
   };
 }
