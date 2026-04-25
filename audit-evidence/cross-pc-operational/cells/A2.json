@@ -1,0 +1,7 @@
+{
+  "cell": "A2",
+  "status": "FAIL",
+  "writtenAt": "2026-04-25T01:46:08.377Z",
+  "note": "",
+  "fwdError": "new row violates row-level security policy for table \"xpc_schedule_shares\""
+}

@@ -1,0 +1,7 @@
+{
+  "cell": "A8",
+  "status": "FAIL",
+  "writtenAt": "2026-04-25T01:46:13.004Z",
+  "note": "Dismiss is local flag; HQ still sees row",
+  "hqDism": null
+}

@@ -959,3 +959,110 @@ Every state transition on `unit_members`, `devices`, and
 migration 0069. Search by table + member id from the existing Audit Log
 page.
 
+
+---
+
+## Cross-PC operational verification (Task #303 — 2026-04-25)
+
+A full cross-PC verification pass against PROD (`nklrdhfsbevckovqqkah`) is
+captured under `audit-evidence/cross-pc-operational/`:
+
+- `REPORT.md` — verdict & root-cause analysis (NO-GO until §4 defect fixed)
+- `matrix.json` — machine-readable PASS/FAIL per cell (current: 76 PASS / 16 FAIL / 92 cells across 18 sections A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R). Verdict: **NO-GO** until both defect families (chain-forwarding RLS + realtime/SLA gap) are remediated.
+- `cells/*.json` — per-cell evidence files
+- `inventory.md` — section/cell catalogue
+- `.local/scripts/task-303-cross-pc.mjs` — re-runnable driver
+
+### Re-running the audit
+
+```
+# (one-time) ensure these env vars are set:
+#   SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
+#   SUPABASE_MANAGEMENT_TOKEN
+node .local/scripts/task-303-cross-pc.mjs > /tmp/t303-run.log 2>&1
+```
+
+The driver:
+1. Provisions a tagged `TEST_T303_*` universe (3 squadrons across 2 wings/2 bases, 15 auth users, 11 PCs, 4 pilots).
+2. Walks the live cells (sections A, B, C, D, E, F, G, H, I, J, L, M, N — 56 cells).
+3. Tears the universe down (residue counts must all be 0 — printed at the bottom of the log).
+
+Then run the static extender, the Round-3 Section R driver, and the
+enhancer (Section R provisions its own tiny TEST_T303_R3_* fixture
+and tears it down) to add the remaining 36 cells (K/O/P/Q + R) and
+regenerate summary artifacts:
+
+```
+node .local/scripts/task-303-extend-matrix.mjs
+node .local/scripts/task-303-section-r.mjs
+node .local/scripts/task-303-section-s.mjs
+node .local/scripts/task-303-enhance-evidence.mjs
+```
+
+After all four scripts run, the matrix totals 92 cells across 18
+sections and `matrix.json` + `run-summary.json` + `acceptance_map`
+agree on counts and verdict. `section-s` does not add new cells —
+it provisions a tiny `TEST_T303_S_*` fixture, replaces the derived
+evidence on O1–O5 + Q1–Q4 with raw before/after operational
+observations (insert/update/delete count deltas, currency-window
+arithmetic, heartbeat constants, RPC live-invoke, reconnect
+upsert), and tears down to zero residue (verified by
+`section-s-teardown-residue.json`).
+
+Real squadron NO.8 (`9d2415b0-600a-44d2-8de9-12c64e53727c`) is NEVER touched — verified by pre/post pilot count.
+
+### Manual cleanup (if a run is killed mid-flight)
+
+Run from any shell with `SUPABASE_MANAGEMENT_TOKEN` set:
+
+```sql
+delete from public.xpc_schedule_shares where id like 'TEST_T303_%' or origin_squadron_id like 'TEST_T303_%';
+delete from public.xpc_messages         where id like 'TEST_T303_%' or from_pc_id like 'TEST_T303_%' or to_pc_id like 'TEST_T303_%';
+delete from public.xpc_pending          where id like 'TEST_T303_%';
+delete from public.xpc_squadron_snapshot where squadron_id::text in (select id::text from public.squadrons where number like 'TEST_T303_%');
+delete from public.xpc_registry         where id like 'TEST_T303_%';
+delete from public.xpc_user_pcs         where pc_id like 'TEST_T303_%';
+delete from public.alerts               where author like 'TEST_T303_%' or body like 'TEST_T303_%';
+delete from public.notams               where notam_no like 'TEST_T303_%' or body like 'TEST_T303_%';
+delete from public.sorties              where sortie_name like 'TEST_T303_%' or (data->>'tag') = 'T303';
+delete from public.pilot_devices        where pilot_id in (select id from public.pilots where name like 'TEST_T303_%');
+delete from public.pilots               where name like 'TEST_T303_%';
+delete from public.squadrons            where number like 'TEST_T303_%' or name like 'TEST_T303_%';
+delete from public.bases                where name like 'TEST_T303_%';
+delete from public.wings                where name like 'TEST_T303_%';
+delete from auth.users                  where email like 't303-%';
+```
+
+### Known defects surfaced by Task #303
+
+**Family #1 — chain-forwarding RLS** (cells A2, A3, A5, A6, A8, M3).
+`xpc_schedule_shares` SELECT policy
+(`origin_squadron_id ∈ my_pcs OR current_pc_id ∈ my_pcs`) does not
+include `chain_pc_ids`. PostgREST always emits `RETURNING` (even with
+`Prefer: return=headers-only`), so when a PC forwards a share by
+re-pointing `current_pc_id` to a PC it does not own, the
+SELECT-during-RETURNING check fires against the new row and fails
+with `42501 — new row violates row-level security policy`. This
+blocks the entire Squadron→Wing→Base→HQ chain in PROD today. See
+`audit-evidence/cross-pc-operational/REPORT.md` §4 for the full
+reproduction and proposed remediation. Filed as follow-up #308.
+
+**Family #2 — realtime / SLA gap** (cells H4 + P1–P9).
+`pg_publication_tables` for `supabase_realtime` contains only
+`device_requests`. All 9 cross-PC tables (`xpc_schedule_shares`,
+`xpc_messages`, `xpc_pending`, `xpc_registry`, `xpc_squadron_snapshot`,
+`alerts`, `notams`, `sorties`, `pilots`) propagate via the dashboard's
+15–30 s polling cadence and therefore fail any ≤5 s realtime SLA.
+Functional propagation still passes (sections B/C/D/E/F/G), so this is
+an SLA gating decision. Filed as follow-up #309.
+
+**No schema changes were applied in Task #303** — both remediations
+are filed as follow-ups.
+
+### Constraints worth knowing for any future driver
+
+- `alerts.priority`, `notams.priority`: only `'normal' | 'medium' | 'urgent'` — `'high'` and `'info'` are rejected by the CHECK constraint.
+- `xpc_schedule_shares.status`: `draft | submitted | reviewed | approved | rejected | held | edited` — `'pending'` is rejected.
+- `sorties.id`, `alerts.id`, `notams.id` are `uuid` (use `crypto.randomUUID()`); `pilots.id`, `xpc_*.id`, `users` are `text`.
+- `xpc_squadron_snapshot.squadron_id` requires `::text` cast for `IN` against `squadrons.id::text`.
+- Realtime publication contains only `device_requests`. Cross-PC tables propagate via 15–30 s polling, not realtime.

@@ -1,0 +1,8 @@
+{
+  "cell": "M3",
+  "status": "FAIL",
+  "writtenAt": "2026-04-25T01:47:08.302Z",
+  "note": "Base E sees alpha share but not bravo share (cross-base)",
+  "eSeesA": [],
+  "eSeesB": []
+}
