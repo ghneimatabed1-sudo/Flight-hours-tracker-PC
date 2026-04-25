@@ -24,6 +24,7 @@ import { supabase } from "../lib/supabase";
 type Phase =
   | { kind: "polling" }
   | { kind: "signing-in" }
+  | { kind: "approved-manual"; detail: string | null }
   | { kind: "rejected"; reason: string | null }
   | { kind: "ignored" }
   | { kind: "expired" }
@@ -36,6 +37,7 @@ export default function WaitingForApproval() {
   const pending = getPendingRequest();
   const [phase, setPhase] = useState<Phase>({ kind: "polling" });
   const [elapsed, setElapsed] = useState(0);
+  const [manualTick, setManualTick] = useState(0);
   const tickRef = useRef<number | null>(null);
 
   // Wall-clock counter so the user sees something is alive.
@@ -90,6 +92,21 @@ export default function WaitingForApproval() {
           window.location.reload();
           return;
         }
+        if (s.status === "approved") {
+          // Recovery path: approval completed but this client cannot finish
+          // automatic sign-in (missing Supabase config/session/email).
+          // Keep the operator in control with a manual "Continue to login"
+          // action instead of silently polling forever.
+          setPhase({
+            kind: "approved-manual",
+            detail: !supabase
+              ? "Approved, but this build is not cloud-configured for automatic sign-in."
+              : (!s.supabase_email
+                  ? "Approved, but the server response did not include sign-in email."
+                  : null),
+          });
+          return;
+        }
         if (s.status === "rejected") { setPhase({ kind: "rejected", reason: s.decision_reason }); return; }
         if (s.status === "ignored")  { setPhase({ kind: "ignored" }); return; }
         if (s.status === "unknown")  { setPhase({ kind: "expired" }); return; }
@@ -106,13 +123,17 @@ export default function WaitingForApproval() {
       alive = false;
       if (tickRef.current) window.clearTimeout(tickRef.current);
     };
-  }, [pending, navigate]);
+  }, [pending, navigate, manualTick]);
 
   if (!pending) return null;
 
   const startOver = () => {
     clearPendingRequest();
     navigate("/", { replace: true });
+  };
+  const continueToLogin = () => {
+    clearPendingRequest();
+    navigate("/login", { replace: true });
   };
 
   return (
@@ -122,6 +143,7 @@ export default function WaitingForApproval() {
           <h1 className="text-xl font-semibold">
             {phase.kind === "polling" && "Waiting for super admin approval…"}
             {phase.kind === "signing-in" && "Approved — signing you in…"}
+            {phase.kind === "approved-manual" && "Approved — continue to login"}
             {phase.kind === "rejected" && "Request rejected"}
             {phase.kind === "ignored" && "Request set aside"}
             {phase.kind === "expired" && "Request not found"}
@@ -177,12 +199,42 @@ export default function WaitingForApproval() {
               this PC and come back — the request will still be here.
               Elapsed: {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}.
             </p>
+            <button
+              type="button"
+              onClick={() => setManualTick((x) => x + 1)}
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-900"
+            >
+              Refresh approval status now
+            </button>
           </div>
         )}
 
         {phase.kind === "signing-in" && (
           <div className="text-sm text-emerald-300">
             Approved. Loading your dashboard…
+          </div>
+        )}
+
+        {phase.kind === "approved-manual" && (
+          <div className="space-y-3">
+            <div className="rounded border border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-200">
+              Your request is approved. Continue to Login and sign in with your approved username/password.
+              {phase.detail ? ` ${phase.detail}` : ""}
+            </div>
+            <button
+              type="button"
+              onClick={continueToLogin}
+              className="w-full rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
+            >
+              Continue to Login
+            </button>
+            <button
+              type="button"
+              onClick={() => setManualTick((x) => x + 1)}
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-900"
+            >
+              Refresh approval status now
+            </button>
           </div>
         )}
 
