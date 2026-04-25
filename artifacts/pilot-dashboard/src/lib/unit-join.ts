@@ -307,7 +307,12 @@ export async function updateMemberSquadrons(memberId: string, squadronNames: str
   return r.ok;
 }
 
-export async function removeMember(memberId: string, reason: string): Promise<boolean> {
+export interface RemoveMemberResult {
+  ok: boolean;
+  error?: UnitJoinError;
+  detail?: unknown;
+}
+export async function removeMember(memberId: string, reason: string): Promise<RemoveMemberResult> {
   // Calls the hardened unit_remove_member from migration 0075 — flips
   // status to 'removed', revokes devices, rotates the bcrypt hash,
   // sets banned_until='infinity', and deletes auth.sessions +
@@ -315,7 +320,8 @@ export async function removeMember(memberId: string, reason: string): Promise<bo
   // token is dead within ≤1h (its TTL) and password sign-in is blocked
   // immediately.
   const r = await rpcAuth("unit_remove_member", { p_member_id: memberId, p_reason: reason });
-  return r.ok;
+  if (!r.ok) return { ok: false, error: r.error, detail: r.detail };
+  return { ok: true };
 }
 
 export async function fetchMemberSelf(): Promise<UnitMemberSelf | null> {

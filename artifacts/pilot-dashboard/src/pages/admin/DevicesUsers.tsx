@@ -76,9 +76,18 @@ export default function DevicesUsers() {
     }
     const r = removeTarget;
     setBusyId(r.member_id);
-    const ok = await removeMember(r.member_id, reason);
+    const res = await removeMember(r.member_id, reason);
     setBusyId(null);
-    if (!ok) { setError("Remove failed."); return; }
+    if (!res.ok) {
+      const detailText =
+        typeof res.detail === "string"
+          ? res.detail
+          : (res.detail && typeof res.detail === "object" && "message" in res.detail
+              ? String((res.detail as { message?: unknown }).message ?? "")
+              : "");
+      setError(`Remove failed: ${res.error}${detailText ? ` (${detailText})` : ""}`);
+      return;
+    }
     setRemoveTarget(null);
     setRemoveReason("");
     await reload();

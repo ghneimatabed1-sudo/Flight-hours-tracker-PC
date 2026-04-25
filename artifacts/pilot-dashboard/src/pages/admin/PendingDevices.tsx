@@ -58,7 +58,13 @@ export default function PendingDevices() {
     const r = await approveRequest(req.id, override);
     setBusyId(null);
     if (!r.ok) {
-      setError(`Approve failed: ${r.error}`);
+      const detail =
+        typeof r.detail === "string"
+          ? r.detail
+          : r.detail && typeof r.detail === "object" && "detail" in (r.detail as Record<string, unknown>)
+            ? String((r.detail as Record<string, unknown>).detail ?? "")
+            : "";
+      setError(`Approve failed: ${r.error}${detail ? ` (${detail})` : ""}`);
       return;
     }
     void reload();
