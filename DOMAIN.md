@@ -125,11 +125,15 @@ A live deployment looks like:
 - **Leaves page is now sync-safe across PCs.** Daily leave actions now persist through Supabase (`unavailable` as the daily source + `leaves` monthly aggregates), removing the previous local-only `rjaf.leaves.`* divergence.
 - **Cross-PC foundation:** a new migration grants Super Admin write RLS over `bases`, `wings`, and `squadrons`, so org-registry changes can be made from the app without service-role credentials.
 
-
 ### 3.2 v1.1.126 full-role reliability hardening (2026-04-25)
 
 - **Super Admin Overview pilot counters are now live-data backed.** The admin overview derives pilot totals and expiry-warning counts from the shared pilot data path instead of static mock arrays, so role-level reliability checks reflect synchronized records.
 - **Role-flow reliability matrix added.** `audit-evidence/2026-04-25/full-role-reliability/ROLE_FLOW_MATRIX.md` is now the explicit reference matrix for Ops, Flight, Squadron, Wing, Base, HQ, and Super Admin flow expectations used in regression audits.
+
+### 3.3 v1.1.127 pending-device approval resilience (2026-04-25)
+
+- **Super Admin Pending Devices approval is now idempotent against Auth races/collisions.** The `unit-approve-device` path now recovers when `auth.admin.createUser` races with an existing email by resolving/updating the existing account instead of failing the approval.
+- **Approval now uses password-policy-safe placeholder credentials.** The temporary password stamped during approval explicitly satisfies stricter Auth password-class requirements before the joining laptop replaces it during claim.
 
 ---
 
@@ -279,8 +283,8 @@ All sheets export to PDF (printable) and XLSX (editable). The XLSX export is rou
 
 - `**.local/memory/`** — settled rules per area (dual-hour, initial-hours, multi-squadron, currency-refresh, print-system, release-process, supabase-admin, active-pc-visibility, add-pilot-form, phone-pair-indicator, reminders-wording, user-management). **These override everything else when there's a conflict — they are operator-settled truth.**
 - `**.local/HAWK-EYE-OVERNIGHT-MASTER-REPORT.md`** — what was built in each version v1.1.75 → present.
-- `**AGENTS.md**` — the must-read briefing on do-nots, test commands, migration recipe.
-- `**replit.md**` — full project overview, brand assets, workflow inventory.
+- `**AGENTS.md`** — the must-read briefing on do-nots, test commands, migration recipe.
+- `**replit.md`** — full project overview, brand assets, workflow inventory.
 - **Code source-of-truth files:**
   - `artifacts/pilot-dashboard/src/lib/cross-pc.ts` — every cross-PC interaction (schedule chain, messages, guest pilots, registry, claims).
   - `artifacts/pilot-dashboard/src/lib/squadron-data.ts` — local squadron state (roster, sorties, currency).

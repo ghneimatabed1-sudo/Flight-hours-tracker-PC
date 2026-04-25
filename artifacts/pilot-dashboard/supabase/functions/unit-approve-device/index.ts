@@ -66,12 +66,52 @@ interface MemberRow {
   display_name: string;
 }
 
-// Cryptographically random throw-away password — 48 hex chars (192 bits).
+// Cryptographically random throw-away password.
+// Must satisfy stricter GoTrue password policies (upper/lower/digit/symbol).
 // Replaced by the joining laptop's real password on the claim step.
 function randomPlaceholderPassword(): string {
-  const bytes = new Uint8Array(24);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghijkmnopqrstuvwxyz";
+  const digits = "23456789";
+  const symbols = "!@#$%^&*()-_=+[]{}";
+  const all = upper + lower + digits + symbols;
+
+  const pick = (charset: string): string => {
+    const bytes = new Uint8Array(1);
+    crypto.getRandomValues(bytes);
+    return charset[bytes[0] % charset.length];
+  };
+
+  const chars = [
+    pick(upper),
+    pick(lower),
+    pick(digits),
+    pick(symbols),
+  ];
+  for (let i = 0; i < 20; i += 1) chars.push(pick(all));
+
+  // Fisher-Yates shuffle so required-class chars are not predictable.
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const bytes = new Uint8Array(1);
+    crypto.getRandomValues(bytes);
+    const j = bytes[0] % (i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join("");
+}
+
+async function findAuthUserIdByEmail(admin: ReturnType<typeof createClient>, email: string): Promise<string | null> {
+  const wanted = email.trim().toLowerCase();
+  if (!wanted) return null;
+  for (let page = 1; page <= 20; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) break;
+    const users = data?.users ?? [];
+    if (!users.length) break;
+    const match = users.find((u: AuthUser) => (u.email ?? "").toLowerCase() === wanted);
+    if (match) return match.id;
+  }
+  return null;
 }
 
 // @ts-ignore Deno
@@ -168,9 +208,7 @@ Deno.serve(async (req: Request) => {
 
   let authUserId: string | null = null;
   try {
-    const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-    const match = list?.users?.find((u: AuthUser) => (u.email ?? "").toLowerCase() === email);
-    if (match) authUserId = match.id;
+    authUserId = await findAuthUserIdByEmail(admin, email);
   } catch (_) { /* listUsers not strictly required */ }
 
   if (authUserId) {
@@ -193,9 +231,29 @@ Deno.serve(async (req: Request) => {
       user_metadata: userMeta,
     });
     if (createErr || !created.user) {
-      return reply({ ok: false, error: "user_create_failed", detail: createErr?.message }, 500);
+      const msg = (createErr?.message ?? "").toLowerCase();
+      const conflict = msg.includes("already") || msg.includes("exists") || msg.includes("registered");
+      if (!conflict) {
+        return reply({ ok: false, error: "user_create_failed", detail: createErr?.message }, 500);
+      }
+      const existingId = await findAuthUserIdByEmail(admin, email);
+      if (!existingId) {
+        return reply({ ok: false, error: "user_create_failed", detail: createErr?.message }, 500);
+      }
+      authUserId = existingId;
+      const { error: updErr } = await admin.auth.admin.updateUserById(authUserId, {
+        password: placeholderPassword,
+        app_metadata: appMeta,
+        user_metadata: userMeta,
+        email_confirm: true,
+        ban_duration: "none",
+      });
+      if (updErr) {
+        return reply({ ok: false, error: "user_update_failed", detail: updErr.message }, 500);
+      }
+    } else {
+      authUserId = created.user.id;
     }
-    authUserId = created.user.id;
   }
 
   // ── 6. Mirror into public.users so audit-log joins surface the name ──

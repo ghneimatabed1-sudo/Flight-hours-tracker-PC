@@ -17,3 +17,11 @@
 ## Operator-facing lesson captured
 
 - Super-admin overview widgets must never rely on static mock arrays when Supabase is configured; this creates false readiness signals for org-wide command visibility and masks real cross-PC drift.
+
+## 2026-04-25 — Pending-device approval hardening (user_create_failed)
+
+- Field issue: Super Admin `Pending Devices` approval could fail with `Approve failed: user_create_failed` while the request had already been reserved, causing operator confusion and join retries.
+- Root reliability fix in `supabase/functions/unit-approve-device/index.ts`:
+  - Placeholder password generation now guarantees mixed-character policy compliance (upper/lower/digit/symbol) instead of raw hex-only output.
+  - `auth.admin.createUser` failure now falls back idempotently when the email already exists by re-finding the auth user and applying metadata/password update.
+- Operational result: approval remains stable across stricter GoTrue password policy settings and duplicate-email race windows, reducing back-and-forth failures during device onboarding.
