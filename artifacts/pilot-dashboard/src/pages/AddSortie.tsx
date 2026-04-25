@@ -234,7 +234,7 @@ export default function AddSortie() {
     if (noAircraftConfigured) {
       toast({
         title: "No aircraft configured",
-        description: "Run the Squadron Setup Wizard before adding sorties.",
+        description: "Add the squadron's airframes from Monthly Report → Defaults before adding sorties.",
         variant: "destructive",
       });
       return;
@@ -608,16 +608,17 @@ export default function AddSortie() {
             <div className="flex-1">
               <div className="font-semibold">No aircraft configured for this squadron yet.</div>
               <div className="text-xs text-amber-200/90 mt-0.5">
-                Add the airframes your squadron flies on the Setup Wizard
-                so Add Sortie / Sortie Log / Flight Program can use them.
+                Add the airframes your squadron flies under
+                Monthly Report → Defaults so Add Sortie /
+                Sortie Log / Flight Program can use them.
               </div>
             </div>
             <a
-              href="/setup/squadron"
+              href="/monthly-report/defaults"
               className="px-2.5 py-1 rounded-md bg-amber-500/30 border border-amber-400/50 text-amber-100 text-xs font-semibold"
-              data-testid="link-open-setup-wizard"
+              data-testid="link-open-squadron-defaults"
             >
-              Open Setup Wizard
+              Open Squadron Defaults
             </a>
           </div>
         </Card>

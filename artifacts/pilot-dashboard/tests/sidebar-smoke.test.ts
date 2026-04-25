@@ -123,8 +123,11 @@ const PERSONAS: Record<RoleKey, Persona> = {
 // src/components/HQLayout.tsx (admin + commander shells); kept here in
 // one place so the smoke screen owns its own contract independent of
 // any future sidebar tweak.
+// Task #300 — `/admin/keys` (License Keys) and `/admin/commanders`
+// were retired with the new Join → Approve → Bind flow. Their sidebar
+// entries are gone too, so they're no longer smoke-tested here.
 const ADMIN_ROUTES = [
-  "/admin", "/admin/keys", "/admin/commanders", "/admin/squadrons",
+  "/admin", "/admin/squadrons",
   "/admin/reminders", "/admin/audit", "/admin/security",
   "/admin/connection-map", "/connections", "/settings", "/diagnostic",
 ] as const;
@@ -232,10 +235,8 @@ const PAGE_LOADERS: PageMap = {
   "/connections":       () => import("../src/pages/Connections.tsx"),
   "/settings":          () => import("../src/pages/Settings.tsx"),
   "/diagnostic":        () => import("../src/pages/Diagnostic.tsx"),
-  // admin
+  // admin (Task #300 retired LicenseKeys + Commanders pages)
   "/admin":                 () => import("../src/pages/admin/Overview.tsx"),
-  "/admin/keys":            () => import("../src/pages/admin/LicenseKeys.tsx"),
-  "/admin/commanders":      () => import("../src/pages/admin/Commanders.tsx"),
   "/admin/squadrons":       () => import("../src/pages/admin/Squadrons.tsx"),
   "/admin/reminders":       () => import("../src/pages/admin/RemindersSchedule.tsx"),
   "/admin/audit":           () => import("../src/pages/admin/AuditLog.tsx"),

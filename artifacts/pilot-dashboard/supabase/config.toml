@@ -5,7 +5,8 @@
 # with the intended authorization model. Without this file, a deploy that
 # omits or fat-fingers `--no-verify-jwt` can silently flip a privileged
 # function from "JWT required" to "open to the internet" — exactly the
-# defect Audit A (audit-2026-04-25) caught on `provision-commander`.
+# defect Audit A (audit-2026-04-25) caught on `provision-commander`,
+# which has since been retired by Task #300 (see note further down).
 #
 # Two buckets:
 #   verify_jwt = true   → Supabase rejects requests without a valid user
@@ -25,9 +26,6 @@ project_id = "nklrdhfsbevckovqqkah"
 # ── Authenticated functions (JWT REQUIRED) ───────────────────────────────
 # Every privileged write path lives here. Adding a new function that does
 # auth.users / app_metadata mutations? It belongs in this list.
-
-[functions.provision-commander]
-verify_jwt = true
 
 [functions.provision-user]
 verify_jwt = true
@@ -77,12 +75,11 @@ verify_jwt = false
 # These are the only functions that may be deployed without JWT
 # verification. Each one MUST enforce its own gate (shared secret, password
 # challenge, etc.) before doing anything privileged.
-
-[functions.register-license]
-verify_jwt = false
+#
+# Task #300 — the legacy `register-license`, `provision-commander`, and
+# `validate-license` functions are deleted. The Join → Approve → Bind
+# flow (unit-approve-device + unit-claim-device + unit-super-admin-setup)
+# is the only sanctioned account-provisioning path now.
 
 [functions.super-admin-2fa]
-verify_jwt = false
-
-[functions.validate-license]
 verify_jwt = false

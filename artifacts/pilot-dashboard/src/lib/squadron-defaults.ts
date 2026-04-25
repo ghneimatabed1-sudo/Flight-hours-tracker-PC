@@ -201,7 +201,7 @@ export async function hydrateSquadronDefaultsFromDb(
       // fields onto the local cache and report success so the
       // SetupGate marks the wizard complete (existing PCs are never
       // force-redirected). The operator can still navigate to
-      // /setup/squadron manually to configure airframes.
+      // Monthly Report → Defaults to configure airframes.
       saveSquadronDefaults(squadronNumber, {
         ...cur,
         airbase: (data.base as string | null) ?? cur.airbase,

@@ -1,6 +1,5 @@
 import React, { useEffect } from "react";
 import { Switch, Route, Router as WouterRouter, Redirect, useLocation as useWouterLocation } from "wouter";
-import { loadSquadronDefaults, hydrateSquadronDefaultsFromDb } from "@/lib/squadron-defaults";
 import { useHashLocation } from "wouter/use-hash-location";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
@@ -84,7 +83,6 @@ import Archives from "@/pages/Archives";
 import OpsTeam from "@/pages/OpsTeam";
 import MonthlyReport from "@/pages/MonthlyReport";
 import MonthlyReportDefaults from "@/pages/MonthlyReportDefaults";
-import SetupWizard from "@/pages/SetupWizard";
 import NotFound from "@/pages/not-found";
 import AdminOverview from "@/pages/admin/Overview";
 import AdminSquadrons from "@/pages/admin/Squadrons";
@@ -141,7 +139,6 @@ function SquadronOpsRoutes() {
       <Route path="/archives" component={Archives} />
       <Route path="/ops-team" component={OpsTeam} />
       <Route path="/monthly-report/defaults" component={MonthlyReportDefaults} />
-      <Route path="/setup/squadron" component={SetupWizard} />
       <Route path="/monthly-report" component={MonthlyReport} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/connections" component={Connections} />
@@ -163,15 +160,12 @@ function AdminRoutes() {
       {/* Task #299 — new join/approve/bind admin surfaces */}
       <Route path="/admin/pending-devices" component={PendingDevices} />
       <Route path="/admin/devices-users" component={DevicesUsers} />
-      {/* Task #299 review round 5 — the old License Keys / Commanders
-          surfaces are GONE, not just hidden. Hard-redirect any deep
-          link that still points at them so the only operative
-          account-management path is Pending Devices + Devices & Users.
-          Keeping the routes mounted (even un-linked) preserved a
-          parallel admin path that violated the "single Join → Approve
-          → Bind control plane" mandate. */}
-      <Route path="/admin/keys"><Redirect to="/admin/devices-users" /></Route>
-      <Route path="/admin/commanders"><Redirect to="/admin/devices-users" /></Route>
+      {/* Task #300 — legacy License Keys / Commanders / Setup Squadron
+          surfaces are removed entirely. The Join → Approve → Bind flow
+          (Pending Devices + Devices & Users) is the only sanctioned
+          path. Stale deep links to /admin/keys, /admin/commanders, or
+          /setup/squadron now fall through to the catch-all NotFound
+          below so they surface visibly instead of silently bouncing. */}
       <Route path="/admin/squadrons" component={AdminSquadrons} />
       <Route path="/admin/audit" component={AdminAuditLog} />
       <Route path="/admin/security" component={AdminSecurity} />
@@ -293,43 +287,9 @@ function Shell() {
     <Layout>
       <ArchiveBootstrap />
       <SquadronSnapshotPublisher />
-      <SetupGate>
-        <SquadronOpsRoutes />
-      </SetupGate>
+      <SquadronOpsRoutes />
     </Layout>
   );
-}
-
-function SetupGate({ children }: { children: React.ReactNode }) {
-  const { squadron } = useAuth();
-  const [location] = useWouterLocation();
-  const sqKey = squadron?.number ?? squadron?.name ?? "default";
-  const [hydrated, setHydrated] = React.useState(false);
-  React.useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const ok = await hydrateSquadronDefaultsFromDb(sqKey);
-      if (!cancelled) {
-        if (ok) {
-          try { localStorage.setItem(`rjaf.setupWizard.${sqKey}.complete`, "1"); }
-          catch { /* noop */ }
-        }
-        setHydrated(true);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [sqKey]);
-
-  const completeFlag = (() => {
-    try { return localStorage.getItem(`rjaf.setupWizard.${sqKey}.complete`) === "1"; }
-    catch { return false; }
-  })();
-  const defaults = loadSquadronDefaults(sqKey);
-  const needsSetup = hydrated && !completeFlag && defaults.airframes.length === 0;
-  if (needsSetup && location !== "/setup/squadron") {
-    return <Redirect to="/setup/squadron" />;
-  }
-  return <>{children}</>;
 }
 
 // Publishes this squadron's roster + unavailable list to xpc_squadron_snapshot
