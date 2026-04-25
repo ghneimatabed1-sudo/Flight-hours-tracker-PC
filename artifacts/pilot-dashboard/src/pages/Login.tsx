@@ -11,6 +11,30 @@ import QRCode from "qrcode";
 // but a PC left unattended overnight always ends up on the screensaver.
 const LOGIN_AUTO_LOCK_MS = 60 * 60 * 1000;
 
+type LoginUpdaterState =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "available"; version: string }
+  | { kind: "none"; version?: string }
+  | { kind: "progress"; percent: number; transferred: number; total: number }
+  | { kind: "downloaded"; version: string }
+  | { kind: "error"; message: string };
+
+type LoginElectronBridge = {
+  checkForUpdates?: () => Promise<{ ok: boolean; version?: string | null; reason?: string }>;
+  installUpdateNow?: () => Promise<boolean>;
+  onUpdateEvent?: (cb: (e: LoginUpdaterState) => void) => () => void;
+  isPackaged?: () => Promise<boolean>;
+};
+
+function getLoginBridge(): LoginElectronBridge | null {
+  return (window as unknown as { rjafElectron?: LoginElectronBridge }).rjafElectron ?? null;
+}
+
+function fmtMB(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
 export default function LoginGate() {
   const {
     licensed, configured, activateLicense, configureSquadron, login, fingerprint,
@@ -65,6 +89,26 @@ export default function LoginGate() {
   // button label to a "Verifying…" message, and prevents the duplicate
   // submits that were turning a slow network into a 60 s+ stall.
   const [busy, setBusy] = useState(false);
+  const [updState, setUpdState] = useState<LoginUpdaterState>({ kind: "idle" });
+  const [updPackaged, setUpdPackaged] = useState(false);
+  const bridge = getLoginBridge();
+
+  useEffect(() => {
+    if (!bridge) return;
+    bridge.isPackaged?.().then((v) => setUpdPackaged(!!v)).catch(() => {});
+    const off = bridge.onUpdateEvent?.((e) => setUpdState(e));
+    return () => { off?.(); };
+  }, [bridge]);
+
+  const onCheckUpdates = async () => {
+    if (!bridge?.checkForUpdates || !updPackaged) return;
+    setUpdState({ kind: "checking" });
+    const res = await bridge.checkForUpdates();
+    if (!res.ok && res.reason) setUpdState({ kind: "error", message: res.reason });
+  };
+  const onInstallUpdateNow = async () => {
+    await bridge?.installUpdateNow?.();
+  };
 
   // First-screen policy:
   //   - Fresh install (no PC role lock yet) → Super Admin login. The very
@@ -469,6 +513,50 @@ export default function LoginGate() {
                 >
                   <span className="opacity-70">{t("deviceNameBadge")}: </span>
                   <span className="font-medium">{pcDeviceName}</span>
+                </div>
+              )}
+              {bridge && updPackaged && (
+                <div className="rounded-md border border-border bg-secondary/30 px-3 py-2 space-y-2" data-testid="login-update-panel">
+                  <div className="text-xs font-medium">Update</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={onCheckUpdates}
+                      disabled={updState.kind === "checking" || updState.kind === "progress"}
+                      className="px-2.5 py-1 rounded border border-border bg-secondary text-xs disabled:opacity-50"
+                      data-testid="button-login-check-update"
+                    >
+                      {updState.kind === "checking"
+                        ? "Checking…"
+                        : updState.kind === "progress"
+                        ? "Downloading…"
+                        : "Check for update"}
+                    </button>
+                    {updState.kind === "downloaded" && (
+                      <button
+                        type="button"
+                        onClick={onInstallUpdateNow}
+                        className="px-2.5 py-1 rounded bg-primary text-primary-foreground text-xs"
+                        data-testid="button-login-install-update"
+                      >
+                        Restart & install
+                      </button>
+                    )}
+                    {updState.kind === "available" && (
+                      <span className="text-[11px] text-amber-400">v{updState.version} found</span>
+                    )}
+                    {updState.kind === "none" && (
+                      <span className="text-[11px] text-emerald-400">Up to date</span>
+                    )}
+                    {updState.kind === "error" && (
+                      <span className="text-[11px] text-destructive truncate max-w-[14rem]" title={updState.message}>Error: {updState.message}</span>
+                    )}
+                    {updState.kind === "progress" && (
+                      <span className="text-[11px] text-muted-foreground">
+                        {updState.percent.toFixed(0)}% · {fmtMB(updState.transferred)}/{fmtMB(updState.total)}
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
               <Field label={t("username")} value={u} onChange={setU} autoFocus={!u} />
