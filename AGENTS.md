@@ -97,6 +97,11 @@ If any of those four say N/A, that's fine — but you must consciously decide N/
 
 ## Recent fixes — concrete lessons (most recent first)
 
+### v1.1.126 (2026-04-25) — Super Admin overview de-mocked + role-hardening audit artifacts
+- `src/pages/admin/Overview.tsx` no longer imports seed `mockData.pilots` / `mockData.licenseKeys`; it now reads pilot counts + expiry status from `usePilots()` (shared data layer) so the Super Admin overview reflects live squadron state instead of local seed drift.
+- Added audit evidence + role-flow matrix under `audit-evidence/2026-04-25/full-role-reliability/` as the baseline for future role-regression passes.
+- **Lesson:** any admin surface that summarizes operational state must consume the same Supabase-backed hooks as ops/commander pages; seed arrays are acceptable only for explicit demo-only paths.
+
 ### v1.1.96 (2026-04-23) — Wing→Base forward + Base.approve final archive
 - Operator-stated chain (DOMAIN.md §7.1) is now wired end-to-end: ops→sqn→wing→base→base.approve = final archive. Wing.approve without Base forward is also valid (saves the day for that squadron).
 - The Wing→Base forward UI was already in `ScheduleChain.tsx:651-700`; the only blocker was a `throw` in `cross-pc.ts:1659` saying "Wing tier shares are terminal". Removing it opened the path.

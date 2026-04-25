@@ -1,28 +1,77 @@
 import { useI18n } from "@/lib/i18n";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plane, Users, AlertTriangle, KeyRound, Printer } from "lucide-react";
-import { pilots, licenseKeys } from "@/lib/mockData";
+import { Plane, Users, AlertTriangle, Printer } from "lucide-react";
 import { useSquadrons } from "@/lib/squadron-store";
-import { pilotWorstStatus } from "@/lib/format";
+import { currencyStatus, pilotWorstStatus } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { FrozenAccessPanel } from "@/components/FrozenAccessPanel";
 import { useAuth } from "@/lib/auth";
+import { useQuery } from "@tanstack/react-query";
+import { pilots as mockPilots } from "@/lib/mockData";
+import { supabase, supabaseConfigured } from "@/lib/supabase";
+
+type AdminPilotStat = {
+  squadronId: string;
+  status: ReturnType<typeof currencyStatus> | ReturnType<typeof pilotWorstStatus>;
+};
 
 export default function AdminOverview() {
   const { t, lang } = useI18n();
   const { user } = useAuth();
   const squadrons = useSquadrons();
+  const pilotStatsQ = useQuery<AdminPilotStat[]>({
+    queryKey: ["admin_overview_pilot_stats"],
+    queryFn: async () => {
+      if (!supabaseConfigured || !supabase) {
+        return mockPilots.map((p) => ({
+          squadronId: p.squadronId,
+          status: pilotWorstStatus(p),
+        }));
+      }
+      const { data, error } = await supabase
+        .from("pilots")
+        .select("squadron_id,data");
+      if (error) throw error;
+      return (data ?? []).map((row) => {
+        const d = (row.data ?? {}) as Record<string, unknown>;
+        const expiry = (d.expiry ?? {}) as Record<string, unknown>;
+        const statuses = [
+          currencyStatus(String(expiry.day ?? "")),
+          currencyStatus(String(expiry.night ?? "")),
+          currencyStatus(String(expiry.nvg ?? "")),
+          currencyStatus(String(expiry.irt ?? "")),
+          currencyStatus(String(expiry.medical ?? "")),
+        ];
+        const rank: Record<ReturnType<typeof currencyStatus>, number> = {
+          current: 0,
+          unset: 1,
+          warning: 2,
+          expiringSoon: 3,
+          critical: 4,
+          expired: 5,
+        };
+        const worst = statuses.reduce(
+          (acc, s) => (rank[s] > rank[acc] ? s : acc),
+          "current" as ReturnType<typeof currencyStatus>,
+        );
+        return {
+          squadronId: String(row.squadron_id ?? ""),
+          status: worst,
+        };
+      });
+    },
+    initialData: [],
+  });
+  const pilotStats = pilotStatsQ.data ?? [];
   const enabledSquadrons = squadrons.filter(s => s.enabled);
-  const expired = pilots.filter(p => { const s = pilotWorstStatus(p); return s === "expired" || s === "critical"; }).length;
-  const warning = pilots.filter(p => { const s = pilotWorstStatus(p); return s === "warning" || s === "expiringSoon"; }).length;
-  const activeKeys = licenseKeys.filter(k => k.status !== "revoked").length;
+  const expired = pilotStats.filter(p => p.status === "expired" || p.status === "critical").length;
+  const warning = pilotStats.filter(p => p.status === "warning" || p.status === "expiringSoon").length;
 
   const stats = [
     { icon: <Plane className="h-5 w-5" />, label: t("totalSquadrons"), value: `${enabledSquadrons.length}/${squadrons.length}` },
-    { icon: <Users className="h-5 w-5" />, label: t("totalPilots"), value: pilots.length },
+    { icon: <Users className="h-5 w-5" />, label: t("totalPilots"), value: pilotStats.length },
     { icon: <AlertTriangle className="h-5 w-5 text-red-500" />, label: t("expiredCurrencies"), value: expired },
-    { icon: <KeyRound className="h-5 w-5" />, label: t("licenseKeys"), value: `${activeKeys}/${licenseKeys.length}` },
   ];
 
   return (
@@ -68,9 +117,9 @@ export default function AdminOverview() {
               </thead>
               <tbody>
                 {squadrons.map(s => {
-                  const sp = pilots.filter(p => p.squadronId === s.id);
-                  const e = sp.filter(p => { const s = pilotWorstStatus(p); return s === "expired" || s === "critical"; }).length;
-                  const w = sp.filter(p => { const s = pilotWorstStatus(p); return s === "warning" || s === "expiringSoon"; }).length;
+                  const sp = pilotStats.filter(p => p.squadronId === s.id);
+                  const e = sp.filter(p => p.status === "expired" || p.status === "critical").length;
+                  const w = sp.filter(p => p.status === "warning" || p.status === "expiringSoon").length;
                   return (
                     <tr key={s.id} className="border-b border-border/60 hover:bg-accent/40" data-testid={`row-sqn-${s.id}`}>
                       <td className="py-2 px-2 font-medium">{lang === "ar" ? s.nameAr : s.name}</td>
