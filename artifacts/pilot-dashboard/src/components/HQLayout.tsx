@@ -4,7 +4,8 @@ import { useAuth } from "@/lib/auth";
 import { useI18n, type Key } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Languages, ShieldCheck, Activity, KeyRound, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2, Bell, ClipboardCheck, History, Settings as SettingsIcon, Link2 as Link2Icon, Network } from "lucide-react";
+import { LogOut, Languages, ShieldCheck, Activity, Users, Plane, ListChecks, BarChart3, AlertTriangle, AlarmClock, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Mail, Share2, Bell, ClipboardCheck, History, Settings as SettingsIcon, Link2 as Link2Icon, Network, Inbox, Laptop } from "lucide-react";
+import IdentityStrip from "@/components/IdentityStrip";
 import { canUseMessages, canUseScheduleChain, canViewFinalSchedules } from "@/lib/cross-pc";
 import { useSidebarBadges } from "@/lib/sidebar-badges";
 import { FlightBindingGate, FlightBindingBadge } from "@/components/FlightBindingGate";
@@ -47,8 +48,11 @@ export function HQLayout({ children }: { children: ReactNode }) {
   const items: NavItem[] = isAdmin
     ? [
         { path: "/admin", labelKey: "systemOverview", icon: <BarChart3 className="h-4 w-4" /> },
-        { path: "/admin/keys", labelKey: "licenseKeys", icon: <KeyRound className="h-4 w-4" /> },
-        { path: "/admin/commanders", labelKey: "commanders", icon: <Users className="h-4 w-4" /> },
+        // Task #299 — Pending Devices replaces License Keys + Generate Code,
+        // Devices & Users replaces Commanders. Old routes still mounted in
+        // App.tsx for direct-link compat but no longer surfaced in nav.
+        { path: "/admin/pending-devices", labelKey: "pendingDevices", icon: <Inbox className="h-4 w-4" /> },
+        { path: "/admin/devices-users", labelKey: "devicesAndUsers", icon: <Laptop className="h-4 w-4" /> },
         { path: "/admin/squadrons", labelKey: "squadrons", icon: <Plane className="h-4 w-4" /> },
         { path: "/admin/reminders", labelKey: "remindersSchedule", icon: <AlarmClock className="h-4 w-4" /> },
         { path: "/admin/audit", labelKey: "auditLog", icon: <ListChecks className="h-4 w-4" /> },
@@ -247,6 +251,7 @@ export function HQLayout({ children }: { children: ReactNode }) {
           <HeartbeatFailureBanner diagnosticPath={isAdmin ? "/diagnostic" : "/dashboard/diagnostic"} />
           <SessionCollisionBanner />
           {isAdmin && <RecoveryCodesLowBanner />}
+          <IdentityStrip />
           <FlightBindingGate>
             {children}
           </FlightBindingGate>

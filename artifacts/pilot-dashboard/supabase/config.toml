@@ -50,6 +50,29 @@ verify_jwt = true
 [functions.notify-notam]
 verify_jwt = true
 
+# Task #299 — replaces register-license + provision-commander for the
+# new Join → Approve → Bind flow. Caller MUST present a super-admin
+# Bearer JWT; the function re-verifies via xpc_is_super_admin() and
+# only then promotes a reserved device_request to a real auth.users +
+# unit_members + devices binding.
+[functions.unit-approve-device]
+verify_jwt = true
+
+# Task #299 review-pass. Anonymous-callable: the joining laptop runs
+# this immediately after seeing status='approved' to swap the random
+# throw-away password set by unit-approve-device for its own
+# remembered password. Authenticated by claim_token + password hash
+# stored on the device_request row, NOT by a JWT.
+[functions.unit-claim-device]
+verify_jwt = false
+
+# Task #299 review-pass. Anonymous-callable bootstrap: mints the very
+# first super admin on a fresh unit. The unit_super_admin_setup_allowed()
+# predicate is the gate — once one super admin exists this function
+# fails closed.
+[functions.unit-super-admin-setup]
+verify_jwt = false
+
 # ── Bootstrap / login functions (NO JWT — see notes above) ───────────────
 # These are the only functions that may be deployed without JWT
 # verification. Each one MUST enforce its own gate (shared secret, password

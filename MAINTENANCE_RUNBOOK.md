@@ -839,3 +839,123 @@ for the new round.
 | Database migrations | 0001..0060 (the ledger should match the on-disk file list; the GitHub Actions workflow fails any push that diverges) |
 | Edge functions | 11 (heal-claims, link-pilot-device, manage-reminder-schedule, notify-alert, notify-currency-expiry, notify-notam, provision-commander, provision-user, register-license, super-admin-2fa, validate-license) |
 | Hardening migrations (Task #265) | 0056 audit_log archive · 0057 xpc_outbox · 0058 monthly_close_immutability · 0059 runtime_errors · 0060 schema_drift_check |
+
+---
+
+## Multi-PC accounts (15-year) — the Join → Approve → Bind flow
+
+**Introduced**: Task #299, migration 0069 (+ patches 0070-0074), Edge
+Function `unit-approve-device`, client surfaces `FirstLaunch`,
+`JoinSetup`, `WaitingForApproval`, `PendingDevices`, `DevicesUsers`.
+
+**Replaces**: License Keys, Commanders, "Generate Code", "Set up this
+device", `provision-commander`, `register-license`, `validate-license`,
+`license_registry`, `commander_accounts`. Old admin pages stay reachable
+by deep link only — no sidebar entry.
+
+### How a fresh laptop joins the unit
+
+1. Operator launches the desktop installer for the first time. The new
+   `FirstLaunch` screen shows two buttons: **Request to join this unit**
+   and **I already have an account**.
+2. Operator picks "Request to join this unit" → `JoinSetup` form.
+3. Operator picks role (Squadron Operator, Flight Cmdr, Sqn Cmdr, Wing
+   Cmdr, Base Cmdr, HQ Cmdr), one-or-more squadrons (the picker enforces
+   the role's allowed cardinality), username (lowercase + dot/dash/_,
+   ≥ 3 chars), display name, password (≥ 8 chars). Submitting calls
+   `unit_request_join` with the laptop's stable fingerprint and the
+   shared `x-unit-join-secret` header. The request id + username +
+   fingerprint are parked in localStorage.
+4. Laptop lands on `WaitingForApproval`. It polls
+   `unit_request_status` every 4 seconds. Closing the laptop does not
+   lose the request — re-opening lands back on the polling screen
+   because the local state survives reload.
+
+### How the super admin processes requests
+
+1. Super admin signs in normally. The HQ sidebar shows
+   **Pending Devices** (badge = pending count) and **Devices & Users**.
+2. **Pending Devices** lists every `device_request` with
+   `status='pending'`. Each row shows username, display name, requested
+   role, requested squadrons, fingerprint short id, originating IP, and
+   age. Three actions:
+   - **Approve** → `unit_reserve_approval` (RPC, super-admin gated by
+     RLS) followed by the `unit-approve-device` Edge Function which
+     creates the `auth.users` row, mirrors into `public.users`, inserts
+     `unit_members` + `devices` rows, and writes the password back to
+     the request row so the joining laptop can pull it on its next
+     status poll.
+   - **Reject** → `unit_reject_request` with a reason. The reason is
+     surfaced to the joining laptop's WaitingForApproval screen.
+   - **Ignore** → `unit_ignore_request` (no reason). Useful for
+     deferred decisions; the row is cleared by the cron sweep after
+     30 days.
+   - Squadron-list override: clicking squadron pills before Approve
+     overrides what the operator requested.
+3. The page subscribes to realtime on `device_requests` so a new
+   incoming request appears within ~5 seconds without a refresh, and
+   has a 5-second poll fallback for robustness.
+
+### How to edit or revoke a bound user
+
+Open **Devices & Users** (filter dropdown: Active / Removed / All).
+Each row shows the bound `auth.users` identity, its tier, the squadron
+allow-list, the device fingerprint short id, and status.
+
+- **Edit squadrons** → click "Edit squadrons", toggle pills, click Save.
+  Calls `unit_update_squadrons`. The change is patched onto
+  `auth.users.raw_app_meta_data.squadron_ids` directly so the bound
+  laptop sees it on its next session refresh — no re-sign-in required
+  for the operator.
+- **Remove member** → click Remove, enter a reason. Calls
+  `unit_remove_member`. This flips `unit_members.status` to `removed`,
+  revokes the `devices` row, and clears `app_metadata` so the next
+  RLS check from that laptop fails closed. We never hard-delete; the
+  audit trail stays intact for 15 years.
+
+### How to add a new squadron
+
+Use the existing **Squadrons** admin page (still in the sidebar).
+Squadron rows are referenced by `name` in `unit_members.squadron_allow_list`,
+so adding one immediately makes it pickable in JoinSetup and the
+PendingDevices override grid. No deploy required.
+
+### How to rotate the join secret
+
+The secret is stored in two places:
+- Database: `public.unit_config` row with `key='join_secret'`, value =
+  current secret. Read by `_unit_join_secret_ok()`.
+- Client: baked into the desktop installer as `VITE_UNIT_JOIN_SECRET`.
+
+To rotate:
+1. Generate a new secret: `openssl rand -hex 32`.
+2. Update the DB row:
+   `update public.unit_config set value = '<new>' where key = 'join_secret';`
+   (only super_admin can do this — RLS gated).
+3. Rebuild the desktop installer with the new
+   `VITE_UNIT_JOIN_SECRET` and roll out via the auto-updater.
+4. **Order matters**: while old laptops are still on the previous
+   installer they will be locked out of new joins (existing bound
+   users are unaffected — the secret is only checked on the
+   `unit_request_*` RPCs). To avoid a window of lockout, make the
+   client accept BOTH secrets for one upgrade cycle by extending the
+   `_unit_join_secret_ok()` helper to read multiple rows from
+   `unit_config`, then drop the old row after the rollout completes.
+
+### Safe order of operations (cheat sheet)
+
+| Goal | Step 1 | Step 2 | Step 3 |
+| --- | --- | --- | --- |
+| Add a new squadron and let people join it | Squadrons → Create | Wait for fresh PCs to land on JoinSetup | Approve from Pending Devices |
+| Move a wing cmdr to also cover a second squadron | Devices & Users → Edit squadrons → toggle pill → Save | Operator's next session refresh picks it up | (no reboot) |
+| Remove an operator who's left the unit | Devices & Users → Remove with reason | Their PC's next RLS check fails → forced sign-out | (audit row written) |
+| Rotate the join secret | Update `unit_config` row | Rebuild installer | Auto-update fleet, then drop old secret |
+| Investigate why a laptop's request hasn't appeared | Pending Devices may have a dropped subscription — refresh the page | Verify the laptop's `VITE_UNIT_JOIN_SECRET` matches DB | Inspect `audit_log` for `device_request_*` events |
+
+### Where the audit trail lives
+
+Every state transition on `unit_members`, `devices`, and
+`device_requests` writes an `audit_log` row via the trigger created in
+migration 0069. Search by table + member id from the existing Audit Log
+page.
+

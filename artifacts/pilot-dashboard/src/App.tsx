@@ -40,6 +40,13 @@ import Layout from "@/components/Layout";
 import OpeningAnimation from "@/components/OpeningAnimation";
 import { HQLayout } from "@/components/HQLayout";
 import LoginGate from "@/pages/Login";
+import FirstLaunch from "@/pages/FirstLaunch";
+import JoinSetup from "@/pages/JoinSetup";
+import WaitingForApproval from "@/pages/WaitingForApproval";
+import SuperAdminSetup from "@/pages/SuperAdminSetup";
+import PendingDevices from "@/pages/admin/PendingDevices";
+import DevicesUsers from "@/pages/admin/DevicesUsers";
+import { getPendingRequest } from "@/lib/unit-join";
 import Dashboard from "@/pages/Dashboard";
 import SortieLog from "@/pages/SortieLog";
 import AddSortie from "@/pages/AddSortie";
@@ -80,8 +87,6 @@ import MonthlyReportDefaults from "@/pages/MonthlyReportDefaults";
 import SetupWizard from "@/pages/SetupWizard";
 import NotFound from "@/pages/not-found";
 import AdminOverview from "@/pages/admin/Overview";
-import LicenseKeys from "@/pages/admin/LicenseKeys";
-import Commanders from "@/pages/admin/Commanders";
 import AdminSquadrons from "@/pages/admin/Squadrons";
 import AdminAuditLog from "@/pages/admin/AuditLog";
 import AdminSecurity from "@/pages/admin/Security";
@@ -155,8 +160,18 @@ function AdminRoutes() {
     <Switch>
       <Route path="/"><Redirect to="/admin" /></Route>
       <Route path="/admin" component={AdminOverview} />
-      <Route path="/admin/keys" component={LicenseKeys} />
-      <Route path="/admin/commanders" component={Commanders} />
+      {/* Task #299 — new join/approve/bind admin surfaces */}
+      <Route path="/admin/pending-devices" component={PendingDevices} />
+      <Route path="/admin/devices-users" component={DevicesUsers} />
+      {/* Task #299 review round 5 — the old License Keys / Commanders
+          surfaces are GONE, not just hidden. Hard-redirect any deep
+          link that still points at them so the only operative
+          account-management path is Pending Devices + Devices & Users.
+          Keeping the routes mounted (even un-linked) preserved a
+          parallel admin path that violated the "single Join → Approve
+          → Bind control plane" mandate. */}
+      <Route path="/admin/keys"><Redirect to="/admin/devices-users" /></Route>
+      <Route path="/admin/commanders"><Redirect to="/admin/devices-users" /></Route>
       <Route path="/admin/squadrons" component={AdminSquadrons} />
       <Route path="/admin/audit" component={AdminAuditLog} />
       <Route path="/admin/security" component={AdminSecurity} />
@@ -243,12 +258,26 @@ const IDLE_LOGOUT_MS = 30 * 60 * 1000;
 
 function Shell() {
   const { licensed, configured, user, logout } = useAuth();
+  const [location] = useWouterLocation();
 
   useIdleTimeout(IDLE_LOGOUT_MS, () => {
     if (user) logout();
   }, !!user);
 
-  if (!user) return <LoginGate />;
+  // Task #299 — Join → Approve → Bind front door. When no user is signed
+  // in, the new flow takes precedence over the legacy LoginGate so a
+  // fresh laptop can file a join request without a license key. The
+  // pending-request hand-off survives reload via localStorage; if the
+  // user is already mid-request we route them straight back to the
+  // waiting screen so they don't lose progress on tab reopen.
+  if (!user) {
+    if (location.startsWith("/join/setup")) return <JoinSetup />;
+    if (location.startsWith("/join/waiting")) return <WaitingForApproval />;
+    if (location.startsWith("/setup/super-admin")) return <SuperAdminSetup />;
+    if (location.startsWith("/login")) return <LoginGate />;
+    if (getPendingRequest()) return <WaitingForApproval />;
+    return <FirstLaunch />;
+  }
 
   if (user.role === "super_admin") {
     return <HQLayout><AdminRoutes /></HQLayout>;

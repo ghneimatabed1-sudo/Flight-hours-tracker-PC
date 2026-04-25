@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import { supabase, supabaseConfigured, validateLicenseRemote, recordAuditEvent, getSupabaseCreds, storeSupabaseCreds, resyncSupabaseCreds } from "./supabase";
+import { fetchMemberSelf } from "./unit-join";
 import { lookupLicenseKey } from "./license-registry";
 import { SUPER_ADMIN } from "./mockData";
 import { findCommanderByUsername, verifyCommanderPassword } from "./commander-store";
@@ -1421,6 +1422,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // pause the timer when the tab is hidden so minimising doesn't
   // pre-emptively log the user out before the real idle period elapses.
   const currentUserId = state.user?.id;
+
+  // Task #299 round 4 — membership watchdog. Code review required a
+  // ≤60s lockout window after an SA removes a member; Supabase
+  // access-token TTL is 1h, so even after `unit_remove_member` deletes
+  // sessions + refresh tokens + bans the user, an in-flight access
+  // token can keep working until it expires. The watchdog closes that
+  // gap on the client side: every 30 s it asks the server "am I still
+  // an active member?" via `unit_member_self()`. If the server says
+  // status='removed' the client tears down its session immediately —
+  // the operator sees the lock screen within the next poll tick.
+  // Transient errors (null) are ignored so a flaky network doesn't
+  // log the user out spuriously.
+  const isUnitBoundUser = !!state.user && (
+    state.user.role === "super_admin"
+    || state.user.role === "commander"
+    || state.user.role === "ops"
+  );
+  useEffect(() => {
+    if (!isUnitBoundUser) return;
+    let alive = true;
+    const tick = async () => {
+      if (!alive) return;
+      try {
+        const me = await fetchMemberSelf();
+        if (!alive) return;
+        if (me && me.status === "removed") {
+          // Definitive: server says I'm removed. Sign out + clear local
+          // user state. The component tree will re-render to FirstLaunch
+          // / login on the next pass.
+          if (supabase) { try { await supabase.auth.signOut(); } catch { /* ignore */ } }
+          localStorage.removeItem("rjaf.user");
+          setState((s) => ({ ...s, user: null }));
+        }
+      } catch {
+        /* transient error — ignore, try again next tick */
+      }
+    };
+    void tick();
+    const t = window.setInterval(tick, 30_000);
+    return () => { alive = false; window.clearInterval(t); };
+  }, [isUnitBoundUser, currentUserId]);
   // `prefVersion` is bumped whenever the Settings page writes a new
   // inactivity value, which re-runs this effect and re-arms the timer
   // with the new timeout (including 0 = disabled). Without this, picking

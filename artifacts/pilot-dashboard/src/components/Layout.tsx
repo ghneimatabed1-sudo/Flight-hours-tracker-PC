@@ -28,6 +28,7 @@ import {
 import { canUseMessages, canUseScheduleChain, canViewFinalSchedules } from "@/lib/cross-pc";
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
 import { SquadronScopePicker } from "@/components/SquadronScopePicker";
+import IdentityStrip from "@/components/IdentityStrip";
 import HeartbeatFailureBanner from "@/components/HeartbeatFailureBanner";
 import { getHeartbeatStatus, isHeartbeatFresh, subscribeHeartbeatStatus } from "@/lib/cross-pc";
 import { IncomingAlertWatcher } from "@/components/IncomingAlertWatcher";
@@ -312,6 +313,12 @@ export default function Layout({ children }: { children: ReactNode }) {
         </header>
         <HeartbeatFailureBanner diagnosticPath="/diagnostic" />
         <SessionCollisionBanner />
+        {/* Task #299 — IdentityStrip mounts under every authenticated
+            shell (HQLayout for SA/commander, Layout for squadron ops)
+            so every operator sees a permanent reminder of the bound
+            member, role, scope, and machine fingerprint without
+            needing to open a settings panel. */}
+        <IdentityStrip />
         <main className="flex-1 overflow-y-auto p-5">{children}</main>
       </div>
       {/* Cross-PC alert watcher: chimes + toasts + desktop notifications

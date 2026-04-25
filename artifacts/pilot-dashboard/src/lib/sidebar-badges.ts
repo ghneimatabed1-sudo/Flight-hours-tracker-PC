@@ -8,6 +8,8 @@ import {
   usePendingApprovals,
   canViewFinalSchedules,
 } from "@/lib/cross-pc";
+import { listPendingRequests } from "@/lib/unit-join";
+import { supabase } from "@/lib/supabase";
 
 export type SidebarBadgeMap = Record<string, number>;
 
@@ -62,8 +64,53 @@ function readLastSeenFlightProgram(): string {
   }
 }
 
+// Task #299 — super-admin pending-device count poller. Only runs when
+// the signed-in user is a super_admin (the only role with the Pending
+// Devices page in their sidebar). Polls every 5s and also subscribes
+// to realtime device_requests changes so the red badge wakes within
+// ~1s of a new join landing.
+function usePendingDeviceCount(role: string | undefined): number {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    if (role !== "super_admin") {
+      setCount(0);
+      return;
+    }
+    let alive = true;
+    const reload = async () => {
+      try {
+        const list = await listPendingRequests();
+        if (!alive) return;
+        setCount(list.length);
+      } catch {
+        /* leave count as-is on transient failure */
+      }
+    };
+    void reload();
+    const t = window.setInterval(reload, 5000);
+    let cleanup: (() => void) | null = null;
+    const sb = supabase;
+    if (sb) {
+      const ch = sb
+        .channel("device_requests:sidebar-badge")
+        .on("postgres_changes", { event: "*", schema: "public", table: "device_requests" }, () => {
+          void reload();
+        })
+        .subscribe();
+      cleanup = () => { void sb.removeChannel(ch); };
+    }
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+      if (cleanup) cleanup();
+    };
+  }, [role]);
+  return count;
+}
+
 export function useSidebarBadges(): SidebarBadgeMap {
   const { user, squadron } = useAuth();
+  const pendingDeviceCount = usePendingDeviceCount(user?.role);
 
   const myTier =
     (user?.role as string | undefined) === "flight_cmdr" ? "flight"
@@ -188,6 +235,8 @@ export function useSidebarBadges(): SidebarBadgeMap {
       "/messages": messageCount,
       "/pending": pendingCount,
       "/final-schedules": finalsCount,
+      // Task #299 — super-admin pending-device queue badge.
+      "/admin/pending-devices": pendingDeviceCount,
     };
-  }, [sharesQ.data, messagesQ.inbox, pendingQ.data, matchesMe, finalsViewer, lastSeenFinals, lastSeenFP, user?.role, user?.scope]);
+  }, [sharesQ.data, messagesQ.inbox, pendingQ.data, matchesMe, finalsViewer, lastSeenFinals, lastSeenFP, user?.role, user?.scope, pendingDeviceCount]);
 }
