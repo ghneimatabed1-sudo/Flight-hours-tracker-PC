@@ -4,13 +4,22 @@
 // Round-3 review rework: the super-admin button is ALWAYS rendered so
 // the operator never wonders where it went; when an SA already exists
 // we render the button DISABLED with an explanatory message instead
-// of silently hiding it. The "I already have an account" link is
-// removed — every laptop in the new flow joins through the
-// request/approve/bind path; there is no separate self-serve sign-in
-// page in this product. We also gate the "Request to join" button on
+// of silently hiding it. We also gate the "Request to join" button on
 // at least one squadron existing in the cloud, otherwise the join
 // would land on a JoinSetup page with an empty squadron picker and
 // fail at submit time.
+//
+// Per CO request after v1.1.123: the legacy "Super admin sign-in" entry
+// is restored as a third always-available button. This routes to the
+// existing /login page (standard supabase email-and-password auth) so
+// the super admin can come back in on a fresh laptop or after a
+// re-install — without it, an SA whose original laptop dies has no
+// way back in (the bootstrap path is locked once an SA already exists,
+// and the join roles list does not include super_admin). This does
+// NOT create a second SA, does NOT bypass the join-secret gate (which
+// only protects the join-request anti-spam flow), and does NOT widen
+// any RLS policy — the auth itself is standard supabase
+// signInWithPassword that the rest of the dashboard already relies on.
 //
 // Routed unconditionally from App.tsx when:
 //   • no Supabase session is live, AND
@@ -65,11 +74,15 @@ export default function FirstLaunch() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 grid place-items-center p-6">
       <div className="w-full max-w-md space-y-6">
-        <div className="text-center space-y-2">
-          <div className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-amber-500/10 text-amber-400 text-2xl">
-            ✈
-          </div>
-          <h1 className="text-2xl font-semibold">Pilot Hours Dashboard</h1>
+        <div className="text-center space-y-3">
+          <img
+            src="brand/emblem.png"
+            alt="Royal Jordanian Air Force"
+            draggable={false}
+            className="mx-auto h-24 w-24 object-contain"
+            data-testid="img-rjaf-emblem"
+          />
+          <h1 className="text-2xl font-semibold">Squadron Management System</h1>
           <p className="text-sm text-slate-400">Welcome to your unit's logbook.</p>
         </div>
 
@@ -116,6 +129,19 @@ export default function FirstLaunch() {
               Request to join this unit
             </button>
           )}
+
+          {/* Always-available re-entry path. Targets the existing
+              /login page (App.tsx routes /login through to LoginGate
+              regardless of FirstLaunch state). Standard email +
+              password sign-in via supabase auth. Designed primarily
+              for the super admin coming back on a fresh laptop. */}
+          <Link
+            href="/login"
+            data-testid="link-existing-account"
+            className="block w-full rounded-lg border border-slate-700 bg-slate-900/60 px-4 py-3 text-center font-semibold text-slate-200 hover:bg-slate-800 transition"
+          >
+            Super admin sign-in
+          </Link>
         </div>
 
         {cloud.kind === "loading" && (
