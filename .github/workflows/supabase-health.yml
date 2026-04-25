@@ -14,9 +14,6 @@ name: Supabase Health Checks
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
   schedule:
     # 03:17 UTC daily — outside the operator workday, after the
     # nightly cron jobs in the Supabase project have settled.
