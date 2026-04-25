@@ -304,21 +304,56 @@ All three tables must exist with the RLS policies, indexes, triggers, and the mi
 
 ---
 
+## Round 6 — task #302: multi-role workspace walk + two production fixes
+
+Task #302 asked for a physical six-role two-laptop walk. That walk needs
+real hardware and is documented as the user's to drive (see "What I
+cannot prove from this workspace" + the crib sheet). What the agent
+*could* do — and did — was extend the previous single-role probe into a
+multi-role walk against the real prod DB across all six roles plus the
+squadron-edit / remove / reject / ignore paths. That walk found two
+ship-blocking production defects, both fixed in the same task:
+
+- **MPC-1**: `unit-approve-device` Edge Function failed with HTTP 500
+  `user_mirror_failed` for every commander tier. Root cause: the edge
+  function upserts `role='commander'` into the legacy `public.users`
+  table, but `users_role_check` only allowed `ops/deputy/admin/superadmin`.
+  Migration **0082_users_role_check_allow_commander.sql** extends the
+  allow-list to include `'commander'` and `'super_admin'`. Applied to
+  prod 2026-04-25T01:05:28Z (ledger sha `381db5873361…`).
+- **MPC-2**: `unit_reject_request` wrote to the dropped `password_plain`
+  column, returning HTTP 400 on every Reject click. Migration
+  **0081_unit_reject_drop_password_plain.sql** is a `CREATE OR REPLACE`
+  that removes the dead column write. Applied to prod
+  2026-04-25T01:05:25Z (ledger sha `94426f71314c…`).
+
+After both migrations the multi-role walk re-runs **green** end-to-end:
+all six roles bind, all four shared-state paths pass, cleanup runs
+clean, residue check shows zero. Evidence:
+`audit-evidence/multi-pc-simple-rebuild/two-laptop-walk.md` and
+`audit-evidence/multi-pc-simple-rebuild/multi-role-walk-results.json`
+(exit code 0, started 01:07:18Z, finished 01:07:57Z).
+
 ## Summary
 
 | Area | Status |
 | --- | --- |
-| Schema migration 0069 in prod | ✅ verified |
+| Schema migrations 0069–0082 in prod | ✅ verified (ledger rows present, sha non-null) |
 | RPC contract | ✅ all 12 RPCs probed |
-| Edge Function `unit-approve-device` deployed | ✅ verified |
-| Synthetic end-to-end probe | ✅ all steps pass |
+| Edge Function `unit-approve-device` deployed | ✅ verified — works for every role after migration 0082 |
+| Synthetic end-to-end probe (single-role, ops) | ✅ all steps pass |
+| Workspace-side multi-role walk (six roles + edit/remove/reject/ignore) | ✅ walked 2026-04-25; all six roles + all four paths green after migrations 0081 + 0082. See `two-laptop-walk.md` + `multi-role-walk-results.json`. |
 | Client UI compiles + builds | ✅ verified (`tsc` clean, `vite build` clean) |
 | Sidebar + router surgery | ✅ verified |
 | api-server decoupled | ✅ verified |
 | Documentation (runbook + replit.md) | ✅ verified |
-| Six-role two-laptop end-to-end walk | ⏳ user to walk |
-| 24-hour cron observation | ⏳ user to observe |
-| Backup-restore probe | ⏳ user to run on staging |
-| Windows installer rebuild + rollout | ⏳ user to build + sign + upload |
+| **Six-role two-laptop end-to-end walk (physical)** | ⏳ user to walk on real hardware |
+| **24-hour cron observation** | ⏳ user to observe |
+| **Backup-restore probe** | ⏳ user to run on staging |
+| **Windows installer rebuild + rollout** | ⏳ user to build + sign + upload |
 
-**Workspace verdict: GO.** Everything that lives in code, schema, deployed function, and synthetic probe is green. The four ⏳ items are physical-world / external-pipeline items the agent cannot perform from inside this workspace and are documented for the user to walk through with the crib sheet above.
+**Workspace verdict: GO.** Schema, RPCs, edge functions, and the new
+multi-role walk all return green against the production database. The
+four bottom-row ⏳ items remain ⏳ — they require physical hardware and
+external pipelines the agent cannot drive from inside this workspace,
+exactly as before.
