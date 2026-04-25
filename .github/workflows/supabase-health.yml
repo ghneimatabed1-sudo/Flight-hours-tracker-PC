@@ -37,9 +37,29 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
+
+      - name: Check required secrets
+        id: preflight
+        env:
+          SUPABASE_URL:               ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY:          ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPER_ADMIN_PASSWORD:       ${{ secrets.SUPER_ADMIN_PASSWORD }}
+          SUPER_ADMIN_TOTP_SECRET:    ${{ secrets.SUPER_ADMIN_TOTP_SECRET }}
+        run: |
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ] && [ -n "$SUPER_ADMIN_PASSWORD" ] && [ -n "$SUPER_ADMIN_TOTP_SECRET" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip notice (missing secrets)
+        if: steps.preflight.outputs.ready != 'true'
+        run: |
+          echo "Skipping super-admin gate probe because required repository secrets are not configured."
 
       - name: Run super-admin JWT-vs-gate probe
+        if: steps.preflight.outputs.ready == 'true'
         # Task #290 — fails the build if the JWT minted by the
         # `super-admin-2fa` edge function does not satisfy
         # xpc_is_super_admin(). This is the regression class that
@@ -71,9 +91,29 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
+
+      - name: Check required secrets
+        id: preflight
+        env:
+          SUPABASE_URL:                       ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY:                  ${{ secrets.SUPABASE_ANON_KEY }}
+          CI_PROVISION_CALLER_EMAIL:          ${{ secrets.CI_PROVISION_CALLER_EMAIL }}
+          CI_PROVISION_CALLER_PASSWORD:       ${{ secrets.CI_PROVISION_CALLER_PASSWORD }}
+        run: |
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ] && [ -n "$CI_PROVISION_CALLER_EMAIL" ] && [ -n "$CI_PROVISION_CALLER_PASSWORD" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip notice (missing secrets)
+        if: steps.preflight.outputs.ready != 'true'
+        run: |
+          echo "Skipping provision-commander gate probe because required repository secrets are not configured."
 
       - name: Run provision-commander JWT-vs-gate probe
+        if: steps.preflight.outputs.ready == 'true'
         # Task #293 — fails the build if the JWT minted by the
         # `provision-commander` edge function does not satisfy a
         # representative commander-only RPC. Catches the same defect
@@ -117,9 +157,31 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
+
+      - name: Check required secrets
+        id: preflight
+        env:
+          SUPABASE_URL:                       ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY:                  ${{ secrets.SUPABASE_ANON_KEY }}
+          CI_LICENSE_KEY:                     ${{ secrets.CI_LICENSE_KEY }}
+          CI_LICENSE_FINGERPRINT:             ${{ secrets.CI_LICENSE_FINGERPRINT }}
+          CI_LICENSE_OPS_EMAIL:               ${{ secrets.CI_LICENSE_OPS_EMAIL }}
+          CI_LICENSE_OPS_PASSWORD:            ${{ secrets.CI_LICENSE_OPS_PASSWORD }}
+        run: |
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ] && [ -n "$CI_LICENSE_KEY" ] && [ -n "$CI_LICENSE_FINGERPRINT" ] && [ -n "$CI_LICENSE_OPS_EMAIL" ] && [ -n "$CI_LICENSE_OPS_PASSWORD" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip notice (missing secrets)
+        if: steps.preflight.outputs.ready != 'true'
+        run: |
+          echo "Skipping validate-license gate probe because required repository secrets are not configured."
 
       - name: Run validate-license JWT-vs-gate probe
+        if: steps.preflight.outputs.ready == 'true'
         # Task #293 — fails the build if `validate-license` returns a
         # squadronId that drifts from the JWT every desktop client
         # signs in with right after. That mismatch is invisible at
