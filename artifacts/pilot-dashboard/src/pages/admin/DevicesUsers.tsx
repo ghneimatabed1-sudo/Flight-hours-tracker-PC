@@ -15,6 +15,8 @@ export default function DevicesUsers() {
   const [error, setError] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, string[]>>({});
   const [filter, setFilter] = useState<"all" | "active" | "removed">("active");
+  const [removeTarget, setRemoveTarget] = useState<UnitDeviceListRow | null>(null);
+  const [removeReason, setRemoveReason] = useState("");
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -61,13 +63,24 @@ export default function DevicesUsers() {
     await reload();
   };
 
-  const onRemove = async (r: UnitDeviceListRow) => {
-    const reason = window.prompt(`Remove ${r.display_name}? Type a reason for the audit log:`) ?? "";
-    if (!reason) return;
+  const requestRemove = (r: UnitDeviceListRow) => {
+    setRemoveTarget(r);
+    setRemoveReason("");
+  };
+  const confirmRemove = async () => {
+    if (!removeTarget) return;
+    const reason = removeReason.trim();
+    if (!reason) {
+      setError("Removal reason is required.");
+      return;
+    }
+    const r = removeTarget;
     setBusyId(r.member_id);
     const ok = await removeMember(r.member_id, reason);
     setBusyId(null);
     if (!ok) { setError("Remove failed."); return; }
+    setRemoveTarget(null);
+    setRemoveReason("");
     await reload();
   };
 
@@ -100,6 +113,40 @@ export default function DevicesUsers() {
       </div>
 
       {error && <div className="rounded border border-rose-500/40 bg-rose-500/5 px-3 py-2 text-sm text-rose-200">{error}</div>}
+      {removeTarget && (
+        <div className="rounded border border-amber-500/40 bg-amber-500/10 p-3 space-y-3">
+          <div className="text-sm text-amber-200">
+            Remove <span className="font-semibold">{removeTarget.display_name}</span> ({removeTarget.username})?
+          </div>
+          <label className="block space-y-1">
+            <span className="text-xs text-slate-300">Reason (required for audit log)</span>
+            <input
+              type="text"
+              value={removeReason}
+              onChange={(e) => setRemoveReason(e.target.value)}
+              placeholder="e.g. duplicate request / left unit"
+              className="w-full rounded border border-slate-600 bg-slate-900 px-2 py-1.5 text-sm"
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => { setRemoveTarget(null); setRemoveReason(""); }}
+              className="rounded border border-slate-600 px-2 py-1 text-xs"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={busyId === removeTarget.member_id}
+              onClick={() => void confirmRemove()}
+              className="rounded bg-rose-500 px-2 py-1 text-xs font-semibold text-white hover:bg-rose-400 disabled:opacity-50"
+            >
+              Confirm remove
+            </button>
+          </div>
+        </div>
+      )}
 
       {loading && <div className="text-sm text-slate-400">Loading…</div>}
       {!loading && filtered.length === 0 && (
@@ -195,7 +242,7 @@ export default function DevicesUsers() {
                           <button
                             type="button"
                             disabled={busyId === r.member_id}
-                            onClick={() => onRemove(r)}
+                            onClick={() => requestRemove(r)}
                             className="rounded bg-rose-500/80 px-2 py-1 text-xs font-medium text-white hover:bg-rose-500 disabled:opacity-50"
                           >Remove</button>
                         </>
