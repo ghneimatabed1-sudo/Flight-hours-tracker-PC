@@ -156,6 +156,19 @@ jobs:
           # which fails immediately in a packaged Electron app loading
           # from file:// — the operator sees "Failed to fetch" on Setup.
           VITE_API_SERVER_URL: ${{ secrets.VITE_API_SERVER_URL }}
+          # Anti-spam shared secret that the desktop-installer must
+          # carry in the `x-unit-join-secret` header on every call to
+          # the join-flow RPCs (`unit_join_request_*`,
+          # `unit_super_admin_setup_*`, etc). Migration 0076 stores
+          # the canonical value in `unit_config.join_secret` in
+          # production; the desktop build mirrors it here so the
+          # client-side helper `unitJoinConfigured` evaluates to
+          # `true`. WITHOUT THIS SECRET the FirstLaunch screen renders
+          # both buttons disabled with the message "Cloud not
+          # reachable from this PC, or this build wasn't issued with
+          # a join secret." and the operator cannot proceed past the
+          # welcome screen — i.e. every fresh install is bricked.
+          VITE_UNIT_JOIN_SECRET: ${{ secrets.VITE_UNIT_JOIN_SECRET }}
         run: pnpm run build
 
       - name: Verify VITE_API_SERVER_URL was injected
@@ -171,6 +184,23 @@ jobs:
           echo "VITE_API_SERVER_URL ok: $VITE_API_SERVER_URL"
         env:
           VITE_API_SERVER_URL: ${{ secrets.VITE_API_SERVER_URL }}
+
+      - name: Verify VITE_UNIT_JOIN_SECRET was injected
+        # Hard-fail the build if the join secret is missing. Without
+        # it every fresh install lands on FirstLaunch with both
+        # buttons disabled — the v1.1.122 regression we shipped on
+        # 2026-04-25. Tripwire here so we never ship that build
+        # variant again.
+        run: |
+          set -euo pipefail
+          if [ -z "${VITE_UNIT_JOIN_SECRET:-}" ]; then
+            echo "::error::VITE_UNIT_JOIN_SECRET secret is not set in this repo. Every fresh installer would land on FirstLaunch with both buttons disabled and the message 'Cloud not reachable from this PC, or this build wasn't issued with a join secret.' Add it under Settings → Secrets and variables → Actions — the canonical value lives in production unit_config.join_secret (read it via the unit_get_join_secret() RPC as super-admin)."
+            exit 1
+          fi
+          # Length check only — never echo the secret itself.
+          echo "VITE_UNIT_JOIN_SECRET ok: (length ${#VITE_UNIT_JOIN_SECRET})"
+        env:
+          VITE_UNIT_JOIN_SECRET: ${{ secrets.VITE_UNIT_JOIN_SECRET }}
 
       - name: Verify renderer output exists
         run: |
