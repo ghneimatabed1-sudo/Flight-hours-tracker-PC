@@ -107,3 +107,9 @@ id = "q6V8HFQuXLYRKedUecL8b"
 uri = "file://.local/test-report-2026-04-23.md"
 type = "text"
 title = "Hawk Eye — Overnight Comprehensive Simulation Report (2026-04-23)"
+
+[[outputs]]
+id = "uWUvNM85_47NBLA5WgCEi"
+uri = "file://HANDOFF.md"
+type = "text"
+title = "Hawk Eye — Complete Agent Handoff Document"
