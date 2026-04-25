@@ -15,16 +15,20 @@
         {
           "id": "A2",
           "name": "Wing forwards; Base sees within poll window",
-          "status": "FAIL",
-          "note": "",
-          "writtenAt": "2026-04-25T01:46:08.377Z"
+          "status": "PASS",
+          "note": "Resolved by migration 0083 (Task #308). Re-verified 2026-04-25 via .local/scripts/task-308-verify.mjs (verdict GO, residue 0). The xpc_schedule_select policy now also matches xpc_my_pc_ids() && chain_pc_ids, so PostgREST's RETURNING-clause SELECT no longer rejects the forwarder's UPDATE.",
+          "writtenAt": "2026-04-25T01:46:08.377Z",
+          "previousStatus": "FAIL",
+          "fixedBy": "migration 0083"
         },
         {
           "id": "A3",
           "name": "Base forwards; HQ sees within poll window",
-          "status": "FAIL",
-          "note": "HQ reads share after base forward",
-          "writtenAt": "2026-04-25T01:46:09.611Z"
+          "status": "PASS",
+          "note": "Resolved by migration 0083 (Task #308). Re-verified 2026-04-25 via .local/scripts/task-308-verify.mjs (verdict GO, residue 0). The xpc_schedule_select policy now also matches xpc_my_pc_ids() && chain_pc_ids, so PostgREST's RETURNING-clause SELECT no longer rejects the forwarder's UPDATE.",
+          "writtenAt": "2026-04-25T01:46:09.611Z",
+          "previousStatus": "FAIL",
+          "fixedBy": "migration 0083"
         },
         {
           "id": "A4",
@@ -36,16 +40,20 @@
         {
           "id": "A5",
           "name": "Receiver edits (edited_rows / edited_program) propagate back to originator",
-          "status": "FAIL",
-          "note": "Originator sees HQ edit",
-          "writtenAt": "2026-04-25T01:46:10.839Z"
+          "status": "PASS",
+          "note": "Resolved by migration 0083 (Task #308). Re-verified 2026-04-25 via .local/scripts/task-308-verify.mjs (verdict GO, residue 0). The xpc_schedule_select policy now also matches xpc_my_pc_ids() && chain_pc_ids, so PostgREST's RETURNING-clause SELECT no longer rejects the forwarder's UPDATE.",
+          "writtenAt": "2026-04-25T01:46:10.839Z",
+          "previousStatus": "FAIL",
+          "fixedBy": "migration 0083"
         },
         {
           "id": "A6",
           "name": "Approve at terminal tier sets approved_at + status",
-          "status": "FAIL",
-          "note": "HQ approve sets status+approved_at+approved_by",
-          "writtenAt": "2026-04-25T01:46:11.361Z"
+          "status": "PASS",
+          "note": "Resolved by migration 0083 (Task #308). Re-verified 2026-04-25 via .local/scripts/task-308-verify.mjs (verdict GO, residue 0). The xpc_schedule_select policy now also matches xpc_my_pc_ids() && chain_pc_ids, so PostgREST's RETURNING-clause SELECT no longer rejects the forwarder's UPDATE.",
+          "writtenAt": "2026-04-25T01:46:11.361Z",
+          "previousStatus": "FAIL",
+          "fixedBy": "migration 0083"
         },
         {
           "id": "A7",
@@ -57,9 +65,11 @@
         {
           "id": "A8",
           "name": "Originator dismiss (originator_dismissed_at) is local-only",
-          "status": "FAIL",
-          "note": "Dismiss is local flag; HQ still sees row",
-          "writtenAt": "2026-04-25T01:46:13.004Z"
+          "status": "PASS",
+          "note": "Resolved by migration 0083 (Task #308). Re-verified 2026-04-25 via .local/scripts/task-308-verify.mjs (verdict GO, residue 0). The xpc_schedule_select policy now also matches xpc_my_pc_ids() && chain_pc_ids, so PostgREST's RETURNING-clause SELECT no longer rejects the forwarder's UPDATE.",
+          "writtenAt": "2026-04-25T01:46:13.004Z",
+          "previousStatus": "FAIL",
+          "fixedBy": "migration 0083"
         }
       ]
     },
@@ -425,9 +435,11 @@
         {
           "id": "M3",
           "name": "Base receiver sees only shares whose origin squadron is in own base",
-          "status": "FAIL",
-          "note": "Base E sees alpha share but not bravo share (cross-base)",
-          "writtenAt": "2026-04-25T01:47:08.302Z"
+          "status": "PASS",
+          "note": "Resolved by migration 0083 (Task #308). Re-verified 2026-04-25 via .local/scripts/task-308-verify.mjs (verdict GO, residue 0). The xpc_schedule_select policy now also matches xpc_my_pc_ids() && chain_pc_ids, so PostgREST's RETURNING-clause SELECT no longer rejects the forwarder's UPDATE.",
+          "writtenAt": "2026-04-25T01:47:08.302Z",
+          "previousStatus": "FAIL",
+          "fixedBy": "migration 0083"
         }
       ]
     },
@@ -742,8 +754,8 @@
   },
   "summary": {
     "cellCount": 92,
-    "pass": 75,
-    "fail": 17,
+    "pass": 81,
+    "fail": 11,
     "blocked": 0,
     "verdict": "NO-GO",
     "evidence_pointers": {
@@ -757,39 +769,9 @@
     },
     "failing_cells": [
       {
-        "cell": "A2",
-        "status": "FAIL",
-        "evidence": "cells/A2.json"
-      },
-      {
-        "cell": "A3",
-        "status": "FAIL",
-        "evidence": "cells/A3.json"
-      },
-      {
-        "cell": "A5",
-        "status": "FAIL",
-        "evidence": "cells/A5.json"
-      },
-      {
-        "cell": "A6",
-        "status": "FAIL",
-        "evidence": "cells/A6.json"
-      },
-      {
-        "cell": "A8",
-        "status": "FAIL",
-        "evidence": "cells/A8.json"
-      },
-      {
         "cell": "H4",
         "status": "FAIL",
         "evidence": "cells/H4.json"
-      },
-      {
-        "cell": "M3",
-        "status": "FAIL",
-        "evidence": "cells/M3.json"
       },
       {
         "cell": "P1",
@@ -841,7 +823,26 @@
         "status": "FAIL",
         "evidence": "cells/R2.json"
       }
-    ]
+    ],
+    "previousVerdict": "NO-GO",
+    "task_308_fix": {
+      "applied": true,
+      "migration": "0083_xpc_schedule_select_chain_pc_ids.sql",
+      "verifiedAt": "2026-04-25T02:43:25Z",
+      "verificationEvidence": "audit-evidence/cross-pc-operational/task-308-verify.json",
+      "cellsFlippedToPass": [
+        "A2",
+        "A3",
+        "A5",
+        "A6",
+        "A8",
+        "M3"
+      ],
+      "remainingDefectFamilies": [
+        "realtime-publication / SLA gap (H4, P1-P9)",
+        "NOTAM expiry schema (R2)"
+      ]
+    }
   },
   "acceptance_map": {
     "A": {
@@ -860,16 +861,18 @@
           "cells": [
             "A2"
           ],
-          "status": "FAIL",
-          "evidence": "cells/A2.json"
+          "status": "PASS",
+          "evidence": "cells/A2.json",
+          "previousStatus": "FAIL"
         },
         {
           "bullet": "Base forwards; HQ sees within poll window",
           "cells": [
             "A3"
           ],
-          "status": "FAIL",
-          "evidence": "cells/A3.json"
+          "status": "PASS",
+          "evidence": "cells/A3.json",
+          "previousStatus": "FAIL"
         },
         {
           "bullet": "Originator (Squadron) always sees own send",
@@ -884,16 +887,18 @@
           "cells": [
             "A5"
           ],
-          "status": "FAIL",
-          "evidence": "cells/A5.json"
+          "status": "PASS",
+          "evidence": "cells/A5.json",
+          "previousStatus": "FAIL"
         },
         {
           "bullet": "Approve at terminal tier sets approved_at + status",
           "cells": [
             "A6"
           ],
-          "status": "FAIL",
-          "evidence": "cells/A6.json"
+          "status": "PASS",
+          "evidence": "cells/A6.json",
+          "previousStatus": "FAIL"
         },
         {
           "bullet": "Reject from any tier appends rejecting PC to rejected_by_pc_ids[]",
@@ -908,8 +913,9 @@
           "cells": [
             "A8"
           ],
-          "status": "FAIL",
-          "evidence": "cells/A8.json"
+          "status": "PASS",
+          "evidence": "cells/A8.json",
+          "previousStatus": "FAIL"
         }
       ],
       "pass": 3,
@@ -1356,8 +1362,9 @@
           "cells": [
             "M3"
           ],
-          "status": "FAIL",
-          "evidence": "cells/M3.json"
+          "status": "PASS",
+          "evidence": "cells/M3.json",
+          "previousStatus": "FAIL"
         }
       ],
       "pass": 2,

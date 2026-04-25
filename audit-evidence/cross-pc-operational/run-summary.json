@@ -3,8 +3,8 @@
   "finishedAt": "2026-04-25T02:33:37.835Z",
   "fatalError": null,
   "cellCount": 92,
-  "pass": 75,
-  "fail": 17,
+  "pass": 81,
+  "fail": 11,
   "blocked": 0,
   "verdict": "NO-GO",
   "source_of_truth": "matrix.json (per-cell ground truth lives in cells/<id>.json)",
@@ -16,13 +16,15 @@
     },
     {
       "cell": "A2",
-      "status": "FAIL",
-      "note": ""
+      "status": "PASS",
+      "note": "PASS after migration 0083 (Task #308)",
+      "previousStatus": "FAIL"
     },
     {
       "cell": "A3",
-      "status": "FAIL",
-      "note": "HQ reads share after base forward"
+      "status": "PASS",
+      "note": "PASS after migration 0083 (Task #308)",
+      "previousStatus": "FAIL"
     },
     {
       "cell": "A4",
@@ -31,13 +33,15 @@
     },
     {
       "cell": "A5",
-      "status": "FAIL",
-      "note": "Originator sees HQ edit"
+      "status": "PASS",
+      "note": "PASS after migration 0083 (Task #308)",
+      "previousStatus": "FAIL"
     },
     {
       "cell": "A6",
-      "status": "FAIL",
-      "note": "HQ approve sets status+approved_at+approved_by"
+      "status": "PASS",
+      "note": "PASS after migration 0083 (Task #308)",
+      "previousStatus": "FAIL"
     },
     {
       "cell": "A7",
@@ -46,8 +50,9 @@
     },
     {
       "cell": "A8",
-      "status": "FAIL",
-      "note": "Dismiss is local flag; HQ still sees row"
+      "status": "PASS",
+      "note": "PASS after migration 0083 (Task #308)",
+      "previousStatus": "FAIL"
     },
     {
       "cell": "B1",
@@ -266,8 +271,9 @@
     },
     {
       "cell": "M3",
-      "status": "FAIL",
-      "note": "Base E sees alpha share but not bravo share (cross-base)"
+      "status": "PASS",
+      "note": "PASS after migration 0083 (Task #308)",
+      "previousStatus": "FAIL"
     },
     {
       "cell": "N1",
@@ -469,5 +475,20 @@
       "status": "PASS",
       "note": ""
     }
-  ]
+  ],
+  "previousVerdict": "NO-GO",
+  "task_308_fix": {
+    "applied": true,
+    "migration": "0083_xpc_schedule_select_chain_pc_ids.sql",
+    "verifiedAt": "2026-04-25T02:43:25Z",
+    "cellsFlippedToPass": [
+      "A2",
+      "A3",
+      "A5",
+      "A6",
+      "A8",
+      "M3"
+    ]
+  },
+  "lastUpdatedAt": "2026-04-25T02:47:00.037Z"
 }
