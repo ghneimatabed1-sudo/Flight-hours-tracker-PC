@@ -1,5 +1,9 @@
 # Threat Model
 
+> For the engineering handoff (live state, schema, auth model summary,
+> known-broken list), see `HANDOFF.md`. This file is the dedicated security
+> deep dive.
+
 ## Project Overview
 
 Hawk Eye — RJAF Squadron Ops is a pnpm monorepo that includes an Electron + Vite + React desktop dashboard, an Expo mobile app, a small Express API server, and a Supabase backend with PostgreSQL, Auth, Row Level Security, and Edge Functions. Its production users are super administrators, squadron operations staff, commanders, and pilots.

@@ -1,5 +1,9 @@
 # RJAF Flight Hours System — Build Targets
 
+> For the full release process (iron rules, GitHub Actions secrets, electron-
+> updater behaviour, rollback policy), see `HANDOFF.md` §12. This file is the
+> deep dive on the build pipeline itself.
+
 This repo produces three artefacts for operational use:
 
 | Target                 | Platform | Builder                        | Output |

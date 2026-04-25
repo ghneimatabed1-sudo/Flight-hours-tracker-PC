@@ -1,7 +1,7 @@
 # DOMAIN.md — What Hawk Eye Actually Does
 
 > **Functional reference for AI agents and humans.**
-> Read this to understand WHAT every page, role, and number means in operational terms — not how the code is structured. For "do not break" rules see `AGENTS.md`. For settled per-feature rules see `.local/memory/`.
+> Read this to understand WHAT every page, role, and number means in operational terms — not how the code is structured. For "do not break" rules see `AGENTS.md`. For settled per-feature rules see `.local/memory/`. For the master engineering handoff (live state, schema, source tree index, known-broken list, release process) see `HANDOFF.md` at the repo root.
 
 ---
 

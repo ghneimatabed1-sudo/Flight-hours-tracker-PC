@@ -1,5 +1,10 @@
 # Hawk Eye — Desktop App
 
+> For the master engineering handoff (today's live state, every migration /
+> RPC / edge function / cron job, source-tree index, known-broken list,
+> release process), see `HANDOFF.md` at the repo root. This README is the
+> per-artifact developer quickstart.
+
 A bilingual (English / العربية) Windows desktop application for the squadron
 ops officer to manage all flight data — pilot roster, sortie log, currencies,
 risk assessments, duty week, NOTAMs, and more. Built with Electron + React +
@@ -15,12 +20,22 @@ TypeScript on top of Vite. Designed to replace the legacy SqDn App 21.10.16.
 The same React code runs in both modes — only the shell changes.
 
 ## Security architecture (implemented + scaffolded)
+
+> ⚠️ **The "License key required" bullet below is SUPERSEDED — see
+> `HANDOFF.md` §10 and §11.D.** The `license_keys` table was dropped by
+> migration 0081 and bootstrap is now the multi-PC join flow
+> (`unit-super-admin-setup` for the first PC of a fresh unit, then
+> `device-requests` Join → Approve → Bind for every additional PC).
+> Three legacy edge functions (`register-license`, `validate-license`,
+> `provision-commander`) are still deployed but reference dropped tables
+> and will error if invoked — flagged for cleanup in §11.D / task #316.
+
 - **Installer is password-protected** — NSIS macro in `build/installer.nsh`
   prompts for a master install password supplied at build time via the
   `INSTALL_PASSWORD` env var.
-- **License key required** — first launch shows the License Activation
-  screen. Keys are validated (in the demo: client-side; in production:
-  Supabase Edge Function) and bound to the PC's hardware fingerprint.
+- **License key required** — _LEGACY, no longer in effect_. First launch
+  now shows the join flow described in HANDOFF.md §10. The
+  `license_keys` table no longer exists.
 - **Hardware fingerprint** — derived from CPUs + MAC addresses + hostname
   in the Electron main process and exposed to the renderer through a secure
   preload bridge.

@@ -3,6 +3,10 @@
 > **You are an AI agent (Replit Agent, Cursor, Claude Code, Aider, Cline, anything).**
 > **This file is the 60-second briefing. Read it in full before touching any code.**
 > If you skip it, you will repeat bugs that have already cost the operator time.
+>
+> For the comprehensive engineering handoff (live DB state, all migrations,
+> RPCs, edge functions, cron jobs, source tree, known-broken list, release
+> process), open `HANDOFF.md` at the repo root after reading this file.
 
 ---
 

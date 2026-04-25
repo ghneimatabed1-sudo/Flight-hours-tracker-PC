@@ -1,5 +1,10 @@
 # Overview
 
+> **For the canonical project handoff — what's deployed, what's broken, how
+> to release, every table/RPC/edge-function/cron — read `HANDOFF.md` at the
+> repo root first.** This file is the agent-facing project log; HANDOFF.md
+> is the engineer-facing single source of truth.
+
 This project, "Hawk Eye" (عين الصقر), is a pnpm workspace monorepo using TypeScript, designed for the Royal Jordanian Air Force (RJAF). It provides a comprehensive flight hours management system, including a web-based command dashboard ("Hawk Eye HQ") for super administrators and commanders, and a mobile application for pilots.
 
 **Latest fix (2026-04-25, task #308 — schedule chain forwarding RLS):** PROD migration `0083_xpc_schedule_select_chain_pc_ids.sql` widened the `xpc_schedule_select` policy on `public.xpc_schedule_shares` with a third disjunct: `xpc_my_pc_ids() && chain_pc_ids`. This unblocks Squadron→Wing→Base→HQ schedule forwarding, which was returning `42501 new row violates row-level security policy` on every cross-tier handoff because PostgREST's PATCH RETURNING fired the SELECT policy against the new row whose `current_pc_id` is no longer in the forwarder's claims. The fix is read-side only — INSERT/UPDATE/DELETE policies are untouched. Applied directly to PROD via the Supabase Management API and recorded in `_migration_ledger` (sha256 `26c6343e…`); the migration is also committed to disk so the GitHub Actions `Apply Supabase Migrations` workflow is a no-op for it on next push. Verified end-to-end against PROD with `.local/scripts/task-308-verify.mjs` (provisions a tagged `TEST_T308_*` universe of 3 users, exercises full Sqn→Wing→Base forward + Base approve + originator/wing readback, tears down to zero residue — verdict GO, 9/9 PASS). Audit cells A2/A3/A5/A6/A8/M3 in `audit-evidence/cross-pc-operational/` flipped FAIL→PASS; matrix totals moved from 75/17 to 81/11. Full fix summary: `audit-evidence/cross-pc-operational/REPORT.md` §4.5.

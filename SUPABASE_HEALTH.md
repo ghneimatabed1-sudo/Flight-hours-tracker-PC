@@ -1,4 +1,18 @@
 # Hawk Eye — Supabase Health Snapshot
+
+> **SUPERSEDED — see `HANDOFF.md` §2 (live state) and §5 (full schema /
+> migrations / RPCs / edge functions / cron jobs).**
+>
+> The 2026-04-24 snapshot below shows 44 migrations and a populated cluster.
+> As of 2026-04-25 there are **89 migrations**, the operational tables are
+> **empty** (one squadron row, one super-admin, no commanders, no pilots,
+> no sorties), and the legacy `commanders` / `license_keys` tables have
+> been dropped. The numbers in the tables below are out of date — keep
+> this file only as historical context for the audit lineage.
+> The current truth is in `HANDOFF.md`.
+
+---
+
 **Snapshot date:** 2026-04-24 · **Project:** production (`nklrdhfsbevckovqqkah`) — single Supabase project, no separate dev environment exists
 **How to refresh this file:**
 ```
