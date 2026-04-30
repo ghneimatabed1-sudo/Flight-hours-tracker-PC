@@ -21,143 +21,89 @@ restore, or reset anything in this system.
 
 ---
 
-## 1. First-time install on the host PC
+## 1. First-time install — double-click `HawkEye-Setup.exe`
 
-1. Install Postgres 14 or newer on the host PC. Pick a strong password
-   for the `postgres` superuser. Write it down.
-2. Install Node.js 20 or newer on the host PC.
-3. Copy the Hawk Eye source folder onto the host (USB or LAN copy).
-4. Open PowerShell **as administrator** in the source folder.
-5. Run:
-   ```
-   pnpm install
-   .\scripts\lan-host\first-time-setup.ps1
-   ```
-   To also broadcast this hub on the LAN as `_hawkeye-hub._tcp` so an
-   aggregator install wizard can suggest it automatically, append
-   `-EnableMdns` (off by default — leave it off on sites that block
-   multicast):
-   ```
-   .\scripts\lan-host\first-time-setup.ps1 -EnableMdns
-   ```
-6. Answer the prompts:
-   - **Squadron name** — a short, friendly name for this hub PC such
-     as `tigers-hub` or `eagles-hub` (1-15 chars, letters / digits /
-     hyphen, no leading or trailing hyphen, not all digits). This
-     becomes the Windows computer name, so the PC is reachable on the
-     LAN as `<name>.local`. If the name changes the script queues a
-     **rename + reboot** — finish the script first, then run
-     `shutdown /r /t 0`.
-   - Postgres superuser password (the one from step 1).
-   - First super-admin username.
-   - First super-admin password (8+ characters).
-7. The script writes both `.env.production` files (including
-   `SQUADRON_NAME`), creates the database, lays out every Hawk Eye
-   table, mints the super-admin, and registers two scheduled tasks:
-   one to start the api-server on boot
-   (`HawkEye-ApiServer-OnStartup`), and one to back up the database
-   every night at 02:30 (`HawkEye-Postgres-Backup-Daily`). When
-   `-EnableMdns` was passed, a third task
-   (`HawkEye-Mdns-OnStartup`) keeps the Bonjour broadcast alive
-   across reboots.
-8. Note the **bootstrap token** the script prints. Store it somewhere
-   safe — it is only used once, the first time you sign in remotely.
-9. Note the **initial peer access token** the script prints in a green
-   banner near the end. It looks like `phk_<uuid>_<hex>`. Copy it
-   immediately — it is shown **once**. The Wing Commander PC operator
-   will paste it when adding this squadron. A copy is also saved to
-   `%PROGRAMDATA%\HawkEye\peer-token-initial.txt` (readable only by
-   local Administrators) in case it scrolls off-screen. Lost it?
-   See section 6 — `reset-peer-token.ps1` mints a fresh one any time.
+There is one Windows installer for every PC role:
+**`HawkEye-Setup.exe`** (~150-300 MB; offline; bundles Node.js LTS,
+pnpm, the prebuilt api-server, and the prebuilt dashboard, so the
+target PC needs no internet and no separate Node install).
 
-The host PC is now ready. Reboot it once (mandatory if the squadron
-name changed the computer name) and confirm the api-server comes back
-up automatically (check Task Scheduler → "Hawk Eye API Server" →
-status: Running).
+Steps for **every** role:
 
----
+1. Install Postgres 14+ on the PC and pick a strong password for the
+   `postgres` superuser. Write it down — the installer asks for it.
+   (Skip this step on **Viewer** laptops — they have no database.)
+2. Copy `HawkEye-Setup.exe` onto the PC (USB or LAN copy) and
+   double-click it. Windows will ask for elevation — click **Yes**.
+3. On screen 2, **pick the role** for this PC:
+   - **Operation Pilot PC (Squadron Hub)** — stores the squadron's
+     pilots and sortie data. One per squadron.
+   - **Wing Commander PC (Aggregator)** — rolls up several squadrons
+     into one wing-level dashboard.
+   - **Base Commander PC (Aggregator)** — rolls up several wings into
+     one base-level dashboard.
+   - **Squadron / Flight Commander Laptop (Viewer only)** — no data
+     stored locally; reads from the squadron hub PC.
+4. Fill in the per-role prompts:
+   - **Hub**: squadron name (1-15 chars, letters/digits/hyphen — this
+     becomes the Windows computer name, e.g. `tigers-hub`), Postgres
+     superuser password, first super-admin username + password
+     (typed twice), and an optional "advertise on the LAN (mDNS)"
+     checkbox.
+   - **Wing / Base**: Postgres password and first super-admin
+     username + password. The address book of squadron hubs is filled
+     in **after** install (see "What to do after install" below).
+   - **Viewer**: hub address (e.g. `tigers-hub.local`) and port
+     (default 3847).
+   The installer validates every field client-side and refuses to
+   advance with bad input.
+5. Click **Install**. The installer extracts the bundle, then runs
+   the matching `scripts\lan-host\*.ps1` setup script silently in
+   the background. Status reads "Setting up …". The full transcript
+   lands in `<install dir>\install-log.txt` for troubleshooting.
+6. **Hub installs only**: the finished page shows the **peer access
+   token** in a green panel with a **Copy** button. Hand this token
+   to the Wing/Base Commander PC operator. It is shown once; a copy
+   is also saved to `%PROGRAMDATA%\HawkEye\peer-token-initial.txt`
+   (readable only by local Administrators).
+7. Click **Finish**. A desktop shortcut and Start Menu entry are
+   created automatically:
+   - Hub / Aggregator → **Hawk Eye Dashboard** (opens in default
+     browser).
+   - Viewer → **Hawk Eye Viewer** (kiosk-style window aimed at the
+     hub).
 
-## 1b. First-time install on a Wing/Base Commander PC
+If the squadron name changed the Windows computer name during a Hub
+install, the install log will note that a **reboot is mandatory**
+before the api-server can advertise as `<name>.local`.
 
-A **Wing Commander PC** rolls up several squadrons' data. A **Base
-Commander PC** rolls up several wings' data. Both are *aggregator*
-PCs — they have their own Postgres + api-server, but they pull
-squadron data from the squadron host PCs over the LAN. They do **not**
-own any squadron's data of their own.
+### What to do after install
 
-Before you start, on each squadron's host PC:
-- Confirm `first-time-setup.ps1` was run with `-EnableMdns` so this
-  PC will see it on the LAN. (If not, you can still add it by hand —
-  see step 6 below.)
-- Have the squadron's **peer access token** ready. It was printed in a
-  green banner at the end of squadron's `first-time-setup.ps1`, and a
-  copy is in `%PROGRAMDATA%\HawkEye\peer-token-initial.txt` on that
-  hub PC (Local Administrators only). Lost it? Run
-  `reset-peer-token.ps1` on the hub to mint a fresh one.
+- **Wing / Base PCs** — open the dashboard, sign in as the
+  super-admin you just minted, and use **Admin → Address Book** to
+  add the squadron hubs (their hostnames + peer tokens). You can
+  also use `scripts\lan-host\add-squadron-peer.ps1` from PowerShell.
+- **Hub PCs** — to broadcast this hub on the LAN later (if you left
+  the mDNS checkbox off during install), run
+  `scripts\lan-host\register-mdns.ps1 -SquadronName <name>`.
+- **Viewer PCs** — to re-point a laptop at a different hub, run
+  `scripts\lan-host\change-viewer-hub.ps1`.
+- Peer tokens can be rotated any time via the dashboard's
+  **Admin → Peer Tokens** page or `scripts\lan-host\reset-peer-token.ps1`.
 
-Steps:
+### Manual install fallback (advanced / troubleshooting)
 
-1. Install Postgres 14 or newer on the Wing/Base PC. Pick a strong
-   password for the `postgres` superuser. Write it down.
-2. Install Node.js 20 or newer on the Wing/Base PC.
-3. (Optional but recommended) Install Apple Bonjour Print Services for
-   Windows from <https://support.apple.com/kb/dl999>. This adds
-   `dns-sd.exe`, which the wizard uses to auto-detect squadron hubs.
-   Without it, the wizard falls back to manual entry.
-4. Copy the Hawk Eye source folder onto the Wing/Base PC (USB or LAN
-   copy).
-5. Open PowerShell **as administrator** in the source folder.
-6. Run:
-   ```
-   pnpm install
-   .\scripts\lan-host\aggregator-first-time-setup.ps1
-   ```
-   The wizard will:
-   - Ask whether this is a `wing` or `base` PC.
-   - Ask for a short hostname (`wing-cmd-pc`, `base-cmd-pc`, …) and
-     queue a Windows rename if the current name doesn't match. **A
-     reboot is mandatory after the script finishes if the rename
-     happened.**
-   - Auto-install Postgres via `winget` if it isn't already present.
-   - Create the local `hawkeye_aggregator` database, write
-     `artifacts/api-server/.env` with `INSTALL_PROFILE=aggregator-wing`
-     (or `aggregator-base`), build the api-server, and lay out every
-     table this PC needs.
-   - Mint the first super-admin account on this Wing/Base PC.
-   - **Auto-discover squadron hubs** by browsing `_hawkeye-hub._tcp`
-     on the LAN. Detected squadrons appear in a numbered picker
-     showing the squadron name and the resolved `<host>:<port>`. Pick
-     them by number (or type `a` to add all), and for each one paste
-     that squadron's **peer access token** when prompted. The wizard
-     validates the hub responds with `installProfile=hub` before
-     adding it, then stores the entry in `peer_squadrons` (visible
-     later in the dashboard's address book).
-   - **Manual fallback:** when discovery is finished, the wizard asks
-     "Add another squadron by hand?" — answer `y` for any squadron
-     whose LAN blocks multicast or whose hub didn't opt in to mDNS.
-     Type the squadron handle, the hostname (`tigers-hub.local`),
-     port (default 3847), and the peer token. Same validation runs.
-   - Register two scheduled tasks: one to start the api-server on
-     boot (`HawkEye-ApiServer-OnStartup`), and one to back up the
-     database every night at 02:30 (`HawkEye-Postgres-Backup-Daily`).
-7. Note the **bootstrap token** the script prints. It's only used
-   once for first sign-in if you ever need to recover the super-admin.
-8. The aggregator dashboard is just the regular Hawk Eye `.exe` aimed
-   at this Wing/Base PC instead of a squadron hub. Install it on
-   each commander's workstation the same way as section 2 below; the
-   address book is reachable in the dashboard under
-   **Admin → Squadrons (peers)**.
+The PowerShell scripts under `scripts\lan-host\` are still the
+canonical implementation. Run them directly when:
 
-To **add or rotate squadrons later** (e.g. a new squadron joins, or a
-peer token was rotated), you have two options:
-- Re-run `aggregator-first-time-setup.ps1` — the database / env / build
-  steps are idempotent, and the discovery + manual-entry steps will
-  add new peers (existing ones return "peer already exists" and are
-  left alone).
-- Or call the API directly: `POST /api/aggregate/peers` adds an entry,
-  `PATCH /api/aggregate/peers/:id` swaps the token, and `DELETE
-  /api/aggregate/peers/:id` removes one. All three are super-admin
-  only and recorded in `audit_log`.
+- The installer cannot run (e.g. you are scripting an unattended
+  build, or a strict policy blocks unsigned `.exe` files).
+- The installer fails partway through and `install-log.txt` shows a
+  recoverable error you want to retry by hand.
+- You are a developer iterating on the install flow.
+
+See **§ 11. Manual install via PowerShell scripts** at the end of
+this runbook for the per-role commands.
 
 ---
 
@@ -180,23 +126,44 @@ If a dashboard PC cannot reach the host PC, check:
 
 ---
 
-## 2a. Install a Wing or Base Commander PC (aggregator)
+## 2a. Wing or Base Commander PC (aggregator)
 
-A Wing Commander or Base Commander PC is an **aggregator**. It runs
-the api-server in `aggregator-wing` or `aggregator-base` mode. That
-mode does **not** host squadron data of its own; instead it fans out
-reads to one or more squadron hub PCs and aggregates the responses
-into a single dashboard for the wing/base view.
+Use **`HawkEye-Setup.exe`** (see § 1) and pick **Wing Commander PC
+(Aggregator)** or **Base Commander PC (Aggregator)** on the role
+picker. The installer asks for the local Postgres password and the
+first super-admin account, then runs `aggregator-first-time-setup.ps1`
+silently.
 
-A small local Postgres database is still installed — it stores the
-local super_admin, the squadron-hub address book, the audit log, and
-a per-peer response cache. No squadron sortie/pilot data is ever
-written here.
+A Wing/Base PC runs the api-server in `aggregator-wing` or
+`aggregator-base` mode. That mode does **not** host squadron data of
+its own; it fans reads out to squadron hub PCs and aggregates the
+responses into a wing/base dashboard. A small local Postgres database
+stores only the local super_admin, the squadron-hub address book, the
+audit log, and a per-peer response cache.
 
-### Install
+### Add a squadron after install
 
-On the new aggregator PC, with Node.js 20+ and the Hawk Eye source
-folder copied across (USB or LAN):
+Once the aggregator PC is up, add hubs from the dashboard
+(**Admin → Address Book**), or from PowerShell:
+
+```
+.\scripts\lan-host\add-squadron-peer.ps1 `
+    -DisplayName "Eagles" `
+    -Address "eagles-hub.local" `
+    -Token   "<paste-from-hub>"
+```
+
+The address book is editable later (super_admin only) under
+**Admin → Address Book**.
+
+### Manual install fallback (PowerShell-only path)
+
+The original PowerShell-only flow is preserved in **§ 11. Manual
+install via PowerShell scripts** at the end of this runbook. Use it
+when the installer cannot run (e.g. unattended deployment scripts).
+
+<details>
+<summary>Show original step-by-step setup-aggregator.ps1 instructions</summary>
 
 1. Open PowerShell **as administrator** in the source folder.
 2. Run:
@@ -296,17 +263,41 @@ only) under **Admin → Address Book** — that path uses the same
   Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3847/api/aggregate/peers/health
   ```
 
+</details>
+
 ---
 
-## 2b. Install a Commander laptop (viewer)
+## 2b. Squadron / Flight Commander laptop (viewer)
 
-Squadron Commanders and Flight Commanders use their own laptops, not
-the host PC. Their laptops are **viewers** — pure dashboard clients.
-A viewer laptop has **no Postgres** and **no api-server**: nothing
-is stored locally and login still happens against the squadron's hub
-PC over the LAN.
+Use **`HawkEye-Setup.exe`** (see § 1) and pick **Squadron / Flight
+Commander Laptop (Viewer only)** on the role picker. The installer
+asks for the hub address (e.g. `tigers-hub.local`) and an optional
+port, then runs `setup-viewer.ps1` silently.
 
-### Install
+A viewer laptop has **no Postgres** and **no api-server**: nothing is
+stored locally and login still happens against the squadron's hub PC
+over the LAN.
+
+### Re-point a viewer at a different hub
+
+When a laptop is reassigned (e.g. Tigers → Eagles):
+
+```
+.\scripts\lan-host\change-viewer-hub.ps1
+```
+
+The script re-validates the new hub, rewrites the dashboard env,
+rebuilds the local bundle, and refreshes the desktop / Start Menu
+shortcuts. Existing shortcuts keep working — no reinstall needed.
+
+### Manual install fallback (PowerShell-only path)
+
+The original PowerShell-only flow is preserved in **§ 11. Manual
+install via PowerShell scripts** at the end of this runbook.
+
+<details>
+<summary>Show original step-by-step setup-viewer.ps1 instructions</summary>
+
 On the commander's laptop, with Node.js 20+ and the Hawk Eye source
 folder copied across (USB or LAN):
 1. Open PowerShell **as administrator** in the source folder.
@@ -379,6 +370,8 @@ When a laptop is reassigned (e.g. Tigers → Eagles):
 If Bonjour `dns-sd.exe` is missing on the laptop, `-AutoDiscover`
 warns and falls back to manual entry — install Bonjour Print
 Services from Apple's site if you want auto-discovery.
+
+</details>
 
 ---
 
@@ -686,70 +679,107 @@ Everything else is recoverable with the scripts in this folder.
 
 ---
 
-## Appendix A — Visual install walkthrough
+## 11. Manual install via PowerShell scripts (advanced / fallback)
 
-**Status:** placeholder. The PNG screenshots referenced below are
-not yet captured because the install scripts in this commit were
-verified by static code review only — the build environment is
-Linux-only and cannot run PowerShell.
+The PowerShell scripts under `scripts\lan-host\` remain the canonical
+implementation of every install path. `HawkEye-Setup.exe` (see § 1)
+is a thin wizard around them. Run them directly when:
 
-The next operator who installs Hawk Eye on real Windows hardware
-should follow `installer/test-vm/README.md` and drop the captured
-screenshots into `installer/test-vm/dryrun-evidence/<date>/<role>/`.
-Once that is done, replace the bullet list below with inline image
-links so field operators have a known-good visual reference for
-each step.
+- The installer cannot run (no admin rights to extract files,
+  unattended deployment script, strict policy blocks unsigned `.exe`).
+- The installer fails partway through and `install-log.txt` shows a
+  recoverable error you want to retry by hand.
+- You are a developer iterating on the install flow.
 
-### A.1 Squadron Lan Host (`first-time-setup.ps1`)
+In every case: install Node.js 20+ on the target PC, copy the Hawk
+Eye source folder across (USB or LAN), open PowerShell **as
+administrator** in the source folder, and `pnpm install` once.
 
-- `01-elevated-shell.png` — elevated PowerShell prompt at the repo
-  root, before the install command.
-- `02-step-3-postgres.png` — installer Step 3 detecting an existing
-  PostgreSQL service.
-- `03-step-6-schema.png` — Step 6b log line confirming
-  `/api/healthz` returned 200 (proves the new healthz polling
-  works).
-- `04-step-10-task-verify.png` — Step 10 log lines showing
-  `Triggering 'HawkEye-ApiServer-OnStartup' once to verify SYSTEM-context startup...`
-  followed by `OK — api-server is reachable on port 3847…`.
-- `05-task-scheduler.png` — Task Scheduler with both
-  `HawkEye-ApiServer-OnStartup` and
-  `HawkEye-Postgres-Backup-Daily` in `Ready` state after a reboot.
-- `06-dashboard-first-load.png` — browser at
-  `http://<squadron>.local/` rendering the dashboard.
+### Squadron Hub (Operation Pilot PC)
 
-### A.2 Aggregator Hub (`setup-aggregator.ps1`)
+```
+.\scripts\lan-host\first-time-setup.ps1            # interactive wizard
+.\scripts\lan-host\first-time-setup.ps1 -EnableMdns  # also broadcast on the LAN
+```
 
-- `01-step-8b-poll.png` — Step 8b polling loop output.
-- `02-step-11-csp.png` — Step 11 log line
-  `Patched dashboard CSP connect-src to include http://<host>:3847`.
-- `03-step-12-task-verify.png` — Step 12 SYSTEM-task verification
-  succeeding.
-- `04-step-13-smoke.png` — Step 13 smoke verification of
-  `/api/aggregate/peers/health`.
-- `05-aggregator-dashboard.png` — DevTools console open, showing
-  zero CSP violations as the dashboard fetches from the local
-  aggregator origin.
+The script prompts for: squadron name (1-15 chars, letters/digits/
+hyphen — becomes the Windows computer name; if the name changes the
+script queues a rename + reboot), the Postgres superuser password,
+and the first super-admin username + password. It writes both
+`.env.production` files, creates the database, lays out every Hawk
+Eye table, mints the super-admin, and registers two scheduled tasks:
+`HawkEye-ApiServer-OnStartup` and `HawkEye-Postgres-Backup-Daily`
+(plus `HawkEye-Mdns-OnStartup` when `-EnableMdns` was passed).
 
-### A.3 Viewer / Kiosk PC (`setup-viewer.ps1` + `launch-viewer.ps1`)
+The script prints the **bootstrap token** (used once for first remote
+sign-in) and the **initial peer access token** in a green banner
+near the end — copy it immediately; it is shown once. A copy is
+saved to `%PROGRAMDATA%\HawkEye\peer-token-initial.txt` (Local
+Administrators only). Lost it? See § 6 — `reset-peer-token.ps1`
+mints a fresh one.
 
-- `01-step-5b-urlacl.png` — Step 5b log line confirming
-  `Reserved http://127.0.0.1:18472/ for BUILTIN\Users.`
-- `02-non-admin-launch.png` — non-admin user double-clicking the
-  desktop shortcut and the launcher binding successfully (no
-  HRESULT 5 popup).
-- `03-port-busy-popup.png` — for contrast, the friendly popup when
-  port 18472 is genuinely in use.
+### Wing / Base Commander PC (aggregator)
 
-### A.4 Add Squadron Peer (`add-squadron-peer.ps1`)
+```
+.\scripts\lan-host\aggregator-first-time-setup.ps1                # interactive
+.\scripts\lan-host\aggregator-first-time-setup.ps1 -Role wing -SkipDiscovery
+```
 
-- `01-prompt.png` — wizard prompting for display name + address.
-- `02-pgpass-prompt.png` — postgres password prompt with a
-  reserved-character password being typed.
-- `03-peer-row.png` — `psql -c "select * from peer_squadrons;"`
-  showing the new row inserted.
+The interactive flow asks whether this is a `wing` or `base` PC, the
+hostname (and queues a Windows rename if needed — **reboot is
+mandatory** afterwards), the Postgres superuser password, and the
+first super-admin username + password. By default it then auto-
+discovers squadron hubs by browsing `_hawkeye-hub._tcp` on the LAN
+and lets you pick them with their peer tokens; with `-SkipDiscovery`
+it just sets the PC up and you add hubs later via the dashboard's
+**Admin → Address Book** or `add-squadron-peer.ps1`.
 
-### A.5 Common pitfalls captured during the dry-run
+To add or rotate squadrons later:
 
-Per-PC quirks, AV warnings, console encoding gotchas, etc. To be
-filled in by the operator who runs the dry-run.
+```
+.\scripts\lan-host\add-squadron-peer.ps1 `
+    -DisplayName "Eagles" -Address "eagles-hub.local" -Token "<paste-from-hub>"
+```
+
+`add-squadron-peer.ps1` reads `DATABASE_URL` from
+`artifacts\api-server\.env` automatically. The address book is also
+editable in the dashboard under **Admin → Address Book**, and via
+`POST/PATCH/DELETE /api/aggregate/peers` — all super-admin-only and
+recorded in `audit_log`.
+
+### Squadron / Flight Commander laptop (viewer)
+
+```
+.\scripts\lan-host\setup-viewer.ps1                                 # interactive
+.\scripts\lan-host\setup-viewer.ps1 -HubAddress tigers-hub.local    # non-interactive
+.\scripts\lan-host\setup-viewer.ps1 -AutoDiscover                   # mDNS picker
+.\scripts\lan-host\setup-viewer.ps1 -PrebuiltDist <folder>          # air-gapped laptop
+.\scripts\lan-host\setup-viewer.ps1 -SkipBuild                      # reuse existing dist
+```
+
+The script writes the dashboard env, builds (or copies) the
+dashboard locally, and creates a desktop / Start Menu shortcut under
+`Hawk Eye → Hawk Eye Viewer`. The output ends with **"This PC is a
+viewer — it does not store any data locally."** — if you don't see
+that line, the install failed somewhere; re-run and read the
+`[FAIL]` message.
+
+To re-point an existing viewer at a different hub, use
+`change-viewer-hub.ps1` instead of re-running `setup-viewer.ps1`
+— it rebuilds the bundle and refreshes the existing shortcuts in
+place without disturbing anything else.
+
+### Useful extra flags (all roles)
+
+- `-SkipScheduledTasks` — install env + DB only; register the
+  scheduled tasks later with `pnpm lan:host:install-startup-task`,
+  `pnpm lan:host:install-backup-task`,
+  `pnpm lan:aggregator:install-dashboard-task`.
+- `-SkipDashboardBuild -SkipApiBuild` (aggregator) — skip rebuilds
+  on a re-run when the bundles are already up to date.
+- `-LocalPort <n>` (viewer) — change the local launcher port if the
+  default 5500 is in use.
+- `-SquadronName "Tigers"` (viewer) — labels the desktop shortcut
+  "Hawk Eye — Tigers" and shows "Tigers hub" in the unreachable-hub
+  message.
+

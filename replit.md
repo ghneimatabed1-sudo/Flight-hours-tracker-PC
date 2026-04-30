@@ -82,18 +82,24 @@ or registered as artifacts):
 
 ## Operator workflow
 
-The host PC operator (a non-developer base IT person) runs a single
-PowerShell script and follows the runbook:
+The host PC operator (a non-developer base IT person) double-clicks
+`HawkEye-Setup.exe` and follows the runbook:
 
-1. `scripts/lan-host/first-time-setup.ps1` — interactive wizard that
-   creates the Postgres DB, writes both `.env.production` files, boots
-   the api-server briefly so `ensureFullSchema()` lays out tables,
-   mints the first super_admin, and registers the api-server +
-   nightly-backup scheduled tasks.
+1. `HawkEye-Setup.exe` (Inno Setup) — built from `installer/HawkEye.iss`
+   by `installer/build.ps1`. Wizard with a role picker (Squadron Hub
+   / Wing Commander / Base Commander / Viewer); each role drives a
+   thin shim under `installer/script-shims/` that calls the matching
+   PowerShell script (`first-time-setup.ps1`,
+   `aggregator-first-time-setup.ps1`, `setup-viewer.ps1`) silently.
+   The Finished page extracts the new peer access token from
+   `install-log.txt` and shows it with a Copy button.
 2. `OPERATOR-RUNBOOK.md` — the day-to-day guide: install/start/backup/
-   restore/reset/USB-update steps in plain language.
-3. `scripts/lan-host/reset-admin-password.ps1` — when an operator
-   forgets their password.
+   restore/reset/USB-update steps in plain language. § 1 covers the
+   installer; § 11 documents the manual PowerShell fallback.
+3. `scripts/lan-host/*.ps1` — canonical implementation of every
+   install path; the installer is a thin wizard around them and they
+   remain the supported fallback. `reset-admin-password.ps1` handles
+   forgotten passwords.
 
 ## Production safety defaults
 

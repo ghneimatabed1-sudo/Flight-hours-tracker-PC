@@ -4,6 +4,7 @@ packages:
   - lib/*
   - lib/integrations/*
   - scripts
+  - installer
 
 autoInstallPeers: false
 
