@@ -80,7 +80,14 @@ if (-not (Test-Path $inner)) {
 #   1. Postgres superuser password (Read-Host -AsSecureString)
 #   2. First super_admin username  (Read-Host)
 #   3. Password for '<user>'       (Read-Host -AsSecureString)
-$stdin = @($pgPassword, $AdminUsername, $adminPassword) -join "`r`n"
+# Trailing CRLF terminates the third Read-Host line; UTF-8 stream
+# encoding stops non-ASCII passwords from being garbled across the
+# pipe. Same hardening as install-hub.ps1.
+$stdin = (@($pgPassword, $AdminUsername, $adminPassword) -join "`r`n") + "`r`n"
+$prevOutputEncoding = [Console]::OutputEncoding
+$prevPwshOutputEncoding = $OutputEncoding
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 # -SkipDiscovery: the installer is non-interactive; let the operator
 # add peers from the dashboard or with add-squadron-peer.ps1 afterwards.
@@ -100,6 +107,8 @@ try {
     }
 } finally {
     Remove-Item -Path $tempOut -ErrorAction SilentlyContinue
+    [Console]::OutputEncoding = $prevOutputEncoding
+    $OutputEncoding = $prevPwshOutputEncoding
 }
 
 $openCmd = Join-Path $RepoRoot "installer\open-dashboard.cmd"

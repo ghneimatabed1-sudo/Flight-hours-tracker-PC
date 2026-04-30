@@ -120,3 +120,97 @@ exercise these explicitly
 3. Append a short note to `OPERATOR-RUNBOOK.md` Appendix
    "Visual install walkthrough" linking the screenshots so the
    field operators have a known-good reference.
+
+---
+
+## Pass 2 (2026-04-30) — extra checks deferred from static review
+
+A second deeper static review was done on 2026-04-30; see
+`dryrun-evidence/2026-04-30/STATIC-REVIEW-DEEP.md`. It found two
+fixable bugs (applied in the same commit) and ten observations
+that need real Windows time to resolve. Please add the following
+checks to your dryrun checklist on top of what's listed above —
+they target the .exe-driven install path specifically, which the
+prior playbook only covered through the inner `.ps1` scripts:
+
+### .exe-driven install (the path operators actually take)
+
+For each role, in addition to running the inner `.ps1` directly:
+
+- **First**, build the installer per `installer/test-vm/BUILD-HOST-README.md`.
+  Drop `iscc-output.log` and `iscc-output.sha256` into
+  `dryrun-evidence/<date>/build-host/`.
+- **Then** double-click `HawkEye-Setup.exe` on the test VM,
+  capture the SmartScreen + UAC dialogs (`00-smartscreen.png`,
+  `00-uac.png`), and pick the role.
+- After install, capture `<install dir>\install-log.txt` (this
+  is the per-install log the shim writes; it includes the inner
+  `.ps1` transcript). Save as `install-log.txt` next to the
+  screenshots. **Without this file the dryrun is not reproducible
+  — the inner .ps1 doesn't write to its own log when invoked
+  through the shim.**
+
+### Hub-role-specific extra checks (deferred from STATIC-REVIEW-DEEP)
+
+- **B1 — desktop-shortcut "Hawk Eye Dashboard" target.** Click
+  the shortcut after install. Expected: dashboard renders.
+  Suspected actual: 404 / "site can't be reached" because the
+  Hub does not currently install a dashboard scheduled task and
+  the .env never sets `VITE_DASHBOARD_PORT`. File outcome.
+- **B7 — `Read-Host -AsSecureString` over redirected stdin.**
+  Use a clean Windows 11 22H2 image with NO Windows Updates
+  applied. If install hangs at "Setting up squadron hub…", read
+  `install-log.txt` for the last `[STEP N]` line — if it ends
+  before STEP 3, file as B7.
+- **A1 (verification)** — run the install with postgres password
+  `Re@l:Pa#s%word!`. After install, sign in to the dashboard
+  with the super_admin you set. Then **uninstall** via Settings →
+  Apps → Hawk Eye → Uninstall, watch the uninstall log, and
+  confirm the database was actually dropped (run `psql -U postgres
+  -c "\l"` after).
+
+### Aggregator-role-specific extra checks
+
+- **B2 — `open-dashboard.cmd` hardcodes 5173.** Open the
+  generated `installer\open-dashboard.cmd` and confirm the
+  hardcoded port matches whatever the dashboard actually listens
+  on after a reboot (should be 5173).
+- **B3 — dashboard scheduled task missing.** After install,
+  reboot, then BEFORE opening anything else run:
+  ```powershell
+  schtasks /Query /FO LIST /V /TN HawkEye-Dashboard-OnStartup
+  ```
+  Expected (per shim contract): task exists. Suspected actual:
+  "ERROR: The system cannot find the file specified."
+- **A1 + A2 (verification)** — same reserved-char password run
+  as the Hub, confirms encoding survives both the installer
+  shim's stdin pipe AND the inner script's `DATABASE_URL`
+  composition.
+
+### Cross-role extra checks
+
+- **B4 — install path with `'`.** Pick install location
+  `D:\O'Brien Squadron\HawkEye` (operator types it in the wizard's
+  Destination Folder page). Expected (per code): inner powershell
+  exits with parser error. If install proceeds normally, B4 isn't
+  a real bug. Either way, file the outcome.
+- **B10 — install path with space.** Pick `C:\Program Files\Hawk Eye Test\`.
+  Then open Task Scheduler → HawkEye-ApiServer-OnStartup →
+  Actions and screenshot the Action's command line. Quote
+  integrity is what we're checking.
+
+### Code-signing dry-run
+
+`installer/CODE-SIGNING-DECISION.md` documents that we ship
+unsigned. Capture two screenshots on a fresh internet-connected
+Windows VM:
+- `00-smartscreen-blocked.png` — the blue SmartScreen panel
+  before clicking "More info".
+- `00-smartscreen-runanyway.png` — the panel after "More info",
+  showing the "Run anyway" button.
+
+These prove the operator dismissal path documented in
+`OPERATOR-RUNBOOK.md` § 1 still works on the current Windows
+build. If a future Windows release removes the "Run anyway"
+button (Microsoft has tightened SmartScreen multiple times since
+2023), the decision-to-stay-unsigned needs revisiting.

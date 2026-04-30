@@ -89,7 +89,17 @@ if (-not (Test-Path $inner)) {
 #
 # When stdin is redirected, PowerShell's Read-Host (including
 # -AsSecureString) reads one line per call from the redirected stream.
-$stdin = @($pgPassword, $AdminUsername, $adminPassword) -join "`r`n"
+# We append a trailing CRLF so the final Read-Host (admin password) sees
+# a terminated line — without it the third Read-Host can hang waiting
+# for EOL on the last unterminated record. Force UTF-8 on the outgoing
+# stream so non-ASCII characters in either password (postgres allows
+# them, and operators sometimes use them) survive the pipe instead of
+# being silently mangled by the host's current code page.
+$stdin = (@($pgPassword, $AdminUsername, $adminPassword) -join "`r`n") + "`r`n"
+$prevOutputEncoding = [Console]::OutputEncoding
+$prevPwshOutputEncoding = $OutputEncoding
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 $mdnsArg = if ($EnableMdns) { "-EnableMdns" } else { "" }
 
@@ -111,6 +121,8 @@ try {
     }
 } finally {
     Remove-Item -Path $tempOut -ErrorAction SilentlyContinue
+    [Console]::OutputEncoding = $prevOutputEncoding
+    $OutputEncoding = $prevPwshOutputEncoding
 }
 
 # Drop a tiny launcher next to the dashboard so the Start Menu shortcut

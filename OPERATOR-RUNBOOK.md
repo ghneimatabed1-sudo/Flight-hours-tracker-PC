@@ -77,6 +77,44 @@ If the squadron name changed the Windows computer name during a Hub
 install, the install log will note that a **reboot is mandatory**
 before the api-server can advertise as `<name>.local`.
 
+#### About the SmartScreen / "Unknown publisher" prompt
+
+The first time you double-click `HawkEye-Setup.exe`, Windows may
+show a blue **"Windows protected your PC"** panel ("SmartScreen
+filter prevented an unrecognised app from starting"), and the
+elevation prompt will show **Unknown publisher**. This is
+expected — Hawk Eye is not code-signed for the small LAN-only
+deployment we ship to. The decision and rationale live at
+`installer/CODE-SIGNING-DECISION.md`.
+
+To proceed safely:
+
+1. Verify the `.exe`'s SHA-256 matches the value your IT support
+   officer gave you (PowerShell:
+   `Get-FileHash .\HawkEye-Setup.exe -Algorithm SHA256`).
+2. On the SmartScreen panel click **More info** → **Run anyway**.
+3. On the User Account Control prompt click **Yes**.
+
+If you skipped the SHA-256 check or the value doesn't match, do
+NOT click "Run anyway" — escalate to your IT officer.
+
+#### About visual screenshots in this section
+
+This section's word-for-word description of the wizard pages was
+authored from the installer source (`installer/HawkEye.iss`)
+during a static review. **The accompanying screenshot gallery is
+intentionally not yet attached** — the project's build host is
+Linux and cannot run Inno Setup's compiler or boot a Windows VM,
+so no real screenshots exist as of 2026-04-30. The next operator
+with Windows hardware will add them; the playbook they should
+follow is `installer/test-vm/README.md`, and the static-review
+findings that drove this section are at
+`installer/test-vm/dryrun-evidence/2026-04-30/STATIC-REVIEW-DEEP.md`.
+
+If you are running an install for the first time and find the
+wizard text differs from the description above, that is a real
+bug — capture the screenshot and report it to the project.
+
 ### What to do after install
 
 - **Wing / Base PCs** — open the dashboard, sign in as the

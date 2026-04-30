@@ -239,6 +239,13 @@ $plainPg = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
 [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
 
 $env:PGPASSWORD = $plainPg
+# URL-encode the password before baking it into a postgres:// URL.
+# Real-world passwords contain `@`, `:`, `/`, `#`, `?`, `%` etc. which
+# are reserved characters in URI userinfo and silently break the
+# connection string when interpolated raw. Mirrors first-time-setup.ps1
+# Step 2 — both wizards share the same uninstall regex which only
+# survives URL-encoded passwords.
+$encPg = [uri]::EscapeDataString($plainPg)
 $superUrl = "postgresql://$DbUser`@$DbHost`:$DbPort/postgres"
 
 # ── Step 3 — Create DB ────────────────────────────────────────────────
@@ -275,7 +282,7 @@ if (Test-Path $apiEnv) {
 } else {
     $bootstrap = -join ((1..32) | ForEach-Object { [char[]]'abcdefghjkmnpqrstuvwxyz23456789' | Get-Random })
     @"
-DATABASE_URL=postgresql://$DbUser`:$plainPg`@$DbHost`:$DbPort/$DbName
+DATABASE_URL=postgresql://$DbUser`:$encPg`@$DbHost`:$DbPort/$DbName
 HAWK_INTERNAL_SESSION_AUTH=required
 HAWK_LAN_BOOTSTRAP_TOKEN=$bootstrap
 HAWK_LAN_DEV_NO_AUTH=0
