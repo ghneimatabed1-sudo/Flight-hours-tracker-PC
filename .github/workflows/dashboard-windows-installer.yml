@@ -44,12 +44,16 @@ jobs:
       - name: Install Inno Setup 6
         shell: pwsh
         run: |
-          choco install innosetup --yes --version=6.2.2 --no-progress
-          # Confirm iscc is findable
-          $iscc = Get-Command "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue
-          if ($null -eq $iscc) { $iscc = Get-Command iscc -ErrorAction SilentlyContinue }
-          if ($null -eq $iscc) { throw "iscc.exe not found after choco install" }
-          Write-Host "iscc found at: $($iscc.Source)"
+          # Direct download is faster and version-pinned without Chocolatey network issues.
+          $InnoUrl  = "https://files.jrsoftware.org/is/6/innosetup-6.2.2.exe"
+          $Installer = "$env:TEMP\innosetup-6.2.2.exe"
+          Write-Host "Downloading Inno Setup 6.2.2..."
+          Invoke-WebRequest -Uri $InnoUrl -OutFile $Installer -UseBasicParsing
+          Write-Host "Installing Inno Setup silently..."
+          Start-Process -FilePath $Installer -ArgumentList "/SP- /VERYSILENT /NORESTART" -Wait
+          $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $isccPath)) { throw "iscc.exe not found at $isccPath after install" }
+          Write-Host "iscc found at: $isccPath"
 
       # Cache the portable Node + pnpm bundles that get embedded inside
       # the installer .exe so we don't re-download ~50 MB on every run.
