@@ -20,9 +20,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Shared helpers (currently exposes Get-RotatedLogCount).
+$scriptDir = if ($PSScriptRoot -and $PSScriptRoot.Trim() -ne "") {
+    $PSScriptRoot
+} else {
+    Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+. (Join-Path $scriptDir "supervisor-log.ps1")
+
 if ([string]::IsNullOrWhiteSpace($HeartbeatPath)) {
     $HeartbeatPath = Join-Path $env:ProgramData "HawkEye\mdns-supervisor.heartbeat"
 }
+$logPath = Join-Path $env:ProgramData "HawkEye\mdns-supervisor.log"
 
 if (-not (Test-Path $HeartbeatPath)) {
     Write-Error "[hawk-eye] mDNS supervisor heartbeat not found at '$HeartbeatPath'. Either mDNS was never enabled (-EnableMdns), the supervisor task is not registered, or it has not started yet. Check Task Scheduler -> HawkEye-Mdns-OnStartup."
@@ -63,6 +72,19 @@ Write-Host "  apiPort       : $($hb.apiPort)"
 Write-Host "  state         : $($hb.state)"
 Write-Host "  childPid      : $($hb.childPid)"
 Write-Host "  restartCount  : $($hb.restartCount)"
+
+# Surface log rotation activity so operators can confirm the
+# in-process rotation is working (and so a flapping supervisor
+# becomes visible from the on-disk backup files, not just from
+# restartCount). Note: this counts rotated files currently on
+# disk (0..MaxBackups), not cumulative rotations since boot —
+# once backups saturate the count plateaus at MaxBackups.
+$rotated = Get-RotatedLogCount -Path $logPath
+$logSizeBytes = 0
+if (Test-Path $logPath) {
+    try { $logSizeBytes = (Get-Item -Path $logPath -Force -ErrorAction Stop).Length } catch { }
+}
+Write-Host "  log           : $logPath ($logSizeBytes B, $rotated rotated backup file(s) on disk)"
 
 if ($ageSec -gt $StaleThresholdSec) {
     Write-Error "[hawk-eye] Heartbeat is stale (>${StaleThresholdSec}s old). Supervisor task may have died — check Task Scheduler -> HawkEye-Mdns-OnStartup, then re-run scripts\lan-host\register-mdns.ps1 to reinstall it."

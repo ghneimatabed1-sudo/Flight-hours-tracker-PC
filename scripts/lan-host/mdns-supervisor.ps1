@@ -39,10 +39,23 @@ param(
 
     # How often the supervisor refreshes the heartbeat file while
     # the child is alive.
-    [int]$HeartbeatIntervalSec = 15
+    [int]$HeartbeatIntervalSec = 15,
+
+    # In-process log rotation (see supervisor-log.ps1). The log
+    # rotates to <log>.1 .. <log>.N when it exceeds $MaxLogBytes;
+    # the oldest copy is discarded so the on-disk footprint is
+    # bounded by roughly $MaxLogBytes * ($MaxLogBackups + 1).
+    # Defaults: 1 MiB per file, 3 rotated copies => ~4 MiB max,
+    # which is plenty for years of healthy operation and survives
+    # weeks of pathological flapping without filling the disk.
+    [int]$MaxLogBytes   = 1048576,
+    [int]$MaxLogBackups = 3
 )
 
 $ErrorActionPreference = "Stop"
+
+# Shared in-process log rotation helpers.
+. (Join-Path $PSScriptRoot "supervisor-log.ps1")
 
 if (-not (Test-Path $DnsSdPath)) {
     throw "dns-sd.exe not found at '$DnsSdPath'."
@@ -50,6 +63,8 @@ if (-not (Test-Path $DnsSdPath)) {
 if ($RestartDelaySec -lt 1)                       { $RestartDelaySec = 1 }
 if ($MaxRestartDelaySec -lt $RestartDelaySec)     { $MaxRestartDelaySec = $RestartDelaySec }
 if ($HeartbeatIntervalSec -lt 1)                  { $HeartbeatIntervalSec = 1 }
+if ($MaxLogBytes -lt 0)                           { $MaxLogBytes = 0 }
+if ($MaxLogBackups -lt 0)                         { $MaxLogBackups = 0 }
 
 $dataDir = Join-Path $env:ProgramData "HawkEye"
 if (-not (Test-Path $dataDir)) {
@@ -61,7 +76,8 @@ $heartbeatFile = Join-Path $dataDir "mdns-supervisor.heartbeat"
 function Write-SupervisorLog {
     param([string]$Message)
     $line = "{0} {1}" -f (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz"), $Message
-    try { Add-Content -Path $logFile -Value $line -ErrorAction Stop } catch { }
+    Write-RotatingLog -Path $logFile -Line $line `
+        -MaxBytes $MaxLogBytes -MaxBackups $MaxLogBackups
     Write-Host $line
 }
 
@@ -85,7 +101,7 @@ function Write-Heartbeat {
     } catch { }
 }
 
-Write-SupervisorLog "[supervisor] start: SquadronName=$SquadronName ApiPort=$ApiPort DnsSdPath=$DnsSdPath restartDelay=${RestartDelaySec}s maxDelay=${MaxRestartDelaySec}s heartbeat=${HeartbeatIntervalSec}s"
+Write-SupervisorLog "[supervisor] start: SquadronName=$SquadronName ApiPort=$ApiPort DnsSdPath=$DnsSdPath restartDelay=${RestartDelaySec}s maxDelay=${MaxRestartDelaySec}s heartbeat=${HeartbeatIntervalSec}s logRotate=${MaxLogBytes}B/${MaxLogBackups}backups"
 Write-Heartbeat -ChildPid 0 -RestartCount 0 -State "starting"
 
 # `$args` is an automatic variable in PowerShell, so name this
