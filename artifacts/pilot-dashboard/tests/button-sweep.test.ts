@@ -92,29 +92,32 @@ const PERSONAS: Record<RoleKey, Persona> = {
   deputy:        { user: { username: "dep",   displayName: "Deputy Ops",      role: "deputy" },                                    layout: "ops" },
 };
 
+// Task #339 — multi-PC cleanup retired pages: PendingApprovals,
+// ScheduleChain, ScheduleHistory, FinalSchedules, Messages, Connections,
+// Diagnostic, FlightProgram, Reminders, admin/RemindersSchedule,
+// admin/ConnectionMap. Routes mirror Layout.tsx + HQLayout.tsx.
 const ADMIN_ROUTES = [
   "/admin", "/admin/squadrons",
-  "/admin/reminders", "/admin/audit", "/admin/security",
-  "/admin/connection-map", "/connections", "/settings", "/diagnostic",
+  "/admin/audit", "/admin/security", "/admin/health", "/admin/users",
+  "/admin/peer-tokens",
+  "/settings",
 ] as const;
 const COMMANDER_BASE = [
   "/dashboard", "/dashboard/pilots", "/dashboard/alerts", "/dashboard/currencies",
-  "/dashboard/sticky", "/dashboard/messages", "/dashboard/connections",
-  "/dashboard/settings", "/dashboard/diagnostic",
+  "/dashboard/sticky",
+  "/dashboard/settings",
 ] as const;
-const COMMANDER_SQUADRON_FLIGHT_EXTRA = ["/dashboard/unavailable", "/dashboard/pilot-alerts"] as const;
-const COMMANDER_SQUADRON_ONLY_EXTRA = ["/dashboard/flights", "/dashboard/flight-program", "/dashboard/simulator"] as const;
-const COMMANDER_FLIGHT_ONLY_EXTRA = ["/dashboard/flight-program"] as const;
-const COMMANDER_CHAIN_EXTRA = ["/dashboard/schedule-chain", "/dashboard/schedule-history"] as const;
-const COMMANDER_FINAL_EXTRA = ["/dashboard/final-schedules"] as const;
+const COMMANDER_SQUADRON_FLIGHT_EXTRA = [
+  "/dashboard/unavailable", "/dashboard/pilot-alerts",
+  "/dashboard/flights", "/dashboard/simulator",
+] as const;
 const OPS_ROUTES = [
-  "/", "/sortie-log", "/sortie-add", "/pending", "/external-pilots",
-  "/schedule-chain", "/schedule-history", "/messages",
+  "/", "/sortie-log", "/sortie-add", "/external-pilots",
   "/roster", "/currency", "/rankings", "/cycle", "/leaves", "/unavailable",
-  "/duty", "/flight-program", "/risk", "/coordinating", "/notams",
-  "/nav-routes", "/units", "/pdf", "/reminders", "/audit", "/import",
-  "/archives", "/ops-team", "/monthly-report", "/help", "/connections",
-  "/settings", "/diagnostic",
+  "/duty", "/risk", "/coordinating", "/notams",
+  "/nav-routes", "/units", "/pdf", "/audit", "/import",
+  "/archives", "/ops-team", "/monthly-report", "/help",
+  "/settings",
 ] as const;
 function routesFor(role: RoleKey): string[] {
   const persona = PERSONAS[role];
@@ -122,15 +125,12 @@ function routesFor(role: RoleKey): string[] {
   if (persona.layout === "commander") {
     const scope = persona.user.scope as string;
     const out = [...COMMANDER_BASE];
-    if (scope === "squadron") out.push(...COMMANDER_SQUADRON_ONLY_EXTRA, ...COMMANDER_SQUADRON_FLIGHT_EXTRA);
-    else if (scope === "flight") out.push(...COMMANDER_FLIGHT_ONLY_EXTRA, ...COMMANDER_SQUADRON_FLIGHT_EXTRA);
-    if (scope === "flight" || scope === "squadron" || scope === "wing") out.push(...COMMANDER_CHAIN_EXTRA);
-    if (scope === "flight" || scope === "squadron" || scope === "base" || scope === "wing") out.push(...COMMANDER_FINAL_EXTRA);
+    if (scope === "squadron" || scope === "flight") out.push(...COMMANDER_SQUADRON_FLIGHT_EXTRA);
     return Array.from(new Set(out));
   }
   const out = [...OPS_ROUTES];
   if (role === "deputy") {
-    return out.filter(p => p !== "/flight-program" && p !== "/ops-team" && p !== "/monthly-report" && p !== "/pending");
+    return out.filter(p => p !== "/ops-team" && p !== "/monthly-report");
   }
   return out;
 }
@@ -140,11 +140,7 @@ const PAGE_LOADERS: PageMap = {
   "/":                  () => import("../src/pages/Dashboard.tsx"),
   "/sortie-log":        () => import("../src/pages/SortieLog.tsx"),
   "/sortie-add":        () => import("../src/pages/AddSortie.tsx"),
-  "/pending":           () => import("../src/pages/PendingApprovals.tsx"),
   "/external-pilots":   () => import("../src/pages/ExternalPilots.tsx"),
-  "/schedule-chain":    () => import("../src/pages/ScheduleChain.tsx"),
-  "/schedule-history":  () => import("../src/pages/ScheduleHistory.tsx"),
-  "/messages":          () => import("../src/pages/Messages.tsx"),
   "/roster":            () => import("../src/pages/Roster.tsx"),
   "/currency":          () => import("../src/pages/Currency.tsx"),
   "/rankings":          () => import("../src/pages/Rankings.tsx"),
@@ -152,29 +148,26 @@ const PAGE_LOADERS: PageMap = {
   "/leaves":            () => import("../src/pages/Leaves.tsx"),
   "/unavailable":       () => import("../src/pages/Unavailable.tsx"),
   "/duty":              () => import("../src/pages/DutyWeek.tsx"),
-  "/flight-program":    () => import("../src/pages/FlightProgram.tsx"),
   "/risk":              () => import("../src/pages/Risk.tsx"),
   "/coordinating":      () => import("../src/pages/Coordinating.tsx"),
   "/notams":            () => import("../src/pages/NotamsPage.tsx"),
   "/nav-routes":        () => import("../src/pages/NavRoutes.tsx"),
   "/units":             () => import("../src/pages/Units.tsx"),
   "/pdf":               () => import("../src/pages/PdfExports.tsx"),
-  "/reminders":         () => import("../src/pages/Reminders.tsx"),
   "/audit":             () => import("../src/pages/AuditLog.tsx"),
   "/import":            () => import("../src/pages/HistoricalImport.tsx"),
   "/archives":          () => import("../src/pages/Archives.tsx"),
   "/ops-team":          () => import("../src/pages/OpsTeam.tsx"),
   "/monthly-report":    () => import("../src/pages/MonthlyReport.tsx"),
   "/help":              () => import("../src/pages/Help.tsx"),
-  "/connections":       () => import("../src/pages/Connections.tsx"),
   "/settings":          () => import("../src/pages/Settings.tsx"),
-  "/diagnostic":        () => import("../src/pages/Diagnostic.tsx"),
   "/admin":                 () => import("../src/pages/admin/Overview.tsx"),
   "/admin/squadrons":       () => import("../src/pages/admin/Squadrons.tsx"),
-  "/admin/reminders":       () => import("../src/pages/admin/RemindersSchedule.tsx"),
   "/admin/audit":           () => import("../src/pages/admin/AuditLog.tsx"),
   "/admin/security":        () => import("../src/pages/admin/Security.tsx"),
-  "/admin/connection-map":  () => import("../src/pages/admin/ConnectionMap.tsx"),
+  "/admin/health":          () => import("../src/pages/admin/SystemHealth.tsx"),
+  "/admin/users":           () => import("../src/pages/admin/Users.tsx"),
+  "/admin/peer-tokens":     () => import("../src/pages/admin/PeerTokens.tsx"),
   "/dashboard":                  () => import("../src/pages/dashboard/Overview.tsx"),
   "/dashboard/pilots":           () => import("../src/pages/dashboard/PilotsTable.tsx"),
   "/dashboard/alerts":           () => import("../src/pages/dashboard/Alerts.tsx"),
@@ -182,16 +175,9 @@ const PAGE_LOADERS: PageMap = {
   "/dashboard/pilot-alerts":     () => import("../src/pages/dashboard/PilotAlerts.tsx"),
   "/dashboard/simulator":        () => import("../src/pages/dashboard/Simulator.tsx"),
   "/dashboard/flights":          () => import("../src/pages/dashboard/FlightRecords.tsx"),
-  "/dashboard/flight-program":   () => import("../src/pages/FlightProgram.tsx"),
   "/dashboard/unavailable":      () => import("../src/pages/dashboard/UnavailableView.tsx"),
   "/dashboard/sticky":           () => import("../src/pages/StickyNotes.tsx"),
-  "/dashboard/schedule-chain":   () => import("../src/pages/ScheduleChain.tsx"),
-  "/dashboard/schedule-history": () => import("../src/pages/ScheduleHistory.tsx"),
-  "/dashboard/final-schedules":  () => import("../src/pages/FinalSchedules.tsx"),
-  "/dashboard/messages":         () => import("../src/pages/Messages.tsx"),
-  "/dashboard/connections":      () => import("../src/pages/Connections.tsx"),
   "/dashboard/settings":         () => import("../src/pages/Settings.tsx"),
-  "/dashboard/diagnostic":       () => import("../src/pages/Diagnostic.tsx"),
 };
 
 function setSession(persona: Persona) {

@@ -24,11 +24,14 @@ import express from "express";
 // method with a capturing mock.
 import { pool } from "../../../lib/db/src/index";
 import unavailableRouter from "../../api-server/src/routes/unavailable-internal";
-import pilotLinksRouter from "../../api-server/src/routes/pilot-links-internal";
-import lanUsersRouter from "../../api-server/src/routes/lan-users-reminders";
 import opsReadRouter from "../../api-server/src/routes/ops-read-lan";
 import savedDutyWeeksRouter from "../../api-server/src/routes/saved-duty-weeks-internal";
 import squadronAirframesRouter from "../../api-server/src/routes/squadron-airframes";
+
+// Task #339 — pilot-links-internal and lan-users-reminders routers
+// were retired with the multi-PC mesh feature set. Their per-route
+// tests below were removed; the LAN-scope contract is still pinned
+// here for the surviving routers.
 import {
   canReadSquadronData,
   canWriteSquadronData,
@@ -69,8 +72,6 @@ function makeApp() {
     next();
   });
   app.use("/", unavailableRouter);
-  app.use("/", pilotLinksRouter);
-  app.use("/", lanUsersRouter);
   app.use("/", opsReadRouter);
   app.use("/", savedDutyWeeksRouter);
   app.use("/", squadronAirframesRouter);
@@ -174,41 +175,10 @@ test("GET /unavailable: super_admin sees everything (no filter)", async () => {
   assert.deepEqual(cap.params, []);
 });
 
-test("GET /pilot-links/active-devices: ops scoped to own squadron", async () => {
-  reset();
-  await withServer(async (baseUrl) => {
-    const res = await get(baseUrl, "/pilot-links/active-devices", {
-      role: "ops",
-      squadron_id: "S1",
-    });
-    assert.equal(res.status, 200);
-  });
-  const cap = lastCapture();
-  assert.match(cap.sql, /from pilot_devices d/);
-  assert.match(cap.sql, /left join pilots p on p\.id = d\.pilot_id/);
-  assert.match(cap.sql, /and p\.squadron_id::text = \$1/);
-  assert.deepEqual(cap.params, ["S1"]);
-});
-
-test("GET /pilot-links/active-devices: commander_wing pulls whole wing", async () => {
-  reset();
-  await withServer(async (baseUrl) => {
-    const res = await get(baseUrl, "/pilot-links/active-devices", {
-      role: "commander_wing",
-      squadron_id: "S1",
-      wing_id: "W7",
-    });
-    assert.equal(res.status, 200);
-  });
-  const cap = lastCapture();
-  assert.match(cap.sql, /wing_id = \$1/);
-  assert.deepEqual(cap.params, ["W7", "S1"]);
-});
-
-// Helper: stage the per-call return values for pool.query. The route
-// fires the pilot lookup first, then two parallel queries for devices
-// + link codes — order between those two is not deterministic, so we
-// just return empty rows for any call after the first.
+// Helper: stage the per-call return values for pool.query. Routes
+// that fire a pilot/squadron lookup before the scoped read need this
+// to feed deterministic rows for the first call (the lookup) and
+// then fall back to empty rows for any follow-up.
 function stageQueryReturns(returns: unknown[][]) {
   let callCount = 0;
   (pool as unknown as { query: (...args: unknown[]) => Promise<unknown> }).query =
@@ -227,110 +197,6 @@ function restoreSimpleMock() {
       return { rows: nextRows };
     };
 }
-
-test("GET /pilot-links/status: rejects ops looking up a foreign squadron pilot", async () => {
-  reset();
-  stageQueryReturns([[{ squadron_id: "S99", wing_id: "W2", base_id: "B2" }]]);
-  await withServer(async (baseUrl) => {
-    const res = await get(baseUrl, "/pilot-links/status?pilotId=p1", {
-      role: "ops",
-      squadron_id: "S1",
-    });
-    assert.equal(res.status, 403);
-  });
-  restoreSimpleMock();
-});
-
-test("GET /pilot-links/status: commander_wing may inspect a different squadron in their wing", async () => {
-  reset();
-  // Pilot belongs to S2, but S2 is in W7 — same wing as actor.
-  stageQueryReturns([[{ squadron_id: "S2", wing_id: "W7", base_id: "B1" }]]);
-  await withServer(async (baseUrl) => {
-    const res = await get(baseUrl, "/pilot-links/status?pilotId=p1", {
-      role: "commander_wing",
-      squadron_id: "S1",
-      wing_id: "W7",
-    });
-    assert.equal(res.status, 200);
-  });
-  restoreSimpleMock();
-});
-
-test("GET /pilot-links/status: commander_wing rejected when target squadron is in a different wing", async () => {
-  reset();
-  stageQueryReturns([[{ squadron_id: "S99", wing_id: "W9", base_id: "B9" }]]);
-  await withServer(async (baseUrl) => {
-    const res = await get(baseUrl, "/pilot-links/status?pilotId=p1", {
-      role: "commander_wing",
-      squadron_id: "S1",
-      wing_id: "W7",
-    });
-    assert.equal(res.status, 403);
-  });
-  restoreSimpleMock();
-});
-
-test("GET /pilot-links/status: commander_base may inspect any pilot on their base", async () => {
-  reset();
-  stageQueryReturns([[{ squadron_id: "S2", wing_id: "W2", base_id: "B3" }]]);
-  await withServer(async (baseUrl) => {
-    const res = await get(baseUrl, "/pilot-links/status?pilotId=p1", {
-      role: "commander_base",
-      squadron_id: "S1",
-      base_id: "B3",
-    });
-    assert.equal(res.status, 200);
-  });
-  restoreSimpleMock();
-});
-
-test("GET /pilot-links/status: 404 when pilot does not exist", async () => {
-  reset();
-  stageQueryReturns([[]]);
-  await withServer(async (baseUrl) => {
-    const res = await get(baseUrl, "/pilot-links/status?pilotId=missing", {
-      role: "ops",
-      squadron_id: "S1",
-    });
-    assert.equal(res.status, 404);
-  });
-  restoreSimpleMock();
-});
-
-test("GET /reminders/overview: commander_base scopes both queries by base_id", async () => {
-  reset();
-  await withServer(async (baseUrl) => {
-    const res = await get(baseUrl, "/reminders/overview", {
-      role: "commander_base",
-      squadron_id: "S1",
-      base_id: "B3",
-    });
-    assert.equal(res.status, 200);
-  });
-  // Two SELECTs were issued (prefs + notifications); both should be scoped.
-  assert.equal(captured.length, 2);
-  for (const cap of captured) {
-    assert.match(cap.sql, /left join pilots p/);
-    assert.match(cap.sql, /base_id = \$1/);
-    assert.deepEqual(cap.params, ["B3", "S1"]);
-  }
-});
-
-test("GET /reminders/overview: ops scopes both queries to own squadron", async () => {
-  reset();
-  await withServer(async (baseUrl) => {
-    const res = await get(baseUrl, "/reminders/overview", {
-      role: "ops",
-      squadron_id: "S1",
-    });
-    assert.equal(res.status, 200);
-  });
-  assert.equal(captured.length, 2);
-  for (const cap of captured) {
-    assert.match(cap.sql, /and p\.squadron_id::text = \$1/);
-    assert.deepEqual(cap.params, ["S1"]);
-  }
-});
 
 test("GET /leaves: commander_wing year is $1 and wing filter starts at $2", async () => {
   reset();
@@ -574,21 +440,6 @@ test("canWriteSquadronData: ops with NULL squadron_id cannot write a target with
   assert.equal(canWriteSquadronData("commander_wing", null, null), false);
   // sanity: same valid id → allowed
   assert.equal(canWriteSquadronData("ops", "S1", "S1"), true);
-});
-
-test("GET /pilot-links/status: commander_wing with null wing_id is rejected against null-wing target", async () => {
-  reset();
-  // Pilot belongs to S99, whose squadron has a null wing_id.
-  stageQueryReturns([[{ squadron_id: "S99", wing_id: null, base_id: null }]]);
-  await withServer(async (baseUrl) => {
-    const res = await get(baseUrl, "/pilot-links/status?pilotId=p1", {
-      role: "commander_wing",
-      squadron_id: "S1",
-      wing_id: null,
-    });
-    assert.equal(res.status, 403);
-  });
-  restoreSimpleMock();
 });
 
 test("GET /saved-duty-weeks: commander_base with null base_id is rejected against null-base target", async () => {
