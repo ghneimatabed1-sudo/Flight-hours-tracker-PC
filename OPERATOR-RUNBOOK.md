@@ -39,8 +39,9 @@ restore, or reset anything in this system.
    - First super-admin password (8+ characters).
 7. The script writes both `.env.production` files, creates the
    database, lays out every Hawk Eye table, mints the super-admin, and
-   registers two scheduled tasks: one to start the api-server on boot,
-   one to back up the database every night at 02:00.
+   registers two scheduled tasks: one to start the api-server on boot
+   (`HawkEye-ApiServer-OnStartup`), and one to back up the database
+   every night at 02:30 (`HawkEye-Postgres-Backup-Daily`).
 8. Note the **bootstrap token** the script prints. Store it somewhere
    safe — it is only used once, the first time you sign in remotely.
 
@@ -55,7 +56,9 @@ Server" → status: Running).
 1. Copy `Hawk Eye Setup x.y.z.exe` to the dashboard PC.
 2. Run the installer as a regular user.
 3. The installer creates a desktop shortcut. Launch it.
-4. Sign in with the super-admin account from step 1.7.
+4. Sign in with the super-admin account you minted at the prompts in
+   step 1.6 (username + password you typed when `first-time-setup.ps1`
+   asked).
 5. Inside the app: **Admin → Users → Add user** to create the per-PC
    ops officer / commander accounts.
 
@@ -81,11 +84,17 @@ Glance once a week:
 
 ## 4. Backups
 
-Automatic: the nightly backup task writes a `.dump` file to the path
-configured in `scripts/lan-host/install-backup-task.ps1`. Default
-location is `C:\HawkEye\backups\hawkeye-YYYY-MM-DD.dump`.
+Automatic: the nightly backup task runs at **02:30** local time and
+writes a `.dump` file under
+`<repo>\artifacts\api-server\backups\hawk-eye-lan-YYYYMMDD-HHMMSS.dump`.
+Files older than 14 days are pruned automatically. To put backups
+somewhere else, re-run `install-backup-task.ps1` (it overwrites the
+task) and pass `-RunAt "HH:mm"`; to change the directory, pass
+`-BackupDir` to `backup-postgres.ps1` or wrap it in your own scheduled
+task.
 
-Manual on-demand:
+Manual on-demand (also writes under
+`artifacts\api-server\backups\` by default):
 ```
 .\scripts\lan-host\backup-postgres.ps1
 ```
@@ -98,22 +107,37 @@ backup** — if the host PC dies, it dies with it.
 
 ## 5. Restore from backup
 
-On a fresh host PC (after re-installing Postgres and Node):
+On a fresh host PC (after re-installing Postgres and Node) — empty
+database, no existing tables:
 ```
-.\scripts\lan-host\restore-postgres.ps1 -BackupFile "D:\hawkeye-2026-04-29.dump"
+.\scripts\lan-host\restore-postgres.ps1 -BackupFile "D:\hawk-eye-lan-20260429-023000.dump"
 ```
 
-The script drops the existing database, re-creates it, and loads the
-dump. The api-server picks up the restored data on next boot.
+If the database already has data (you are restoring on top of an
+existing install), pass `-DropAndRecreate` so the restore wipes the
+existing schema first:
+```
+.\scripts\lan-host\restore-postgres.ps1 -BackupFile "D:\hawk-eye-lan-20260429-023000.dump" -DropAndRecreate
+```
+
+The script reads `DATABASE_URL` from your shell environment by default;
+pass `-DatabaseUrl "postgresql://..."` to override it. The api-server
+picks up the restored data on next boot.
 
 ---
 
 ## 6. Reset a forgotten password
 
-When an ops officer or commander forgets their password:
+When an ops officer or commander forgets their password, on the host
+PC export the database URL once per shell, then run the reset:
 ```
+$env:DATABASE_URL = "postgresql://postgres:<pg-pw>@127.0.0.1:5432/hawkeye_internal"
 .\scripts\lan-host\reset-admin-password.ps1 -Username "ops1"
 ```
+
+(or pass `-DatabaseUrl "postgresql://..."` directly to the script).
+Without one of those the script aborts with `DATABASE_URL not set`.
+You can read the same URL out of `artifacts\api-server\.env`.
 
 You will be prompted for the new password twice. The new password is
 hashed (never stored as plain text) and written directly to the
@@ -153,9 +177,17 @@ If the host-side api-server source needs to change (rare):
 
 ## 8. Troubleshooting
 
+First, on the host PC, run the two diagnostic scripts. Together they
+cover ~80% of first-run failures:
+
+```
+pnpm lan:host:preflight   # checks .env, pnpm/pg_dump on PATH, port 3847 free
+pnpm lan:host:health      # hits http://127.0.0.1:3847/api/healthz
+```
+
 | Symptom | Try this |
 | --- | --- |
-| Dashboard says "Cannot reach API server" | `ping hawk-host.local` from the dashboard PC. If it fails, the host PC is offline or the LAN path is broken. |
+| Dashboard says "Cannot reach API server" | `ping hawk-host.local` from the dashboard PC. If it fails, the host PC is offline, mDNS is blocked on the LAN, or the LAN path is broken. Run `pnpm lan:host:health` on the host to confirm the api-server itself is alive. |
 | Sign-in keeps failing | Check the audit log on the host PC's Postgres for `lan_login_failed` rows. Ask user to wait 5 minutes (rate limit) and try again. |
 | All sign-ins fail and we just rebuilt the host | Run `reset-admin-password.ps1` for the super-admin and try again. |
 | Dashboard title bar shows "v? · nogit" | The build was made from a tarball without `.git`. Functionally fine; cosmetic. |

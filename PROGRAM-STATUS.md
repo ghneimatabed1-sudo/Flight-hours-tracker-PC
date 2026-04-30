@@ -54,7 +54,7 @@ verified; PARTIAL or DEFERRED with a reason when it was not.
 | T021 | Electron version + git hash in title bar | DONE | `vite.config.ts` injects `__APP_VERSION__` + `__GIT_SHORT_HASH__`; `HQLayout.tsx` renders `v{version} · {hash}`. Auto-update remains off-by-default; `webSecurity:false` documented. |
 | T022 | `first-time-setup.ps1` | DONE | Added under `scripts/lan-host/`. Walks Postgres install, DB+role creation, env writes, schema bootstrap, super_admin mint, scheduled-task install. |
 | T023 | `OPERATOR-RUNBOOK.md` | DONE | Added at repo root. Plain-language, install/start/backup/restore/reset/USB-update/troubleshooting/escalation. |
-| T024 | Real-hardware pilot test | **DEFERRED — CANNOT BE RUN FROM REPLIT** | Requires the operator's bare-metal host PC + at least one dashboard PC + a private LAN. The runbook tells them exactly which steps to run; this file and `GO-NO-GO-CHECKLIST.md` §C+§E call this out as the standing condition on GO. |
+| T024 | Real-hardware pilot test | **DEFERRED — CANNOT BE RUN FROM REPLIT** | Requires the operator's bare-metal host PC + at least one dashboard PC + a private LAN. The runbook tells them exactly which steps to run; this file and `GO-NO-GO-CHECKLIST.md` §C+§E call this out as the standing condition on GO. Pre-flight verification done in task #319 — see "Task #319 preflight" section below. |
 | T025 | Update GO/NO-GO + PROGRAM-STATUS | DONE | This file plus `GO-NO-GO-CHECKLIST.md` rewritten. |
 
 ---
@@ -84,3 +84,59 @@ verified; PARTIAL or DEFERRED with a reason when it was not.
 - Any guarantee that the bare-metal pilot test will pass on the first
   try. The runbook's troubleshooting table covers the most likely
   environmental snags.
+
+---
+
+## Task #319 preflight (2026-04-30)
+
+T024 itself still cannot be performed from Replit — it physically
+requires the host PC + dashboard laptop + base LAN. To shrink the
+chance of a first-try failure on real hardware, the following was
+verified in-session:
+
+- `pnpm run typecheck` — GREEN across all four typed packages
+  (`api-server`, `mockup-sandbox`, `pilot-dashboard`, `scripts`).
+- `pnpm --filter @workspace/api-server run build` — GREEN. This is the
+  exact build invoked in Step 5 of `first-time-setup.ps1`; if it had
+  failed, the operator would have hit it on bare metal.
+- `/api/healthz` route is wired (`artifacts/api-server/src/routes/health.ts`)
+  so `check-host-health.ps1` has something real to hit.
+- `ensureLanAuthSchema` (alias of `ensureFullSchema`) is invoked from
+  `index.ts` on boot, so Step 5b of `first-time-setup.ps1` will create
+  every LAN table on the operator's empty Postgres.
+- All 11 PowerShell scripts under `scripts/lan-host/` were read end-to-
+  end. The following runbook-vs-script drifts that would have failed
+  the operator on first run were fixed:
+  1. `OPERATOR-RUNBOOK.md` §1.7 + §4 had the wrong default backup path
+     (`C:\HawkEye\backups\hawkeye-YYYY-MM-DD.dump`) and time (`02:00`).
+     The script writes `artifacts\api-server\backups\hawk-eye-lan-
+     YYYYMMDD-HHMMSS.dump` at `02:30`; both runbook sections now
+     reflect that and §4 documents the override flags.
+  2. `OPERATOR-RUNBOOK.md` §5 example for `restore-postgres.ps1` was
+     missing `-DropAndRecreate` despite claiming the script "drops the
+     existing database, re-creates it, and loads the dump". On a
+     populated DB the unflagged form would fail with "relation already
+     exists". Runbook now shows both forms (empty DB vs in-place
+     restore) and notes the `-DatabaseUrl` override.
+  3. `OPERATOR-RUNBOOK.md` §6 example for `reset-admin-password.ps1`
+     omitted `DATABASE_URL`. The script aborts immediately without it.
+     Runbook now exports the URL first (or shows the `-DatabaseUrl`
+     flag) and points the operator at `artifacts\api-server\.env` to
+     copy the value from.
+  4. `OPERATOR-RUNBOOK.md` §2 referenced "the super-admin account from
+     step 1.7" — super-admin is actually minted at the prompts in
+     step 1.6. Wording corrected.
+- **Critical script fix:** `backup-postgres.ps1` previously required
+  `-DatabaseUrl` or `DATABASE_URL` in the process env. The nightly
+  backup task installed by `install-backup-task.ps1` runs under
+  `SYSTEM` with no inherited env and was never passed `-DatabaseUrl`,
+  so the nightly backup would have aborted every night with "Database
+  URL missing" — silently leaving the host with no backups. Fixed by
+  having `backup-postgres.ps1` fall back to parsing `DATABASE_URL`
+  from `artifacts/api-server/.env` (the same file `start-api-host.ps1`
+  loads). Avoids baking the password into the scheduled-task command
+  line, which would have been visible to anyone running
+  `schtasks /query /v`.
+
+T024 stays DEFERRED until the operator runs the runbook on real
+hardware and reports back per `GO-NO-GO-CHECKLIST.md` §E.

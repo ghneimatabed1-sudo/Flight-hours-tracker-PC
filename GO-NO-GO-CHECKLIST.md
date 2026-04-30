@@ -43,7 +43,7 @@ Date: 2026-04-30 (task #318)
 
 | # | Gate | Status | Notes |
 | --- | --- | --- | --- |
-| C1 | T024 — pilot test on actual host PC + dashboard PC on a private LAN | **DEFERRED — CANNOT BE RUN FROM REPLIT** | Requires the operator's physical host PC, at least one dashboard PC, and a private LAN. The runbook's §1 + §2 describe exactly the steps to perform; the operator is requested to run them and report back before the verdict is upgraded to unconditional GO. |
+| C1 | T024 — pilot test on actual host PC + dashboard PC on a private LAN | **DEFERRED — CANNOT BE RUN FROM REPLIT** | Requires the operator's physical host PC, at least one dashboard PC, and a private LAN. The runbook's §1 + §2 describe exactly the steps to perform; the operator is requested to run them and report back before the verdict is upgraded to unconditional GO. Task #319 added a pre-flight pass (typecheck + api-server build verified GREEN; runbook fixed for four script-vs-doc drifts; **critical fix to `backup-postgres.ps1`** so the SYSTEM-scheduled nightly backup actually has a `DATABASE_URL` to use). See `PROGRAM-STATUS.md` "Task #319 preflight". |
 
 ## D. Residual risks
 

@@ -28,8 +28,32 @@ if (-not $DatabaseUrl -or $DatabaseUrl.Trim() -eq "") {
   $DatabaseUrl = [System.Environment]::GetEnvironmentVariable("DATABASE_URL", "Process")
 }
 
+# Fall back to artifacts/api-server/.env so the nightly task (which runs
+# under SYSTEM with no inherited DATABASE_URL) and ad-hoc operator runs
+# both work without anyone having to bake the password into the
+# scheduled-task command line (which would expose it via `schtasks /query
+# /v`).
 if (-not $DatabaseUrl -or $DatabaseUrl.Trim() -eq "") {
-  throw "Database URL missing. Pass -DatabaseUrl or set DATABASE_URL in environment."
+  $apiEnv = Join-Path $root "artifacts\api-server\.env"
+  if (Test-Path $apiEnv) {
+    Get-Content -Path $apiEnv | ForEach-Object {
+      $line = $_.Trim()
+      if ($line -eq "" -or $line.StartsWith("#")) { return }
+      $parts = $line -split "=", 2
+      if ($parts.Count -ne 2) { return }
+      $k = $parts[0].Trim()
+      if ($k -ne "DATABASE_URL") { return }
+      $v = $parts[1].Trim()
+      if ($v.StartsWith('"') -and $v.EndsWith('"')) {
+        $v = $v.Substring(1, $v.Length - 2)
+      }
+      $DatabaseUrl = $v
+    }
+  }
+}
+
+if (-not $DatabaseUrl -or $DatabaseUrl.Trim() -eq "") {
+  throw "Database URL missing. Pass -DatabaseUrl, set DATABASE_URL in environment, or fill DATABASE_URL in artifacts\api-server\.env."
 }
 
 if (-not (Get-Command pg_dump -ErrorAction SilentlyContinue)) {
