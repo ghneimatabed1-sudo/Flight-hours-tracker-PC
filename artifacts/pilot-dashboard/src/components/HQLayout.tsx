@@ -53,6 +53,7 @@ export function HQLayout({ children }: { children: ReactNode }) {
           ? ([
               { path: "/admin/audit", labelKey: "auditLog", icon: <ListChecks className="h-4 w-4" /> },
               { path: "/admin/users", labelKey: "nav_users", icon: <Users className="h-4 w-4" /> },
+              { path: "/admin/lan-peers", labelKey: "nav_lan_peers", icon: <Server className="h-4 w-4" /> },
             ] satisfies NavItem[])
           : []),
         { path: "/settings", labelKey: "nav_settings", icon: <SettingsIcon className="h-4 w-4" /> },
@@ -70,6 +71,8 @@ export function HQLayout({ children }: { children: ReactNode }) {
         { path: "/admin/health", labelKey: "nav_system_health", icon: <HeartPulse className="h-4 w-4" /> },
         { path: "/admin/users", labelKey: "nav_users", icon: <Users className="h-4 w-4" /> },
         { path: "/admin/peer-tokens", labelKey: "nav_peer_tokens", icon: <KeyRound className="h-4 w-4" /> },
+        { path: "/admin/lan-peers", labelKey: "nav_lan_peers", icon: <Server className="h-4 w-4" /> },
+        { path: "/admin/lan-pairing-inbox", labelKey: "nav_lan_pairing_inbox", icon: <Bell className="h-4 w-4" /> },
         { path: "/settings", labelKey: "nav_settings", icon: <SettingsIcon className="h-4 w-4" /> },
       ]
     : [

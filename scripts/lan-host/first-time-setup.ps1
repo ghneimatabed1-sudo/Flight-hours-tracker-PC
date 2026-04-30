@@ -526,18 +526,36 @@ $plainAdmin = $null
 
 # ── Step 9 — Optional mDNS broadcast ───────────────────────────────────
 if ($EnableMdns) {
-    Step 9 "Registering mDNS broadcast (_hawkeye-hub._tcp)..."
+    Step 9 "Registering mDNS broadcast (_hawkeye-hub._tcp + _hawkeye._tcp role=hub)..."
     $mdnsScript = Join-Path $ScriptDir "register-mdns.ps1"
     if (-not (Test-Path $mdnsScript)) {
         Warn "register-mdns.ps1 not found; skipped."
     } else {
+        # 1) Legacy hub-only service so older aggregators/viewers can
+        #    still find this hub via `<squadron>.local`.
         try {
-            & powershell -NoProfile -ExecutionPolicy Bypass -File $mdnsScript -SquadronName $SquadronName -ApiPort $ApiPort
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $mdnsScript `
+                -SquadronName $SquadronName -ApiPort $ApiPort `
+                -TaskName "HawkEye-Mdns-Hub-OnStartup"
             if ($LASTEXITCODE -ne 0) {
-                Warn "register-mdns.ps1 exited with code $LASTEXITCODE. Re-run it manually after rebooting if needed."
+                Warn "register-mdns.ps1 (legacy) exited with code $LASTEXITCODE. Re-run it manually after rebooting if needed."
             }
         } catch {
-            Warn "mDNS registration failed: $_. Re-run register-mdns.ps1 manually if you want this hub auto-discovered."
+            Warn "mDNS legacy registration failed: $_. Re-run register-mdns.ps1 manually if you want this hub auto-discovered."
+        }
+        # 2) Magic LAN auto-discovery (_hawkeye._tcp with role=hub)
+        #    so aggregators/viewers ≥1.1.110 can offer one-click pairing.
+        try {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $mdnsScript `
+                -SquadronName $SquadronName -ApiPort $ApiPort `
+                -ServiceType "_hawkeye._tcp" -Role hub `
+                -Hostname $env:COMPUTERNAME `
+                -TaskName "HawkEye-Mdns-Magic-OnStartup"
+            if ($LASTEXITCODE -ne 0) {
+                Warn "register-mdns.ps1 (magic LAN) exited with code $LASTEXITCODE. Re-run it manually after rebooting if needed."
+            }
+        } catch {
+            Warn "mDNS magic-LAN registration failed: $_. One-click pairing will fall back to manual setup-aggregator.ps1."
         }
     }
 } else {

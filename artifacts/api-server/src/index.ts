@@ -10,7 +10,14 @@ import {
   setActiveInstallProfile,
   type InstallProfile,
 } from "./lib/install-profile";
+import {
+  installProfileToRole,
+  LanDiscoveryService,
+  setLanDiscoveryService,
+} from "./lib/lan-discovery";
+import { makeDnsSdBrowseTransport } from "./lib/lan-discovery-dnssd";
 import type { Server } from "node:http";
+import os from "node:os";
 
 let profile: InstallProfile;
 try {
@@ -91,6 +98,45 @@ let server: Server | null = null;
 
     logger.info({ port, profile }, "Server listening");
   });
+
+  // Start LAN auto-discovery (Task T-R). The dns-sd transport is
+  // best-effort: if dns-sd.exe isn't on PATH (e.g. someone uninstalled
+  // Bonjour) it logs a warning and the discovery service simply
+  // reports an empty peer list. We disable the loop entirely on
+  // explicit opt-out (HAWK_LAN_DISCOVERY=off) so air-gapped sites
+  // that block multicast never spawn the child process at all.
+  const discoveryMode = (process.env.HAWK_LAN_DISCOVERY ?? "").trim().toLowerCase();
+  if (discoveryMode !== "off" && discoveryMode !== "0" && discoveryMode !== "false") {
+    try {
+      const role = installProfileToRole(profile);
+      const txt: Record<string, string> = {
+        role,
+        hostname: os.hostname(),
+        version: process.env.npm_package_version ?? "",
+        squadron: process.env.SQUADRON_NAME ?? "",
+        wing: process.env.WING_NAME ?? "",
+        base: process.env.BASE_NAME ?? "",
+      };
+      const svc = new LanDiscoveryService({
+        selfHostname: os.hostname(),
+        selfRole: role,
+        selfPort: port,
+        selfTxt: txt,
+        transport: makeDnsSdBrowseTransport(),
+        logger: {
+          warn: (...args) => logger.warn(...(args as [unknown])),
+          info: (...args) => logger.info(...(args as [unknown])),
+        },
+      });
+      await svc.start();
+      setLanDiscoveryService(svc);
+      logger.info({ role }, "lan-discovery started");
+    } catch (err) {
+      logger.warn({ err }, "lan-discovery failed to start; continuing without it");
+    }
+  } else {
+    logger.info("lan-discovery disabled via HAWK_LAN_DISCOVERY env");
+  }
 })();
 
 function shutdown(signal: string): void {

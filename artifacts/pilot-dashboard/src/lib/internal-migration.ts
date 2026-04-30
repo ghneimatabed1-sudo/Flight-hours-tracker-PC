@@ -69,8 +69,21 @@ function isAggregator(p: ActiveInstallProfile = __activeInstallProfile): boolean
  */
 function mapLogicalPath(path: string): string {
   const stripped = path.replace(/^\/+/, "");
-  if (isAggregator() && stripped.startsWith("internal/auth/lan/")) {
-    return "aggregate/auth/lan/" + stripped.slice("internal/auth/lan/".length);
+  if (isAggregator()) {
+    if (stripped.startsWith("internal/auth/lan/")) {
+      return "aggregate/auth/lan/" + stripped.slice("internal/auth/lan/".length);
+    }
+    // LAN auto-discovery + pairing routes (Task T-R) are mounted on
+    // both `/api/internal/*` (hub) and `/api/aggregate/*` (aggregator)
+    // by the api-server. Rewriting here lets the dashboard pages
+    // use the canonical `internal/lan-discovery/*` /
+    // `internal/lan-pairing/*` logical paths regardless of profile.
+    if (stripped.startsWith("internal/lan-discovery/")) {
+      return "aggregate/lan-discovery/" + stripped.slice("internal/lan-discovery/".length);
+    }
+    if (stripped.startsWith("internal/lan-pairing/")) {
+      return "aggregate/lan-pairing/" + stripped.slice("internal/lan-pairing/".length);
+    }
   }
   return stripped;
 }
@@ -2370,5 +2383,278 @@ export async function fetchAggregateRows(
     return { items, peers };
   } catch {
     return null;
+  }
+}
+
+// ── LAN auto-discovery + one-click pairing (Task T-R) ───────────────
+
+export type LanPeerRole =
+  | "hub"
+  | "aggregator-wing"
+  | "aggregator-base"
+  | "viewer";
+
+export type LanDiscoveredPeer = {
+  hostname: string;
+  role: LanPeerRole;
+  address: string;
+  port: number;
+  txt: Record<string, string>;
+  firstSeenAt: number;
+  lastSeenAt: number;
+};
+
+export type LanDiscoveryReport = {
+  enabled: boolean;
+  self: LanDiscoveredPeer | null;
+  peers: LanDiscoveredPeer[];
+};
+
+const ALL_LAN_ROLES: readonly LanPeerRole[] = [
+  "hub",
+  "aggregator-wing",
+  "aggregator-base",
+  "viewer",
+];
+
+function parseLanPeer(raw: Record<string, unknown>): LanDiscoveredPeer | null {
+  const role = String(raw.role ?? "").toLowerCase() as LanPeerRole;
+  if (!ALL_LAN_ROLES.includes(role)) return null;
+  const hostname = String(raw.hostname ?? "").trim();
+  if (!hostname) return null;
+  const address = String(raw.address ?? "").trim();
+  const port = Number(raw.port ?? 0);
+  const txt = (raw.txt && typeof raw.txt === "object" ? raw.txt : {}) as Record<string, string>;
+  const firstSeenAt = Number(raw.firstSeenAt ?? 0);
+  const lastSeenAt = Number(raw.lastSeenAt ?? 0);
+  return {
+    hostname,
+    role,
+    address,
+    port: Number.isFinite(port) ? port : 0,
+    txt,
+    firstSeenAt: Number.isFinite(firstSeenAt) ? firstSeenAt : 0,
+    lastSeenAt: Number.isFinite(lastSeenAt) ? lastSeenAt : 0,
+  };
+}
+
+export async function fetchLanDiscoveryReport(): Promise<LanDiscoveryReport | null> {
+  const url = getInternalApiPath("internal/lan-discovery/peers");
+  if (!url) return null;
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: internalApiHeadersBase(),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as Record<string, unknown>;
+    const enabled = body?.enabled === true;
+    const peersRaw = Array.isArray(body?.peers) ? body.peers : [];
+    const selfRaw = body?.self && typeof body.self === "object"
+      ? (body.self as Record<string, unknown>)
+      : null;
+    return {
+      enabled,
+      self: selfRaw ? parseLanPeer(selfRaw) : null,
+      peers: peersRaw
+        .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+        .map(parseLanPeer)
+        .filter((x): x is LanDiscoveredPeer => x !== null),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export type LanInboundRequestRow = {
+  id: string;
+  requester_role: LanPeerRole;
+  requester_hostname: string;
+  requester_address: string;
+  requester_app_version: string | null;
+  status: string;
+  issued_token_id: string | null;
+  approval_error: string | null;
+  created_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+  delivered_at: string | null;
+};
+
+function parseLanInboundRow(raw: Record<string, unknown>): LanInboundRequestRow | null {
+  const id = String(raw.id ?? "").trim();
+  const role = String(raw.requester_role ?? "").toLowerCase() as LanPeerRole;
+  if (!id || !ALL_LAN_ROLES.includes(role)) return null;
+  return {
+    id,
+    requester_role: role,
+    requester_hostname: String(raw.requester_hostname ?? ""),
+    requester_address: String(raw.requester_address ?? ""),
+    requester_app_version: raw.requester_app_version == null
+      ? null
+      : String(raw.requester_app_version),
+    status: String(raw.status ?? "pending"),
+    issued_token_id: raw.issued_token_id == null
+      ? null
+      : String(raw.issued_token_id),
+    approval_error: raw.approval_error == null ? null : String(raw.approval_error),
+    created_at: String(raw.created_at ?? ""),
+    decided_at: raw.decided_at == null ? null : String(raw.decided_at),
+    decided_by: raw.decided_by == null ? null : String(raw.decided_by),
+    delivered_at: raw.delivered_at == null ? null : String(raw.delivered_at),
+  };
+}
+
+export async function fetchLanPairingInbox(
+  status: "pending" | "all" = "pending",
+): Promise<LanInboundRequestRow[] | null> {
+  const url = getInternalApiPath(
+    `internal/lan-pairing/inbox?status=${encodeURIComponent(status)}`,
+  );
+  if (!url) return null;
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: internalApiHeadersBase(),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { items?: unknown };
+    const items = Array.isArray(body?.items) ? body.items : [];
+    return items
+      .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+      .map(parseLanInboundRow)
+      .filter((x): x is LanInboundRequestRow => x !== null);
+  } catch {
+    return null;
+  }
+}
+
+export async function postLanPairingApprove(
+  id: string,
+  label?: string,
+): Promise<{ ok: boolean; error?: string; status?: number; delivered?: boolean }> {
+  const url = getInternalApiPath(
+    `internal/lan-pairing/inbox/${encodeURIComponent(id)}/approve`,
+  );
+  if (!url) return { ok: false, error: "internal_api_disabled" };
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: internalWriteHeaders(),
+      body: JSON.stringify({ label: label ?? "" }),
+    });
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      return { ok: false, error: String(body?.error ?? `http_${res.status}`), status: res.status };
+    }
+    return { ok: true, delivered: body?.delivered === true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function postLanPairingDeny(
+  id: string,
+): Promise<{ ok: boolean; error?: string; status?: number }> {
+  const url = getInternalApiPath(
+    `internal/lan-pairing/inbox/${encodeURIComponent(id)}/deny`,
+  );
+  if (!url) return { ok: false, error: "internal_api_disabled" };
+  try {
+    const res = await fetch(url, { method: "POST", headers: internalWriteHeaders() });
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) return { ok: false, error: String(body?.error ?? `http_${res.status}`), status: res.status };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export type LanOutboundRequestRow = {
+  id: string;
+  hub_hostname: string;
+  hub_address: string;
+  status: string;
+  received_token_id: string | null;
+  received_token_label: string | null;
+  error_detail: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function parseLanOutboundRow(raw: Record<string, unknown>): LanOutboundRequestRow | null {
+  const id = String(raw.id ?? "").trim();
+  if (!id) return null;
+  return {
+    id,
+    hub_hostname: String(raw.hub_hostname ?? ""),
+    hub_address: String(raw.hub_address ?? ""),
+    status: String(raw.status ?? "pending"),
+    received_token_id: raw.received_token_id == null ? null : String(raw.received_token_id),
+    received_token_label: raw.received_token_label == null ? null : String(raw.received_token_label),
+    error_detail: raw.error_detail == null ? null : String(raw.error_detail),
+    created_at: String(raw.created_at ?? ""),
+    updated_at: String(raw.updated_at ?? ""),
+  };
+}
+
+export async function fetchLanPairingOutbox(): Promise<LanOutboundRequestRow[] | null> {
+  const url = getInternalApiPath("internal/lan-pairing/outbox");
+  if (!url) return null;
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: internalApiHeadersBase(),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { items?: unknown };
+    const items = Array.isArray(body?.items) ? body.items : [];
+    return items
+      .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+      .map(parseLanOutboundRow)
+      .filter((x): x is LanOutboundRequestRow => x !== null);
+  } catch {
+    return null;
+  }
+}
+
+export async function postLanPairingRequest(input: {
+  hub_hostname: string;
+  hub_address: string;
+  hub_port: number;
+}): Promise<{ ok: boolean; id?: string; error?: string; status?: number }> {
+  const url = getInternalApiPath("internal/lan-pairing/request");
+  if (!url) return { ok: false, error: "internal_api_disabled" };
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: internalWriteHeaders(),
+      body: JSON.stringify(input),
+    });
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) return { ok: false, error: String(body?.error ?? `http_${res.status}`), status: res.status };
+    return { ok: true, id: String(body?.id ?? "") };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function deleteLanPairingOutbound(
+  id: string,
+): Promise<{ ok: boolean; error?: string; status?: number }> {
+  const url = getInternalApiPath(
+    `internal/lan-pairing/outbox/${encodeURIComponent(id)}`,
+  );
+  if (!url) return { ok: false, error: "internal_api_disabled" };
+  try {
+    const res = await fetch(url, { method: "DELETE", headers: internalWriteHeaders() });
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) return { ok: false, error: String(body?.error ?? `http_${res.status}`), status: res.status };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }

@@ -31,6 +31,16 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$DnsSdPath,
 
+    # Service type to register. Default keeps the legacy hub-only
+    # registration shape; magic LAN auto-discovery passes
+    # `_hawkeye._tcp` along with -Role + TXT records.
+    [string]$ServiceType = "_hawkeye-hub._tcp",
+    [string]$Role        = "",
+    [string]$Wing        = "",
+    [string]$Base        = "",
+    [string]$Hostname    = "",
+    [string]$AppVersion  = "",
+
     # How long to wait before respawning dns-sd.exe after a crash.
     # Doubles up to $MaxRestartDelaySec on repeated rapid failures,
     # then resets after a run that lasted at least 60s.
@@ -105,8 +115,19 @@ Write-SupervisorLog "[supervisor] start: SquadronName=$SquadronName ApiPort=$Api
 Write-Heartbeat -ChildPid 0 -RestartCount 0 -State "starting"
 
 # `$args` is an automatic variable in PowerShell, so name this
-# something distinct.
-$dnsArgs = @("-R", $SquadronName, "_hawkeye-hub._tcp", "local", $ApiPort)
+# something distinct. Magic LAN auto-discovery (ServiceType
+# `_hawkeye._tcp`) appends role-aware TXT records so peers can
+# decide whether this PC is a hub, aggregator, or viewer without
+# having to ask. dns-sd.exe accepts TXT records as
+# `key=value` positional args after the port.
+$dnsArgs = @("-R", $SquadronName, $ServiceType, "local", $ApiPort)
+if ($ServiceType -eq "_hawkeye._tcp") {
+    if (-not [string]::IsNullOrWhiteSpace($Role))       { $dnsArgs += "role=$Role" }
+    if (-not [string]::IsNullOrWhiteSpace($Wing))       { $dnsArgs += "wing=$Wing" }
+    if (-not [string]::IsNullOrWhiteSpace($Base))       { $dnsArgs += "base=$Base" }
+    if (-not [string]::IsNullOrWhiteSpace($Hostname))   { $dnsArgs += "hostname=$Hostname" }
+    if (-not [string]::IsNullOrWhiteSpace($AppVersion)) { $dnsArgs += "version=$AppVersion" }
+}
 
 $restartCount = 0
 $currentDelay = $RestartDelaySec

@@ -77,7 +77,12 @@ param(
     [switch]$AutoDiscover,
     [switch]$SkipScheduledTasks,
     [switch]$SkipDashboardBuild,
-    [switch]$SkipApiBuild
+    [switch]$SkipApiBuild,
+    # Magic LAN auto-discovery: announce this PC on `_hawkeye._tcp`
+    # with role=aggregator-{wing|base} so a Hub super_admin can spot
+    # it in their pairing inbox / dashboard. Off by default (parity
+    # with first-time-setup.ps1); pass on sites that allow multicast.
+    [switch]$EnableMdns
 )
 
 $ErrorActionPreference = "Stop"
@@ -746,6 +751,33 @@ if ($probeProc -and -not $probeProc.HasExited) {
 Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
 
 Write-Host ""
+# ── Step 14 — Optional magic-LAN announce (_hawkeye._tcp) ─────────────
+if ($EnableMdns) {
+    Step 14 "Registering magic-LAN announce (_hawkeye._tcp role=$installProfile)..."
+    $mdnsScript = Join-Path $ScriptDir "register-mdns.ps1"
+    if (-not (Test-Path $mdnsScript)) {
+        Warn "register-mdns.ps1 not found; skipped. Re-run with -EnableMdns after restoring the file."
+    } else {
+        try {
+            $instanceName = "$($env:COMPUTERNAME)"
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $mdnsScript `
+                -SquadronName $instanceName -ApiPort $ApiPort `
+                -ServiceType "_hawkeye._tcp" -Role $installProfile `
+                -Hostname $env:COMPUTERNAME `
+                -TaskName "HawkEye-Mdns-Magic-OnStartup"
+            if ($LASTEXITCODE -ne 0) {
+                Warn "register-mdns.ps1 exited with code $LASTEXITCODE. Re-run after rebooting if needed."
+            } else {
+                Info "OK — this PC now announces as role=$installProfile on _hawkeye._tcp."
+            }
+        } catch {
+            Warn "mDNS registration failed: $_. Pairing will still work via manual hub-token paste."
+        }
+    }
+} else {
+    Step 14 "Skipping magic-LAN announce (-EnableMdns not passed). Pair manually via setup-aggregator -AutoDiscover or paste a hub token."
+}
+
 Write-Host "DONE. This PC is an aggregator ($installProfile)." -ForegroundColor Green
 Write-Host "  - Local Postgres database  : $DbName"
 Write-Host "  - Local super_admin        : $AdminUser"

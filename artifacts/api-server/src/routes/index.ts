@@ -16,6 +16,8 @@ import savedDutyWeeksInternalRouter from "./saved-duty-weeks-internal";
 import importHistoryInternalRouter from "./import-history-internal";
 import pilotsTransferRouter from "./pilots-transfer";
 import peerTokensInternalRouter from "./peer-tokens-internal";
+import internalLanDiscoveryRouter from "./internal-lan-discovery";
+import internalLanPairingRouter from "./internal-lan-pairing";
 import lanAuthPublic from "./lan-auth-public";
 import peerShellRouter from "./peer-shell";
 import aggregateShellRouter from "./aggregate-shell";
@@ -82,6 +84,8 @@ export function buildRouter(profile: InstallProfile): IRouter {
     internal.use(importHistoryInternalRouter);
     internal.use(pilotsTransferRouter);
     internal.use(peerTokensInternalRouter);
+    internal.use(internalLanDiscoveryRouter);
+    internal.use(internalLanPairingRouter);
     router.use("/internal", internal);
 
     router.use("/peer", peerShellRouter);
@@ -101,6 +105,12 @@ export function buildRouter(profile: InstallProfile): IRouter {
     aggregate.use(mdnsHealthRouter);
     aggregate.use(aboutRouter);
     aggregate.use(aggregateShellRouter);
+    // LAN discovery + outbound pairing belong on aggregator/viewer
+    // installs too — without them the first-launch pairing card has
+    // nothing to render. Approve/Deny short-circuits with `not_a_hub`
+    // since aggregators do not mint peer tokens.
+    aggregate.use(internalLanDiscoveryRouter);
+    aggregate.use(internalLanPairingRouter);
     router.use("/aggregate", aggregate);
   }
 

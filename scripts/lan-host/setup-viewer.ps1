@@ -43,7 +43,13 @@ param(
     [int]   $LocalPort     = 5500,
     [string]$PrebuiltDist  = "",
     [switch]$SkipBuild,
-    [switch]$SkipShortcuts
+    [switch]$SkipShortcuts,
+    # Magic LAN auto-discovery: announce this viewer on `_hawkeye._tcp`
+    # with role=viewer so a Hub super_admin can see active viewers in
+    # their dashboard. Off by default; pass on sites that allow
+    # multicast. Note: viewers do NOT run an api-server, so this is
+    # informational only — viewers can't accept inbound pairing.
+    [switch]$EnableMdns
 )
 
 $ErrorActionPreference = "Stop"
@@ -465,6 +471,34 @@ if ($SkipShortcuts) {
             $sc.WindowStyle  = 7  # Minimized — launcher pops the browser itself.
             $sc.Save()
             Info "Wrote shortcut $lnkPath"
+        }
+    }
+}
+
+# ── Step 6b — Optional magic-LAN announce (_hawkeye._tcp role=viewer) ─
+if ($EnableMdns) {
+    Info "Registering magic-LAN announce (_hawkeye._tcp role=viewer)..."
+    $mdnsScript = Join-Path $PSScriptRoot "register-mdns.ps1"
+    if (-not (Test-Path $mdnsScript)) {
+        Warn "register-mdns.ps1 not found; skipped."
+    } else {
+        try {
+            $instanceName = "$($env:COMPUTERNAME)"
+            # Viewers don't host an api-server — advertise the local
+            # dashboard port so operators inspecting the broadcast
+            # see something meaningful.
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $mdnsScript `
+                -SquadronName $instanceName -ApiPort $LocalPort `
+                -ServiceType "_hawkeye._tcp" -Role viewer `
+                -Hostname $env:COMPUTERNAME `
+                -TaskName "HawkEye-Mdns-Magic-OnStartup"
+            if ($LASTEXITCODE -ne 0) {
+                Warn "register-mdns.ps1 exited with code $LASTEXITCODE."
+            } else {
+                Info "OK — this viewer now announces on _hawkeye._tcp."
+            }
+        } catch {
+            Warn "mDNS registration failed: $_."
         }
     }
 }

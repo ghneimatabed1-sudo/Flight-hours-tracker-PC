@@ -117,10 +117,41 @@ bug — capture the screenshot and report it to the project.
 
 ### What to do after install
 
-- **Wing / Base PCs** — open the dashboard, sign in as the
-  super-admin you just minted, and use **Admin → Address Book** to
-  add the squadron hubs (their hostnames + peer tokens). You can
-  also use `scripts\lan-host\add-squadron-peer.ps1` from PowerShell.
+- **Wing / Base PCs (first launch only)** — when you open the
+  dashboard for the first time, Hawk Eye scans the LAN for any PC
+  announcing itself as a Hub. If it finds one, you get a **"Pair
+  with your Hub"** card with a single button. Click **Pair with
+  this Hub** and the request is sent over the LAN to the Hub's
+  super_admin. The Hub super_admin sees it under **Admin → Pairing
+  Inbox** and clicks **Approve**. The peer access token is then
+  delivered encrypted to your PC automatically — you never copy or
+  paste it — and stored in `peer_squadrons` so the aggregator's
+  fan-out reads start working immediately. The dashboard reloads
+  paired and ready to use. If nothing appears, fall back to the
+  address-book / `setup-aggregator.ps1` flow below.
+- **Viewer PCs (first launch only)** — viewers don't host an
+  api-server, so the in-app pairing card doesn't apply. Use
+  `setup-viewer.ps1 -AutoDiscover` from PowerShell instead; it
+  browses the same `_hawkeye-hub._tcp` mDNS service, lets you pick
+  the squadron's hub, and bakes its address into the local viewer
+  bundle.
+- **Wing / Base PCs** — if the one-click flow can't see a Hub (e.g.
+  different VLAN), open the dashboard, sign in as the super-admin
+  you just minted, and use **Admin → Address Book** to add the
+  squadron hubs (their hostnames + peer tokens). You can also use
+  `scripts\lan-host\add-squadron-peer.ps1` from PowerShell.
+- **Hub PCs (super_admin only)** — track who is asking to pair with
+  this Hub at any time under **Admin → Pairing Inbox**. The list
+  shows each requester's hostname, role (wing / base / viewer),
+  squadron from its TXT announce, and the timestamp. Approve and
+  the Hub mints a fresh peer token bound to that requester and
+  delivers it encrypted. Deny and the requester's outbox row flips
+  to `denied` immediately.
+- **Any PC** — see who else is on the LAN under **Admin → LAN Peers**
+  (or **Aggregator → LAN Peers** on a wing/base). The page lists
+  every Hawk Eye PC currently announcing on `_hawkeye._tcp` with
+  hostname, role, IP, and last-seen timestamp. Useful for sanity
+  checks ("is the Tigers hub actually on the LAN right now?").
 - **Hub PCs** — to broadcast this hub on the LAN later (if you left
   the mDNS checkbox off during install), run
   `scripts\lan-host\register-mdns.ps1 -SquadronName <name>`.
@@ -179,9 +210,42 @@ responses into a wing/base dashboard. A small local Postgres database
 stores only the local super_admin, the squadron-hub address book, the
 audit log, and a per-peer response cache.
 
-### Add a squadron after install
+### One-click pairing on first launch
 
-Once the aggregator PC is up, add hubs from the dashboard
+When you open the aggregator dashboard for the first time, Hawk Eye
+runs a **LAN auto-discovery scan** in the background — it looks for
+any PC on the same network announcing `_hawkeye._tcp` with TXT
+record `role=hub`. If at least one Hub is visible, you see a
+full-screen card titled **"Pair with your Hub"** listing every
+discovered Hub by hostname, IP, squadron name, and version.
+
+Click **Pair with this Hub** next to the right Hub. The aggregator
+sends a signed pairing request to the Hub over the LAN. The Hub's
+super_admin sees it under **Admin → Pairing Inbox** with this PC's
+hostname, role, and timestamp, and clicks **Approve** (or **Deny**).
+On approve, the Hub mints a fresh peer access token, encrypts it
+with this PC's X25519 public key (delivered with the request) and
+the result is downloaded automatically. No copy-paste, no plaintext
+token on screen. The card flips to "Paired successfully" and the
+dashboard reloads against the Hub's data.
+
+If the discovery card shows **"No Hub visible on this LAN"**:
+- Confirm the Hub PC is powered on and on the same VLAN.
+- On the Hub, run `Get-Service Bonjour` and start it if not running.
+- On this PC, confirm the bundled Bonjour package was installed
+  (folder `<install dir>\bonjour-portable\dns-sd.exe` exists, or
+  Bonjour Print Services is installed system-wide).
+- Wait 10 s and click **Retry** on the card. mDNS announces are
+  re-broadcast every 30 s.
+- If discovery is still empty, fall back to the address-book flow
+  below (or, for cross-VLAN setups, ask the Hub super_admin to
+  mint a peer token from **Admin → Peer Tokens** and paste it via
+  `setup-aggregator.ps1`).
+
+### Add a squadron after install (manual / fallback)
+
+If you skipped the one-click pairing card, or want to add another
+squadron from a different LAN, add hubs from the dashboard
 (**Admin → Address Book**), or from PowerShell:
 
 ```
@@ -316,6 +380,34 @@ A viewer laptop has **no Postgres** and **no api-server**: nothing is
 stored locally and login still happens against the squadron's hub PC
 over the LAN.
 
+### One-click pairing on first launch
+
+Viewers do **not** run a local api-server, so there is no in-app
+"Pair with your Hub" card on a viewer (that card needs a local
+backend to mint and store an X25519 keypair, persist outbound
+requests, and host an `/api/internal/lan-pairing/approval`
+endpoint — none of which exist on a viewer).
+
+Instead, viewer first launch uses **PowerShell-side mDNS
+discovery**:
+
+```
+.\scripts\lan-host\setup-viewer.ps1 -AutoDiscover
+```
+
+The script browses `_hawkeye-hub._tcp` on the LAN for ~6 seconds,
+shows a numbered pick-list of hubs, lets the operator confirm one,
+then bakes that hub's address into the viewer bundle. No Hub-side
+super_admin approval is required for read-only viewer access — the
+viewer just talks to the hub's existing read endpoints over the
+LAN. The viewer can also opt in to announcing itself on
+`_hawkeye._tcp` with `role=viewer` by re-running
+`setup-viewer.ps1 -EnableMdns`; this is informational only and
+helps a Hub super_admin see active viewers in their dashboard.
+
+If multicast is blocked, omit `-AutoDiscover` and pass `-HubAddress
+<host-or-ip> -HubPort <port>` directly.
+
 ### Re-point a viewer at a different hub
 
 When a laptop is reassigned (e.g. Tigers → Eagles):
@@ -327,6 +419,10 @@ When a laptop is reassigned (e.g. Tigers → Eagles):
 The script re-validates the new hub, rewrites the dashboard env,
 rebuilds the local bundle, and refreshes the desktop / Start Menu
 shortcuts. Existing shortcuts keep working — no reinstall needed.
+
+After re-pointing, the dashboard's first launch on the new hub
+will again show the one-click pairing card so the new Hub
+super_admin can approve this viewer.
 
 ### Manual install fallback (PowerShell-only path)
 

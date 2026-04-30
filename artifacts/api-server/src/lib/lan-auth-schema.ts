@@ -309,6 +309,131 @@ export async function ensureFullSchema(): Promise<void> {
     );
     create index if not exists notams_posted_on_idx on notams (posted_on desc);
   `);
+
+  // ── LAN pairing (Task T-R) ──────────────────────────────────────────
+  // Persistent X25519 keypair this PC presents to peers when asking
+  // them to pair (see `lib/lan-pairing-crypto.ts`). Single-row table
+  // pinned by id=1 so re-bootstrapping the schema never spawns a new
+  // identity; a fresh keypair only appears via the explicit
+  // `resetLocalPairingKeypair()` helper. Private key is stored at
+  // rest in plain hex — DB filesystem access already implies machine
+  // compromise, and the key is only useful in tandem with a
+  // simultaneously-mounted listening api-server on the LAN.
+  await pool.query(`
+    create table if not exists lan_pairing_keypair (
+      id smallint primary key default 1,
+      public_key text not null,
+      private_key text not null,
+      created_at timestamptz not null default now()
+    );
+  `);
+
+  // Inbound pairing requests received by *this* PC (typically a Hub
+  // super_admin's PC). When a remote aggregator/viewer POSTs to
+  // `/api/internal/lan-pairing/inbound-request` we persist the request
+  // so it survives a Hub restart and shows up in the super_admin's
+  // pairing inbox. Approve/Deny flips `status`; once approved we
+  // generate a peer token, encrypt it with `requester_pub_key`, POST
+  // back to `requester_callback_url`, and log the resulting token id
+  // here so the operator can revoke it later via the Peer Tokens
+  // page.
+  //
+  // Status values:
+  //   pending   — awaiting super_admin action
+  //   approved  — token issued + delivered (or queued for delivery)
+  //   denied    — super_admin clicked Deny
+  //   cancelled — requester withdrew before approval
+  //   delivered — approval payload was successfully POSTed to requester
+  //   delivery_failed — delivery POST failed; surfaces in the UI for retry
+  await pool.query(`
+    create table if not exists lan_pairing_inbound_requests (
+      id text primary key,
+      requester_role text not null,
+      requester_hostname text not null,
+      requester_address text not null,
+      requester_pub_key text not null,
+      requester_callback_url text not null,
+      requester_squadron text,
+      requester_wing text,
+      requester_base text,
+      requester_app_version text,
+      status text not null default 'pending',
+      issued_token_id text,
+      approval_error text,
+      created_at timestamptz not null default now(),
+      decided_at timestamptz,
+      decided_by text,
+      delivered_at timestamptz
+    );
+    create index if not exists lan_pairing_inbound_status_idx
+      on lan_pairing_inbound_requests (status, created_at desc);
+    create unique index if not exists lan_pairing_inbound_dedupe_idx
+      on lan_pairing_inbound_requests (
+        requester_hostname, requester_address, status
+      ) where status = 'pending';
+  `);
+
+  // Outbound pairing requests this PC has sent to a remote Hub. We
+  // persist them so a freshly-rebooted aggregator/viewer can find out
+  // whether its earlier request was approved without re-prompting the
+  // operator. Status values mirror the inbound table; `received_token`
+  // is non-null only after the Hub's approval payload was decrypted
+  // and the token stashed in the local peer-token-client config.
+  await pool.query(`
+    create table if not exists lan_pairing_outbound_requests (
+      id text primary key,
+      hub_hostname text not null,
+      hub_address text not null,
+      hub_port integer,
+      status text not null default 'pending',
+      received_token_id text,
+      received_token_label text,
+      paired_peer_squadron_id text,
+      error_detail text,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+    alter table lan_pairing_outbound_requests
+      add column if not exists hub_port integer;
+    alter table lan_pairing_outbound_requests
+      add column if not exists paired_peer_squadron_id text;
+    create index if not exists lan_pairing_outbound_status_idx
+      on lan_pairing_outbound_requests (status, created_at desc);
+  `);
+
+  // peer_squadrons / peer_cache — owned by aggregate-peers + peer-fanout.
+  // Created here so the schema is whole on every PC; the relation is
+  // tolerated as missing by the legacy code paths but its presence is
+  // required for one-click pairing to actually wire the new peer into
+  // the fanout list. Idempotent.
+  await pool.query(`
+    create table if not exists peer_squadrons (
+      id uuid primary key default gen_random_uuid(),
+      squadron_id text not null,
+      squadron_name text,
+      base_url text not null,
+      token_hash text,
+      added_at timestamptz not null default now(),
+      added_by text,
+      last_ok_at timestamptz,
+      last_error text,
+      last_error_at timestamptz,
+      removed_at timestamptz,
+      auth_token text
+    );
+    create unique index if not exists peer_squadrons_squadron_idx
+      on peer_squadrons (squadron_id) where removed_at is null;
+    create table if not exists peer_cache (
+      peer_squadron_id uuid not null
+        references peer_squadrons (id) on delete cascade,
+      kind text not null,
+      payload jsonb not null,
+      fetched_at timestamptz not null default now(),
+      primary key (peer_squadron_id, kind)
+    );
+    create index if not exists peer_cache_fetched_at_idx
+      on peer_cache (fetched_at desc);
+  `);
 }
 
 /**

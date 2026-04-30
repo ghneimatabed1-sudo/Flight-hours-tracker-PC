@@ -63,7 +63,11 @@ param(
     [string]$PsqlPath         = "psql.exe",
     [int]   $MdnsBrowseSeconds = 6,
     [switch]$SkipDiscovery,
-    [switch]$SkipScheduledTasks
+    [switch]$SkipScheduledTasks,
+    # Magic LAN auto-discovery: also announce this aggregator on
+    # `_hawkeye._tcp` with role=aggregator-{wing|base}. Off by default;
+    # pass on sites that allow multicast.
+    [switch]$EnableMdns
 )
 
 $ErrorActionPreference = "Stop"
@@ -763,6 +767,30 @@ if ($SkipScheduledTasks) {
 Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
 
 Write-Host ""
+# ── Step 12 — Optional magic-LAN announce (_hawkeye._tcp) ─────────────
+if ($EnableMdns) {
+    Write-Host ""
+    Write-Host "Step 12: Registering magic-LAN announce (_hawkeye._tcp role=$InstallProfile)..." -ForegroundColor Cyan
+    $mdnsScript = Join-Path $ScriptDir "register-mdns.ps1"
+    if (-not (Test-Path $mdnsScript)) {
+        Warn "register-mdns.ps1 not found; skipped."
+    } else {
+        try {
+            $instanceName = "$($env:COMPUTERNAME)"
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $mdnsScript `
+                -SquadronName $instanceName -ApiPort $ApiPort `
+                -ServiceType "_hawkeye._tcp" -Role $InstallProfile `
+                -Hostname $env:COMPUTERNAME `
+                -TaskName "HawkEye-Mdns-Magic-OnStartup"
+            if ($LASTEXITCODE -ne 0) {
+                Warn "register-mdns.ps1 exited with code $LASTEXITCODE."
+            }
+        } catch {
+            Warn "mDNS registration failed: $_."
+        }
+    }
+}
+
 Write-Host "DONE. This PC is a $InstallProfile aggregator." -ForegroundColor Green
 Write-Host "  - Address book lives in DB '$DbName' (table: peer_squadrons)."
 Write-Host "  - Manage peers later via the dashboard or POST/PATCH/DELETE /api/aggregate/peers."

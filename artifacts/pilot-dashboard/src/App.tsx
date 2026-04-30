@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Switch, Route, Router as WouterRouter, Redirect, useLocation as useWouterLocation } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import ErrorBoundary from "@/components/ErrorBoundary";
@@ -78,6 +78,9 @@ import AdminSecurity from "@/pages/admin/Security";
 import AdminSystemHealth from "@/pages/admin/SystemHealth";
 import AdminUsers from "@/pages/admin/Users";
 import AdminPeerTokens from "@/pages/admin/PeerTokens";
+import AdminLanPeers from "@/pages/admin/LanPeers";
+import AdminLanPairingInbox from "@/pages/admin/LanPairingInbox";
+import FirstLaunchPairingCard from "@/components/FirstLaunchPairingCard";
 import CommanderOverview from "@/pages/dashboard/Overview";
 import PilotsTable from "@/pages/dashboard/PilotsTable";
 import DashboardPilotDetail from "@/pages/dashboard/PilotDetail";
@@ -148,6 +151,8 @@ function AdminRoutes() {
       <Route path="/admin/health" component={AdminSystemHealth} />
       <Route path="/admin/users" component={AdminUsers} />
       <Route path="/admin/peer-tokens" component={AdminPeerTokens} />
+      <Route path="/admin/lan-peers" component={AdminLanPeers} />
+      <Route path="/admin/lan-pairing-inbox" component={AdminLanPairingInbox} />
       <Route path="/settings" component={SettingsPage} />
       <Route component={NotFound} />
     </Switch>
@@ -212,9 +217,50 @@ function AggregatorRoutes() {
       <Route path="/admin/peer-squadrons" component={PeerSquadrons} />
       <Route path="/admin/audit" component={AdminAuditLog} />
       <Route path="/admin/users" component={AdminUsers} />
+      <Route path="/admin/lan-peers" component={AdminLanPeers} />
       <Route path="/settings" component={SettingsPage} />
       <Route component={NotFound} />
     </Switch>
+  );
+}
+
+// One-click LAN-pairing first-launch gate for aggregator/viewer PCs.
+// Once a peer-token has been issued by the Hub super admin (any past
+// `paired` outbound entry) or the operator dismisses the card, we
+// remember it via localStorage and render the normal aggregator
+// shell on every subsequent boot. The gate intentionally stays
+// passive when the LAN discovery service is offline so a manually
+// configured peer token (paste path via setup-aggregator.ps1) keeps
+// working — we simply skip the card and fall through.
+const PAIRING_GATE_KEY = "lan_pairing_completed";
+
+function readGateCompleted(): boolean {
+  try {
+    return window.localStorage.getItem(PAIRING_GATE_KEY) === "1";
+  } catch {
+    return true;
+  }
+}
+
+function writeGateCompleted(): void {
+  try {
+    window.localStorage.setItem(PAIRING_GATE_KEY, "1");
+  } catch {
+    // Storage may be denied (private mode); the user will be re-prompted
+    // on next launch which is acceptable.
+  }
+}
+
+function AggregatorPairingGate({ children }: { children: ReactNode }) {
+  const [done, setDone] = useState<boolean>(() => readGateCompleted());
+  if (done) return <>{children}</>;
+  return (
+    <FirstLaunchPairingCard
+      onPaired={() => {
+        writeGateCompleted();
+        setDone(true);
+      }}
+    />
   );
 }
 
@@ -253,7 +299,11 @@ function Shell() {
     // who somehow log into an aggregator PC also land here — there
     // is no SquadronOpsRoutes view available because no local
     // squadron data exists on this box.
-    return <HQLayout><AggregatorRoutes /></HQLayout>;
+    return (
+      <AggregatorPairingGate>
+        <HQLayout><AggregatorRoutes /></HQLayout>
+      </AggregatorPairingGate>
+    );
   }
   if (user.role === "super_admin") {
     return <HQLayout><AdminRoutes /></HQLayout>;

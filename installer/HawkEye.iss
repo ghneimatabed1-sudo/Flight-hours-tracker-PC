@@ -84,6 +84,28 @@ Source: "build-cache\node\*"; DestDir: "{app}\.runtime\node"; Flags: recursesubd
 ; Bundled portable pnpm (single-file Windows binary).
 Source: "build-cache\pnpm\pnpm.exe"; DestDir: "{app}\.runtime\pnpm"; Flags: ignoreversion
 
+; Bundled portable Bonjour (dns-sd.exe + the Apple mDNS responder
+; DLLs it depends on). Lets every Hawk Eye PC announce itself on
+; `_hawkeye._tcp` for magic LAN auto-discovery without forcing the
+; operator to install Bonjour Print Services first.
+;
+; Resolution order in register-mdns.ps1:
+;   1. -DnsSdPath param
+;   2. PATH (Bonjour Print Services adds itself there)
+;   3. C:\Program Files\Bonjour\dns-sd.exe
+;   4. C:\Program Files (x86)\Bonjour\dns-sd.exe
+;   5. {app}\bonjour-portable\dns-sd.exe   ← this bundle
+;
+; NOTE for builders: place the redistributable Bonjour binaries in
+; `installer/bonjour-portable/` before running build.ps1. See
+; `installer/bonjour-portable/README.md` for the file list and the
+; license obligations attached to redistributing them. The
+; `skipifsourcedoesntexist` flag keeps the installer buildable on
+; dev boxes that haven't staged the binaries yet (the Hawk Eye PCs
+; will simply not see auto-discovery without them — the operator
+; can still pair manually via setup-aggregator.ps1).
+Source: "..\installer\bonjour-portable\*"; DestDir: "{app}\bonjour-portable"; Flags: recursesubdirs createallsubdirs ignoreversion skipifsourcedoesntexist
+
 ; Shim scripts: thin wrappers that translate Inno Setup-style params
 ; into the form the existing first-time-setup.ps1 etc expect.
 Source: "script-shims\*.ps1"; DestDir: "{app}\installer\script-shims"; Flags: ignoreversion recursesubdirs
