@@ -1356,6 +1356,137 @@ export async function deleteInternalLanUser(
   }
 }
 
+/**
+ * Peer access tokens — super_admin CRUD against
+ * `routes/peer-tokens-internal.ts`. The plain token text is returned
+ * exactly once at create time and is never re-derivable from the row;
+ * after that only metadata (label, scope, issued_at, last_used_at,
+ * revoked_at, …) is exposed.
+ */
+export type InternalPeerTokenRow = {
+  id: string;
+  label: string | null;
+  scope: string;
+  issued_at: string;
+  issued_by: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+  revoked_by: string | null;
+  last_used_at: string | null;
+};
+
+function parsePeerTokenRow(r: Record<string, unknown>): InternalPeerTokenRow {
+  const str = (v: unknown): string | null =>
+    v == null || v === "" ? null : String(v);
+  return {
+    id: String(r.id ?? ""),
+    label: str(r.label),
+    scope: String(r.scope ?? ""),
+    issued_at: String(r.issued_at ?? ""),
+    issued_by: str(r.issued_by),
+    expires_at: str(r.expires_at),
+    revoked_at: str(r.revoked_at),
+    revoked_by: str(r.revoked_by),
+    last_used_at: str(r.last_used_at),
+  };
+}
+
+export async function fetchInternalPeerTokens(): Promise<
+  InternalPeerTokenRow[] | null
+> {
+  const url = getInternalApiPath("internal/peer-tokens");
+  if (!url) return null;
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: internalApiHeadersBase(),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { items?: unknown };
+    if (!body || !Array.isArray(body.items)) return null;
+    return body.items
+      .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+      .map(parsePeerTokenRow);
+  } catch {
+    return null;
+  }
+}
+
+export async function postInternalPeerTokenCreate(input: {
+  label: string;
+  scope?: string;
+  expires_at?: string | null;
+}): Promise<
+  | { ok: true; token: string; row: InternalPeerTokenRow }
+  | { ok: false; error: string; status?: number }
+> {
+  const url = getInternalApiPath("internal/peer-tokens");
+  if (!url) return { ok: false, error: "internal_api_disabled" };
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: internalWriteHeaders(),
+      body: JSON.stringify({
+        label: input.label,
+        scope: input.scope,
+        expires_at: input.expires_at ?? null,
+      }),
+    });
+    const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: String(parsed?.error ?? `http_${res.status}`),
+        status: res.status,
+      };
+    }
+    const token = String(parsed?.token ?? "").trim();
+    const row = parsed?.row && typeof parsed.row === "object"
+      ? parsePeerTokenRow(parsed.row as Record<string, unknown>)
+      : null;
+    if (!token || !row) {
+      return { ok: false, error: "peer_token_bad_payload" };
+    }
+    return { ok: true, token, row };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function deleteInternalPeerToken(
+  id: string,
+): Promise<
+  | { ok: true; row: InternalPeerTokenRow }
+  | { ok: false; error: string; status?: number }
+> {
+  const url = getInternalApiPath(
+    `internal/peer-tokens/${encodeURIComponent(id)}`,
+  );
+  if (!url) return { ok: false, error: "internal_api_disabled" };
+  try {
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: internalWriteHeaders(),
+    });
+    const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: String(parsed?.error ?? `http_${res.status}`),
+        status: res.status,
+      };
+    }
+    const row = parsed?.row && typeof parsed.row === "object"
+      ? parsePeerTokenRow(parsed.row as Record<string, unknown>)
+      : null;
+    if (!row) return { ok: false, error: "peer_token_bad_payload" };
+    return { ok: true, row };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export async function postInternalPilotTransfer(
   pilotId: string,
   toSquadronId: string,

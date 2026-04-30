@@ -129,6 +129,7 @@ const PERSONAS: Record<RoleKey, Persona> = {
 const ADMIN_ROUTES = [
   "/admin", "/admin/squadrons",
   "/admin/reminders", "/admin/audit", "/admin/security",
+  "/admin/peer-tokens",
   "/admin/connection-map", "/connections", "/settings", "/diagnostic",
 ] as const;
 
@@ -241,6 +242,7 @@ const PAGE_LOADERS: PageMap = {
   "/admin/reminders":       () => import("../src/pages/admin/RemindersSchedule.tsx"),
   "/admin/audit":           () => import("../src/pages/admin/AuditLog.tsx"),
   "/admin/security":        () => import("../src/pages/admin/Security.tsx"),
+  "/admin/peer-tokens":     () => import("../src/pages/admin/PeerTokens.tsx"),
   "/admin/connection-map":  () => import("../src/pages/admin/ConnectionMap.tsx"),
   // commander
   "/dashboard":                  () => import("../src/pages/dashboard/Overview.tsx"),
