@@ -6,3 +6,11 @@ release
 playwright-report
 test-results
 .playwright
+
+# Matrix sweep outputs (task #361). Per-cell screenshots/console/network
+# logs and the parallel SPA bundle the harness builds against. Both are
+# regenerated on every run; uploaded by CI as workflow artifacts.
+playwright-report-matrix
+test-results-matrix
+test-evidence
+dist-matrix
