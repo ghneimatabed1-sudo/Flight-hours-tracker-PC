@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import DateInput from "@/components/DateInput";
 import { Card, PageHead } from "@/components/Layout";
+import { Link } from "wouter";
 import { useI18n } from "@/lib/i18n";
 import {
   usePilots,
@@ -586,7 +587,12 @@ export default function AddSortie() {
 
   return (
     <div>
-      <PageHead title={t("nav_addsortie")} subtitle="New flight entry" />
+      <PageHead title={t("nav_addsortie")} subtitle="New flight entry" actions={
+        <Link href="/sortie-add/wizard" data-testid="link-sortie-wizard"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs font-medium hover:bg-amber-500/20">
+          {t("addSortieWizardCta")}
+        </Link>
+      } />
 
       {noAircraftConfigured && (
         <Card className="mb-4 border-amber-400/40 bg-amber-500/10">

@@ -206,6 +206,13 @@ export default function Roster() {
             <Search className="h-3.5 w-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input value={q} onChange={e => setQ(e.target.value)} placeholder={t("search")} className="pl-7 pr-2 py-1.5 rounded-md bg-input border border-border text-sm" />
           </div>
+          <Link
+            href="/roster/wizard"
+            data-testid="link-add-pilot-wizard"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm font-medium hover:bg-amber-500/20"
+          >
+            <Plus className="h-3.5 w-3.5" /> {t("addPilotWizardCta")}
+          </Link>
           <button
             onClick={() => setAdding(blankPilot())}
             data-testid="button-add-pilot"

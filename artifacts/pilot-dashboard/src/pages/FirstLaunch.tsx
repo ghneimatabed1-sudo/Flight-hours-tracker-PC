@@ -102,7 +102,7 @@ export default function FirstLaunch() {
               carries an explanation underneath. */}
           {saButtonEnabled ? (
             <Link
-              href="/setup/super-admin"
+              href="/setup/super-admin/wizard"
               data-testid="link-super-admin-setup"
               className="block w-full rounded-lg bg-emerald-500 px-4 py-3 text-center font-semibold text-slate-900 hover:bg-emerald-400 transition"
             >

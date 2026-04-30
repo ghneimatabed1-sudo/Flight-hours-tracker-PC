@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { usePilots, useSorties, useNotams } from "@/lib/squadron-data";
 import { computeAllTotals } from "@/lib/calculations";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
+import { CurrencyExpiringPanel } from "@/components/CurrencyExpiringPanel";
 import { Link } from "wouter";
 import {
   Plane, MoonStar, Moon, Cpu, Users, Calendar, AlertTriangle,
@@ -163,9 +164,19 @@ export default function Dashboard() {
             <Link href="/sortie-add" className="block w-full text-center px-3 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 inline-flex items-center justify-center gap-2 lift">
               <Plane className="h-4 w-4" /> {t("addSortie")}
             </Link>
+            <Link
+              href="/sortie-add/wizard"
+              data-testid="link-add-sortie-wizard"
+              className="block w-full text-center px-3 py-2 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs font-medium hover:bg-amber-500/20"
+            >
+              {t("addSortieWizardCta")}
+            </Link>
           </div>
         </div>
       </div>
+
+      {/* ───── Currency expiring this month (T337) ───── */}
+      <CurrencyExpiringPanel testId="dashboard-currency-expiring" />
 
       {/* ───── Two columns: Expiring + NOTAMs ─────────── */}
       <div className="grid lg:grid-cols-[1.5fr_1fr] gap-4">

@@ -35,6 +35,10 @@ import FirstLaunch from "@/pages/FirstLaunch";
 import JoinSetup from "@/pages/JoinSetup";
 import WaitingForApproval from "@/pages/WaitingForApproval";
 import SuperAdminSetup from "@/pages/SuperAdminSetup";
+import SetupWizard from "@/pages/wizards/SetupWizard";
+import AddSortieWizard from "@/pages/wizards/AddSortieWizard";
+import AddPilotWizard from "@/pages/wizards/AddPilotWizard";
+import DutyWeekWizard from "@/pages/wizards/DutyWeekWizard";
 import { clearPendingRequest, getPendingRequest } from "@/lib/unit-join";
 import Dashboard from "@/pages/Dashboard";
 import SortieLog from "@/pages/SortieLog";
@@ -97,8 +101,10 @@ function SquadronOpsRoutes() {
     <Switch>
       <Route path="/" component={Dashboard} />
       <Route path="/sortie-log" component={SortieLog} />
+      <Route path="/sortie-add/wizard" component={AddSortieWizard} />
       <Route path="/sortie-add" component={AddSortie} />
       <Route path="/external-pilots" component={ExternalPilots} />
+      <Route path="/roster/wizard" component={AddPilotWizard} />
       <Route path="/roster" component={Roster} />
       <Route path="/pilot/:id" component={PilotDetail} />
       <Route path="/currency" component={Currency} />
@@ -107,6 +113,7 @@ function SquadronOpsRoutes() {
       <Route path="/cycle" component={Cycle} />
       <Route path="/leaves" component={Leaves} />
       <Route path="/unavailable" component={Unavailable} />
+      <Route path="/duty/wizard" component={DutyWeekWizard} />
       <Route path="/duty" component={DutyWeek} />
       <Route path="/risk" component={Risk} />
       <Route path="/coordinating" component={Coordinating} />
@@ -230,6 +237,7 @@ function Shell() {
     }
     if (location.startsWith("/join/setup")) return <JoinSetup />;
     if (location.startsWith("/join/waiting")) return <WaitingForApproval />;
+    if (location.startsWith("/setup/super-admin/wizard")) return <SetupWizard />;
     if (location.startsWith("/setup/super-admin")) return <SuperAdminSetup />;
     if (location.startsWith("/login")) return <LoginGate />;
     if (getPendingRequest()) return <WaitingForApproval />;

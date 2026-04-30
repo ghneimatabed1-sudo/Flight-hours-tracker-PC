@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import DateInput from "@/components/DateInput";
 import { Card, PageHead } from "@/components/Layout";
+import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 import { usePilots, useSavedDutyWeeks, useSaveDutyWeek, useDeleteOldDutyWeeks } from "@/lib/squadron-data";
@@ -248,7 +249,12 @@ export default function DutyWeek() {
 
   return (
     <div className="print-area">
-      <PageHead title="مناوبات السرب" subtitle="جدول المناوبة الأسبوعي — قابل للطباعة والتعديل" />
+      <PageHead title="مناوبات السرب" subtitle="جدول المناوبة الأسبوعي — قابل للطباعة والتعديل" actions={
+        <Link href="/duty/wizard" data-testid="link-duty-wizard"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs font-medium hover:bg-amber-500/20 print:hidden">
+          معالج موجّه
+        </Link>
+      } />
 
       <div className="flex flex-wrap items-center gap-2 mb-3 print:hidden">
         <label className="text-sm font-medium">تاريخ البداية:</label>
