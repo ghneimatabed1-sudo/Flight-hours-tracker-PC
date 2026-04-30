@@ -49,27 +49,21 @@ function cspPlugin(): Plugin {
   };
 }
 
-const rawPort = process.env.PORT;
-
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
-
+// PORT and BASE_PATH are required for the dev/preview server (Replit
+// workflow injects them) but irrelevant for `vite build`. We fall back
+// to safe defaults so the production installer build (which only needs
+// to emit static files into dist/public) works on any Windows CI host.
+const rawPort = process.env.PORT ?? "5173";
 const port = Number(rawPort);
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-const basePath = process.env.BASE_PATH;
-
-if (!basePath) {
-  throw new Error(
-    "BASE_PATH environment variable is required but was not provided.",
-  );
-}
+// For the LAN installer the dashboard is served from "/" by an Express
+// host (see installer/HawkEye.iss). For Replit dev BASE_PATH is set by
+// the workflow. "/" is the correct fallback for both.
+const basePath = process.env.BASE_PATH ?? "/";
 
 /** Dev/preview: proxy same-origin `__hawk_eye_internal_api` → monorepo api-server `/api` (see src/lib/internal-migration.ts). */
 const baseNorm = (basePath || "/").replace(/\/$/, "");
