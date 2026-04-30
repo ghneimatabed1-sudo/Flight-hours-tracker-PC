@@ -800,3 +800,45 @@ place without disturbing anything else.
   "Hawk Eye — Tigers" and shows "Tigers hub" in the unreachable-hub
   message.
 
+
+---
+
+## 12. Guard scripts (`scripts/src/check-*.mjs`)
+
+Hawk Eye keeps a small set of release-time guard scripts that catch
+regressions before a USB push. Every guard listed here is wired into
+`pnpm run release:verify` (or invoked directly from a documented
+workflow). Anything **not** in this list has either been retired or
+should not be expected to run.
+
+If a script under `scripts/src/check-*.mjs` is not described below
+and is not invoked by any workflow file or `release:verify`, treat
+it as dead code and delete it — that is exactly the housekeeping
+this section exists to prevent.
+
+| Guard | What it enforces | How it runs |
+| --- | --- | --- |
+| `check-no-external-urls.mjs` | After the dashboard is built, scans `artifacts/pilot-dashboard/dist/` for any `http(s)://…` literal that is not on the documented allow-list (localhost, `*.local`, `hawk-api.lan`, `hawk-hub.lan`, namespace URIs, vendor license URLs, Google Fonts). The LAN install is air-gapped — any unexpected external URL would either render as a broken icon or leak a hostname. | Invoked by `pnpm run release:verify` (`check-no-external-urls` step). Also runnable directly with `pnpm run check:no-external-urls`. Add new legitimate URLs to `ALLOW_URL_REGEXES` in the script. |
+| `check-audit-evidence-mirror.mjs` | When a commit message contains `audit-NNNN-MM-DD`, asserts the same commit also touches `audit-evidence/NNNN-MM-DD/`. This was added after Round-3 sibling reports failed to reach the coordinator because they lived in gitignored `.local/`. | Run on demand with `node scripts/src/check-audit-evidence-mirror.mjs --commits N` or `--range A..B`. Defaults to `--mode warning`; promote to `--mode blocker` once a clean cycle proves no historical false positives. |
+| `check-migration-prefixes.mjs` | Walks the migrations directory under the dashboard artifact, groups files by their leading `NNNN_` prefix, and fails on any new collision (the legacy collisions already applied in production are pinned in an allowlist). Prevents the silent "second migration with the same prefix never reaches production" failure mode (Audit H / Task #249). | Run on demand with `pnpm run check:migration-prefixes`. The coordinator is expected to run this before merging any round of parallel SQL work — see `MAINTENANCE_RUNBOOK.md` § "Migration prefix allocation for parallel agents." |
+
+### Why scripts get retired
+
+When a backend dependency goes away (e.g. when Supabase was ripped
+out of Hawk Eye's runtime), every guard script that probed it is
+retired in the same change set. A guard that probes a function or
+endpoint that no longer exists silently passes through its error
+path on every release, so it provides zero defence-in-depth and
+just wastes a few seconds per `release:verify` run plus a few
+minutes for the next person who reads it and tries to figure out
+what it was for.
+
+If you need to audit which guards are wired into which pipelines:
+
+- `pnpm run release:verify`'s `CHECKS` array in
+  `scripts/src/release-verify.mjs` is the authoritative list of
+  guards run on every release.
+- `.github/workflows/*.yml` lists any guards run by GitHub Actions
+  (build / installer / mobile pipelines).
+- `package.json` `scripts` section lists every guard exposed as a
+  named pnpm task (`pnpm run check:*`).
