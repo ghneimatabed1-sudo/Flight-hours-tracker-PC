@@ -20,7 +20,6 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import {
   deleteInternalAlert,
-  fetchInternalActivePilotDevicesRows,
   deleteInternalNotam,
   deleteInternalUnavailableById,
   fetchInternalAlertsRows,
@@ -33,8 +32,6 @@ import {
   fetchInternalScheduleRows,
   fetchInternalSortieTableRows,
   fetchInternalUnavailableRows,
-  fetchInternalPilotLinkStatus,
-  fetchInternalReminderOverviewRows,
   internalWritesEnabled,
   isLanSessionLoginEnabled,
   patchInternalAlert,
@@ -42,11 +39,9 @@ import {
   internalPilotUpsertFetch,
   internalPilotDeleteFetch,
   postInternalAlertInsert,
-  postInternalIssuePilotLinkCode,
   postInternalImportHistory,
   postInternalNotamInsert,
   postInternalPilotTransfer,
-  postInternalRevokePilotDevices,
   postInternalSquadronUserCreate,
   postInternalUndoImport,
   fetchInternalSquadronUsersRows,
@@ -2398,264 +2393,6 @@ export function useUndoLastImport() {
       qc.invalidateQueries({ queryKey: ["audit_log"] });
     },
   });
-}
-
-// ── mobile link codes & device revocation ───────────────────────────────
-//
-// Server-side trust model lives in 0002_mobile_link.sql. The dashboard side
-// only ever:
-//   * calls issue_pilot_link_code(pilotId) RPC to get a fresh plaintext code
-//     (the RPC invalidates any previous unconsumed code for the same pilot),
-//   * UPDATEs pilot_devices.revoked_at to revoke a phone, and
-//   * SELECTs from pilot_devices / pilot_link_codes for status display.
-// In demo mode (no Supabase) we keep an in-memory mock of the same shape so
-// the UI is fully exercisable in the hosted preview.
-
-// Mirrors the SQL default `expires_at default (now() + interval '7 days')` in
-// 0002_mobile_link.sql so demo and live show the same countdown.
-const LINK_CODE_TTL_MS = 7 * 24 * 60 * 60_000;
-
-export interface PilotLinkStatus {
-  device: { linkedAt: string; lastSeenAt: string; revokedAt: string | null } | null;
-  pendingCode: { expiresAt: string } | null;
-}
-
-interface MockDevice { pilotId: string; linkedAt: string; lastSeenAt: string; revokedAt: string | null }
-interface MockCode   { pilotId: string; expiresAt: string; consumedAt: string | null }
-const mockDevices: MockDevice[] = [];
-const mockCodes: MockCode[] = [];
-
-function mockStatus(pilotId: string): PilotLinkStatus {
-  const dev = mockDevices.filter(d => d.pilotId === pilotId).sort((a, b) => b.linkedAt.localeCompare(a.linkedAt))[0] ?? null;
-  const code = mockCodes.find(c => c.pilotId === pilotId && c.consumedAt === null && c.expiresAt > new Date().toISOString()) ?? null;
-  return {
-    device: dev ? { linkedAt: dev.linkedAt, lastSeenAt: dev.lastSeenAt, revokedAt: dev.revokedAt } : null,
-    pendingCode: code ? { expiresAt: code.expiresAt } : null,
-  };
-}
-
-// All active (non-revoked) linked devices — used by the Settings page so ops
-// can revoke any device even after the pilot has been deleted from the roster.
-export interface LinkedDeviceRow {
-  pilotId: string;
-  linkedAt: string;
-  lastSeenAt: string;
-}
-
-export function useAllLinkedDevices(): UseQueryResult<LinkedDeviceRow[]> {
-  return useQuery<LinkedDeviceRow[]>({
-    queryKey: ["all_linked_devices"],
-    queryFn: async () => {
-      if (isLanSessionLoginEnabled()) {
-        const rows = await fetchInternalActivePilotDevicesRows();
-        if (!rows) return [];
-        return rows.map((r) => ({
-          pilotId: String(r.pilot_id ?? ""),
-          linkedAt: String(r.linked_at ?? ""),
-          lastSeenAt: String(r.last_seen_at ?? ""),
-        }));
-      }
-      if (!isLive()) {
-        return mockDevices
-          .filter(d => d.revokedAt === null)
-          .map(d => ({ pilotId: d.pilotId, linkedAt: d.linkedAt, lastSeenAt: d.lastSeenAt }));
-      }
-      return [];
-    },
-    staleTime: 10_000,
-  });
-}
-
-export function usePilotLinkStatus(pilotId: string | undefined): UseQueryResult<PilotLinkStatus> {
-  return useQuery<PilotLinkStatus>({
-    queryKey: ["pilot_link_status", pilotId],
-    enabled: Boolean(pilotId),
-    queryFn: async () => {
-      if (!pilotId) return { device: null, pendingCode: null };
-      if (isLanSessionLoginEnabled()) {
-        const out = await fetchInternalPilotLinkStatus(pilotId);
-        if (!out.ok) throw new Error(out.error);
-        const d = out.body.device as Record<string, unknown> | null | undefined;
-        const c = out.body.pendingCode as Record<string, unknown> | null | undefined;
-        return {
-          device: d
-            ? {
-                linkedAt: String(d.linkedAt ?? ""),
-                lastSeenAt: String(d.lastSeenAt ?? ""),
-                revokedAt: d.revokedAt == null ? null : String(d.revokedAt),
-              }
-            : null,
-          pendingCode: c ? { expiresAt: String(c.expiresAt ?? "") } : null,
-        };
-      }
-      if (!isLive()) return mockStatus(pilotId);
-      return { device: null, pendingCode: null };
-    },
-    staleTime: 5_000,
-  });
-}
-
-export function useIssueLinkCode() {
-  const qc = useQueryClient();
-  return useMutation<{ code: string; expiresAt: string }, Error, { pilotId: string; actor?: string }>({
-    mutationFn: async ({ pilotId, actor }) => {
-      if (isLanSessionLoginEnabled()) {
-        const out = await postInternalIssuePilotLinkCode(pilotId);
-        if (!out.ok) throw new Error(out.error);
-        await recordAuditEvent({ type: "mobile.code.issued", actor, detail: { pilotId, transport: "lan_internal_api" } });
-        return { code: out.code, expiresAt: out.expiresAt };
-      }
-      if (!isLive()) {
-        // Invalidate previous unconsumed codes for this pilot, mirroring the SQL.
-        for (const c of mockCodes) if (c.pilotId === pilotId && c.consumedAt === null) c.consumedAt = new Date().toISOString();
-        const code = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
-        const expiresAt = new Date(Date.now() + LINK_CODE_TTL_MS).toISOString();
-        mockCodes.push({ pilotId, expiresAt, consumedAt: null });
-        return { code, expiresAt };
-      }
-      throw new Error("internal_data_plane_required");
-    },
-    onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ["pilot_link_status", vars.pilotId] });
-      qc.invalidateQueries({ queryKey: ["audit_log"] });
-    },
-  });
-}
-
-export function useRevokePilotDevices() {
-  const qc = useQueryClient();
-  return useMutation<{ revoked: number }, Error, { pilotId: string; actor?: string }>({
-    mutationFn: async ({ pilotId, actor }) => {
-      if (isLanSessionLoginEnabled()) {
-        const out = await postInternalRevokePilotDevices(pilotId);
-        if (!out.ok) throw new Error(out.error);
-        await recordAuditEvent({
-          type: "mobile.device.revoked",
-          actor,
-          detail: { pilotId, devices: out.revoked, transport: "lan_internal_api" },
-        });
-        return { revoked: out.revoked };
-      }
-      if (!isLive()) {
-        let n = 0;
-        const now = new Date().toISOString();
-        for (const d of mockDevices) {
-          if (d.pilotId === pilotId && d.revokedAt === null) { d.revokedAt = now; n++; }
-        }
-        // Also expire any outstanding unconsumed code.
-        for (const c of mockCodes) if (c.pilotId === pilotId && c.consumedAt === null) c.consumedAt = now;
-        return { revoked: n };
-      }
-      throw new Error("internal_data_plane_required");
-    },
-    onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ["pilot_link_status", vars.pilotId] });
-      qc.invalidateQueries({ queryKey: ["all_linked_devices"] });
-      qc.invalidateQueries({ queryKey: ["audit_log"] });
-    },
-  });
-}
-
-// ── pilot reminder prefs + last-sent log (ops view) ────────────────────
-export type CurrencyKeyName = "day" | "night" | "irt" | "medical" | "sim";
-
-export interface ReminderOverviewRow {
-  pilotId: string;
-  pushEnabled: boolean;
-  expoPushToken: string | null;
-  platform: string | null;
-  thresholds: Partial<Record<CurrencyKeyName, number[]>>;
-  updatedAt: string | null;
-  lastSentAt: string | null;
-  lastSentCurrency: CurrencyKeyName | null;
-  lastSentThresholdDays: number | null;
-  lastSentExpiry: string | null;
-}
-
-let mockReminderOverview: ReminderOverviewRow[] | null = null;
-function seedReminderOverview(): ReminderOverviewRow[] {
-  // Synthetic preview data: opt half the roster in to push, leave the rest
-  // un-configured so the "no reminders" filter in the ops view has data.
-  const today = new Date();
-  return MOCK_PILOTS.map((p, i) => {
-    const enrolled = i % 2 === 0;
-    const updated = new Date(today.getTime() - (i + 1) * 86400000).toISOString();
-    if (!enrolled) {
-      return {
-        pilotId: p.id,
-        pushEnabled: false,
-        expoPushToken: null,
-        platform: null,
-        thresholds: {},
-        updatedAt: null,
-        lastSentAt: null,
-        lastSentCurrency: null,
-        lastSentThresholdDays: null,
-        lastSentExpiry: null,
-      };
-    }
-    const fired = i % 3 === 0;
-    return {
-      pilotId: p.id,
-      pushEnabled: true,
-      expoPushToken: "ExponentPushToken[demo-" + p.id + "]",
-      platform: i % 2 === 0 ? "ios" : "android",
-      thresholds: {
-        day: [14, 7, 1],
-        night: [7],
-        irt: [],
-        medical: [30, 7],
-        sim: [],
-      },
-      updatedAt: updated,
-      lastSentAt: fired ? new Date(today.getTime() - (i + 1) * 3600000).toISOString() : null,
-      lastSentCurrency: fired ? "day" : null,
-      lastSentThresholdDays: fired ? 7 : null,
-      lastSentExpiry: fired ? p.expiry.day : null,
-    };
-  });
-}
-function getMockReminderOverview(): ReminderOverviewRow[] {
-  if (!mockReminderOverview) mockReminderOverview = seedReminderOverview();
-  return mockReminderOverview;
-}
-
-export function useReminderOverview(): UseQueryResult<ReminderOverviewRow[]> & {
-  data: ReminderOverviewRow[];
-} {
-  const useDemoSeed = !isLanSessionLoginEnabled();
-  const q = useQuery<ReminderOverviewRow[]>({
-    queryKey: ["reminder_overview"],
-    queryFn: async () => {
-      if (isLanSessionLoginEnabled()) {
-        const rows = await fetchInternalReminderOverviewRows();
-        if (!rows) return [];
-        return rows.map((r) => ({
-          pilotId: String(r.pilotId ?? ""),
-          pushEnabled: Boolean(r.pushEnabled),
-          expoPushToken: r.expoPushToken == null ? null : String(r.expoPushToken),
-          platform: r.platform == null ? null : String(r.platform),
-          thresholds: (r.thresholds as ReminderOverviewRow["thresholds"]) ?? {},
-          updatedAt: r.updatedAt == null ? null : String(r.updatedAt),
-          lastSentAt: r.lastSentAt == null ? null : String(r.lastSentAt),
-          lastSentCurrency: r.lastSentCurrency == null ? null : (String(r.lastSentCurrency) as CurrencyKeyName),
-          lastSentThresholdDays:
-            r.lastSentThresholdDays == null
-              ? null
-              : Number(r.lastSentThresholdDays),
-          lastSentExpiry: r.lastSentExpiry == null ? null : String(r.lastSentExpiry),
-        }));
-      }
-      if (!isLive()) return [...getMockReminderOverview()];
-      return [];
-    },
-    initialData: useDemoSeed ? () => [...getMockReminderOverview()] : undefined,
-    staleTime: 30_000,
-  });
-  return {
-    ...q,
-    data: q.data ?? (useDemoSeed ? getMockReminderOverview() : []),
-  } as UseQueryResult<ReminderOverviewRow[]> & { data: ReminderOverviewRow[] };
 }
 
 // ── demo seed (preview only) ────────────────────────────────────────────

@@ -11,9 +11,7 @@ import { useDashPilots, useDashSquadrons } from "@/lib/dash-pilots";
 import { resolveScopedIds, useSquadronScope } from "@/lib/squadron-scope";
 import { currencyStatus, fmtDate } from "@/lib/format";
 import type { CurrencyStatus, Pilot } from "@/lib/types";
-import { Search, ArrowUpDown, Download, Printer, FileSpreadsheet, Gauge, Eye, EyeOff } from "lucide-react";
-import { CommanderEmptyState } from "@/components/CommanderEmptyState";
-import { SnapshotStalenessBanner } from "@/components/SnapshotStalenessBanner";
+import { Search, ArrowUpDown, Download, Printer, FileSpreadsheet, Gauge } from "lucide-react";
 
 // Per-PC hide-pilot store, mirrored exactly with the ops Currency page so
 // that on a dual-purpose PC (commander + ops both signed in over time) the
@@ -316,10 +314,6 @@ export default function Currencies() {
           <div>{list.length} {t("pilots")}</div>
         </div>
       </div>
-
-      {/* Wing/Base/HQ tier empty-state explainer (audit F-B-01). */}
-      <CommanderEmptyState surface="currencies" />
-      <SnapshotStalenessBanner />
 
       <div className="flex flex-wrap gap-2 no-print">
         <div className="relative flex-1 min-w-48">

@@ -1,6 +1,9 @@
 import { buildApp } from "./app";
 import { logger } from "./lib/logger";
-import { ensureLanAuthSchema } from "./lib/lan-auth-schema";
+import {
+  ensureLanAuthSchema,
+  ensureLegacyCleanup,
+} from "./lib/lan-auth-schema";
 import {
   recordInstallProfile,
   resolveInstallProfile,
@@ -57,6 +60,7 @@ let server: Server | null = null;
 (async () => {
   try {
     await ensureLanAuthSchema();
+    await ensureLegacyCleanup();
   } catch (err) {
     logger.error({ err }, "Failed to ensure LAN auth schema");
     process.exit(1);

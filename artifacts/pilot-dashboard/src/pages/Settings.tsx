@@ -9,10 +9,7 @@ import {
   type InactivityMinutes,
 } from "@/lib/auth";
 import { useCurrencyWindow, DEFAULT_CURRENCY_WINDOW } from "@/lib/currency-settings";
-import { usePilots, useAllLinkedDevices, useRevokePilotDevices } from "@/lib/squadron-data";
-import { Smartphone, ShieldOff, Loader2, AlertTriangle, Eraser, ArrowRight, Sliders, Link2 } from "lucide-react";
-import { useRegisteredPCs } from "@/lib/cross-pc";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Loader2, AlertTriangle, Eraser, ArrowRight, Sliders } from "lucide-react";
 import { Link } from "wouter";
 import { isLanSessionLoginEnabled } from "@/lib/internal-migration";
 
@@ -136,9 +133,7 @@ function ReleaseLicenseButton({
 // clean without waiting for a developer.
 //
 // What it does:
-//   • DELETEs this PC's row from xpc_registry on Supabase
-//   • DELETEs this PC's claim from xpc_user_pcs on Supabase
-//   • Signs out from Supabase
+//   • Signs out of the LAN session
 //   • Clears every `rjaf.*` localStorage key on this device
 //   • Hard reloads → next launch is exactly like a fresh install
 //
@@ -224,14 +219,7 @@ function ResetPcButton({ onConfirm }: { onConfirm: () => Promise<void> }) {
               </div>
 
               <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs space-y-1.5">
-                <div className="font-medium text-destructive">
-                  {lanMode ? "What gets deleted on the LAN server:" : "What gets deleted on the cloud backend:"}
-                </div>
-                <ul className="list-disc ms-4 space-y-0.5 text-foreground/90">
-                  <li>This PC's row in <span className="font-mono">xpc_registry</span> (other PCs stop seeing it).</li>
-                  <li>This PC's claim in <span className="font-mono">xpc_user_pcs</span>.</li>
-                </ul>
-                <div className="font-medium text-destructive pt-1">What gets wiped locally:</div>
+                <div className="font-medium text-destructive">What gets wiped locally:</div>
                 <ul className="list-disc ms-4 space-y-0.5 text-foreground/90">
                   <li>License activation, signed-in user, squadron config.</li>
                   <li>PC id, device suffix, device label, role lock.</li>
@@ -489,226 +477,9 @@ function InactivityTimeoutSection() {
   );
 }
 
-function MobileDevicesCard() {
-  const { user } = useAuth();
-  const { rankOf } = useI18n();
-  const pilotsQ = usePilots();
-  const devicesQ = useAllLinkedDevices();
-  const revoke = useRevokePilotDevices();
-  const [manualId, setManualId] = useState("");
-  const [revoking, setRevoking] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  // The full device list lives inside a modal so the Settings page itself
-  // stays compact. With 15+ paired phones the inline list used to push
-  // every other Settings card off-screen and force a long scroll just to
-  // reach Release License or the auto-updater toggle. Now Settings shows
-  // a one-line summary + an "Open" button; the modal is full-height with
-  // its own internal scroll.
-  const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState("");
-
-  const pilotById = Object.fromEntries((pilotsQ.data ?? []).map(p => [p.id, p]));
-  const devices = devicesQ.data ?? [];
-
-  const doRevoke = async (pilotId: string) => {
-    if (!window.confirm(`Revoke mobile access for pilot ${pilotById[pilotId]?.name || pilotId}? The phone will be locked out immediately.`)) return;
-    setRevoking(pilotId);
-    try {
-      const res = await revoke.mutateAsync({ pilotId, actor: user?.username });
-      if (res.revoked === 0) {
-        setNotice(`No active mobile device found for ${pilotById[pilotId]?.name || pilotId} — nothing to revoke.`);
-      } else {
-        setNotice(`Revoked ${res.revoked} device(s) for ${pilotById[pilotId]?.name || pilotId}.`);
-      }
-      setTimeout(() => setNotice(null), 5000);
-    } catch (e) {
-      // Supabase PostgrestError shape: { code, details, hint, message }.
-      // Plain Error has .message. Anything else gets JSON-stringified (so
-      // the user sees the real reason instead of "[object Object]").
-      const err = e as { code?: string; message?: string; hint?: string };
-      const code = err?.code;
-      const msg = err?.message ?? (e instanceof Error ? e.message : null) ?? (() => {
-        try { return JSON.stringify(e); } catch { return String(e); }
-      })();
-      let friendly = msg;
-      if (code === "42501") {
-        friendly = "Your session expired — sign out and sign back in, then try again. (If this keeps happening, re-activate the license from this PC.)";
-      } else if (code === "PGRST116" || msg.includes("0 rows")) {
-        friendly = "No matching device found for that pilot ID.";
-      }
-      setNotice(`Revoke failed: ${friendly}`);
-    } finally {
-      setRevoking(null);
-    }
-  };
-
-  const doManualRevoke = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const id = manualId.trim();
-    if (!id) return;
-    await doRevoke(id);
-    setManualId("");
-  };
-
-  const fmtDate = (iso: string) => {
-    try { const d = new Date(iso); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; }
-    catch { return iso; }
-  };
-
-  // Filter applied to the dialog list — by pilot id, name, or rank.
-  const q = filter.trim().toLowerCase();
-  const filteredDevices = q
-    ? devices.filter(d => {
-        const p = pilotById[d.pilotId];
-        const hay = [d.pilotId, p?.name, p ? rankOf(p) : ""].join(" ").toLowerCase();
-        return hay.includes(q);
-      })
-    : devices;
-
-  return (
-    <>
-      {/* Compact summary card on Settings — no inline scroll-fest. */}
-      <Card className="lg:col-span-2 space-y-3">
-        <div className="flex items-center gap-2">
-          <Smartphone className="h-4 w-4 text-primary" />
-          <div className="text-sm font-semibold">Mobile Devices — Active Connections</div>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          All phones currently linked to this squadron's Hawk Eye mobile app. Open the full list to view
-          every paired device and revoke access for any pilot — even one removed from the roster.
-        </p>
-        <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2.5">
-          <div className="flex items-center gap-2 text-sm">
-            {devicesQ.isLoading ? (
-              <><Loader2 className="h-3.5 w-3.5 animate-spin" /> <span className="text-muted-foreground">Loading…</span></>
-            ) : (
-              <>
-                <span className="font-semibold tabular-nums">{devices.length}</span>
-                <span className="text-muted-foreground">paired phone{devices.length === 1 ? "" : "s"}</span>
-              </>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm bg-primary/15 text-primary border border-primary/40 hover:bg-primary/25"
-            data-testid="button-open-mobile-devices"
-          >
-            View all <ArrowRight className="h-3.5 w-3.5" />
-          </button>
-        </div>
-        {notice && !open && (
-          <div className={`text-xs px-3 py-2 rounded-md border ${notice.startsWith("Revoke failed") ? "bg-destructive/10 text-rose-300 border-destructive/40" : "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"}`}>
-            {notice}
-          </div>
-        )}
-      </Card>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent
-          className="max-w-3xl w-[95vw] max-h-[85vh] flex flex-col gap-3"
-          data-testid="dialog-mobile-devices"
-        >
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Smartphone className="h-4 w-4 text-primary" />
-              Mobile Devices
-              <span className="ms-2 text-xs font-normal text-muted-foreground tabular-nums">
-                {devices.length} paired
-              </span>
-            </DialogTitle>
-          </DialogHeader>
-
-          <input
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
-            placeholder="Search by pilot name, ID or rank…"
-            className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
-            data-testid="input-mobile-devices-filter"
-          />
-
-          <div className="flex-1 min-h-0 overflow-y-auto rounded-md border border-border">
-            {devicesQ.isLoading && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground p-4">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading devices…
-              </div>
-            )}
-            {!devicesQ.isLoading && devices.length === 0 && (
-              <div className="text-xs text-muted-foreground p-4">No active mobile connections found.</div>
-            )}
-            {!devicesQ.isLoading && devices.length > 0 && filteredDevices.length === 0 && (
-              <div className="text-xs text-muted-foreground p-4">No devices match "{filter}".</div>
-            )}
-            {filteredDevices.length > 0 && (
-              <div className="divide-y divide-border">
-                {filteredDevices.map(dev => {
-                  const pilot = pilotById[dev.pilotId];
-                  const isRevoking = revoking === dev.pilotId;
-                  return (
-                    <div key={dev.pilotId} className="flex items-center justify-between gap-3 px-3 py-2.5 bg-card">
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium truncate">
-                          {pilot ? `${rankOf(pilot)} ${pilot.name}` : <span className="text-amber-300">Pilot not in roster</span>}
-                          <span className="ms-2 text-xs text-muted-foreground font-mono">({dev.pilotId})</span>
-                        </div>
-                        <div className="text-[11px] text-muted-foreground mt-0.5">
-                          Linked: {fmtDate(dev.linkedAt)} · Last seen: {fmtDate(dev.lastSeenAt)}
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => doRevoke(dev.pilotId)}
-                        disabled={isRevoking}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs bg-destructive/15 text-rose-300 border border-destructive/40 hover:bg-destructive/25 disabled:opacity-50 shrink-0"
-                        data-testid={`button-revoke-device-${dev.pilotId}`}
-                      >
-                        {isRevoking ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldOff className="h-3 w-3" />}
-                        Revoke
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Manual revoke for orphaned pilot IDs not in the device list yet */}
-          <div className="pt-2 border-t border-border">
-            <div className="text-xs text-muted-foreground mb-1.5 font-semibold">
-              Revoke by Pilot ID (for removed or unlisted pilots)
-            </div>
-            <form onSubmit={doManualRevoke} className="flex gap-2">
-              <input
-                value={manualId}
-                onChange={e => setManualId(e.target.value)}
-                placeholder="e.g. P001"
-                className="flex-1 px-3 py-1.5 rounded-md bg-input border border-border text-sm font-mono"
-                data-testid="input-manual-revoke-pilot-id"
-              />
-              <button
-                type="submit"
-                disabled={!manualId.trim() || revoke.isPending}
-                className="px-3 py-1.5 rounded-md text-sm bg-destructive/15 text-rose-300 border border-destructive/40 hover:bg-destructive/25 disabled:opacity-50"
-                data-testid="button-manual-revoke"
-              >
-                <ShieldOff className="h-3.5 w-3.5 inline me-1" />Revoke
-              </button>
-            </form>
-          </div>
-
-          {notice && (
-            <div className={`text-xs px-3 py-2 rounded-md border ${notice.startsWith("Revoke failed") ? "bg-destructive/10 text-rose-300 border-destructive/40" : "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"}`}>
-              {notice}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
 export default function Settings() {
-  const { t, lang, setLang, rankOf } = useI18n();
-  const { squadron, configureSquadron, fingerprint, releaseLicense, resetThisPC, user } = useAuth();
+  const { t, lang, setLang } = useI18n();
+  const { squadron, configureSquadron, fingerprint, releaseLicense, resetThisPC } = useAuth();
   const [name, setName] = useState(squadron?.name || "");
   const [num, setNum] = useState(squadron?.number || "");
   const [base, setBase] = useState(squadron?.base || "");
@@ -752,18 +523,7 @@ export default function Settings() {
 
   return (
     <div>
-      <PageHead
-        title={t("nav_settings")}
-        actions={
-          <Link
-            href="/diagnostic"
-            data-testid="link-settings-diagnostic"
-            className="text-xs px-2.5 py-1.5 rounded-md bg-secondary border border-border hover:bg-secondary/70 inline-flex items-center gap-1.5"
-          >
-            {lang === "ar" ? "أعتقد أن جهازي لا يتصل" : "I think my PC isn't connecting"}
-          </Link>
-        }
-      />
+      <PageHead title={t("nav_settings")} />
       <div className="grid lg:grid-cols-2 gap-4">
         <Card>
           <form onSubmit={save} className="space-y-3">
@@ -821,10 +581,9 @@ export default function Settings() {
             </p>
           )}
           <p className="text-[11px] text-muted-foreground -mt-1">
-            <span className="font-semibold">Reset this PC</span> wipes this device's
-            registration on {lanMode ? "the LAN backend" : "the central server"} (xpc_registry + xpc_user_pcs) and clears
-            every Hawk Eye setting saved locally — leaving the PC ready to set up from
-            scratch. Other PCs and squadron data are not affected.
+            <span className="font-semibold">Reset this PC</span> clears every Hawk Eye
+            setting saved locally — leaving the PC ready to set up from scratch.
+            Squadron data on the LAN server is not affected.
           </p>
           <hr className="border-border" />
           <InactivityTimeoutSection />
@@ -927,14 +686,6 @@ export default function Settings() {
             </div>
           </form>
         </Card>
-        {/* v1.1.43: Mobile Devices / Active Connections is an Ops-PC
-            tool — pairing pilot phones to a squadron is the Ops officer's
-            job, not the Squadron Commander's or Flight Commander's.
-            Hide the whole card (including the manual revoke form) on
-            commander-tier accounts so it never appears in the Sqn Cmdr
-            or Flight Cmdr Settings page. */}
-        {(user?.role === "ops" || user?.role === "deputy") && <MobileDevicesCard />}
-        <ChainSetupSection />
         <Card className="lg:col-span-2 flex items-center gap-5">
           <img src="brand/wings.png" className="h-16 object-contain shrink-0 opacity-95" alt="Pilot Wings" />
           <div className="space-y-1.5 flex-1">
@@ -956,151 +707,6 @@ export default function Settings() {
 // owns it. Without this pin, when the registry shows multiple wings or
 // bases the forward dropdowns would list all of them and a wrong click
 // would route to the wrong wing/base.
-function ChainSetupSection() {
-  const pcsQ = useRegisteredPCs();
-  const { user } = useAuth();
-  // Derive tier from authenticated user role/scope — mirrors the
-  // computation used in ScheduleChain. Earlier draft read from
-  // localStorage `rjaf.pcTier`, but no code writes that key, so the
-  // panel never rendered. Using the same source as ScheduleChain
-  // guarantees consistency between the warning banner and the picker.
-  const myTier: "ops" | "flight" | "squadron" | "wing" | "base" | "" =
-    !user ? ""
-    : user.role === "ops" ? "ops"
-    : user.scope === "flight" ? "flight"
-    : user.scope === "wing" ? "wing"
-    : user.scope === "base" ? "base"
-    : "squadron";
-  const myPcId = (() => {
-    try { return localStorage.getItem("rjaf.xpc.localId") || ""; } catch { return ""; }
-  })();
-  const [parentPcId, setParentPcId] = useState<string>(() => {
-    try { return localStorage.getItem("rjaf.parentPcId") || ""; } catch { return ""; }
-  });
-  const [squadronPcId, setSquadronPcId] = useState<string>(() => {
-    try { return localStorage.getItem("rjaf.squadronPcId") || ""; } catch { return ""; }
-  });
-  const [savedNote, setSavedNote] = useState<string>("");
-
-  // What tier should the parent PC be? Sqn → wing, Wing → base. Ops PCs
-  // share their squadron's parent so they also pick a wing. Flight has
-  // no upchain parent — it uses squadronPcId instead. Base has none.
-  const parentTier: "wing" | "base" | null =
-    myTier === "wing" ? "base" :
-    (myTier === "squadron" || myTier === "ops") ? "wing" :
-    null;
-
-  const parentChoices = (pcsQ.data ?? []).filter(p => p.tier === parentTier && p.id !== myPcId);
-  const squadronChoices = (pcsQ.data ?? []).filter(p => p.tier === "squadron" && p.id !== myPcId);
-
-  const save = () => {
-    try {
-      if (parentPcId) localStorage.setItem("rjaf.parentPcId", parentPcId);
-      else localStorage.removeItem("rjaf.parentPcId");
-      if (myTier === "flight") {
-        if (squadronPcId) localStorage.setItem("rjaf.squadronPcId", squadronPcId);
-        else localStorage.removeItem("rjaf.squadronPcId");
-      }
-      setSavedNote("Saved. Heartbeat will publish the change within 30s.");
-      setTimeout(() => setSavedNote(""), 4000);
-    } catch {
-      setSavedNote("Could not save (localStorage blocked).");
-    }
-  };
-
-  // Base tier has no upchain parent and no squadron pointer — render
-  // an explanatory note instead of an empty form.
-  if (myTier === "base") {
-    return (
-      <Card className="lg:col-span-2 space-y-2">
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <Link2 className="h-4 w-4" /> Chain Setup
-        </div>
-        <p className="text-xs text-muted-foreground">
-          This is a Base PC — it sits at the top of the chain. Nothing to pin here. Wings under this base
-          should pin <span className="font-semibold">this PC</span> as their parent in their own Settings.
-        </p>
-        <div className="text-[11px] text-muted-foreground font-mono break-all">My PC id: {myPcId || "—"}</div>
-      </Card>
-    );
-  }
-  if (myTier === "" || parentTier === null && myTier !== "flight") {
-    return null;
-  }
-
-  return (
-    <Card className="lg:col-span-2 space-y-3">
-      <div className="flex items-center gap-2 text-sm font-semibold">
-        <Link2 className="h-4 w-4" /> Chain Setup
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Pin this PC's place in the multi-squadron org chart. As Hawk Eye scales beyond one squadron the
-        registry starts listing PCs from other wings and bases too — pinning the parent here keeps every
-        forward routed to the right destination, even when 15+ squadrons are online.
-      </p>
-
-      {parentTier && (
-        <label className="block">
-          <span className="text-xs text-muted-foreground">
-            Parent {parentTier === "wing" ? "Wing PC (your squadron's wing commander)" : "Base PC (your wing's base commander)"}
-          </span>
-          <select
-            value={parentPcId}
-            onChange={e => setParentPcId(e.target.value)}
-            className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm"
-            data-testid="select-parent-pc"
-          >
-            <option value="">— not pinned (will list all visible {parentTier} PCs) —</option>
-            {parentChoices.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.deviceName ? `${p.deviceName} · ` : ""}{p.squadronName} ({p.id})
-                {p.online ? " · online" : ""}
-              </option>
-            ))}
-          </select>
-          {parentChoices.length === 0 && (
-            <div className="text-[11px] text-amber-300/80 mt-1">
-              No {parentTier} PCs visible yet. Bring the {parentTier} PC online once and it will appear here.
-            </div>
-          )}
-        </label>
-      )}
-
-      {myTier === "flight" && (
-        <label className="block">
-          <span className="text-xs text-muted-foreground">Owning Squadron PC (which squadron this flight reports to)</span>
-          <select
-            value={squadronPcId}
-            onChange={e => setSquadronPcId(e.target.value)}
-            className="w-full mt-1 px-3 py-2 rounded-md bg-input border border-border text-sm"
-            data-testid="select-squadron-pc"
-          >
-            <option value="">— not pinned —</option>
-            {squadronChoices.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.deviceName ? `${p.deviceName} · ` : ""}{p.squadronName} ({p.id})
-                {p.online ? " · online" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-
-      <div className="flex items-center gap-3">
-        <button
-          onClick={save}
-          className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm"
-          data-testid="button-save-chain-setup"
-        >
-          Save chain pins
-        </button>
-        {savedNote && <span className="text-xs text-muted-foreground">{savedNote}</span>}
-      </div>
-      <div className="text-[11px] text-muted-foreground font-mono break-all">My PC id: {myPcId || "—"}</div>
-    </Card>
-  );
-}
-
 function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <label className="block">

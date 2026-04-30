@@ -5,7 +5,6 @@ import { RJAF_RANKS, lookupRankEn } from "@/lib/ranks";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import {
-  useAllLinkedDevices,
   usePilots,
   useUpdatePilot,
   useCreatePilot,
@@ -25,57 +24,12 @@ import { Plus, Search, Pencil, Trash2, X, Loader2, FileDown, ArrowRightLeft } fr
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 
-// Per-pilot phone-pair status sourced directly from `pilot_devices`.
-//
-// The dot is binary by design (per ops): GREEN means the pilot has at
-// least one active (revoked_at = null) device row — i.e. their phone
-// is paired right now. GRAY means no active pairing exists (never
-// paired, or every pairing has been revoked). The freshness/last-seen
-// nuance is intentionally NOT shown on the roster — that lives on the
-// pilot detail page. Realtime + 30 s polling fallback keep the dot
-// in sync without a manual refresh.
-interface PairRow {
-  pilot_id:  string;
-  linked_at: string | null;
-}
-function usePilotPairing() {
-  const devicesQ = useAllLinkedDevices();
-  const data = useMemo(() => {
-    const m = new Map<string, PairRow>();
-    for (const r of devicesQ.data ?? []) {
-      const row: PairRow = {
-        pilot_id: String(r.pilotId ?? ""),
-        linked_at: r.linkedAt ?? null,
-      };
-      const prev = m.get(row.pilot_id);
-      if (!prev || (row.linked_at ?? "") > (prev.linked_at ?? "")) {
-        m.set(row.pilot_id, row);
-      }
-    }
-    return m;
-  }, [devicesQ.data]);
-  return { ...devicesQ, data };
-}
-function pairDotInfo(row: PairRow | undefined):
-  { color: string; label: string; tooltip: string } {
-  if (!row) {
-    return { color: "bg-zinc-500", label: "Not paired", tooltip: "Not paired" };
-  }
-  const when = row.linked_at ? fmtDateTimeDDMM(row.linked_at) : "—";
-  return {
-    color: "bg-emerald-500",
-    label: "Paired",
-    tooltip: `Paired ${when}`,
-  };
-}
-
 export default function Roster() {
   const { t, rankOf } = useI18n();
   const [q, setQ] = useState("");
   const [importedOnly, setImportedOnly] = useState(false);
   const pilotsQ = usePilots();
   const { data: PILOTS, isLoading, isFetching } = pilotsQ;
-  const syncQ = usePilotPairing();
   const updatePilot = useUpdatePilot();
   const createPilot = useCreatePilot();
   const deletePilot = useDeletePilot();
@@ -273,7 +227,6 @@ export default function Roster() {
           <table className="w-full text-sm">
             <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
-                <th className="px-2 py-2 text-center w-6" title="Mobile sync indicator">●</th>
                 <th className="px-3 py-2 text-left">{t("militaryNumber")}</th>
                 <th className="px-3 py-2 text-left">{t("rank")}</th>
                 <th className="px-3 py-2 text-left">{t("name")}</th>
@@ -298,16 +251,8 @@ export default function Roster() {
                 </tr>
               )}
               {list.map((p: Pilot) => {
-                const dot = pairDotInfo(syncQ.data?.get(p.id));
                 return (
                 <tr key={p.id} className="border-t border-border row-hover">
-                  <td className="px-2 py-2 text-center" data-testid={`sync-dot-${p.id}`}>
-                    <span
-                      className={`inline-block h-2.5 w-2.5 rounded-full ${dot.color}`}
-                      title={dot.tooltip}
-                      aria-label={dot.label}
-                    />
-                  </td>
                   <td className="px-3 py-2 font-mono">
                     <span className="inline-flex items-center gap-1.5">
                       {p.militaryNumber || p.id}

@@ -5,7 +5,7 @@ import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import {
   usePilots, useSorties, useNotams, useDutyWeek, useLeaves,
-  useSchedule, useAuditLog, useReminderOverview,
+  useSchedule, useAuditLog,
 } from "@/lib/squadron-data";
 import { supabaseConfigured } from "@/lib/lan-legacy-shims";
 import { FileDown, FileText, Loader2, Globe, AlertTriangle, Info, Eye, X } from "lucide-react";
@@ -21,7 +21,6 @@ import {
   exportExternalPilots,
   exportPilotLogbook,
   exportAuditLog,
-  exportRemindersLog,
   exportNotams,
   exportNavRoutes,
   exportRiskAssessment,
@@ -71,7 +70,6 @@ export default function PdfExports() {
   const leavesQ = useLeaves();
   const scheduleQ = useSchedule();
   const auditQ = useAuditLog();
-  const remindersQ = useReminderOverview();
 
   const pilots = pilotsQ.data;
   const sorties = sortiesQ.data;
@@ -181,7 +179,6 @@ export default function PdfExports() {
     { key: "periodicAnnual", group: "perPilot", title: lang === "ar" ? `ملخص دوري · السنوي · ${pdfYear}` : `Periodic Summary · Annual · ${pdfYear}`, desc: lang === "ar" ? "صفحة كتاب السجل الورقي للسنة الكاملة." : "Paper-logbook periodic summary page — full calendar year.", needsPilot: true },
 
     { key: "audit", group: "admin", title: lang === "ar" ? "سجل التدقيق" : "Audit Log", desc: lang === "ar" ? "كل أحداث التحرير ضمن نطاق تاريخ." : "Every edit/delete within the date range.", needsRange: true },
-    { key: "reminders", group: "admin", title: lang === "ar" ? "سجل التذكيرات" : "Reminders Log", desc: lang === "ar" ? "تذكيرات الطيارين المسجلة." : "Configured pilot reminders + last sent." },
   ];
 
   // Build the per-spec export closure. Used by both `run` (direct save)
@@ -277,21 +274,6 @@ export default function PdfExports() {
             entity: a.target, detail: undefined,
           }));
           await exportAuditLog(sqdn, rows, r, pdfLang); break;
-        }
-        case "reminders": {
-          const pilotMap = new Map(pilots.map((p) => [p.id, p]));
-          const rows = remindersQ.data.map((row) => {
-            const enabledKeys = Object.keys(row.thresholds).filter((k) => (row.thresholds as Record<string, number[] | undefined>)[k]?.length);
-            const allThresholds = Object.values(row.thresholds).flat().filter((v): v is number => typeof v === "number");
-            return {
-              pilot: pilotMap.get(row.pilotId)?.name ?? row.pilotId,
-              type: enabledKeys.join(", ") || (row.pushEnabled ? "push" : "—"),
-              threshold: allThresholds.length ? allThresholds.join(", ") : "—",
-              lastSent: row.lastSentAt ?? undefined,
-              nextDue: row.lastSentExpiry ?? undefined,
-            };
-          });
-          await exportRemindersLog(sqdn, rows, pdfLang); break;
         }
       }
     };

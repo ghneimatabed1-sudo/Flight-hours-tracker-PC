@@ -3,7 +3,7 @@
 // Replaces hand-edited SQL and the host-side `reset-admin-password.ps1`
 // helper for everyday operator account work. Wraps the LAN api-server
 // endpoints (GET/POST/PATCH/DELETE /api/internal/users) exposed by
-// routes/lan-users-reminders.ts. Rendered inside HQLayout under
+// routes/lan-users.ts. Rendered inside HQLayout under
 // `/admin/users` and gated client-side to super_admin (the API also
 // gates server-side via `canManageUsers`).
 //

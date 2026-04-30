@@ -30,7 +30,6 @@ import {
   setStoredLanSessionToken,
 } from "./internal-migration";
 import { userFromLanAuthProfile } from "./lan-user-map";
-import { setResetInProgress } from "./cross-pc";
 
 // ---- Inactivity preference ----------------------------------------------
 // Per-user-id preference (in minutes) for auto-logout after no input.
@@ -270,7 +269,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [logout]);
 
   const resetThisPC = useCallback(async () => {
-    setResetInProgress(true);
     try {
       try { await postLanLogout(); } catch { /* ignore */ }
       clearLanSessionToken();
