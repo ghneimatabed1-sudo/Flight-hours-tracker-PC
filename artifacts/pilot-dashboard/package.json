@@ -38,6 +38,7 @@
     "test:peer-tokens-page": "tsx --tsconfig tests/tsconfig.json --import=./tests/peer-tokens-page-register.mjs --test --test-force-exit tests/peer-tokens-page.test.ts",
     "test:aggregate-fanout": "tsx --tsconfig tests/tsconfig.json --test --test-force-exit tests/aggregate-fanout-routes.test.ts",
     "test:ensure-schema": "tsx --tsconfig tests/tsconfig.json --test --test-force-exit tests/ensure-schema-idempotent.test.ts",
+    "test:matrix-playwright": "node e2e/matrix/build-dashboard.mjs && playwright test --config playwright.matrix.config.ts",
     "electron:compile": "tsc -p electron/tsconfig.json && node -e \"require('fs').mkdirSync('dist-electron',{recursive:true});require('fs').writeFileSync('dist-electron/package.json',JSON.stringify({type:'commonjs'}))\"",
     "electron:dev": "pnpm run electron:compile && electron dist-electron/main.js",
     "electron:build": "pnpm run build && pnpm run electron:compile && electron-builder --win nsis --config electron-builder.json"
