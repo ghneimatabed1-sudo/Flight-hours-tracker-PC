@@ -1,7 +1,32 @@
-import app from "./app";
+import { buildApp } from "./app";
 import { logger } from "./lib/logger";
 import { ensureLanAuthSchema } from "./lib/lan-auth-schema";
+import {
+  recordInstallProfile,
+  resolveInstallProfile,
+  setActiveInstallProfile,
+  type InstallProfile,
+} from "./lib/install-profile";
 import type { Server } from "node:http";
+
+let profile: InstallProfile;
+try {
+  profile = resolveInstallProfile();
+} catch (err) {
+  logger.error({ err }, "Failed to resolve INSTALL_PROFILE");
+  process.exit(1);
+}
+
+if (profile === "viewer") {
+  logger.error(
+    { profile },
+    "INSTALL_PROFILE=viewer has no backend — install dashboard only. Refusing to start.",
+  );
+  process.exit(0);
+}
+
+setActiveInstallProfile(profile);
+logger.info({ profile }, `Hawk Eye api-server starting in '${profile}' mode`);
 
 const rawPort = process.env["PORT"];
 
@@ -17,14 +42,8 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-// ── Process-level safety nets ────────────────────────────────────────────
-// Without these, any rogue async error (a timer, a third-party callback, a
-// fire-and-forget promise) terminates the entire API server and every
-// connected PC loses backend access until the process is restarted.
-// Node's default for unhandledRejection became "throw" in v15+, which means
-// a single missing await in any code path crashes the server. We log loudly
-// and keep serving — operational uptime is more important than fail-fast
-// for a production rollout where a restart can take minutes.
+// Process-level safety nets: a single missing await must not tear down
+// every connected PC's backend.
 process.on("unhandledRejection", (reason, promise) => {
   logger.error({ err: reason, promise }, "Unhandled promise rejection");
 });
@@ -33,7 +52,6 @@ process.on("uncaughtException", (err, origin) => {
   logger.error({ err, origin }, "Uncaught exception");
 });
 
-// ── HTTP server with graceful shutdown ───────────────────────────────────
 let server: Server | null = null;
 
 (async () => {
@@ -43,19 +61,34 @@ let server: Server | null = null;
     logger.error({ err }, "Failed to ensure LAN auth schema");
     process.exit(1);
   }
+
+  try {
+    const meta = await recordInstallProfile(profile);
+    if (meta.profile !== profile) {
+      logger.warn(
+        {
+          firstBootedProfile: meta.profile,
+          firstBootedAt: meta.firstBootedAt,
+          currentProfile: profile,
+        },
+        "Install profile drift detected — first-boot profile is canonical",
+      );
+    }
+  } catch (err) {
+    logger.error({ err }, "Failed to record install profile metadata");
+  }
+
+  const app = buildApp(profile);
   server = app.listen(port, (err?: Error) => {
     if (err) {
       logger.error({ err }, "Error listening on port");
       process.exit(1);
     }
 
-    logger.info({ port }, "Server listening");
+    logger.info({ port, profile }, "Server listening");
   });
 })();
 
-// Stop accepting new connections, drain in-flight requests, then exit. The
-// 10-second cap prevents a hung socket from blocking shutdown indefinitely
-// (which would cause the process supervisor to SIGKILL us anyway).
 function shutdown(signal: string): void {
   logger.info({ signal }, "Shutdown signal received, closing server");
   if (!server) {

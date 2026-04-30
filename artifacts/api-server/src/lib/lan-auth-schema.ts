@@ -582,6 +582,67 @@ export async function ensureFullSchema(): Promise<void> {
     create index if not exists xpc_schedule_shares_flight_date_idx
       on xpc_schedule_shares (flight_date desc, updated_at desc);
   `);
+
+  // ── Install profile + multi-PC peer plumbing ────────────────────────
+  // install_profile_meta: single-row record of what this PC first booted
+  // as. peer_tokens: hub-issued read tokens. peer_squadrons: aggregator's
+  // list of hubs to fan out to. peer_cache: last successful read from
+  // each peer (lets the dashboard show stale data when a hub is offline).
+  await pool.query(`
+    create table if not exists install_profile_meta (
+      id int primary key check (id = 1),
+      profile text not null,
+      first_booted_at timestamptz not null default now(),
+      last_seen_profile text,
+      last_seen_at timestamptz not null default now()
+    );
+    alter table install_profile_meta
+      add column if not exists last_seen_profile text,
+      add column if not exists last_seen_at timestamptz not null default now();
+
+    create table if not exists peer_tokens (
+      id uuid primary key default gen_random_uuid(),
+      token_hash text not null,
+      label text,
+      scope text not null default 'squadron-read',
+      issued_at timestamptz not null default now(),
+      issued_by text,
+      expires_at timestamptz,
+      revoked_at timestamptz,
+      revoked_by text,
+      last_used_at timestamptz
+    );
+    create unique index if not exists peer_tokens_token_hash_idx
+      on peer_tokens (token_hash);
+    create index if not exists peer_tokens_active_idx
+      on peer_tokens (revoked_at) where revoked_at is null;
+
+    create table if not exists peer_squadrons (
+      id uuid primary key default gen_random_uuid(),
+      squadron_id text not null,
+      squadron_name text,
+      base_url text not null,
+      token_hash text,
+      added_at timestamptz not null default now(),
+      added_by text,
+      last_ok_at timestamptz,
+      last_error text,
+      last_error_at timestamptz,
+      removed_at timestamptz
+    );
+    create unique index if not exists peer_squadrons_squadron_idx
+      on peer_squadrons (squadron_id) where removed_at is null;
+
+    create table if not exists peer_cache (
+      peer_squadron_id uuid not null references peer_squadrons (id) on delete cascade,
+      kind text not null,
+      payload jsonb not null,
+      fetched_at timestamptz not null default now(),
+      primary key (peer_squadron_id, kind)
+    );
+    create index if not exists peer_cache_fetched_at_idx
+      on peer_cache (fetched_at desc);
+  `);
 }
 
 /**

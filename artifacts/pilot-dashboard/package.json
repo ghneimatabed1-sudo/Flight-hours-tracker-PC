@@ -9,7 +9,7 @@
     "build": "vite build --config vite.config.ts",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run test:smoke && npm run test:buttons && npm run test:guest-pending && npm run test:sortie-smart && npm run test:add-sortie-ui && npm run test:schedule-names && npm run test:monthly-report && npm run test:join-lifecycle && npm run test:fault-injection && npm run test:squadron-merge && npm run test:squadrons-remote && npm run test:lan-user-map && npm run test:admin-audit-lan && npm run test:admin-overview-stats && npm run test:translations && npm run test:dash-pilots && npm run test:lan-read-scope && npm run test:lan-read-scope-routes && npm run test:lan-user-role-gate",
+    "test": "npm run test:smoke && npm run test:buttons && npm run test:guest-pending && npm run test:sortie-smart && npm run test:add-sortie-ui && npm run test:schedule-names && npm run test:monthly-report && npm run test:join-lifecycle && npm run test:fault-injection && npm run test:squadron-merge && npm run test:squadrons-remote && npm run test:lan-user-map && npm run test:admin-audit-lan && npm run test:admin-overview-stats && npm run test:translations && npm run test:dash-pilots && npm run test:lan-read-scope && npm run test:lan-read-scope-routes && npm run test:lan-user-role-gate && npm run test:install-profile-routes",
     "test:smoke": "tsx --tsconfig tests/tsconfig.json --import=./tests/asset-loader-register.mjs --test --test-force-exit tests/sidebar-smoke.test.ts",
     "test:buttons": "tsx --tsconfig tests/tsconfig.json --import=./tests/asset-loader-register.mjs --test --test-force-exit tests/button-sweep.test.ts",
     "test:guest-pending": "tsx --tsconfig tests/tsconfig.json --import=./tests/asset-loader-register.mjs --test --test-force-exit tests/guest-pending-actions.test.ts",
@@ -29,6 +29,7 @@
     "test:lan-read-scope": "tsx --tsconfig tests/tsconfig.json --test --test-force-exit tests/lan-read-scope.test.ts",
     "test:lan-read-scope-routes": "tsx --tsconfig tests/tsconfig.json --test --test-force-exit tests/lan-read-scope-routes.test.ts",
     "test:lan-user-role-gate": "tsx --tsconfig tests/tsconfig.json --test --test-force-exit tests/lan-user-role-gate.test.ts",
+    "test:install-profile-routes": "tsx --tsconfig tests/tsconfig.json --test --test-force-exit tests/install-profile-routes.test.ts",
     "electron:compile": "tsc -p electron/tsconfig.json && node -e \"require('fs').mkdirSync('dist-electron',{recursive:true});require('fs').writeFileSync('dist-electron/package.json',JSON.stringify({type:'commonjs'}))\"",
     "electron:dev": "pnpm run electron:compile && electron dist-electron/main.js",
     "electron:build": "pnpm run build && pnpm run electron:compile && electron-builder --win nsis --config electron-builder.json"

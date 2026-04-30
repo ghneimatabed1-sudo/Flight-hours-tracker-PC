@@ -24,38 +24,67 @@ import lanUsersRemindersRouter from "./lan-users-reminders";
 import importHistoryInternalRouter from "./import-history-internal";
 import pilotsTransferRouter from "./pilots-transfer";
 import lanAuthPublic from "./lan-auth-public";
+import peerShellRouter from "./peer-shell";
+import aggregateShellRouter from "./aggregate-shell";
 import { requireInternalLanSession } from "../lib/lan-auth-middleware";
+import {
+  isAggregatorProfile,
+  type InstallProfile,
+} from "../lib/install-profile";
 
-const router: IRouter = Router();
+/**
+ * Build the `/api/*` router for the active install profile.
+ *
+ *  - hub             — /api/healthz, /api/internal/*, /api/peer/* (shell)
+ *  - aggregator-*    — /api/healthz, /api/aggregate/* (shell)
+ *  - viewer          — has no backend; throws (index.ts also refuses to start)
+ */
+export function buildRouter(profile: InstallProfile): IRouter {
+  if (profile === "viewer") {
+    throw new Error(
+      "viewer install profile has no backend — refuse to build a router",
+    );
+  }
 
-const internal: IRouter = Router();
-internal.use(lanAuthPublic);
-internal.use(requireInternalLanSession);
-internal.use(pilotOptionsRouter);
-internal.use(squadronAirframesRouter);
-internal.use(squadronsListRouter);
-internal.use(pilotsTableRouter);
-internal.use(pilotsWritesRouter);
-internal.use(sortiesWritesRouter);
-internal.use(sortiesReadRouter);
-internal.use(auditLogReadRouter);
-internal.use(remindersInternalRouter);
-internal.use(xpcRegistryRouter);
-internal.use(xpcMessagesRouter);
-internal.use(xpcPendingRouter);
-internal.use(xpcScheduleSharesRouter);
-internal.use(xpcSnapshotsRouter);
-internal.use(xpcPairsRouter);
-internal.use(unavailableInternalRouter);
-internal.use(opsReadLanRouter);
-internal.use(opsBoardInternalRouter);
-internal.use(savedDutyWeeksInternalRouter);
-internal.use(pilotLinksInternalRouter);
-internal.use(lanUsersRemindersRouter);
-internal.use(importHistoryInternalRouter);
-internal.use(pilotsTransferRouter);
+  const router: IRouter = Router();
 
-router.use(healthRouter);
-router.use("/internal", internal);
+  router.use(healthRouter);
 
-export default router;
+  if (profile === "hub") {
+    const internal: IRouter = Router();
+    internal.use(lanAuthPublic);
+    internal.use(requireInternalLanSession);
+    internal.use(pilotOptionsRouter);
+    internal.use(squadronAirframesRouter);
+    internal.use(squadronsListRouter);
+    internal.use(pilotsTableRouter);
+    internal.use(pilotsWritesRouter);
+    internal.use(sortiesWritesRouter);
+    internal.use(sortiesReadRouter);
+    internal.use(auditLogReadRouter);
+    internal.use(remindersInternalRouter);
+    internal.use(xpcRegistryRouter);
+    internal.use(xpcMessagesRouter);
+    internal.use(xpcPendingRouter);
+    internal.use(xpcScheduleSharesRouter);
+    internal.use(xpcSnapshotsRouter);
+    internal.use(xpcPairsRouter);
+    internal.use(unavailableInternalRouter);
+    internal.use(opsReadLanRouter);
+    internal.use(opsBoardInternalRouter);
+    internal.use(savedDutyWeeksInternalRouter);
+    internal.use(pilotLinksInternalRouter);
+    internal.use(lanUsersRemindersRouter);
+    internal.use(importHistoryInternalRouter);
+    internal.use(pilotsTransferRouter);
+    router.use("/internal", internal);
+
+    router.use("/peer", peerShellRouter);
+  }
+
+  if (isAggregatorProfile(profile)) {
+    router.use("/aggregate", aggregateShellRouter);
+  }
+
+  return router;
+}

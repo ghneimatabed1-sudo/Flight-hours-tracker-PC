@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+
 /**
  * Active install profile for this PC. One of `hub`, `aggregator-wing`,
 `aggregator-base`, `viewer`. Operators use this to verify what role
@@ -20,12 +21,3 @@ export const HealthStatusInstallProfile = {
   "aggregator-base": "aggregator-base",
   viewer: "viewer",
 } as const;
-
-export interface HealthStatus {
-  status: string;
-  /** Active install profile for this PC. One of `hub`, `aggregator-wing`,
-`aggregator-base`, `viewer`. Operators use this to verify what role
-a given install was configured with.
- */
-  installProfile?: HealthStatusInstallProfile;
-}

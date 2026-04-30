@@ -5,7 +5,13 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { HealthStatusInstallProfile } from "./healthStatusInstallProfile";
 
 export interface HealthStatus {
   status: string;
+  /** Active install profile for this PC. One of `hub`, `aggregator-wing`,
+`aggregator-base`, `viewer`. Operators use this to verify what role
+a given install was configured with.
+ */
+  installProfile?: HealthStatusInstallProfile;
 }

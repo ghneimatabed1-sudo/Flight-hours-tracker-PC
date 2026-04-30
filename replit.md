@@ -37,6 +37,19 @@ or registered as artifacts):
   columns on `lan_users`. Domain tables (pilots, sorties, monthly
   reports, schedule rows) ship through the legacy migration runner the
   host scripts apply on first install.
+- **Install profile:** the api-server reads `INSTALL_PROFILE` at boot
+  and behaves accordingly. Four roles: `hub` (Operation Pilot PC, full
+  surface — default and only mode the production pilot squadron runs
+  today), `aggregator-wing` (Wing Commander PC, read-only fan-out),
+  `aggregator-base` (Base Commander PC, same one tier higher), and
+  `viewer` (Squadron / Flight Commander laptop — dashboard only, the
+  api-server refuses to start in this mode). The active profile is
+  persisted in `install_profile_meta` on first boot and surfaced on
+  `/api/healthz`. `routes/index.ts#buildRouter(profile)` decides which
+  surfaces are mounted: hub mounts `/api/internal/*` + `/api/peer/*`,
+  aggregators mount `/api/aggregate/*`. Peer-token issuance, fan-out,
+  and install wizards are separate downstream tasks; the foundation
+  ships empty-but-mounted shells that return 501.
 - **Auth:** username + password. Passwords stored as bcrypt(12) hashes.
   Sessions are server-side rows in `lan_sessions` with a token returned
   to the dashboard. There is no JWT, no refresh token, no recovery

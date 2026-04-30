@@ -13,4 +13,10 @@ import * as zod from "zod";
  */
 export const HealthCheckResponse = zod.object({
   status: zod.string(),
+  installProfile: zod
+    .enum(["hub", "aggregator-wing", "aggregator-base", "viewer"])
+    .optional()
+    .describe(
+      "Active install profile for this PC. One of `hub`, `aggregator-wing`,\n`aggregator-base`, `viewer`. Operators use this to verify what role\na given install was configured with.\n",
+    ),
 });
