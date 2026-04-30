@@ -1,6 +1,6 @@
 // Multi-PC scenarios run against THREE real `api-server` processes —
 // one Wing aggregator and two squadron hubs — each booted with its
-// own `INSTALL_PROFILE` and its own isolated Postgres schema, talking
+// own `INSTALL_PROFILE` and its own isolated Postgres database, talking
 // to each other over real HTTP sockets.
 //
 // This is the cross-process surface that `tests/multi-pc-cross.test.ts`
@@ -9,10 +9,16 @@
 //
 //   - its own child node process running `dist/index.mjs`,
 //   - its own TCP port,
-//   - its own pg `search_path` (a unique schema in the shared cluster),
+//   - its own Postgres database in the shared cluster,
 //
 // so anything that lives below HTTP — filesystem state, per-process
-// caches, schema isolation — is exercised end-to-end.
+// caches, database isolation — is exercised end-to-end.
+//
+// The per-PC database topology matches how the real PowerShell installer
+// provisions each squadron and wing PC (one DB per PC, never shared
+// search_path tricks), so this test exercises the same cross-DB query
+// surface, transaction visibility, and connection-string handling that
+// production does.
 //
 // Scenarios re-asserted against this real-process topology:
 //
@@ -34,7 +40,6 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -42,32 +47,40 @@ import pg from "pg";
 import { hashPeerToken } from "../../api-server/src/lib/peer-fanout";
 import { hashPassword } from "../../api-server/src/lib/password";
 import { issuePeerToken } from "../../api-server/src/lib/peer-token";
+import { ensureApiServerBuiltCached } from "./helpers/api-server-build-cache";
 
 const { Client } = pg;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../../..");
 const API_SERVER_DIR = resolve(REPO_ROOT, "artifacts/api-server");
-const API_SERVER_DIST = resolve(API_SERVER_DIR, "dist/index.mjs");
+const API_SERVER_DEST_DIST = resolve(API_SERVER_DIR, "dist");
+const BUILD_CACHE_ROOT = resolve(
+  REPO_ROOT,
+  "node_modules/.cache/multi-pc-test-build",
+);
 
 if (!process.env.DATABASE_URL) {
   throw new Error(
     "DATABASE_URL must be set to run multi-pc-real-process.test.ts " +
       "(this test spins up three real api-server processes against " +
-      "isolated schemas in the same cluster).",
+      "isolated databases in the same cluster).",
   );
 }
 const MASTER_DATABASE_URL = process.env.DATABASE_URL;
 
+// Resolved on first build / first cache hit by `before()`. Children
+// spawn from this dir's `index.mjs`.
+let API_SERVER_DIST = "";
+
 // ─── Helpers ───────────────────────────────────────────────────────────
 
-function databaseUrlForSchema(schema: string): string {
-  // Postgres `options=-c search_path=<schema>` pins all queries from a
-  // child process to its own namespace without needing per-PC clusters.
-  // Encoded with %20 / %3D so pg-connection-string parses the URL
-  // verbatim instead of trying to interpret the bare "=" / " ".
+function databaseUrlForDb(dbName: string): string {
+  // Per-PC database matches how the real PowerShell installer
+  // provisions each squadron/wing PC. We rewrite only the pathname so
+  // host, credentials, and query params (sslmode etc.) carry over.
   const u = new URL(MASTER_DATABASE_URL);
-  u.searchParams.set("options", `-c search_path=${schema}`);
+  u.pathname = `/${encodeURIComponent(dbName)}`;
   return u.toString();
 }
 
@@ -101,11 +114,11 @@ async function withMasterClient<T>(
   }
 }
 
-async function withSchemaClient<T>(
-  schema: string,
+async function withDbClient<T>(
+  dbName: string,
   fn: (c: pg.Client) => Promise<T>,
 ): Promise<T> {
-  const c = new Client({ connectionString: databaseUrlForSchema(schema) });
+  const c = new Client({ connectionString: databaseUrlForDb(dbName) });
   await c.connect();
   try {
     return await fn(c);
@@ -117,7 +130,7 @@ async function withSchemaClient<T>(
 // All tables an api-server (any profile) reads or writes. ensureFullSchema
 // covers most of them but the four peer/install tables are owned by
 // out-of-band PowerShell setup in production, so the test mints them
-// itself in each isolated schema.
+// itself in each isolated database.
 const PEER_DDL = `
   create table if not exists install_profile_meta (
     id integer primary key check (id = 1),
@@ -173,21 +186,32 @@ const PEER_DDL = `
     on peer_tokens (revoked_at) where revoked_at is null;
 `;
 
-async function ensureSchemaAndPeerTables(schema: string): Promise<void> {
+async function ensureDbAndPeerTables(dbName: string): Promise<void> {
   await withMasterClient(async (c) => {
-    await c.query(`create schema if not exists "${schema}"`);
+    // CREATE DATABASE has no IF NOT EXISTS in Postgres; the per-PC
+    // names are randomized so a duplicate would itself be a bug worth
+    // surfacing rather than swallowing.
+    await c.query(`create database "${dbName}"`);
   });
   // The api-server's own ensureFullSchema() will create lan_users,
   // squadrons, pilots, etc. on first boot. Pre-creating the peer/install
   // tables here means the boot path is fully no-op-able afterwards.
-  await withSchemaClient(schema, async (c) => {
+  await withDbClient(dbName, async (c) => {
     await c.query(PEER_DDL);
   });
 }
 
-async function dropSchema(schema: string): Promise<void> {
+async function dropDb(dbName: string): Promise<void> {
   await withMasterClient(async (c) => {
-    await c.query(`drop schema if exists "${schema}" cascade`);
+    // Kick out anything still attached (e.g. a child api-server that
+    // hasn't fully exited yet) so DROP DATABASE doesn't 55006 us.
+    await c.query(
+      `select pg_terminate_backend(pid)
+         from pg_stat_activity
+        where datname = $1 and pid <> pg_backend_pid()`,
+      [dbName],
+    );
+    await c.query(`drop database if exists "${dbName}"`);
   });
 }
 
@@ -196,13 +220,13 @@ async function dropSchema(schema: string): Promise<void> {
 type ApiChild = {
   proc: ChildProcess;
   port: number;
-  schema: string;
+  dbName: string;
   baseUrl: string;
 };
 
 type SpawnOpts = {
   port: number;
-  schema: string;
+  dbName: string;
   profile: "hub" | "aggregator-wing" | "aggregator-base";
   /**
    * Required = real lan_session validation (used for the hub PC so the
@@ -220,11 +244,16 @@ type SpawnOpts = {
 const spawnedChildren = new Set<ApiChild>();
 
 function spawnApiServer(opts: SpawnOpts): ApiChild {
+  if (!API_SERVER_DIST) {
+    throw new Error(
+      "API_SERVER_DIST not resolved — call ensureApiServerBuiltCached() first",
+    );
+  }
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PORT: String(opts.port),
     INSTALL_PROFILE: opts.profile,
-    DATABASE_URL: databaseUrlForSchema(opts.schema),
+    DATABASE_URL: databaseUrlForDb(opts.dbName),
     HAWK_INTERNAL_SESSION_AUTH: opts.internalSessionAuth,
     NODE_ENV: "production",
     // Quiet the pino transport so the test runner output stays readable.
@@ -234,7 +263,7 @@ function spawnApiServer(opts: SpawnOpts): ApiChild {
     INTERNAL_WRITE_SECRET: "",
     // Direct legacy export to a tmp dir per child so concurrent writes
     // can't collide on the same json.
-    LAN_LEGACY_EXPORT_DIR: `/tmp/${opts.schema}`,
+    LAN_LEGACY_EXPORT_DIR: `/tmp/${opts.dbName}`,
   };
   const proc = spawn(process.execPath, [API_SERVER_DIST], {
     env,
@@ -246,13 +275,13 @@ function spawnApiServer(opts: SpawnOpts): ApiChild {
     const s = chunk.toString("utf8");
     if (/error|fatal|exception/i.test(s)) {
       // eslint-disable-next-line no-console
-      console.error(`[${opts.schema}:${opts.port}] ${s.trimEnd()}`);
+      console.error(`[${opts.dbName}:${opts.port}] ${s.trimEnd()}`);
     }
   });
   const child: ApiChild = {
     proc,
     port: opts.port,
-    schema: opts.schema,
+    dbName: opts.dbName,
     baseUrl: `http://127.0.0.1:${opts.port}`,
   };
   spawnedChildren.add(child);
@@ -314,7 +343,7 @@ async function killChild(child: ApiChild | null): Promise<void> {
 // ─── DB seeding helpers ───────────────────────────────────────────────
 
 type SeededHub = {
-  schema: string;
+  dbName: string;
   squadronId: string; // uuid string from squadrons.id
   squadronName: string;
   /** Plaintext peer token (`phk_<uuid>_<hex>`) installed in this hub. */
@@ -322,7 +351,7 @@ type SeededHub = {
 };
 
 async function seedHub(opts: {
-  schema: string;
+  dbName: string;
   squadronName: string;
   squadronNumber: string;
   pilots: Array<{ id: string; rank: string; name: string }>;
@@ -333,7 +362,7 @@ async function seedHub(opts: {
   }>;
 }): Promise<SeededHub> {
   const peer = await issuePeerToken();
-  return await withSchemaClient(opts.schema, async (c) => {
+  return await withDbClient(opts.dbName, async (c) => {
     const sq = await c.query<{ id: string }>(
       `insert into squadrons (number, name)
        values ($1, $2)
@@ -373,11 +402,11 @@ async function seedHub(opts: {
     await c.query(
       `insert into peer_tokens (id, token_hash, label, issued_by)
        values ($1::uuid, $2, $3, $4)`,
-      [peer.id, peer.hash, `aggregator-fanout-${opts.schema}`, "test-bootstrap"],
+      [peer.id, peer.hash, `aggregator-fanout-${opts.dbName}`, "test-bootstrap"],
     );
 
     return {
-      schema: opts.schema,
+      dbName: opts.dbName,
       squadronId,
       squadronName: opts.squadronName,
       peerToken: peer.plain,
@@ -386,13 +415,13 @@ async function seedHub(opts: {
 }
 
 async function insertPeerSquadron(opts: {
-  schema: string;
+  dbName: string;
   squadronId: string;
   squadronName: string;
   baseUrl: string;
   token: string;
 }): Promise<string> {
-  return await withSchemaClient(opts.schema, async (c) => {
+  return await withDbClient(opts.dbName, async (c) => {
     const r = await c.query<{ id: string }>(
       `insert into peer_squadrons
          (squadron_id, squadron_name, base_url, auth_token, token_hash, added_by)
@@ -411,10 +440,10 @@ async function insertPeerSquadron(opts: {
   });
 }
 
-async function countAuditUpserts(schema: string): Promise<
+async function countAuditUpserts(dbName: string): Promise<
   Array<{ actor: string; pilot_id: string }>
 > {
-  return await withSchemaClient(schema, async (c) => {
+  return await withDbClient(dbName, async (c) => {
     const r = await c.query<{
       actor: string;
       detail: { pilot_id?: string };
@@ -449,12 +478,15 @@ type Topology = {
 
 let topo: Topology | null = null;
 
-const SCHEMA_AGG = `mp_pc1_${randomUUID().replace(/-/g, "")}`;
-const SCHEMA_TIGERS = `mp_pc2_${randomUUID().replace(/-/g, "")}`;
-const SCHEMA_HAWKS = `mp_pc3_${randomUUID().replace(/-/g, "")}`;
+// Names match the production installer convention (`hawkeye_<role>_pc<n>`)
+// with a UUID suffix so concurrent CI / local runs don't collide on the
+// same shared cluster. Postgres caps identifiers at 63 bytes; with the
+// 32-char hex suffix we're well under that.
+const DB_AGG = `hawkeye_test_pc1_${randomUUID().replace(/-/g, "")}`;
+const DB_TIGERS = `hawkeye_test_pc2_${randomUUID().replace(/-/g, "")}`;
+const DB_HAWKS = `hawkeye_test_pc3_${randomUUID().replace(/-/g, "")}`;
 
-function ensureApiServerBuilt(): void {
-  if (existsSync(API_SERVER_DIST)) return;
+function buildApiServer(): void {
   const r = spawnSync(
     "pnpm",
     ["--filter", "@workspace/api-server", "build"],
@@ -466,12 +498,18 @@ function ensureApiServerBuilt(): void {
 }
 
 before(async () => {
-  ensureApiServerBuilt();
+  const built = ensureApiServerBuiltCached({
+    apiServerDir: API_SERVER_DIR,
+    cacheRoot: BUILD_CACHE_ROOT,
+    destDist: API_SERVER_DEST_DIST,
+    build: buildApiServer,
+  });
+  API_SERVER_DIST = resolve(built.distDir, "index.mjs");
 
   await Promise.all([
-    ensureSchemaAndPeerTables(SCHEMA_AGG),
-    ensureSchemaAndPeerTables(SCHEMA_TIGERS),
-    ensureSchemaAndPeerTables(SCHEMA_HAWKS),
+    ensureDbAndPeerTables(DB_AGG),
+    ensureDbAndPeerTables(DB_TIGERS),
+    ensureDbAndPeerTables(DB_HAWKS),
   ]);
 
   const [portAgg, portTigers, portHawks] = await Promise.all([
@@ -482,19 +520,19 @@ before(async () => {
 
   const pc1 = spawnApiServer({
     port: portAgg,
-    schema: SCHEMA_AGG,
+    dbName: DB_AGG,
     profile: "aggregator-wing",
     internalSessionAuth: "off",
   });
   const pc2 = spawnApiServer({
     port: portTigers,
-    schema: SCHEMA_TIGERS,
+    dbName: DB_TIGERS,
     profile: "hub",
     internalSessionAuth: "required",
   });
   const pc3 = spawnApiServer({
     port: portHawks,
-    schema: SCHEMA_HAWKS,
+    dbName: DB_HAWKS,
     profile: "hub",
     internalSessionAuth: "required",
   });
@@ -531,7 +569,7 @@ before(async () => {
   ];
 
   const tigers = await seedHub({
-    schema: SCHEMA_TIGERS,
+    dbName: DB_TIGERS,
     squadronName: "Tigers",
     squadronNumber: `T-${Math.floor(Math.random() * 1_000_000)}`,
     pilots: [
@@ -541,7 +579,7 @@ before(async () => {
     lanUsers: lanUsersPc2,
   });
   const hawks = await seedHub({
-    schema: SCHEMA_HAWKS,
+    dbName: DB_HAWKS,
     squadronName: "Hawks",
     squadronNumber: `H-${Math.floor(Math.random() * 1_000_000)}`,
     pilots: [{ id: "H-1", rank: "Capt", name: "Charlie" }],
@@ -551,7 +589,7 @@ before(async () => {
   // A second squadron lives on PC2 for the cross-squadron gate test.
   // alice is in squadron A (tigers); the route should reject any
   // attempt to write a row whose squadron_id is squadron B.
-  const squadronBId = await withSchemaClient(SCHEMA_TIGERS, async (c) => {
+  const squadronBId = await withDbClient(DB_TIGERS, async (c) => {
     const r = await c.query<{ id: string }>(
       `insert into squadrons (number, name)
        values ($1, 'Other')
@@ -563,14 +601,14 @@ before(async () => {
 
   await Promise.all([
     insertPeerSquadron({
-      schema: SCHEMA_AGG,
+      dbName: DB_AGG,
       squadronId: tigers.squadronId,
       squadronName: tigers.squadronName,
       baseUrl: pc2.baseUrl,
       token: tigers.peerToken,
     }),
     insertPeerSquadron({
-      schema: SCHEMA_AGG,
+      dbName: DB_AGG,
       squadronId: hawks.squadronId,
       squadronName: hawks.squadronName,
       baseUrl: pc3.baseUrl,
@@ -598,9 +636,9 @@ after(async () => {
   const survivors = Array.from(spawnedChildren);
   await Promise.allSettled(survivors.map((c) => killChild(c)));
   await Promise.allSettled([
-    dropSchema(SCHEMA_AGG),
-    dropSchema(SCHEMA_TIGERS),
-    dropSchema(SCHEMA_HAWKS),
+    dropDb(DB_AGG),
+    dropDb(DB_TIGERS),
+    dropDb(DB_HAWKS),
   ]);
 });
 
@@ -701,11 +739,11 @@ test("3-PC fan-out: hub recovery — kill PC2, fall back to peer_cache, restart,
     "tigers rows are served from cache, not lost",
   );
 
-  // Restart PC2 against the same schema + same port. The marker on
+  // Restart PC2 against the same database + same port. The marker on
   // peer_squadrons.last_error should clear on the next successful call.
   const pc2Restarted = spawnApiServer({
     port: t.pc2.port,
-    schema: SCHEMA_TIGERS,
+    dbName: DB_TIGERS,
     profile: "hub",
     internalSessionAuth: "required",
   });
@@ -782,8 +820,8 @@ test("PC2 last-write-wins: alice + bob upsert same pilot id, both audited", asyn
   });
   assert.equal(b.status, 200, `bob's upsert should succeed (got ${b.status})`);
 
-  // Verify in the real PC2 schema that bob's write won.
-  const pilotRow = await withSchemaClient(SCHEMA_TIGERS, async (c) => {
+  // Verify in the real PC2 database that bob's write won.
+  const pilotRow = await withDbClient(DB_TIGERS, async (c) => {
     const r = await c.query<{ phone: string; available: boolean }>(
       `select phone, available from pilots where id = $1`,
       [sharedId],
@@ -794,7 +832,7 @@ test("PC2 last-write-wins: alice + bob upsert same pilot id, both audited", asyn
   assert.equal(pilotRow!.phone, "999-BBB", "last writer wins on phone");
   assert.equal(pilotRow!.available, false, "last writer wins on available");
 
-  const audits = await countAuditUpserts(SCHEMA_TIGERS);
+  const audits = await countAuditUpserts(DB_TIGERS);
   const forShared = audits.filter((a) => a.pilot_id === sharedId);
   assert.equal(forShared.length, 2, "both upserts logged in audit_log");
   const actors = forShared.map((a) => a.actor).sort();
