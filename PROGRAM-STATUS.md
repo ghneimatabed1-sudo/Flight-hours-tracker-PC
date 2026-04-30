@@ -210,3 +210,34 @@ exists (added in task #376). What is still missing is real-hardware
 validation of the installer (T-K) — until that is done, no version
 on disk should be marketed as "production-ready" to the operator,
 regardless of how many CI checks are green.
+
+---
+
+## GitHub Push & HawkEye-Setup.exe Build — 2026-04-30
+
+**Status: DONE — build running on GitHub Actions**
+
+All Replit session work (~40 merged tasks) was force-pushed to GitHub
+on 2026-04-30. The GitHub remote had diverged (parallel reliability
+commits), so Replit main — the canonical source — was pushed with
+`--force`. Tag `v1.1.110` was created and pushed immediately after.
+
+| Item | Value |
+| --- | --- |
+| GitHub repo | https://github.com/ghneimatabed1-sudo/Flight-hours-tracker-PC |
+| Tag pushed | `v1.1.110` |
+| Actions tab (watch build progress) | https://github.com/ghneimatabed1-sudo/Flight-hours-tracker-PC/actions |
+| Direct run (in_progress) | https://github.com/ghneimatabed1-sudo/Flight-hours-tracker-PC/actions/runs/25190700067 |
+| GitHub Release (exe will appear here) | https://github.com/ghneimatabed1-sudo/Flight-hours-tracker-PC/releases/tag/v1.1.110 |
+| ETA for HawkEye-Setup.exe | ~10–15 minutes after CI starts |
+
+**How to download and install once CI finishes:**
+
+1. Open the GitHub Release link above.
+2. Click **HawkEye-Setup.exe** under "Assets".
+3. Save the file to your PC.
+4. Right-click → **Run as administrator**.
+5. Follow the Inno Setup wizard; the app installs to `C:\Program Files\HawkEye`.
+
+The `.exe` will also appear as a workflow artifact under the Actions run
+if you prefer to download it from there before the Release is published.
