@@ -70,6 +70,90 @@ If a dashboard PC cannot reach the host PC, check:
 
 ---
 
+## 2b. Install a Commander laptop (viewer)
+
+Squadron Commanders and Flight Commanders use their own laptops, not
+the host PC. Their laptops are **viewers** — pure dashboard clients.
+A viewer laptop has **no Postgres** and **no api-server**: nothing
+is stored locally and login still happens against the squadron's hub
+PC over the LAN.
+
+### Install
+On the commander's laptop, with Node.js 20+ and the Hawk Eye source
+folder copied across (USB or LAN):
+1. Open PowerShell **as administrator** in the source folder.
+2. Run:
+   ```
+   pnpm install
+   .\scripts\lan-host\setup-viewer.ps1
+   ```
+3. Answer the prompt:
+   - **Squadron hub address** — hostname (`tigers-hub.local`) or IP
+     of the squadron's host PC. The script hits the hub on
+     `/api/healthz` and refuses to proceed if nothing answers or if
+     the answer is from a non-hub install.
+   - Optional: re-run with `-AutoDiscover` to scan the LAN for
+     `_hawkeye-hub._tcp` and pick a hub from a list (requires Bonjour
+     Print Services for Windows / `dns-sd.exe`).
+4. The script writes the dashboard env, builds the dashboard locally
+   (or copies a `-PrebuiltDist <folder>` you shipped pre-built), and
+   creates a desktop shortcut + Start Menu entry under
+   `Hawk Eye → Hawk Eye Viewer`.
+5. The output ends with **"This PC is a viewer — it does not store
+   any data locally."** If you don't see that line, the install
+   failed somewhere — re-run and read the `[FAIL]` message.
+
+### Day-to-day use
+- Double-click the desktop shortcut. The launcher first hits the hub
+  on `/api/healthz` and:
+  - **If reachable** — opens the dashboard in a kiosk-style browser
+    window (Edge `--app=` mode, falls back to Chrome, then to the
+    default browser).
+  - **If unreachable** — pops a message saying "Cannot reach
+    `<squadron>` hub at `<address>` — check the network or contact
+    your Ops Pilot" and exits without showing a stuck loading
+    spinner.
+- Login is the user's normal Hawk Eye username + password — same
+  accounts the host PC serves to every other dashboard. Create them
+  on the host via **Admin → Users** as you would for any new user.
+
+### Re-point a viewer at a different hub
+When a laptop is reassigned (e.g. Tigers → Eagles):
+1. On the commander's laptop, in PowerShell **as administrator**:
+   ```
+   .\scripts\lan-host\change-viewer-hub.ps1
+   ```
+   The script prints the current hub it is pointed at, then asks for
+   the new one (or accepts `-HubAddress <new-hub.local>`). It
+   re-validates the new hub, rewrites the dashboard env, rebuilds
+   the local bundle, updates `.viewer-config.json`, and refreshes
+   the existing desktop / Start Menu shortcuts.
+2. Existing shortcuts keep working — no reinstall needed.
+
+### Useful flags
+- `setup-viewer.ps1 -PrebuiltDist <folder>` — copy a prebuilt
+  `dist/public` instead of building locally (useful when the laptop
+  has no Node.js or is air-gapped from npm). The prebuilt bundle
+  **must** have been built with `VITE_INTERNAL_API_URL=http://<this
+  hub>:<port>` — Vite bakes the hub URL into the JS, so a generic
+  bundle would silently call the wrong hub. The script verifies the
+  bundle contains the configured URL and refuses to install if not.
+- `setup-viewer.ps1 -SkipBuild` — keep the existing
+  `dist/public` as-is; only rewrite env, patch CSP, and refresh
+  shortcuts. Same constraint as `-PrebuiltDist`: the existing bundle
+  must already target the configured hub.
+- `setup-viewer.ps1 -SquadronName "Tigers"` — labels the desktop
+  shortcut "Hawk Eye — Tigers" and shows "Tigers hub" in the
+  unreachable-hub message.
+- `setup-viewer.ps1 -LocalPort 5500` — change the local launcher
+  port if 5500 is already in use on the laptop.
+
+If Bonjour `dns-sd.exe` is missing on the laptop, `-AutoDiscover`
+warns and falls back to manual entry — install Bonjour Print
+Services from Apple's site if you want auto-discovery.
+
+---
+
 ## 3. Daily monitoring
 
 There is nothing to do daily. The api-server runs as a scheduled task
@@ -213,6 +297,9 @@ pnpm lan:host:health      # hits http://127.0.0.1:3847/api/healthz
 | Symptom | Try this |
 | --- | --- |
 | Dashboard says "Cannot reach API server" | `ping hawk-host.local` from the dashboard PC. If it fails, the host PC is offline, mDNS is blocked on the LAN, or the LAN path is broken. Run `pnpm lan:host:health` on the host to confirm the api-server itself is alive. |
+| Commander laptop pops "Cannot reach `<squadron>` hub at `<address>`" | The viewer launcher pre-checked `/api/healthz` and got nothing. `ping <address>` from the laptop. If the host is up but the laptop moved squadrons, run `change-viewer-hub.ps1` on the laptop to re-point it. |
+| `setup-viewer.ps1` refuses with "installProfile='viewer' (expected 'hub')" | You pointed the viewer at another viewer / aggregator PC by mistake. Re-run with the **squadron host PC's** address (the one running Postgres + api-server). |
+| Viewer launcher says "local launcher port busy" | Something else on the laptop is using port 5500. Re-run `setup-viewer.ps1 -LocalPort <free-port>`, or pass `-LocalPort` to `launch-viewer.ps1` for a one-off. |
 | Sign-in keeps failing | Check the audit log on the host PC's Postgres for `lan_login_failed` rows. Ask user to wait 5 minutes (rate limit) and try again. If the user account was disabled, sign in as super-admin and re-enable it from **Admin → Users**. |
 | Sign-in returns "lan_user_disabled" | The account is soft-disabled. Sign in as super-admin and toggle it back to **Active** from **Admin → Users**. |
 | All sign-ins fail and we just rebuilt the host | Run `reset-admin-password.ps1` for the super-admin on the host PC, then sign in and use **Admin → Users** to reset everything else. |
