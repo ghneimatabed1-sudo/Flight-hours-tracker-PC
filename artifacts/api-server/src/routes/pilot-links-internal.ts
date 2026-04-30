@@ -3,7 +3,12 @@ import { Router, type IRouter } from "express";
 import { pool } from "@workspace/db";
 import { requireInternalWriteSecret } from "../lib/internal-write-auth";
 import { appendInternalAudit } from "../lib/internal-audit";
-import { normalizeLanRole, readLanUser } from "../lib/lan-authz";
+import {
+  buildSquadronReadFilter,
+  canReadSquadronData,
+  normalizeLanRole,
+  readLanUser,
+} from "../lib/lan-authz";
 
 const router: IRouter = Router();
 
@@ -18,15 +23,35 @@ function canManage(roleRaw: string | null | undefined): boolean {
   return role === "ops" || role === "admin" || role === "super_admin";
 }
 
-router.get("/pilot-links/active-devices", async (_req, res, next) => {
+router.get("/pilot-links/active-devices", async (req, res, next) => {
   try {
+    const actor = readLanUser(req);
+    // Active devices follow the same read scope as their pilot. Source
+    // squadron from pilots so legacy pilot_devices rows with NULL
+    // squadron_id still authorise correctly.
+    const filter = buildSquadronReadFilter(
+      {
+        role: actor?.role ?? null,
+        squadronId: actor?.squadron_id ?? null,
+        wingId: actor?.wing_id ?? null,
+        baseId: actor?.base_id ?? null,
+      },
+      "p.squadron_id",
+      1,
+    );
+    const where = filter
+      ? `where d.revoked_at is null ${filter.sql}`
+      : `where d.revoked_at is null`;
+    const params = filter ? filter.params : [];
     const q = await pool.query(
       `
-      select pilot_id, linked_at, last_seen_at
-      from pilot_devices
-      where revoked_at is null
-      order by linked_at desc
+      select d.pilot_id, d.linked_at, d.last_seen_at
+      from pilot_devices d
+      left join pilots p on p.id = d.pilot_id
+      ${where}
+      order by d.linked_at desc
       `,
+      params,
     );
     res.json({ items: q.rows });
   } catch (err) {
@@ -40,6 +65,50 @@ router.get("/pilot-links/status", async (req, res, next) => {
     if (!pilotId) {
       res.status(400).json({ error: "missing_pilot_id" });
       return;
+    }
+    // Resolve the pilot's squadron + that squadron's wing/base up
+    // front so wing/base commanders can see status for every pilot
+    // under their command, while squadron-tier roles only see their
+    // own squadron's pilots. We must include wing_id/base_id in the
+    // target — `canReadSquadronData` for commander_wing/_base relies
+    // on it to authorise cross-squadron reads.
+    const actor = readLanUser(req);
+    if (actor) {
+      const pilotQ = await pool.query<{
+        squadron_id: string | null;
+        wing_id: string | null;
+        base_id: string | null;
+      }>(
+        `select p.squadron_id, s.wing_id, s.base_id
+         from pilots p
+         left join squadrons s on s.id = p.squadron_id
+         where p.id = $1
+         limit 1`,
+        [pilotId],
+      );
+      const pilot = pilotQ.rows[0];
+      if (!pilot) {
+        res.status(404).json({ error: "pilot_not_found" });
+        return;
+      }
+      if (
+        !canReadSquadronData(
+          {
+            role: actor.role,
+            squadronId: actor.squadron_id ?? null,
+            wingId: actor.wing_id ?? null,
+            baseId: actor.base_id ?? null,
+          },
+          {
+            squadronId: pilot.squadron_id ?? null,
+            wingId: pilot.wing_id ?? null,
+            baseId: pilot.base_id ?? null,
+          },
+        )
+      ) {
+        res.status(403).json({ error: "foreign_squadron_forbidden" });
+        return;
+      }
     }
     const [devQ, codeQ] = await Promise.all([
       pool.query(

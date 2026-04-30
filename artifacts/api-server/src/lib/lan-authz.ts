@@ -67,12 +67,21 @@ export function normalizeLanRole(raw: string | null | undefined): LanRole {
   return "unknown";
 }
 
+// Fail-closed identity comparison. Empty / null on either side never
+// matches — otherwise an actor with a missing scope ID could read or
+// write a legacy row whose corresponding scope ID is also null.
 export function sameSquadron(a: string | null | undefined, b: string | null | undefined): boolean {
-  return String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+  const left = String(a ?? "").trim().toLowerCase();
+  const right = String(b ?? "").trim().toLowerCase();
+  if (left === "" || right === "") return false;
+  return left === right;
 }
 
 function sameId(a: string | null | undefined, b: string | null | undefined): boolean {
-  return String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+  const left = String(a ?? "").trim().toLowerCase();
+  const right = String(b ?? "").trim().toLowerCase();
+  if (left === "" || right === "") return false;
+  return left === right;
 }
 
 /**

@@ -4,7 +4,7 @@ import { pool } from "@workspace/db";
 import { hashPassword } from "../lib/password";
 import { requireInternalWriteSecret } from "../lib/internal-write-auth";
 import { appendInternalAudit } from "../lib/internal-audit";
-import { normalizeLanRole, readLanUser } from "../lib/lan-authz";
+import { buildSquadronReadFilter, normalizeLanRole, readLanUser } from "../lib/lan-authz";
 
 const router: IRouter = Router();
 
@@ -350,22 +350,54 @@ router.delete("/users/:id", requireInternalWriteSecret, async (req, res, next) =
   }
 });
 
-router.get("/reminders/overview", async (_req, res, next) => {
+router.get("/reminders/overview", async (req, res, next) => {
   try {
+    const actor = readLanUser(req);
+    // Reminder prefs + notifications are pilot-scoped; surface them
+    // through the same wing/base/squadron read filter we apply to
+    // /pilots so a wing commander sees their wing's reminders, etc.
+    const prefsFilter = buildSquadronReadFilter(
+      {
+        role: actor?.role ?? null,
+        squadronId: actor?.squadron_id ?? null,
+        wingId: actor?.wing_id ?? null,
+        baseId: actor?.base_id ?? null,
+      },
+      "p.squadron_id",
+      1,
+    );
+    const notifFilter = buildSquadronReadFilter(
+      {
+        role: actor?.role ?? null,
+        squadronId: actor?.squadron_id ?? null,
+        wingId: actor?.wing_id ?? null,
+        baseId: actor?.base_id ?? null,
+      },
+      "p.squadron_id",
+      1,
+    );
+    const prefsWhere = prefsFilter ? `where 1 = 1 ${prefsFilter.sql}` : "";
+    const notifWhere = notifFilter ? `where 1 = 1 ${notifFilter.sql}` : "";
     const [prefsQ, notifQ] = await Promise.all([
       pool.query(
         `
-        select pilot_id, thresholds, push_enabled, expo_push_token, platform, updated_at
-        from pilot_reminder_prefs
+        select pr.pilot_id, pr.thresholds, pr.push_enabled, pr.expo_push_token, pr.platform, pr.updated_at
+        from pilot_reminder_prefs pr
+        left join pilots p on p.id = pr.pilot_id
+        ${prefsWhere}
         `,
+        prefsFilter ? prefsFilter.params : [],
       ),
       pool.query(
         `
-        select distinct on (pilot_id)
-          pilot_id, currency_key, expiry_date, threshold_days, sent_at
-        from pilot_currency_notifications
-        order by pilot_id, sent_at desc
+        select distinct on (n.pilot_id)
+          n.pilot_id, n.currency_key, n.expiry_date, n.threshold_days, n.sent_at
+        from pilot_currency_notifications n
+        left join pilots p on p.id = n.pilot_id
+        ${notifWhere}
+        order by n.pilot_id, n.sent_at desc
         `,
+        notifFilter ? notifFilter.params : [],
       ),
     ]);
     const lastByPilot = new Map<string, Record<string, unknown>>();
