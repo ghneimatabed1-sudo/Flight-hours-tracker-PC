@@ -1,15 +1,10 @@
 name: Build HawkEye-Setup.exe
 
 # Compiles the Inno Setup installer for Hawk Eye (RJAF Squadron Ops).
-# The resulting HawkEye-Setup.exe bundles the api-server, the React
-# dashboard, a portable Node runtime, and portable pnpm — the installer
-# needs nothing pre-installed on the target squadron PC except Windows.
-#
-# This is a LAN-only, air-gapped application. No Supabase or cloud
-# services are referenced. No Supabase secrets are required.
+# LAN-only, air-gapped application — no Supabase or cloud secrets needed.
 #
 # Triggers:
-#   - push to main (any change to installer, api-server, or dashboard src)
+#   - push to main
 #   - push of a v* tag  → also creates a GitHub Release
 #   - manual dispatch   → also creates a GitHub Release
 on:
@@ -44,26 +39,33 @@ jobs:
       - name: Install Inno Setup 6
         shell: pwsh
         run: |
-          # Direct download is faster and version-pinned without Chocolatey network issues.
-          $InnoUrl  = "https://files.jrsoftware.org/is/6/innosetup-6.2.2.exe"
-          $Installer = "$env:TEMP\innosetup-6.2.2.exe"
-          Write-Host "Downloading Inno Setup 6.2.2..."
-          Invoke-WebRequest -Uri $InnoUrl -OutFile $Installer -UseBasicParsing
-          Write-Host "Installing Inno Setup silently..."
-          Start-Process -FilePath $Installer -ArgumentList "/SP- /VERYSILENT /NORESTART" -Wait
-          $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $isccPath)) { throw "iscc.exe not found at $isccPath after install" }
-          Write-Host "iscc found at: $isccPath"
+          # choco is pre-installed on windows-latest and is the most reliable path.
+          # No version pin — the latest Inno Setup 6.x is always compatible.
+          choco install innosetup --yes --no-progress
+          # Confirm iscc is accessible
+          $paths = @(
+            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            "C:\Program Files\Inno Setup 6\ISCC.exe"
+          )
+          $found = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $found) {
+            # Also check PATH
+            $found = (Get-Command iscc -ErrorAction SilentlyContinue)?.Source
+          }
+          if (-not $found) { throw "iscc.exe not found after choco install innosetup" }
+          Write-Host "iscc found at: $found"
+          # Make iscc available to subsequent steps via PATH
+          $dir = Split-Path $found
+          echo "$dir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # Cache the portable Node + pnpm bundles that get embedded inside
-      # the installer .exe so we don't re-download ~50 MB on every run.
+      # Cache the portable Node + pnpm bundles embedded inside the installer .exe
       - name: Cache installer portable bundles
         uses: actions/cache@v4
         with:
           path: |
             installer/build-cache/node
             installer/build-cache/pnpm
-          key: installer-bundles-node20.18.1-pnpm-latest-v1
+          key: installer-bundles-node20.18.1-pnpm-latest-v2
 
       - name: Install workspace dependencies
         run: pnpm install --no-frozen-lockfile
@@ -79,11 +81,10 @@ jobs:
 
       - name: Run installer build script
         shell: pwsh
-        env:
-          ISCC_PATH: "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe"
         run: |
           Set-Location installer
-          .\build.ps1 -IsccPath $env:ISCC_PATH -Verbose
+          # iscc is now on PATH from the install step
+          .\build.ps1 -Verbose
 
       - name: Verify the .exe was produced
         shell: bash
@@ -99,12 +100,9 @@ jobs:
         shell: pwsh
         run: |
           $hash = (Get-FileHash installer\dist\HawkEye-Setup.exe -Algorithm SHA256).Hash.ToLower()
-          $line = "$hash  HawkEye-Setup.exe"
-          $line | Out-File -Encoding ASCII installer\dist\HawkEye-Setup.exe.sha256
+          "$hash  HawkEye-Setup.exe" | Out-File -Encoding ASCII installer\dist\HawkEye-Setup.exe.sha256
           Write-Host "SHA-256: $hash"
 
-      # Always upload as a workflow artifact (downloadable from Actions tab
-      # even on plain main-branch pushes that don't create a Release)
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
@@ -115,9 +113,6 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      # Create a GitHub Release on tag pushes or manual dispatches.
-      # On plain main-branch pushes the .exe is still available as
-      # a workflow artifact above — just not as a formal Release.
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
@@ -127,25 +122,22 @@ jobs:
           body: |
             ## Hawk Eye Squadron Ops — v${{ steps.version.outputs.version }}
 
-            **LAN-only, air-gapped installer. No internet connection required on the target PC.**
+            **LAN-only, air-gapped installer. No internet required on the target PC.**
 
-            ### Install instructions
+            ### Install
             1. Copy `HawkEye-Setup.exe` to the target Windows PC (USB stick is fine).
-            2. Right-click → Run as administrator.
-            3. Follow the wizard — choose your role (Hub / Wing aggregator / Base aggregator / Viewer).
-            4. The installer bundles PostgreSQL, Node, and the dashboard — nothing to pre-install.
+            2. Right-click → **Run as administrator**.
+            3. Follow the wizard — choose your role (Hub / Wing / Base / Viewer).
+            4. Everything installs automatically. No Node, no Postgres needed.
 
             ### Verify download integrity
-            Compare the SHA-256 in `HawkEye-Setup.exe.sha256` against `certutil -hashfile HawkEye-Setup.exe SHA256`.
+            `certutil -hashfile HawkEye-Setup.exe SHA256` and compare to the `.sha256` file.
 
             ### What's in this release
-            - Magic LAN auto-discovery: PCs sense each other on the same LAN and pair with one click.
-            - Dashboard supervisor: launcher auto-restarts on crash.
+            - Magic LAN auto-discovery: PCs sense each other and pair with one click.
+            - Dashboard auto-restarts on crash (supervisor for all 3 services).
             - Audit log captures every admin-triggered ops action.
-            - Operator UX polish: unsaved-change warnings, backup progress, LAN-broadcast restart button.
-            - All four roles tested (Hub / Wing / Base / Viewer).
-
-            See `OPERATOR-RUNBOOK.md` and `installer/CODE-SIGNING-DECISION.md` in the repo for full details.
+            - Operator UX polish: unsaved-change warnings, backup progress, restart-broadcast button.
           files: |
             installer/dist/HawkEye-Setup.exe
             installer/dist/HawkEye-Setup.exe.sha256
