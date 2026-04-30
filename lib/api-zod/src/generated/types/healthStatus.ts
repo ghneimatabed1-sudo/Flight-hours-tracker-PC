@@ -14,4 +14,11 @@ export interface HealthStatus {
 a given install was configured with.
  */
   installProfile?: HealthStatusInstallProfile;
+  /** Semantic version of the running api-server build (read from
+`package.json` at build time and injected via esbuild). The
+dashboard compares this against its own bundled `__APP_VERSION__`
+so the operator gets a "please refresh" banner the moment the hub
+is upgraded out from under their cached HTML.
+ */
+  apiServerVersion?: string;
 }

@@ -31,6 +31,7 @@ import { useIdleTimeout } from "@/lib/use-idle-timeout";
 import Layout from "@/components/Layout";
 import OpeningAnimation from "@/components/OpeningAnimation";
 import { HQLayout } from "@/components/HQLayout";
+import { DiskFullOverlay } from "@/components/DiskFullOverlay";
 import LoginGate from "@/pages/Login";
 import FirstLaunch from "@/pages/FirstLaunch";
 import JoinSetup from "@/pages/JoinSetup";
@@ -303,6 +304,7 @@ function App() {
                 <Toaster />
                 <OpeningAnimation />
                 <UndoToast />
+                <DiskFullOverlay />
               </TooltipProvider>
             </AuthProvider>
           </InstallProfileProvider>

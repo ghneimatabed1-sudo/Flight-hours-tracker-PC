@@ -943,6 +943,31 @@ export const dict = {
     peerSquadronsTokenPlaceholder: "Leave empty to keep current token",
     peerSquadronsDeleteConfirm: "Delete peer squadron {name}?",
     forbiddenSuperAdminOnly: "Only super-admin operators can use this page.",
+
+    // ── Operator failure-mode banners (Task #372 / T-E) ────────────
+    versionMismatchTitle: "The hub has been updated",
+    versionMismatchBody:
+      "Please refresh this page (Ctrl+F5) to load the new version. Until you refresh, some pages may display incorrect data or fail to save.",
+    versionMismatchHubLabel: "Hub",
+    versionMismatchDashboardLabel: "Dashboard",
+    diskFullTitle: "Disk full on the hub PC",
+    diskFullBody:
+      "Writes are blocked until disk space is freed. Please notify your administrator. Until disk space is recovered, no new sorties, NOTAMs, or roster changes can be saved.",
+    diskFullRetry: "I've fixed it, retry",
+    diskFullRetryFailed:
+      "The hub still reports a problem. Free more disk space and try again.",
+    backupVerifyTitleNever: "Backup integrity has never been verified",
+    backupVerifyBodyNever:
+      "No self-restore test has ever recorded a result. Until verify-backup runs successfully, the nightly backups have not been proven recoverable.",
+    backupVerifyTitleOverdue: "Backup verification is overdue",
+    backupVerifyBodyOverdue:
+      "The last verify-backup self-restore test was {days} days ago. Quarterly cadence is required so you know the nightly backups are actually recoverable.",
+    backupVerifyTitleFailed: "Backup verification FAILED",
+    backupVerifyBodyFailed:
+      "The verify-backup self-restore test failed on {date}. The nightly backups may be unrecoverable. Investigate immediately.",
+    backupVerifyRunHint:
+      "Run this on the hub PC in PowerShell (administrator):",
+    backupVerifyDismissAria: "Dismiss for this session",
   },
   ar: {
     nav_sticky: "ملاحظات لاصقة",
@@ -1876,6 +1901,31 @@ export const dict = {
     peerSquadronsTokenPlaceholder: "اتركه فارغًا للإبقاء على الرمز الحالي",
     peerSquadronsDeleteConfirm: "حذف السرب النظير {name}؟",
     forbiddenSuperAdminOnly: "هذه الصفحة متاحة فقط للمسؤول الأعلى.",
+
+    // ── Operator failure-mode banners (Task #372 / T-E) ────────────
+    versionMismatchTitle: "تم تحديث الخادم المركزي",
+    versionMismatchBody:
+      "يرجى تحديث هذه الصفحة (Ctrl+F5) لتحميل الإصدار الجديد. حتى يتم التحديث، قد تعرض بعض الصفحات بيانات غير صحيحة أو تفشل في الحفظ.",
+    versionMismatchHubLabel: "الخادم",
+    versionMismatchDashboardLabel: "لوحة التحكم",
+    diskFullTitle: "القرص ممتلئ على جهاز الخادم",
+    diskFullBody:
+      "تم حظر عمليات الكتابة حتى يتم تحرير مساحة على القرص. يرجى إبلاغ المسؤول. حتى يتم استعادة المساحة، لا يمكن حفظ أي طلعات أو إشعارات أو تغييرات في القائمة.",
+    diskFullRetry: "تم الإصلاح، أعد المحاولة",
+    diskFullRetryFailed:
+      "لا يزال الخادم يبلّغ عن مشكلة. حرّر مساحة إضافية على القرص ثم حاول مرة أخرى.",
+    backupVerifyTitleNever: "لم يتم التحقق من سلامة النسخ الاحتياطي مطلقًا",
+    backupVerifyBodyNever:
+      "لم يُسجَّل أي اختبار استعادة ذاتية. حتى يعمل verify-backup بنجاح، لم تَثبت قابلية استرداد النسخ الاحتياطية الليلية.",
+    backupVerifyTitleOverdue: "التحقق من النسخ الاحتياطي متأخر",
+    backupVerifyBodyOverdue:
+      "كان آخر اختبار استعادة ذاتية لـ verify-backup قبل {days} يومًا. الوتيرة المطلوبة ربع سنوية لضمان قابلية استرداد النسخ الاحتياطية الليلية فعليًا.",
+    backupVerifyTitleFailed: "فشل التحقق من النسخ الاحتياطي",
+    backupVerifyBodyFailed:
+      "فشل اختبار الاستعادة الذاتية لـ verify-backup بتاريخ {date}. قد تكون النسخ الاحتياطية الليلية غير قابلة للاسترداد. تحقّق فورًا.",
+    backupVerifyRunHint:
+      "نفّذ هذا الأمر على جهاز الخادم في PowerShell (كمسؤول):",
+    backupVerifyDismissAria: "إخفاء طوال هذه الجلسة",
   },
 } as const;
 

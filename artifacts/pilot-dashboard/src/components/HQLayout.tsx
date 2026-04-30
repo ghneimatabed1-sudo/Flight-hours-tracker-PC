@@ -9,6 +9,8 @@ import IdentityStrip from "@/components/IdentityStrip";
 import emblem from "@assets/rjaf_emblem.png";
 import { useInstallProfile, isAggregatorProfile } from "@/lib/install-profile";
 import SquadronStatusPanel from "@/components/SquadronStatusPanel";
+import { VersionMismatchBanner } from "@/components/VersionMismatchBanner";
+import { BackupVerifyBanner } from "@/components/BackupVerifyBanner";
 
 interface NavItem {
   path: string;
@@ -195,6 +197,8 @@ export function HQLayout({ children }: { children: ReactNode }) {
         </nav>
         <main className="flex-1 min-w-0 p-4 sm:p-6 space-y-4 overflow-y-auto">
           <IdentityStrip />
+          <VersionMismatchBanner />
+          <BackupVerifyBanner />
           {children}
         </main>
       </div>

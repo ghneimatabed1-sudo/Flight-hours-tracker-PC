@@ -3,6 +3,7 @@ import App from "./App";
 import "./index.css";
 import { startOutboxWorker } from "./lib/offlineQueue";
 import { reportRuntimeError } from "./lib/runtimeErrorReporter";
+import { installFetchInterceptor } from "./lib/api-client";
 
 // Visible diagnostic overlay shown if anything synchronous below throws or
 // if the bundle errors during evaluation. Without this the user sees a
@@ -119,6 +120,9 @@ try {
   // The outbox worker is best-effort — never let it block React mounting.
   try { startOutboxWorker(); } catch (e) { console.warn("outbox worker failed:", e); }
   try { installPointerEventsGuard(); } catch (e) { console.warn("pointer-events guard failed:", e); }
+  // Task #372 / T-E — wrap window.fetch so HTTP 507 disk_full
+  // responses unblank the DiskFullOverlay anywhere in the app.
+  try { installFetchInterceptor(); } catch (e) { console.warn("fetch interceptor failed:", e); }
   createRoot(document.getElementById("root")!).render(<App />);
 } catch (err) {
   showFatal(err);

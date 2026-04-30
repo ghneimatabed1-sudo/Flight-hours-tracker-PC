@@ -19,4 +19,10 @@ export const HealthCheckResponse = zod.object({
     .describe(
       "Active install profile for this PC. One of `hub`, `aggregator-wing`,\n`aggregator-base`, `viewer`. Operators use this to verify what role\na given install was configured with.\n",
     ),
+  apiServerVersion: zod
+    .string()
+    .optional()
+    .describe(
+      'Semantic version of the running api-server build (read from\n`package.json` at build time and injected via esbuild). The\ndashboard compares this against its own bundled `__APP_VERSION__`\nso the operator gets a \"please refresh\" banner the moment the hub\nis upgraded out from under their cached HTML.\n',
+    ),
 });

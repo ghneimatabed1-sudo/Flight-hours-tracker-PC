@@ -392,6 +392,66 @@ export async function fetchInternalApiHealth(): Promise<InternalApiHealthResult>
   }
 }
 
+// ── Backup-verify status (Task #372 / T-E Step 3) ───────────────────
+//
+// Fetches the focused `/api/internal/backup-verify-status` endpoint
+// the api-server exposes for the `BackupVerifyBanner`. The endpoint
+// is super-admin-only on the server and returns either the marker
+// row or `null` when no verify has ever been recorded.
+export type BackupVerifyMarker = {
+  ok: boolean;
+  observedAt: string;
+  ageDays: number;
+  message: string | null;
+};
+
+export type BackupVerifyStatusResult =
+  | { ok: true; marker: BackupVerifyMarker | null }
+  | { ok: false; error: string };
+
+export async function fetchBackupVerifyStatus(): Promise<BackupVerifyStatusResult> {
+  const url = getInternalApiPath("internal/backup-verify-status");
+  if (!url) return { ok: false, error: "internal_api_disabled" };
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: internalApiHeadersBase(),
+    });
+    if (!res.ok) {
+      return { ok: false, error: `http_${res.status}` };
+    }
+    const body = (await res.json()) as {
+      ok?: boolean;
+      marker?: {
+        ok?: boolean;
+        observedAt?: string;
+        ageDays?: number;
+        message?: string | null;
+      } | null;
+    };
+    if (body?.ok !== true) {
+      return { ok: false, error: "bad_payload" };
+    }
+    const m = body.marker;
+    if (m == null) return { ok: true, marker: null };
+    if (typeof m.observedAt !== "string" || typeof m.ageDays !== "number") {
+      return { ok: false, error: "bad_marker" };
+    }
+    return {
+      ok: true,
+      marker: {
+        ok: m.ok === true,
+        observedAt: m.observedAt,
+        ageDays: m.ageDays,
+        message: m.message ?? null,
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export interface InternalPilotOption {
   id: string;
   scheduleName: string;

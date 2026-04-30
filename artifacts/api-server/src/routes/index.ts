@@ -19,6 +19,7 @@ import lanAuthPublic from "./lan-auth-public";
 import peerShellRouter from "./peer-shell";
 import aggregateShellRouter from "./aggregate-shell";
 import systemHealthRouter from "./system-health";
+import backupVerifyStatusRouter from "./backup-verify-status";
 import { requireInternalLanSession } from "../lib/lan-auth-middleware";
 import { diskGuard } from "../middlewares/disk-guard";
 import {
@@ -53,6 +54,7 @@ export function buildRouter(profile: InstallProfile): IRouter {
     // operator can still see what's wrong.
     internal.use(diskGuard);
     internal.use(systemHealthRouter);
+    internal.use(backupVerifyStatusRouter);
     internal.use(pilotOptionsRouter);
     internal.use(squadronAirframesRouter);
     internal.use(squadronsListRouter);
