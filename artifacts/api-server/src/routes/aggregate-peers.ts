@@ -6,6 +6,7 @@ import {
   hashPeerToken,
   listActivePeers,
   pingPeers,
+  probePeerToken,
   type PeerSquadronRow,
 } from "../lib/peer-fanout";
 
@@ -278,6 +279,61 @@ router.patch("/peers/:id", async (req, res, next) => {
       changed: Object.keys(b),
     });
     res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/aggregate/peers/:id/probe — try a candidate token against
+ * the peer's `/api/peer/healthz` WITHOUT persisting it. Used by the
+ * "Test" button in the Refresh Peer Token dialog so the operator can
+ * confirm a freshly-pasted token works before clicking Save.
+ *
+ * Body: `{ auth_token: string }`. Response: `{ ok: true }` on success
+ * or `{ ok: false, error: string, error_kind: PeerErrorKind }` so the
+ * dialog can localise the failure reason.
+ */
+router.post("/peers/:id/probe", async (req, res, next) => {
+  try {
+    if (!isSuperAdmin(req)) {
+      res.status(403).json({ error: "forbidden_role" });
+      return;
+    }
+    const id = String(req.params.id ?? "").trim();
+    if (!id) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    // Reject malformed ids before they hit Postgres so a typo doesn't
+    // surface as an opaque 500 from the `::uuid` cast.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      res.status(400).json({ error: "invalid_id" });
+      return;
+    }
+    const body = (req.body ?? {}) as { auth_token?: unknown };
+    const token = String(body.auth_token ?? "").trim();
+    if (!token) {
+      res.status(400).json({ error: "missing_token" });
+      return;
+    }
+    const q = await pool.query<{ base_url: string }>(
+      `select base_url from peer_squadrons
+        where id = $1::uuid and removed_at is null
+        limit 1`,
+      [id],
+    );
+    const row = q.rows[0];
+    if (!row) {
+      res.status(404).json({ error: "peer_not_found" });
+      return;
+    }
+    const result = await probePeerToken(row.base_url, token);
+    if (result.ok) {
+      res.json({ ok: true });
+      return;
+    }
+    res.json({ ok: false, error: result.error, error_kind: result.error_kind });
   } catch (err) {
     next(err);
   }

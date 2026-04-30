@@ -37,7 +37,7 @@ const requirePeerToken: RequestHandler = async (req, res, next) => {
     const raw = req.get(HEADER);
     const parsed = parsePeerToken(raw ?? null);
     if (!parsed) {
-      res.status(401).json({ error: "invalid_peer_token" });
+      res.status(401).json({ error: "invalid_token" });
       return;
     }
     const q = await pool.query<{
@@ -55,19 +55,22 @@ const requirePeerToken: RequestHandler = async (req, res, next) => {
     );
     const row = q.rows[0];
     if (!row) {
-      res.status(401).json({ error: "invalid_peer_token" });
+      res.status(401).json({ error: "invalid_token" });
       return;
     }
     if (row.revoked_at) {
-      res.status(401).json({ error: "invalid_peer_token" });
+      // Distinct from `invalid_token` so the aggregator can show the
+      // operator a "token revoked → paste new one" prompt instead of a
+      // generic "auth failed" badge.
+      res.status(401).json({ error: "revoked_token" });
       return;
     }
     if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) {
-      res.status(401).json({ error: "invalid_peer_token" });
+      res.status(401).json({ error: "revoked_token" });
       return;
     }
     if (!(await verifyPeerSecret(parsed.secret, row.token_hash))) {
-      res.status(401).json({ error: "invalid_peer_token" });
+      res.status(401).json({ error: "invalid_token" });
       return;
     }
     (req as ReqWithPeer).peerToken = {

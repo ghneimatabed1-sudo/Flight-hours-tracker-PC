@@ -139,6 +139,9 @@ const OfflinePeersBanner = (await import(
 const SquadronStatusPanel = (await import(
   "../src/components/SquadronStatusPanel"
 )).default;
+const RefreshPeerTokenDialog = (await import(
+  "../src/components/RefreshPeerTokenDialog"
+)).default;
 const { HQLayout } = await import("../src/components/HQLayout");
 
 // ── helpers ─────────────────────────────────────────────────────────
@@ -507,6 +510,100 @@ test("aggregator-ui · active profile register flips when the provider mounts in
     "InstallProfileProvider should push initialProfile into the active register",
   );
   internalMigration._resetActiveInstallProfileForTests();
+});
+
+// ── 6. RefreshPeerTokenDialog smoke + button-state contract ───────
+//
+// We do NOT mock fetch here: the dialog only fires fetch on Test/Save
+// click, and `aggregateApiPath()` returns null in this test (no
+// VITE_INTERNAL_API_URL, no DEV proxy), so `probeAggregatePeer` /
+// `patchAggregatePeer` short-circuit to `aggregate_api_disabled`
+// without ever touching the network. That's enough to pin:
+//   - the dialog renders the localized title, label, and squadron name
+//   - Test and Save are disabled until the operator types a token
+//   - typing a token enables both buttons
+//   - clicking Test surfaces a localized error block (proves the
+//     probe → setProbe(fail) → probeFailureMessage default branch is
+//     wired up end-to-end through the i18n provider)
+test("aggregator-ui · RefreshPeerTokenDialog disables Test/Save until a token is typed", async () => {
+  const container = w.document.createElement("div");
+  w.document.body.appendChild(container);
+  const root = createRoot(container);
+  let savedCalls = 0;
+  let cancelCalls = 0;
+  await act(async () => {
+    root.render(
+      withProviders(
+        React.createElement(RefreshPeerTokenDialog, {
+          peerId: "11111111-1111-1111-1111-111111111111",
+          squadronName: "No. 5 Squadron",
+          onSaved: () => {
+            savedCalls += 1;
+          },
+          onCancel: () => {
+            cancelCalls += 1;
+          },
+        }),
+      ),
+    );
+  });
+  const testBtn = container.querySelector<HTMLButtonElement>(
+    '[data-testid="button-refresh-peer-token-test"]',
+  );
+  const saveBtn = container.querySelector<HTMLButtonElement>(
+    '[data-testid="button-refresh-peer-token-save"]',
+  );
+  const cancelBtn = container.querySelector<HTMLButtonElement>(
+    '[data-testid="button-refresh-peer-token-cancel"]',
+  );
+  const input = container.querySelector<HTMLInputElement>(
+    '[data-testid="input-refresh-peer-token"]',
+  );
+  const squadron = container.querySelector(
+    '[data-testid="text-refresh-peer-token-squadron"]',
+  );
+  assert.ok(testBtn, "Test button should render");
+  assert.ok(saveBtn, "Save button should render");
+  assert.ok(cancelBtn, "Cancel button should render");
+  assert.ok(input, "token input should render");
+  assert.ok(squadron, "squadron name slot should render");
+  assert.equal(squadron!.textContent, "No. 5 Squadron");
+  assert.equal(testBtn!.disabled, true, "Test must be disabled with no token");
+  assert.equal(saveBtn!.disabled, true, "Save must be disabled with no token");
+
+  // Type a token via the React-managed input → both buttons enable.
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(
+      w.HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    setter?.call(input, "phk_new_token");
+    input!.dispatchEvent(new w.Event("input", { bubbles: true }));
+  });
+  assert.equal(
+    testBtn!.disabled,
+    false,
+    "Test must enable once the operator types a token",
+  );
+  assert.equal(
+    saveBtn!.disabled,
+    false,
+    "Save must enable once the operator types a token",
+  );
+
+  // Click Cancel → onCancel callback fires (proves the prop wiring).
+  await act(async () => {
+    cancelBtn!.dispatchEvent(
+      new w.MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+  });
+  assert.equal(cancelCalls, 1, "Cancel button should invoke onCancel prop");
+  assert.equal(savedCalls, 0, "onSaved must not fire on Cancel");
+
+  await act(async () => {
+    root.unmount();
+  });
+  container.remove();
 });
 
 // ── teardown ──────────────────────────────────────────────────────

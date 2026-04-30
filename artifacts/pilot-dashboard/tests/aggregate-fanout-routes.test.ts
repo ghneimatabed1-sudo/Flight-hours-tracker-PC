@@ -117,6 +117,19 @@ function normalizeSql(sql: string): string {
       };
     }
 
+    // Single-peer base_url lookup used by POST /peers/:id/probe.
+    if (
+      sql.startsWith(
+        "select base_url from peer_squadrons where id = $1::uuid and removed_at is null",
+      )
+    ) {
+      const idParam = String(params[0] ?? "");
+      const hit = peerRows.find(
+        (p) => p.id === idParam && p.removed_at == null,
+      );
+      return { rows: hit ? [{ base_url: hit.base_url }] : [] };
+    }
+
     if (sql.startsWith("insert into peer_squadrons")) {
       const id = randomUUID();
       const row: PeerRow = {
@@ -289,8 +302,24 @@ type FakeHub = {
   squadronId: string;
   squadronName: string;
   token: string;
-  /** Mutate to flip a hub offline mid-test. */
-  setBroken: (mode: "ok" | "down" | "5xx") => void;
+  /**
+   * Mutate to flip a hub offline / mid-rotation mid-test.
+   *  - "401-invalid": hub responds 401 `{error:"invalid_token"}` (the
+   *    new body the squadron emits when a stale or hash-mismatched
+   *    token is presented).
+   *  - "401-revoked": hub responds 401 `{error:"revoked_token"}` (the
+   *    body emitted when the row is marked revoked or expired). These
+   *    two modes drive the new "Token expired" UI on the aggregator.
+   */
+  setBroken: (
+    mode:
+      | "ok"
+      | "down"
+      | "5xx"
+      | "401-invalid"
+      | "401-revoked"
+      | "404-not-found",
+  ) => void;
 };
 
 async function startFakeHub(opts: {
@@ -300,17 +329,43 @@ async function startFakeHub(opts: {
   resources: FakeHubResources;
 }): Promise<FakeHub> {
   const app: Express = express();
-  let mode: "ok" | "down" | "5xx" = "ok";
+  let mode:
+    | "ok"
+    | "down"
+    | "5xx"
+    | "401-invalid"
+    | "401-revoked"
+    | "404-not-found" = "ok";
 
-  app.get("/api/peer/healthz", (req, res) => {
+  function maybeFail(res: express.Response): boolean {
     if (mode === "down") {
       res.destroy();
-      return;
+      return true;
     }
     if (mode === "5xx") {
       res.status(503).json({ error: "service_unavailable" });
-      return;
+      return true;
     }
+    if (mode === "401-invalid") {
+      res.status(401).json({ error: "invalid_token" });
+      return true;
+    }
+    if (mode === "401-revoked") {
+      res.status(401).json({ error: "revoked_token" });
+      return true;
+    }
+    if (mode === "404-not-found") {
+      // 404 from a peer is not an auth event — classifyHttpError must
+      // bucket it as `other_http` so the dashboard does NOT prompt for
+      // a token refresh. Lets us pin the fourth branch of the taxonomy.
+      res.status(404).json({ error: "not_found" });
+      return true;
+    }
+    return false;
+  }
+
+  app.get("/api/peer/healthz", (req, res) => {
+    if (maybeFail(res)) return;
     const auth = String(req.header("authorization") ?? "");
     if (auth !== `Bearer ${opts.token}`) {
       res.status(401).json({ error: "unknown_token" });
@@ -326,6 +381,14 @@ async function startFakeHub(opts: {
     }
     if (mode === "5xx") {
       res.status(500).json({ error: "boom" });
+      return;
+    }
+    if (mode === "401-invalid") {
+      res.status(401).json({ error: "invalid_token" });
+      return;
+    }
+    if (mode === "401-revoked") {
+      res.status(401).json({ error: "revoked_token" });
       return;
     }
     const auth = String(req.header("authorization") ?? "");
@@ -964,5 +1027,264 @@ test("aggregate read endpoint: /api/aggregate/peers/health pings both peers", as
       Object.prototype.hasOwnProperty.call(body, "items"),
       false,
     );
+  });
+});
+
+// ─── Token-rotation classification ─────────────────────────────────────
+//
+// These tests pin the contract for the "Token expired" UI on the
+// aggregator. classifyHttpError() must inspect the JSON body — not just
+// the 401 status — so the dashboard can distinguish:
+//   - revoked_token → auth_revoked  (operator-initiated rotation)
+//   - invalid_token → auth_invalid  (token doesn't match any row)
+//   - 5xx           → network_error (transient, no UI prompt)
+// We assert this end-to-end through pingPeers so a future refactor of
+// the helper still has to satisfy what pingPeers exposes.
+
+test("pingPeers: error_kind=auth_revoked when peer returns revoked_token", async (t) => {
+  resetDb();
+  const a = await startFakeHub({
+    squadronId: "tigers",
+    squadronName: "Tigers",
+    token: "tok-a",
+    resources: {},
+  });
+  t.after(async () => {
+    await stopFakeHub(a);
+  });
+  const peer = seedPeer({
+    squadronId: a.squadronId,
+    squadronName: a.squadronName,
+    baseUrl: a.baseUrl,
+    token: a.token,
+  });
+  a.setBroken("401-revoked");
+  const statuses = await pingPeers([asPeer(peer)]);
+  assert.equal(statuses.length, 1);
+  assert.equal(statuses[0]!.status, "offline");
+  assert.equal(statuses[0]!.error_kind, "auth_revoked");
+});
+
+test("pingPeers: error_kind=auth_invalid when peer returns invalid_token", async (t) => {
+  resetDb();
+  const a = await startFakeHub({
+    squadronId: "tigers",
+    squadronName: "Tigers",
+    token: "tok-a",
+    resources: {},
+  });
+  t.after(async () => {
+    await stopFakeHub(a);
+  });
+  const peer = seedPeer({
+    squadronId: a.squadronId,
+    squadronName: a.squadronName,
+    baseUrl: a.baseUrl,
+    token: a.token,
+  });
+  a.setBroken("401-invalid");
+  const statuses = await pingPeers([asPeer(peer)]);
+  assert.equal(statuses[0]!.error_kind, "auth_invalid");
+});
+
+test("pingPeers: error_kind=other_http on 404 (not an auth event)", async (t) => {
+  // Pins the fourth branch of classifyHttpError. A 404 from the peer
+  // means the squadron's healthz route is missing or its base_url is
+  // wrong — neither of which should pop the "Token expired" UI.
+  resetDb();
+  const a = await startFakeHub({
+    squadronId: "tigers",
+    squadronName: "Tigers",
+    token: "tok-a",
+    resources: {},
+  });
+  t.after(async () => {
+    await stopFakeHub(a);
+  });
+  const peer = seedPeer({
+    squadronId: a.squadronId,
+    squadronName: a.squadronName,
+    baseUrl: a.baseUrl,
+    token: a.token,
+  });
+  a.setBroken("404-not-found");
+  const statuses = await pingPeers([asPeer(peer)]);
+  assert.equal(statuses[0]!.status, "offline");
+  assert.equal(statuses[0]!.error_kind, "other_http");
+});
+
+test("pingPeers: error_kind=network_error on 5xx (no token prompt)", async (t) => {
+  resetDb();
+  const a = await startFakeHub({
+    squadronId: "tigers",
+    squadronName: "Tigers",
+    token: "tok-a",
+    resources: {},
+  });
+  t.after(async () => {
+    await stopFakeHub(a);
+  });
+  const peer = seedPeer({
+    squadronId: a.squadronId,
+    squadronName: a.squadronName,
+    baseUrl: a.baseUrl,
+    token: a.token,
+  });
+  a.setBroken("5xx");
+  const statuses = await pingPeers([asPeer(peer)]);
+  assert.equal(statuses[0]!.error_kind, "network_error");
+});
+
+test("/api/aggregate/peers/health: surfaces error_kind in JSON", async (t) => {
+  resetDb();
+  const a = await startFakeHub({
+    squadronId: "tigers",
+    squadronName: "Tigers",
+    token: "tok-a",
+    resources: {},
+  });
+  t.after(async () => {
+    await stopFakeHub(a);
+  });
+  seedPeer({
+    squadronId: a.squadronId,
+    squadronName: a.squadronName,
+    baseUrl: a.baseUrl,
+    token: a.token,
+  });
+  a.setBroken("401-revoked");
+  await withAggregator(async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/aggregate/peers/health`);
+    const body = (await res.json()) as {
+      peers: Array<{ squadron_id: string; status: string; error_kind?: string }>;
+    };
+    const tigers = body.peers.find((p) => p.squadron_id === "tigers");
+    assert.equal(tigers?.status, "offline");
+    assert.equal(tigers?.error_kind, "auth_revoked");
+  });
+});
+
+// ─── /peers/:id/probe endpoint ─────────────────────────────────────────
+//
+// The Refresh Peer Token dialog calls this with a freshly-pasted token
+// to verify it works against the squadron's healthz BEFORE saving. The
+// endpoint must:
+//   - 403 non-super_admins (gated like every other write).
+//   - 400 on missing id / missing token.
+//   - 404 when the peer row doesn't exist.
+//   - {ok:true} when the supplied token works.
+//   - {ok:false, error_kind:"auth_revoked"} when the squadron rejects
+//     the token with a revoked body — so the dialog can localise the
+//     "still revoked" copy. Crucially, the probe MUST NOT mutate the
+//     stored auth_token (only PATCH does that).
+
+test("POST /peers/:id/probe: ok=true when token works", async (t) => {
+  resetDb();
+  const a = await startFakeHub({
+    squadronId: "tigers",
+    squadronName: "Tigers",
+    token: "good-token",
+    resources: {},
+  });
+  t.after(async () => {
+    await stopFakeHub(a);
+  });
+  const peer = seedPeer({
+    squadronId: a.squadronId,
+    squadronName: a.squadronName,
+    baseUrl: a.baseUrl,
+    token: "stored-stale-token",
+  });
+  await withAggregator(async (baseUrl) => {
+    const res = await fetch(
+      `${baseUrl}/api/aggregate/peers/${peer.id}/probe`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ auth_token: "good-token" }),
+      },
+    );
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { ok: boolean };
+    assert.equal(body.ok, true);
+  });
+  // Probe must not mutate stored token.
+  assert.equal(peerRows.find((p) => p.id === peer.id)!.auth_token, "stored-stale-token");
+});
+
+test("POST /peers/:id/probe: ok=false + error_kind=auth_revoked when peer says revoked", async (t) => {
+  resetDb();
+  const a = await startFakeHub({
+    squadronId: "tigers",
+    squadronName: "Tigers",
+    token: "good-token",
+    resources: {},
+  });
+  t.after(async () => {
+    await stopFakeHub(a);
+  });
+  const peer = seedPeer({
+    squadronId: a.squadronId,
+    squadronName: a.squadronName,
+    baseUrl: a.baseUrl,
+    token: "stored-stale-token",
+  });
+  a.setBroken("401-revoked");
+  await withAggregator(async (baseUrl) => {
+    const res = await fetch(
+      `${baseUrl}/api/aggregate/peers/${peer.id}/probe`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ auth_token: "any-token" }),
+      },
+    );
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { ok: boolean; error_kind?: string };
+    assert.equal(body.ok, false);
+    assert.equal(body.error_kind, "auth_revoked");
+  });
+});
+
+test("POST /peers/:id/probe: 400 missing token, 404 missing peer, 400 malformed id", async () => {
+  resetDb();
+  await withAggregator(async (baseUrl) => {
+    const fakeId = randomUUID();
+    let res = await fetch(
+      `${baseUrl}/api/aggregate/peers/${fakeId}/probe`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      },
+    );
+    assert.equal(res.status, 400);
+    let body = (await res.json()) as { error?: string };
+    assert.equal(body.error, "missing_token");
+
+    res = await fetch(
+      `${baseUrl}/api/aggregate/peers/${fakeId}/probe`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ auth_token: "x" }),
+      },
+    );
+    assert.equal(res.status, 404);
+
+    // A non-UUID id must surface as a 400 invalid_id, not bubble up
+    // from Postgres as an opaque 500 — the dialog UX depends on
+    // distinguishing "typo in route param" from "no such peer".
+    res = await fetch(
+      `${baseUrl}/api/aggregate/peers/not-a-uuid/probe`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ auth_token: "x" }),
+      },
+    );
+    assert.equal(res.status, 400);
+    body = (await res.json()) as { error?: string };
+    assert.equal(body.error, "invalid_id");
   });
 });

@@ -1801,6 +1801,19 @@ export async function fetchAggregatePeersList(): Promise<
   }
 }
 
+/**
+ * Mirror of `PeerErrorKind` on the server. The dashboard switches the
+ * Squadron Status badge from gray "Offline" to yellow "Token expired"
+ * when the kind is `auth_invalid` or `auth_revoked`, which prompts the
+ * operator to paste the new bearer (e.g. after the squadron ran
+ * `reset-peer-token.ps1` without telling the aggregator).
+ */
+export type PeerErrorKind =
+  | "network_error"
+  | "auth_invalid"
+  | "auth_revoked"
+  | "other_http";
+
 export type PeerHealthStatus = {
   peer_squadron_id: string;
   squadron_id: string;
@@ -1809,7 +1822,21 @@ export type PeerHealthStatus = {
   last_success_at: string | null;
   served_from_cache: boolean;
   error?: string;
+  error_kind?: PeerErrorKind;
 };
+
+function parsePeerErrorKind(v: unknown): PeerErrorKind | undefined {
+  if (typeof v !== "string") return undefined;
+  switch (v) {
+    case "network_error":
+    case "auth_invalid":
+    case "auth_revoked":
+    case "other_http":
+      return v;
+    default:
+      return undefined;
+  }
+}
 
 function parsePeerHealth(r: Record<string, unknown>): PeerHealthStatus {
   const status = r.status === "online" ? "online" : "offline";
@@ -1830,6 +1857,8 @@ function parsePeerHealth(r: Record<string, unknown>): PeerHealthStatus {
   if (r.error != null && r.error !== "") {
     out.error = String(r.error);
   }
+  const kind = parsePeerErrorKind(r.error_kind);
+  if (kind) out.error_kind = kind;
   return out;
 }
 
@@ -1939,6 +1968,62 @@ export async function patchAggregatePeer(
       };
     }
     return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Result of a peer-token probe. The dashboard's "Refresh peer token"
+ * dialog uses `error_kind` to localise the failure reason — e.g.
+ * "Token still revoked" vs "Token still rejected" vs "Peer
+ * unreachable" — so the operator knows whether to ask the squadron
+ * to re-issue the token or to check the network.
+ */
+export type ProbeAggregatePeerResult =
+  | { ok: true }
+  | {
+      ok: false;
+      /** Empty string when the route itself failed (HTTP error). */
+      error: string;
+      error_kind?: PeerErrorKind;
+      status?: number;
+    };
+
+/**
+ * POST /api/aggregate/peers/:id/probe with `{auth_token}`. Lets the
+ * Refresh Peer Token dialog verify a freshly-pasted bearer against the
+ * peer's `/api/peer/healthz` BEFORE the operator commits it via PATCH.
+ */
+export async function probeAggregatePeer(
+  id: string,
+  authToken: string,
+): Promise<ProbeAggregatePeerResult> {
+  const url = aggregateApiPath(`peers/${encodeURIComponent(id)}/probe`);
+  if (!url) return { ok: false, error: "aggregate_api_disabled" };
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: internalWriteHeaders(),
+      body: JSON.stringify({ auth_token: authToken }),
+    });
+    const parsed = (await res.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: String(parsed?.error ?? `http_${res.status}`),
+        status: res.status,
+      };
+    }
+    if (parsed?.ok === true) return { ok: true };
+    return {
+      ok: false,
+      error: String(parsed?.error ?? "probe_failed"),
+      error_kind: parsePeerErrorKind(parsed?.error_kind),
+    };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

@@ -60,6 +60,21 @@ export type PeerSquadronRow = {
   last_error_at: Date | null;
 };
 
+/**
+ * Categorisation of why a peer call failed. `network_error` is the
+ * "transient — try later" bucket (DNS, refused, timeout, 5xx). The
+ * two `auth_*` kinds are surfaced to the operator dashboard so the
+ * Squadron Status panel can show a "Token expired — paste new one"
+ * affordance instead of the generic gray "Offline" badge. See
+ * `routes/peer-shell.ts::requirePeerToken` for the producer-side
+ * contract that decides which body each kind comes from.
+ */
+export type PeerErrorKind =
+  | "network_error"
+  | "auth_invalid"
+  | "auth_revoked"
+  | "other_http";
+
 export type PeerStatus = {
   peer_squadron_id: string;
   squadron_id: string;
@@ -68,6 +83,12 @@ export type PeerStatus = {
   last_success_at: string | null;
   served_from_cache: boolean;
   error?: string;
+  /**
+   * Set whenever `status === "offline"`. Lets the dashboard pick a
+   * "Token expired" badge for `auth_invalid` / `auth_revoked` while
+   * keeping the existing "Offline" badge for everything else.
+   */
+  error_kind?: PeerErrorKind;
   /**
    * Difference (peer clock − this PC's clock) in milliseconds, parsed
    * from the responder's `Date` header. Positive = peer is ahead of us.
@@ -100,8 +121,16 @@ export type FanoutDeps = {
   ) => Promise<{ payload: unknown; fetched_at: Date } | null>;
   /** Called when a peer call succeeds. Default: bump `last_ok_at`. */
   recordPeerOk?: (peerSquadronId: string) => Promise<void>;
-  /** Called when a peer call fails. Default: bump `last_error*`. */
-  recordPeerError?: (peerSquadronId: string, error: string) => Promise<void>;
+  /**
+   * Called when a peer call fails. Default: bump `last_error*`. The
+   * `error_kind` argument lets callers branch on auth-vs-network vs
+   * other-http without re-parsing the message string.
+   */
+  recordPeerError?: (
+    peerSquadronId: string,
+    error: string,
+    error_kind: PeerErrorKind,
+  ) => Promise<void>;
 };
 
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -235,6 +264,10 @@ async function defaultRecordPeerOk(peerSquadronId: string): Promise<void> {
 async function defaultRecordPeerError(
   peerSquadronId: string,
   error: string,
+  // `_error_kind` is part of the seam contract so tests and future
+  // persistence layers can branch on it; the default DB writer keeps
+  // the existing `last_error` text-only column untouched.
+  _error_kind: PeerErrorKind,
 ): Promise<void> {
   try {
     await pool.query(
@@ -287,7 +320,12 @@ function extractItems(payload: unknown): unknown[] {
 
 type PeerCallOutcome =
   | { kind: "ok"; payload: unknown; dateHeader: string | null }
-  | { kind: "fail"; error: string; transient: boolean };
+  | {
+      kind: "fail";
+      error: string;
+      transient: boolean;
+      error_kind: PeerErrorKind;
+    };
 
 async function callPeer(
   peer: PeerSquadronRow,
@@ -334,7 +372,13 @@ async function callPeer(
         : `http_${res.status}`;
     // 4xx → not transient, won't fix itself; 5xx → transient.
     const transient = res.status >= 500;
-    return { kind: "fail", error: `${res.status} ${detail}`, transient };
+    const error_kind = classifyHttpError(res.status, detail);
+    return {
+      kind: "fail",
+      error: `${res.status} ${detail}`,
+      transient,
+      error_kind,
+    };
   } catch (err) {
     const aborted =
       (err instanceof Error && err.name === "AbortError")
@@ -344,10 +388,43 @@ async function callPeer(
       : err instanceof Error
         ? err.message
         : String(err);
-    return { kind: "fail", error: msg, transient: true };
+    return {
+      kind: "fail",
+      error: msg,
+      transient: true,
+      error_kind: "network_error",
+    };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Map a 4xx/5xx response onto one of the four `PeerErrorKind` buckets.
+ *
+ *  - 401 with body `invalid_token`  → `auth_invalid` (token doesn't
+ *    match anything; almost always the squadron rotated their token
+ *    via reset-peer-token.ps1 and the aggregator wasn't told).
+ *  - 401 with body `revoked_token`  → `auth_revoked` (an admin clicked
+ *    Revoke on the squadron hub's super-admin page, or the token's
+ *    `expires_at` lapsed).
+ *  - Other 4xx                       → `auth_invalid` if 401, else
+ *                                      `other_http`.
+ *  - 5xx                             → `network_error` (transient).
+ *
+ * The legacy `invalid_peer_token` body is treated as `auth_invalid` so
+ * older squadron hubs that haven't shipped the new error-body contract
+ * still trigger the operator prompt.
+ */
+function classifyHttpError(status: number, detail: string): PeerErrorKind {
+  if (status >= 500) return "network_error";
+  if (status === 401) {
+    const d = detail.trim().toLowerCase();
+    if (d === "revoked_token") return "auth_revoked";
+    if (d === "invalid_token" || d === "invalid_peer_token") return "auth_invalid";
+    return "auth_invalid";
+  }
+  return "other_http";
 }
 
 /**
@@ -381,7 +458,7 @@ export async function fanOutResource<R extends Record<string, unknown>>(
         await recordPeerOk(peer.id);
         return { peer, outcome };
       }
-      await recordPeerError(peer.id, outcome.error);
+      await recordPeerError(peer.id, outcome.error, outcome.error_kind);
       return { peer, outcome };
     }),
   );
@@ -423,6 +500,7 @@ export async function fanOutResource<R extends Record<string, unknown>>(
             : null,
         served_from_cache: cached != null,
         error: outcome.error,
+        error_kind: outcome.error_kind,
       });
     }
   }
@@ -477,7 +555,7 @@ export async function pingPeers(
           clock_skew_ms: recentPeerSkewMs.get(peer.id) ?? null,
         };
       }
-      await recordPeerError(peer.id, outcome.error);
+      await recordPeerError(peer.id, outcome.error, outcome.error_kind);
       return {
         peer_squadron_id: peer.id,
         squadron_id: peer.squadron_id,
@@ -488,7 +566,46 @@ export async function pingPeers(
           : null,
         served_from_cache: false,
         error: outcome.error,
+        error_kind: outcome.error_kind,
       };
     }),
   );
+}
+
+/**
+ * Single-shot peer health check used by the "Test" button in the
+ * Refresh Peer Token dialog. Calls `/api/peer/healthz` with the
+ * supplied bearer (NOT the stored one) and reports whether it works.
+ *
+ * Returns the same `error_kind` taxonomy as `pingPeers` so the dialog
+ * can tell the operator "still revoked" vs "invalid token" vs
+ * "network unreachable".
+ */
+export async function probePeerToken(
+  baseUrl: string,
+  token: string,
+  opts: { timeoutMs?: number; fetchImpl?: typeof fetch } = {},
+): Promise<
+  | { ok: true }
+  | { ok: false; error: string; error_kind: PeerErrorKind }
+> {
+  const timeoutMs = opts.timeoutMs ?? 2_000;
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const fakePeer: PeerSquadronRow = {
+    id: "probe",
+    squadron_id: "probe",
+    squadron_name: null,
+    base_url: baseUrl,
+    auth_token: token,
+    last_ok_at: null,
+    last_error: null,
+    last_error_at: null,
+  };
+  const outcome = await callPeer(fakePeer, "healthz", timeoutMs, fetchImpl);
+  if (outcome.kind === "ok") return { ok: true };
+  return {
+    ok: false,
+    error: outcome.error,
+    error_kind: outcome.error_kind,
+  };
 }

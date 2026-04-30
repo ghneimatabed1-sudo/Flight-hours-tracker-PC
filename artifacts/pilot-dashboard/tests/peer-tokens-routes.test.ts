@@ -311,27 +311,33 @@ test("DELETE /internal/peer-tokens/:id: 409 when token already revoked", async (
 
 // ── /peer/* middleware ──────────────────────────────────────────────
 
-test("/peer/pilots: 401 invalid_peer_token when no header is sent", async () => {
+test("/peer/pilots: 401 invalid_token when no header is sent", async () => {
   reset();
   await withServer(async (baseUrl) => {
     const res = await fetch(`${baseUrl}/peer/pilots`);
     assert.equal(res.status, 401);
     const body = (await res.json()) as { error?: string };
-    assert.equal(body.error, "invalid_peer_token");
+    // Token-rotation flow needs a distinct body so the aggregator's
+    // classifyHttpError() can decide between "Token expired" UI and a
+    // generic offline state. Missing/malformed/no-row/hash-mismatch all
+    // map to `invalid_token` (auth_invalid kind).
+    assert.equal(body.error, "invalid_token");
   });
 });
 
-test("/peer/pilots: 401 invalid_peer_token when token cannot be parsed", async () => {
+test("/peer/pilots: 401 invalid_token when token cannot be parsed", async () => {
   reset();
   await withServer(async (baseUrl) => {
     const res = await fetch(`${baseUrl}/peer/pilots`, {
       headers: { "x-hawk-peer-token": "garbage" },
     });
     assert.equal(res.status, 401);
+    const body = (await res.json()) as { error?: string };
+    assert.equal(body.error, "invalid_token");
   });
 });
 
-test("/peer/pilots: 401 invalid_peer_token when row is missing in DB", async () => {
+test("/peer/pilots: 401 invalid_token when row is missing in DB", async () => {
   reset();
   // Fabricate a well-shaped token; lookup will return zero rows.
   const issued = await issuePeerToken();
@@ -341,10 +347,12 @@ test("/peer/pilots: 401 invalid_peer_token when row is missing in DB", async () 
       headers: { "x-hawk-peer-token": issued.plain },
     });
     assert.equal(res.status, 401);
+    const body = (await res.json()) as { error?: string };
+    assert.equal(body.error, "invalid_token");
   });
 });
 
-test("/peer/pilots: 401 invalid_peer_token when row is revoked", async () => {
+test("/peer/pilots: 401 revoked_token when row is revoked", async () => {
   reset();
   const issued = await issuePeerToken();
   queryHandler = async (sql) => {
@@ -366,10 +374,15 @@ test("/peer/pilots: 401 invalid_peer_token when row is revoked", async () => {
       headers: { "x-hawk-peer-token": issued.plain },
     });
     assert.equal(res.status, 401);
+    const body = (await res.json()) as { error?: string };
+    // Distinct from `invalid_token` so the aggregator can prompt the
+    // operator with the "Token revoked — refresh" copy instead of the
+    // generic "Token rejected" copy.
+    assert.equal(body.error, "revoked_token");
   });
 });
 
-test("/peer/pilots: 401 invalid_peer_token when expires_at has passed", async () => {
+test("/peer/pilots: 401 revoked_token when expires_at has passed", async () => {
   reset();
   const issued = await issuePeerToken();
   queryHandler = async (sql) => {
@@ -391,10 +404,15 @@ test("/peer/pilots: 401 invalid_peer_token when expires_at has passed", async ()
       headers: { "x-hawk-peer-token": issued.plain },
     });
     assert.equal(res.status, 401);
+    const body = (await res.json()) as { error?: string };
+    // Expired tokens use the same body as revoked tokens — both are an
+    // operator-initiated lifecycle event the aggregator surfaces as
+    // "Token expired".
+    assert.equal(body.error, "revoked_token");
   });
 });
 
-test("/peer/pilots: 401 invalid_peer_token when secret does not match the stored hash", async () => {
+test("/peer/pilots: 401 invalid_token when secret does not match the stored hash", async () => {
   reset();
   const real = await issuePeerToken();
   // Build a token that re-uses the real id but supplies a wrong secret.
