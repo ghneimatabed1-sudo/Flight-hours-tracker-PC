@@ -325,6 +325,15 @@ export const ensureLanAuthSchema = ensureFullSchema;
 // process cwd) before being dropped, so an operator can recover any
 // rows that may have lingered on a long-running install. Subsequent
 // boots find the marker row in `schema_cleanup_marker` and short-circuit.
+//
+// The literal `xpc_*`, `hawk_reminder_*_local`, `pilot_devices`,
+// `pilot_link_codes`, `pilot_reminder_prefs`, and
+// `pilot_currency_notifications` table names below are intentional. The
+// surfaces that read or wrote them are gone (deleted in #336), but a
+// long-running install may still have the rows on disk; we MUST keep
+// these names here so `ensureLegacyCleanup` can find, dump, and drop
+// them on first boot after the upgrade. Do not remove entries unless
+// every install in the field has already burnt the cleanup marker.
 
 const LEGACY_TABLES = [
   "xpc_registry",

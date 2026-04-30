@@ -899,38 +899,6 @@ export async function exportAuditLog(sqdn: SquadronInfo, rows: AuditEntry[], ran
   save(doc, `audit-log-${lang}-${fileStamp()}.pdf`);
 }
 
-// ─── Reminders log ────────────────────────────────────────────────
-export interface ReminderLogEntry { pilot: string; type: string; threshold?: string; lastSent?: string; nextDue?: string }
-export async function exportRemindersLog(sqdn: SquadronInfo, rows: ReminderLogEntry[], lang: PdfLang = "en") {
-  const emblem = await loadEmblem();
-  const doc = await setupDoc(lang);
-  drawHeader(doc, sqdn, lang === "ar" ? "سجل التذكيرات" : "Reminders Log", emblem, lang);
-
-  autoTable(doc, {
-    startY: 42,
-    head: [[
-      shape(tr("col_pilot", lang)),
-      lang === "ar" ? "النوع" : "Type",
-      lang === "ar" ? "الحد" : "Threshold",
-      lang === "ar" ? "آخر إرسال" : "Last sent",
-      lang === "ar" ? "التالي" : "Next due",
-    ]],
-    body: rows.length === 0
-      ? [[lang === "ar" ? "لا يوجد" : "No reminders configured.", "", "", "", ""]]
-      : rows.map((r) => [
-          shape(r.pilot), shape(r.type), shape(r.threshold || "—"),
-          r.lastSent ? fmtDate(r.lastSent) : "—",
-          r.nextDue ? fmtDate(r.nextDue) : "—",
-        ]),
-    styles: { fontSize: 9, cellPadding: 1.6, ...tableStyles(lang) },
-    headStyles: { fillColor: [20, 24, 32], textColor: [212, 175, 55], ...tableStyles(lang) },
-    margin: { left: 8, right: 8 },
-  });
-
-  footer(doc, lang);
-  save(doc, `reminders-log-${lang}-${fileStamp()}.pdf`);
-}
-
 // ─── NOTAMs ───────────────────────────────────────────────────────
 export interface NotamLine { id: string; date: string; text: string }
 export async function exportNotams(sqdn: SquadronInfo, notams: NotamLine[], lang: PdfLang = "en") {
@@ -1535,7 +1503,6 @@ export const PDF_EXPORTS = {
   externalPilots: exportExternalPilots,
   pilotLogbook: exportPilotLogbook,
   auditLog: exportAuditLog,
-  remindersLog: exportRemindersLog,
   notams: exportNotams,
   navRoutes: exportNavRoutes,
   riskAssessment: exportRiskAssessment,

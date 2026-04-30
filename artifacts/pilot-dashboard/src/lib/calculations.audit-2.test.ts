@@ -28,12 +28,12 @@ function formatCode(c: string): string {
   if (s.length !== 6) return c;
   return `${s.slice(0, 2)}-${s.slice(2, 4)}-${s.slice(4, 6)}`;
 }
-// resolvePairKind has dozens of branches; the live equivalent is exercised
-// end-to-end in audit-driver-3.mjs Phase 1.B (D6–D12) against the deployed
-// public.xpc_validate_pairing RPC, which is the canonical authority. The
-// fixture below pins ONLY the legality matrix that the JS side enforces
-// before the network round-trip. If you change either side without the other,
-// production rejects the pair and the operator sees a confusing error.
+// resolvePairKind has dozens of branches in its live form. The fixture below
+// pins ONLY the legality matrix that the JS side enforces before any
+// network round-trip — i.e. the rules that decide whether a candidate pair
+// is even worth submitting. The full kind-resolution authority now lives in
+// the LAN api-server's pair routes; if the rules diverge, operators see a
+// confusing reject from the server.
 function resolvePairKind(args: {
   aTier: string; bTier: string;
   aSquadron: string | null; bSquadron: string | null;

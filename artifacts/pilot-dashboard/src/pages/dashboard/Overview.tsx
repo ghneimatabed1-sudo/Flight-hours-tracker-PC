@@ -10,10 +10,10 @@ import { ChevronRight, Lock, Plane, Users, AlertTriangle, Clock, Printer } from 
 import { Button } from "@/components/ui/button";
 
 // Wing / Base / HQ commanders use this Overview as their landing pad.
-// Squadron cards summarise the operator's authorized squadrons. Connectivity
-// badges (cross-PC mesh) were removed in task #336 along with the rest of
-// the Supabase-era xpc_* surfaces — every operator now reads the same
-// LAN-backed squadron data, so there is nothing to indicate "online" for.
+// Squadron cards summarise the operator's authorized squadrons. Per-squadron
+// connectivity badges were removed in task #336 along with the rest of the
+// cross-PC mesh — every operator now reads the same LAN-backed squadron
+// data, so there is nothing to indicate "online" for.
 
 export default function CommanderOverview() {
   const { t, lang, dir } = useI18n();
