@@ -77,6 +77,90 @@ status: Running).
 
 ---
 
+## 1b. First-time install on a Wing/Base Commander PC
+
+A **Wing Commander PC** rolls up several squadrons' data. A **Base
+Commander PC** rolls up several wings' data. Both are *aggregator*
+PCs — they have their own Postgres + api-server, but they pull
+squadron data from the squadron host PCs over the LAN. They do **not**
+own any squadron's data of their own.
+
+Before you start, on each squadron's host PC:
+- Confirm `first-time-setup.ps1` was run with `-EnableMdns` so this
+  PC will see it on the LAN. (If not, you can still add it by hand —
+  see step 6 below.)
+- Have the squadron's **peer access token** ready. It was printed in a
+  green banner at the end of squadron's `first-time-setup.ps1`, and a
+  copy is in `%PROGRAMDATA%\HawkEye\peer-token-initial.txt` on that
+  hub PC (Local Administrators only). Lost it? Run
+  `reset-peer-token.ps1` on the hub to mint a fresh one.
+
+Steps:
+
+1. Install Postgres 14 or newer on the Wing/Base PC. Pick a strong
+   password for the `postgres` superuser. Write it down.
+2. Install Node.js 20 or newer on the Wing/Base PC.
+3. (Optional but recommended) Install Apple Bonjour Print Services for
+   Windows from <https://support.apple.com/kb/dl999>. This adds
+   `dns-sd.exe`, which the wizard uses to auto-detect squadron hubs.
+   Without it, the wizard falls back to manual entry.
+4. Copy the Hawk Eye source folder onto the Wing/Base PC (USB or LAN
+   copy).
+5. Open PowerShell **as administrator** in the source folder.
+6. Run:
+   ```
+   pnpm install
+   .\scripts\lan-host\aggregator-first-time-setup.ps1
+   ```
+   The wizard will:
+   - Ask whether this is a `wing` or `base` PC.
+   - Ask for a short hostname (`wing-cmd-pc`, `base-cmd-pc`, …) and
+     queue a Windows rename if the current name doesn't match. **A
+     reboot is mandatory after the script finishes if the rename
+     happened.**
+   - Auto-install Postgres via `winget` if it isn't already present.
+   - Create the local `hawkeye_aggregator` database, write
+     `artifacts/api-server/.env` with `INSTALL_PROFILE=aggregator-wing`
+     (or `aggregator-base`), build the api-server, and lay out every
+     table this PC needs.
+   - Mint the first super-admin account on this Wing/Base PC.
+   - **Auto-discover squadron hubs** by browsing `_hawkeye-hub._tcp`
+     on the LAN. Detected squadrons appear in a numbered picker
+     showing the squadron name and the resolved `<host>:<port>`. Pick
+     them by number (or type `a` to add all), and for each one paste
+     that squadron's **peer access token** when prompted. The wizard
+     validates the hub responds with `installProfile=hub` before
+     adding it, then stores the entry in `peer_squadrons` (visible
+     later in the dashboard's address book).
+   - **Manual fallback:** when discovery is finished, the wizard asks
+     "Add another squadron by hand?" — answer `y` for any squadron
+     whose LAN blocks multicast or whose hub didn't opt in to mDNS.
+     Type the squadron handle, the hostname (`tigers-hub.local`),
+     port (default 3847), and the peer token. Same validation runs.
+   - Register two scheduled tasks: one to start the api-server on
+     boot (`HawkEye-ApiServer-OnStartup`), and one to back up the
+     database every night at 02:30 (`HawkEye-Postgres-Backup-Daily`).
+7. Note the **bootstrap token** the script prints. It's only used
+   once for first sign-in if you ever need to recover the super-admin.
+8. The aggregator dashboard is just the regular Hawk Eye `.exe` aimed
+   at this Wing/Base PC instead of a squadron hub. Install it on
+   each commander's workstation the same way as section 2 below; the
+   address book is reachable in the dashboard under
+   **Admin → Squadrons (peers)**.
+
+To **add or rotate squadrons later** (e.g. a new squadron joins, or a
+peer token was rotated), you have two options:
+- Re-run `aggregator-first-time-setup.ps1` — the database / env / build
+  steps are idempotent, and the discovery + manual-entry steps will
+  add new peers (existing ones return "peer already exists" and are
+  left alone).
+- Or call the API directly: `POST /api/aggregate/peers` adds an entry,
+  `PATCH /api/aggregate/peers/:id` swaps the token, and `DELETE
+  /api/aggregate/peers/:id` removes one. All three are super-admin
+  only and recorded in `audit_log`.
+
+---
+
 ## 2. First-time install on each dashboard PC
 
 1. Copy `Hawk Eye Setup x.y.z.exe` to the dashboard PC.
