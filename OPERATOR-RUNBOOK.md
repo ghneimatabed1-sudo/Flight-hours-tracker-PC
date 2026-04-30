@@ -530,6 +530,29 @@ install Bonjour and re-run.
 
 ## 7. Push an updated build via USB
 
+**Before you copy anything to USB:** on the build PC (the machine that
+produced the new installer), open a terminal in the source folder and
+run:
+
+```
+pnpm run release:verify
+```
+
+This runs every gate (typecheck, the full pilot-dashboard test suite,
+the 3-process multi-PC test, the matrix Playwright sweep, and the
+"no external URLs" static check), captures evidence under
+`release-evidence/<date>/`, and writes a single
+`HAWKEYE-RELEASE-REPORT-<date>.md` with a verdict at the top:
+
+| Verdict | Meaning | Action |
+| --- | --- | --- |
+| GREEN | All checks passed and matrix evidence matches the committed baseline. | **GO.** Continue with the steps below. |
+| GREEN (provisional) | All checks passed but the matrix baseline is still the empty starter (drift detector is informational only). | **GO**, but on a host with Chromium also follow the report's recommendation: promote `release-evidence/<date>/matrix-snapshot.json` into `scripts/src/release-evidence-baseline.json`, commit, and re-run so the next release can detect drift. |
+| AMBER | All checks passed but a probe outcome drifted from the (initialized) baseline — a role-gate may have changed. | **HOLD.** Read the drift table in the report. If the change is intentional, refresh `scripts/src/release-evidence-baseline.json` from `release-evidence/<date>/matrix-snapshot.json`, commit, re-run, and confirm GREEN. |
+| RED | A check failed. | **NO-GO.** Open the per-check log under `release-evidence/<date>/`, fix the failure, re-run. Do not bypass. |
+
+Only proceed to the steps below once the verdict is **GREEN**.
+
 Hawk Eye has auto-update **disabled** by default — that is the safe
 choice for a private LAN install.
 

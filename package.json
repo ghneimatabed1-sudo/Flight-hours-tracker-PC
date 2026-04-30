@@ -29,7 +29,8 @@
     "lan:aggregator:add-peer": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/add-squadron-peer.ps1",
     "lan:aggregator:install-dashboard-task": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/install-dashboard-startup-task.ps1",
     "lan:client:setup-env": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/setup-dashboard-lan-env.ps1",
-    "lan:pilot:verify": "pnpm run typecheck && pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/pilot-dashboard run test"
+    "lan:pilot:verify": "pnpm run typecheck && pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/pilot-dashboard run test",
+    "release:verify": "node scripts/src/release-verify.mjs"
   },
   "private": true,
   "devDependencies": {
