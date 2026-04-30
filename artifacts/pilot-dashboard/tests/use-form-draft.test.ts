@@ -133,7 +133,16 @@ test("useFormDraft: typing persists after the 500ms debounce", async () => {
   await flushDebounce();
   const blob = w.localStorage.getItem(KEY);
   assert.ok(blob, "blob must exist after debounce");
-  assert.deepEqual(JSON.parse(blob!), { name: "Alice", count: 3 });
+  // The hook persists `{ _savedAt, value }` envelopes since #383 so
+  // the once-per-mount cleanup sweep can age stale drafts out of
+  // localStorage. The user's data lives under `value`.
+  const parsed = JSON.parse(blob!) as { _savedAt: string; value: DraftShape };
+  assert.deepEqual(parsed.value, { name: "Alice", count: 3 });
+  assert.equal(typeof parsed._savedAt, "string");
+  assert.ok(
+    !Number.isNaN(Date.parse(parsed._savedAt)),
+    "_savedAt must be a parseable ISO timestamp",
+  );
   await h.unmount();
 });
 
@@ -152,7 +161,8 @@ test("useFormDraft: rapid edits collapse into a single write", async () => {
 
   await flushDebounce();
   const blob = w.localStorage.getItem(KEY);
-  assert.deepEqual(JSON.parse(blob!), { name: "ABC", count: 3 });
+  const parsed = JSON.parse(blob!) as { _savedAt: string; value: DraftShape };
+  assert.deepEqual(parsed.value, { name: "ABC", count: 3 });
   await h.unmount();
 });
 
@@ -229,6 +239,166 @@ test("useFormDraft: corrupt persisted blob is dropped on restore", async () => {
   assert.equal(h.hook.hasDraft, false,
     "banner must hide after the failed restore");
   await h.unmount();
+});
+
+test("useFormDraft: legacy raw-T blobs are still accepted on restore (#383)", async () => {
+  // Pre-#383 builds wrote raw `T` JSON without the `_savedAt`
+  // envelope. Operators upgrading to the new bundle must not lose
+  // their in-progress drafts on first launch.
+  const KEY = "draft.test.legacy-raw";
+  const legacy = { name: "Foxtrot", count: 42 };
+  w.localStorage.setItem(KEY, JSON.stringify(legacy));
+
+  const h = await mountHarness(KEY, emptyDraft());
+  assert.equal(h.hook.hasDraft, true, "legacy blob must still trip hasDraft");
+
+  await act(async () => { h.hook.restoreDraft(); });
+  assert.equal(h.state.name, "Foxtrot");
+  assert.equal(h.state.count, 42);
+  await h.unmount();
+});
+
+test("useFormDraft: dirty state installs a beforeunload listener (#382)", async () => {
+  const KEY = "draft.test.beforeunload";
+  w.localStorage.removeItem(KEY);
+
+  // Spy on add/remove to verify the listener lifecycle.
+  const installs: string[] = [];
+  const removes: string[] = [];
+  const origAdd = w.addEventListener.bind(w);
+  const origRemove = w.removeEventListener.bind(w);
+  w.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, opts?: AddEventListenerOptions | boolean) => {
+    if (type === "beforeunload") installs.push(type);
+    return origAdd(type as never, listener as never, opts as never);
+  }) as typeof w.addEventListener;
+  w.removeEventListener = ((type: string, listener: EventListenerOrEventListenerObject, opts?: EventListenerOptions | boolean) => {
+    if (type === "beforeunload") removes.push(type);
+    return origRemove(type as never, listener as never, opts as never);
+  }) as typeof w.removeEventListener;
+
+  try {
+    const h = await mountHarness(KEY, emptyDraft());
+    // Empty baseline — no listener yet.
+    assert.equal(installs.length, 0,
+      "no beforeunload listener while the form matches the baseline");
+
+    await act(async () => { h.setState({ name: "Golf", count: 1 }); });
+    assert.equal(installs.length, 1,
+      "dirty state must install exactly one beforeunload listener");
+
+    // Simulate a tab-close attempt and confirm we cancel it.
+    const ev = new w.Event("beforeunload", { cancelable: true }) as unknown as BeforeUnloadEvent;
+    Object.defineProperty(ev, "returnValue", { value: "", writable: true });
+    w.dispatchEvent(ev as unknown as Event);
+    assert.equal(ev.defaultPrevented, true,
+      "beforeunload must be cancelled while the draft is dirty");
+
+    // Reset to baseline — listener must come back off.
+    await act(async () => { h.setState(emptyDraft()); });
+    assert.ok(removes.length >= 1,
+      "clean form must remove the beforeunload listener");
+
+    await h.unmount();
+  } finally {
+    w.addEventListener = origAdd;
+    w.removeEventListener = origRemove;
+  }
+});
+
+test("useFormDraft: markSaved() suppresses beforeunload until next edit (#382)", async () => {
+  const KEY = "draft.test.markSaved";
+  w.localStorage.removeItem(KEY);
+
+  const installs: string[] = [];
+  const removes: string[] = [];
+  const origAdd = w.addEventListener.bind(w);
+  const origRemove = w.removeEventListener.bind(w);
+  w.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, opts?: AddEventListenerOptions | boolean) => {
+    if (type === "beforeunload") installs.push(type);
+    return origAdd(type as never, listener as never, opts as never);
+  }) as typeof w.addEventListener;
+  w.removeEventListener = ((type: string, listener: EventListenerOrEventListenerObject, opts?: EventListenerOptions | boolean) => {
+    if (type === "beforeunload") removes.push(type);
+    return origRemove(type as never, listener as never, opts as never);
+  }) as typeof w.removeEventListener;
+
+  try {
+    const h = await mountHarness(KEY, emptyDraft());
+
+    // Type → listener is installed.
+    await act(async () => { h.setState({ name: "Alpha", count: 2 }); });
+    assert.equal(installs.length, 1,
+      "dirty edit must install the beforeunload listener");
+
+    // Operator hits Save in the host form. The form does NOT reset
+    // to baseline (e.g. an Edit screen). markSaved() should remove
+    // the listener for this populated state.
+    const installsBefore = installs.length;
+    const removesBefore = removes.length;
+    await act(async () => { h.hook.markSaved(); h.setState({ name: "Alpha", count: 2 }); });
+    assert.ok(removes.length > removesBefore,
+      "markSaved() must remove the listener while state is unchanged");
+    assert.equal(installs.length, installsBefore,
+      "no fresh install while state still equals the saved snapshot");
+
+    // The next user edit must re-arm the listener.
+    await act(async () => { h.setState({ name: "Alpha2", count: 2 }); });
+    assert.ok(installs.length > installsBefore,
+      "subsequent edit must reinstall the beforeunload listener");
+
+    await h.unmount();
+  } finally {
+    w.addEventListener = origAdd;
+    w.removeEventListener = origRemove;
+  }
+});
+
+test("cleanupStaleDrafts: evicts envelopes older than the cutoff (#383)", async () => {
+  const { cleanupStaleDrafts } = await import(
+    "../src/lib/cleanup-stale-drafts.ts"
+  );
+
+  // Wipe any leftover keys so we count cleanly.
+  for (let i = w.localStorage.length - 1; i >= 0; i--) {
+    const k = w.localStorage.key(i);
+    if (k && k.startsWith("draft.")) w.localStorage.removeItem(k);
+  }
+
+  const now = Date.now();
+  const oldStamp = new Date(now - 31 * 24 * 60 * 60 * 1000).toISOString();
+  const freshStamp = new Date(now - 60_000).toISOString();
+  w.localStorage.setItem(
+    "draft.stale.one",
+    JSON.stringify({ _savedAt: oldStamp, value: { foo: 1 } }),
+  );
+  w.localStorage.setItem(
+    "draft.fresh.two",
+    JSON.stringify({ _savedAt: freshStamp, value: { foo: 2 } }),
+  );
+  w.localStorage.setItem(
+    "draft.legacy.three",
+    JSON.stringify({ foo: 3 }), // pre-envelope blob — must be left alone
+  );
+  w.localStorage.setItem(
+    "draft.corrupt.four",
+    "{not valid json",
+  );
+  // Non-draft keys must never be touched.
+  w.localStorage.setItem("rjaf.lang", "en");
+
+  const r = cleanupStaleDrafts();
+  assert.equal(r.removed, 1, "exactly the stale envelope is dropped");
+  assert.deepEqual(r.removedKeys, ["draft.stale.one"]);
+
+  assert.equal(w.localStorage.getItem("draft.stale.one"), null);
+  assert.ok(w.localStorage.getItem("draft.fresh.two"),
+    "fresh envelope survives");
+  assert.ok(w.localStorage.getItem("draft.legacy.three"),
+    "legacy raw blob is left alone (no _savedAt to age out)");
+  assert.equal(w.localStorage.getItem("draft.corrupt.four"), "{not valid json",
+    "corrupt blob is left alone — per-form hook drops it on restore");
+  assert.equal(w.localStorage.getItem("rjaf.lang"), "en",
+    "non-draft keys are never touched");
 });
 
 test("useFormDraft: clearing back to the baseline removes the stored blob", async () => {

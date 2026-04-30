@@ -199,18 +199,28 @@ function ActionButton({
   testId,
   onAfter,
 }: ActionButtonProps) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Last-run summary (#394). Holds either an error string or the
+  // success metadata so we can render a green "Done" pill plus a
+  // "view log" link inline next to the button. Reset on every fresh
+  // click so the operator never sees a stale result.
+  const [done, setDone] = useState<
+    | null
+    | { ok: true; logPath?: string; durationMs?: number }
+    | { ok: false; error: string; logPath?: string }
+  >(null);
 
   const onClick = useCallback(async () => {
     setBusy(true);
-    setError(null);
+    setDone(null);
     try {
       const result = await postInternalAboutAction(action);
       if (!result.ok) {
-        setError(result.error);
+        setDone({ ok: false, error: result.error, logPath: result.logPath });
         return;
       }
+      setDone({ ok: true, logPath: result.logPath, durationMs: result.durationMs });
       await onAfter();
     } finally {
       setBusy(false);
@@ -218,7 +228,7 @@ function ActionButton({
   }, [action, onAfter]);
 
   return (
-    <span className="flex items-center gap-1.5">
+    <span className="flex items-center gap-1.5 flex-wrap">
       <button
         type="button"
         onClick={onClick}
@@ -233,16 +243,84 @@ function ActionButton({
         )}
         <span>{busy ? runningLabel : label}</span>
       </button>
-      {error && (
+      {done?.ok && (
         <span
-          className="text-[10px] text-destructive max-w-[8rem] truncate"
-          title={error}
-          data-testid={`${testId}-error`}
+          className="text-[10px] text-emerald-600"
+          data-testid={`${testId}-success`}
         >
-          {error}
+          {t("about_action_done")}
+          {typeof done.durationMs === "number"
+            ? ` (${Math.round(done.durationMs / 100) / 10}s)`
+            : ""}
         </span>
       )}
+      {done && !done.ok && (
+        <span
+          className="text-[10px] text-destructive max-w-[8rem] truncate"
+          title={done.error}
+          data-testid={`${testId}-error`}
+        >
+          {done.error}
+        </span>
+      )}
+      {done?.logPath && (
+        <CopyLogPathButton
+          logPath={done.logPath}
+          testId={`${testId}-log`}
+          label={t("about_action_log_label")}
+          copiedLabel={t("about_action_log_copied")}
+        />
+      )}
     </span>
+  );
+}
+
+// Renders the per-run log path as a clickable affordance. The path
+// is a Windows file path (e.g. C:\HawkEye\logs\about-actions\xxxx.log)
+// which a browser can't open directly, so the actionable control is
+// "copy to clipboard" — the operator pastes it into Explorer or a
+// support ticket. Falls back to selecting the text if clipboard API
+// is unavailable. (#394 acceptance: surface success/failure with a
+// link to the log file.)
+function CopyLogPathButton({
+  logPath,
+  testId,
+  label,
+  copiedLabel,
+}: {
+  logPath: string;
+  testId: string;
+  label: string;
+  copiedLabel: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      title={logPath}
+      onClick={async () => {
+        // Only flip the "copied" pill on a genuine success — a missing
+        // Clipboard API or a write rejection should leave the pill off
+        // so the operator knows the path didn't actually hit the
+        // clipboard. They can still grab it manually via the `title`
+        // tooltip or by selecting the visible truncated text.
+        if (!navigator.clipboard?.writeText) return;
+        try {
+          await navigator.clipboard.writeText(logPath);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        } catch {
+          /* clipboard blocked; intentionally do not show "copied" */
+        }
+      }}
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground hover:text-foreground hover:bg-muted/60 max-w-[12rem] underline-offset-2 hover:underline"
+    >
+      <span className="truncate">{label}: {logPath}</span>
+      {copied && (
+        <span className="text-emerald-600 not-italic">· {copiedLabel}</span>
+      )}
+    </button>
   );
 }
 

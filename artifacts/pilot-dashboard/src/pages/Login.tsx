@@ -16,6 +16,7 @@ import { isLanNoAuthEnabled } from "@/lib/internal-migration";
 import { useI18n } from "@/lib/i18n";
 import { useIdleTimeout } from "@/lib/use-idle-timeout";
 import LockScreen from "@/components/LockScreen";
+import LoginVersionHint from "@/components/LoginVersionHint";
 import { useInstallProfile } from "@/lib/install-profile";
 import { Languages, KeyRound, Lock, AlertTriangle } from "lucide-react";
 
@@ -223,6 +224,8 @@ export default function LoginGate() {
           >
             {submitting ? t("loading") : t("signIn")}
           </button>
+
+          <LoginVersionHint />
         </form>
 
         {lanNoAuth && (

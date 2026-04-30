@@ -93,6 +93,37 @@ test("hub: /api/internal/* requires LAN session (401 when missing)", async () =>
   });
 });
 
+test("hub: /api/internal/lan-broadcast/restart is mounted (#403)", async () => {
+  // Stand up the hub router with internal session auth disabled so
+  // the super_admin gate short-circuits — same dev/bring-up
+  // convention every other internal route uses. On Linux CI the
+  // endpoint should return 503 (no schtasks); on Windows it would
+  // attempt the actual restart. We just assert the route is wired,
+  // not that schtasks succeeds.
+  const prev = process.env["HAWK_INTERNAL_SESSION_AUTH"];
+  process.env["HAWK_INTERNAL_SESSION_AUTH"] = "off";
+  try {
+    await withServer("hub", async (baseUrl) => {
+      const res = await fetch(`${baseUrl}/api/internal/lan-broadcast/restart`, {
+        method: "POST",
+      });
+      // On the Linux test host: 503 schtasks_unavailable_non_windows.
+      // On a Windows CI host (rare): 200/500 with an exit code body.
+      // Both prove the route handler exists.
+      assert.notEqual(res.status, 404,
+        "lan-broadcast/restart must be mounted under /api/internal");
+      const body = (await res.json()) as { ok?: boolean; error?: string };
+      if (process.platform !== "win32") {
+        assert.equal(res.status, 503);
+        assert.equal(body.error, "schtasks_unavailable_non_windows");
+      }
+    });
+  } finally {
+    if (prev === undefined) delete process.env["HAWK_INTERNAL_SESSION_AUTH"];
+    else process.env["HAWK_INTERNAL_SESSION_AUTH"] = prev;
+  }
+});
+
 test("hub: /api/peer/* mounts and rejects requests with no peer token (401)", async () => {
   await withServer("hub", async (baseUrl) => {
     const res = await fetch(`${baseUrl}/api/peer/pilots`);

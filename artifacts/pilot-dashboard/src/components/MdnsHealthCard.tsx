@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Radio } from "lucide-react";
+import { Loader2, Radio, RotateCw } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
+import { toast } from "@/hooks/use-toast";
 import {
   fetchInternalMdnsHealth,
+  postInternalLanBroadcastRestart,
   type MdnsBadgeState,
   type MdnsHealthFetchResult,
 } from "@/lib/internal-migration";
@@ -63,6 +65,10 @@ export function MdnsHealthCard() {
   // on the first render. Once the card has been rendered once we
   // never re-hide it on a transient `internal_api_disabled` blip.
   const hasLoadedOnce = useRef(false);
+  // Stable ref to the reload closure so children (RestartButton) can
+  // trigger a fresh poll right after a successful restart without
+  // racing the 30s interval.
+  const reloadRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
     let cancelled = false;
@@ -86,6 +92,7 @@ export function MdnsHealthCard() {
       setHidden(false);
       setResult(r);
     };
+    reloadRef.current = reload;
     void reload();
     const id = window.setInterval(() => {
       void reload();
@@ -168,6 +175,14 @@ export function MdnsHealthCard() {
     r.state === "stale" || r.state === "unreadable"
       ? "powershell -ExecutionPolicy Bypass -File scripts\\lan-host\\register-mdns.ps1"
       : "powershell -ExecutionPolicy Bypass -File scripts\\lan-host\\check-mdns-health.ps1";
+  // One-click restart (#403). Offered whenever the badge is not in
+  // the happy "alive" / "starting" / "disabled" states — i.e. the
+  // operator is currently looking at a stuck supervisor.
+  const offerRestart =
+    r.state === "stale" ||
+    r.state === "restarting" ||
+    r.state === "spawn-failed" ||
+    r.state === "unreadable";
 
   return (
     <Card
@@ -212,6 +227,7 @@ export function MdnsHealthCard() {
             </div>
           ) : null}
         </div>
+        {offerRestart ? <RestartButton onAfter={reloadRef.current} /> : null}
         {showCommand ? (
           <div className="rounded border border-border/60 bg-muted/40 p-2 space-y-1">
             <div className="text-xs text-muted-foreground">
@@ -227,6 +243,91 @@ export function MdnsHealthCard() {
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * One-click "restart the LAN broadcast scheduled task" button (#403).
+ *
+ * Posts to `/api/internal/lan-broadcast/restart` and then re-polls
+ * the health endpoint so the badge state reflects what the
+ * supervisor reports right after the kick. Mounted only when the
+ * card already shows a non-happy state, so we never tempt the
+ * operator into restarting a healthy broadcast.
+ */
+function RestartButton({ onAfter }: { onAfter: () => void | Promise<void> }) {
+  const { t } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<null | { ok: true } | { ok: false; error: string }>(
+    null,
+  );
+  const onClick = useCallback(async () => {
+    setBusy(true);
+    setDone(null);
+    try {
+      const r = await postInternalLanBroadcastRestart();
+      if (r.ok) {
+        setDone({ ok: true });
+        // Toast confirmation in addition to the inline pill — the
+        // inline status sits inside the card and is easy to miss
+        // when the operator's focus has already moved elsewhere
+        // after clicking. The toast is non-blocking and dismisses
+        // itself. (Acceptance for #403.)
+        toast({
+          title: t("mdns_restart_toast_title"),
+          description: t("mdns_restart_success"),
+        });
+        await onAfter();
+      } else {
+        setDone({ ok: false, error: r.error });
+        toast({
+          variant: "destructive",
+          title: t("mdns_restart_toast_title"),
+          description: `${t("mdns_restart_failed")}: ${r.error}`,
+        });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [onAfter, t]);
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={busy}
+        data-testid="mdns-restart-button"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-amber-500/15 text-amber-800 border border-amber-500/40 hover:bg-amber-500/25 disabled:opacity-50"
+      >
+        {busy ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <RotateCw className="h-3.5 w-3.5" />
+        )}
+        <span>
+          {busy
+            ? t("mdns_restart_running")
+            : t("mdns_restart_button")}
+        </span>
+      </button>
+      {done?.ok && (
+        <span
+          className="text-[11px] text-emerald-700"
+          data-testid="mdns-restart-success"
+        >
+          {t("mdns_restart_success")}
+        </span>
+      )}
+      {done && !done.ok && (
+        <span
+          className="text-[11px] text-red-700 max-w-[12rem] truncate"
+          title={done.error}
+          data-testid="mdns-restart-error"
+        >
+          {t("mdns_restart_failed")}: {done.error}
+        </span>
+      )}
+    </div>
   );
 }
 

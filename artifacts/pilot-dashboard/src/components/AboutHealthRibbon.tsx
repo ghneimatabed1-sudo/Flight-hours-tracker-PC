@@ -44,24 +44,31 @@ function InlineAction({
   testId,
   onAfter,
 }: InlineActionProps): React.ReactElement {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Last-run summary (#394). Same shape as AboutThisPc.ActionButton.
+  const [done, setDone] = useState<
+    | null
+    | { ok: true; logPath?: string; durationMs?: number }
+    | { ok: false; error: string; logPath?: string }
+  >(null);
   const onClick = useCallback(async () => {
     setBusy(true);
-    setError(null);
+    setDone(null);
     try {
       const r = await postInternalAboutAction(action);
       if (!r.ok) {
-        setError(r.error);
+        setDone({ ok: false, error: r.error, logPath: r.logPath });
         return;
       }
+      setDone({ ok: true, logPath: r.logPath, durationMs: r.durationMs });
       await onAfter();
     } finally {
       setBusy(false);
     }
   }, [action, onAfter]);
   return (
-    <span className="flex items-center gap-1.5">
+    <span className="flex items-center gap-1.5 flex-wrap">
       <button
         type="button"
         onClick={onClick}
@@ -76,16 +83,78 @@ function InlineAction({
         )}
         <span>{busy ? runningLabel : label}</span>
       </button>
-      {error && (
+      {done?.ok && (
         <span
-          className="text-[11px] text-destructive max-w-[10rem] truncate"
-          title={error}
-          data-testid={`${testId}-error`}
+          className="text-[11px] text-emerald-700"
+          data-testid={`${testId}-success`}
         >
-          {error}
+          {t("about_action_done")}
+          {typeof done.durationMs === "number"
+            ? ` (${Math.round(done.durationMs / 100) / 10}s)`
+            : ""}
         </span>
       )}
+      {done && !done.ok && (
+        <span
+          className="text-[11px] text-destructive max-w-[10rem] truncate"
+          title={done.error}
+          data-testid={`${testId}-error`}
+        >
+          {done.error}
+        </span>
+      )}
+      {done?.logPath && (
+        <RibbonCopyLogPath
+          logPath={done.logPath}
+          testId={`${testId}-log`}
+          label={t("about_action_log_label")}
+          copiedLabel={t("about_action_log_copied")}
+        />
+      )}
     </span>
+  );
+}
+
+// Same affordance as AboutThisPc.CopyLogPathButton but sized for the
+// thinner ribbon row. Kept local rather than promoted to a shared
+// component because the two callers want different padding/typography.
+function RibbonCopyLogPath({
+  logPath,
+  testId,
+  label,
+  copiedLabel,
+}: {
+  logPath: string;
+  testId: string;
+  label: string;
+  copiedLabel: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      title={logPath}
+      onClick={async () => {
+        // Only show the "copied" pill when the write actually
+        // succeeded — see CopyLogPathButton in AboutThisPc for
+        // the rationale.
+        if (!navigator.clipboard?.writeText) return;
+        try {
+          await navigator.clipboard.writeText(logPath);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        } catch {
+          /* clipboard blocked; intentionally do not show "copied" */
+        }
+      }}
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono text-muted-foreground hover:text-foreground hover:bg-muted/60 max-w-[14rem] underline-offset-2 hover:underline"
+    >
+      <span className="truncate">{label}: {logPath}</span>
+      {copied && (
+        <span className="text-emerald-600 not-italic">· {copiedLabel}</span>
+      )}
+    </button>
   );
 }
 

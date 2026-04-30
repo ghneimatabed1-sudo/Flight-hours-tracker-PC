@@ -931,20 +931,35 @@ export async function fetchInternalAboutThisPc(): Promise<AboutThisPcReport | nu
 export type AboutThisPcAction = "run-backup" | "run-verify";
 
 export type AboutThisPcActionResult =
-  | { ok: true }
-  | { ok: false; error: string };
+  | {
+      ok: true;
+      /** Server-side path to the captured stdout/stderr log. */
+      logPath?: string;
+      durationMs?: number;
+      exitCode?: number;
+    }
+  | {
+      ok: false;
+      error: string;
+      /** Set when the server got far enough to spawn (#394). */
+      logPath?: string;
+      durationMs?: number;
+      exitCode?: number;
+    };
 
 /**
  * Trigger one of the LAN-host maintenance scripts via the api-server.
  *
  * Wraps the `POST /api/internal/about/run-backup` and
- * `POST /api/internal/about/run-verify` endpoints added in task #390 so
- * the inline buttons on the AboutThisPc panel and the Settings health
- * ribbon can both fire them without re-implementing fetch glue.
+ * `POST /api/internal/about/run-verify` endpoints (originally added in
+ * task #390; expanded by #394 to wait synchronously and return a
+ * structured result).
  *
- * The api-server returns 202 immediately and runs the PowerShell
- * script detached; the caller should re-poll `fetchInternalAboutThisPc`
- * to watch the age dot go green.
+ * The api-server now waits for the PowerShell script to exit and
+ * returns `{ ok, exitCode, durationMs, logPath }`. The caller should
+ * still re-poll `fetchInternalAboutThisPc` after success to refresh
+ * the age dots, but operators get an immediate green/red status
+ * inline as soon as the script finishes.
  */
 export async function postInternalAboutAction(
   action: AboutThisPcAction,
@@ -970,17 +985,94 @@ export async function postInternalAboutAction(
         continue;
       }
       const body = (await res.json().catch(() => null)) as
-        | { ok?: boolean; error?: string }
+        | {
+            ok?: boolean;
+            error?: string;
+            logPath?: string;
+            durationMs?: number;
+            exitCode?: number;
+            // Old api-servers (pre-#394) returned `started:true`
+            // alongside ok; treat that as success without log info.
+            started?: boolean;
+          }
         | null;
-      if (res.ok && body?.ok) return { ok: true };
+      if (res.ok && body?.ok) {
+        return {
+          ok: true,
+          logPath: body.logPath,
+          durationMs: body.durationMs,
+          exitCode: body.exitCode,
+        };
+      }
       lastError = body?.error || `http_${res.status}`;
-      // Don't fan out a definitive server response across candidates.
-      return { ok: false, error: lastError };
+      return {
+        ok: false,
+        error: lastError,
+        logPath: body?.logPath,
+        durationMs: body?.durationMs,
+        exitCode: body?.exitCode,
+      };
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
     }
   }
   return { ok: false, error: lastError };
+}
+
+export type LanBroadcastRestartResult =
+  | {
+      ok: true;
+      endExitCode: number | null;
+      runExitCode: number | null;
+      durationMs: number;
+      taskName: string;
+    }
+  | { ok: false; error: string };
+
+/**
+ * Trigger the LAN-broadcast scheduled task restart endpoint (#403).
+ *
+ * Hits `POST /api/internal/lan-broadcast/restart`, which on the
+ * Windows host runs `schtasks /End` then `schtasks /Run` against the
+ * supervisor task that owns dns-sd.exe. Endpoint waits for both
+ * invocations to complete; the returned result tells the
+ * MdnsHealthCard whether to render success or surface the error.
+ *
+ * Will return `ok:false` with `schtasks_unavailable_non_windows` on
+ * dev hosts (Linux/macOS) — there's no scheduled task to drive there.
+ */
+export async function postInternalLanBroadcastRestart(): Promise<LanBroadcastRestartResult> {
+  const url = getInternalApiPath("internal/lan-broadcast/restart");
+  if (!url) return { ok: false, error: "internal_api_disabled" };
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      cache: "no-store",
+      headers: internalApiHeadersBase(),
+    });
+    const body = (await res.json().catch(() => null)) as
+      | {
+          ok?: boolean;
+          error?: string;
+          endExitCode?: number | null;
+          runExitCode?: number | null;
+          durationMs?: number;
+          taskName?: string;
+        }
+      | null;
+    if (res.ok && body?.ok) {
+      return {
+        ok: true,
+        endExitCode: body.endExitCode ?? null,
+        runExitCode: body.runExitCode ?? null,
+        durationMs: body.durationMs ?? 0,
+        taskName: body.taskName ?? "HawkEye-Mdns-OnStartup",
+      };
+    }
+    return { ok: false, error: body?.error || `http_${res.status}` };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 export async function fetchInternalAuditLogRows(

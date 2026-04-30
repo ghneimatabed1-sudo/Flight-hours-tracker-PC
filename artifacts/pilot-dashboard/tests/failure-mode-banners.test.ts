@@ -432,3 +432,57 @@ test("backup-verify · classifier prefers failed over fresh-vs-overdue check", (
   });
   assert.equal(got.kind, "failed");
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// 4. LoginVersionHint (#386)
+// ─────────────────────────────────────────────────────────────────────
+//
+// Pre-auth amber line that lives directly under the Sign In button
+// when the api-server reports a version strictly newer than the
+// dashboard bundle. Renders nothing while the version is unknown or
+// matches — silence is the right pre-auth default. We render via SSR
+// (no useEffect runs) and prime the module-level api-client state via
+// the test-only setter that VersionMismatchBanner uses already.
+
+const LoginVersionHint = (await import(
+  "../src/components/LoginVersionHint"
+)).default;
+
+test("login-version-hint · renders nothing when api-server version is unknown (#386)", () => {
+  resetState();
+  const html = renderToString(
+    withProviders(React.createElement(LoginVersionHint)),
+  );
+  assert.ok(
+    !html.includes("login-version-hint"),
+    "LoginVersionHint should stay silent until /api/healthz responds",
+  );
+});
+
+test("login-version-hint · renders nothing when api-server matches dashboard (#386)", () => {
+  resetState();
+  apiClient._setApiServerVersionForTests("1.1.110");
+  const html = renderToString(
+    withProviders(React.createElement(LoginVersionHint)),
+  );
+  assert.ok(
+    !html.includes("login-version-hint"),
+    "LoginVersionHint should stay hidden when versions match",
+  );
+});
+
+test("login-version-hint · renders the inline hint when api-server is ahead (#386)", () => {
+  resetState();
+  apiClient._setApiServerVersionForTests("1.1.111");
+  const html = renderToString(
+    withProviders(React.createElement(LoginVersionHint)),
+  );
+  assert.ok(
+    html.includes("login-version-hint"),
+    "LoginVersionHint should render when api-server > dashboard",
+  );
+  assert.ok(
+    html.includes("login-version-hint-refresh"),
+    "LoginVersionHint should expose the Refresh button",
+  );
+});

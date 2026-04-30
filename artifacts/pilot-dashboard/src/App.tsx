@@ -19,6 +19,7 @@ function isElectron(): boolean {
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
 import { runArchiveCheck } from "@/lib/archive";
+import { cleanupStaleDrafts } from "@/lib/cleanup-stale-drafts";
 import { clearDemoSeed } from "@/lib/squadron-data";
 import { Toaster } from "@/components/ui/toaster";
 import { UndoToast } from "@/components/UndoToast";
@@ -281,6 +282,17 @@ function ArchiveBootstrap() {
   return null;
 }
 
+// Once-per-mount localStorage hygiene (#383). Evicts `draft.*`
+// envelopes whose `_savedAt` timestamp is older than 30 days so the
+// operator's browser storage doesn't grow unbounded across months
+// of half-typed sorties / NOTAMs / pilot edits.
+function StaleDraftSweep() {
+  useEffect(() => {
+    try { cleanupStaleDrafts(); } catch { /* best-effort */ }
+  }, []);
+  return null;
+}
+
 function App() {
   return (
     <ErrorBoundary>
@@ -305,6 +317,7 @@ function App() {
                 <OpeningAnimation />
                 <UndoToast />
                 <DiskFullOverlay />
+                <StaleDraftSweep />
               </TooltipProvider>
             </AuthProvider>
           </InstallProfileProvider>

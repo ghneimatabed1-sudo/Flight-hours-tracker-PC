@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { spawn, execSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve as pathResolve } from "node:path";
 
 import { gatherAboutThisPc } from "../lib/about";
@@ -40,11 +41,22 @@ router.get("/about", async (req: Request, res: Response) => {
 // a super_admin can kick off a backup or verify-backup without
 // dropping to PowerShell. Both endpoints spawn the existing LAN-host
 // scripts (`scripts/lan-host/backup-postgres.ps1` and
-// `scripts/lan-host/verify-backup.ps1`) detached so the HTTP request
-// returns immediately and the browser can poll `/about` for the age
-// to drop. The scripts are the only blessed way to write the dump
-// file and the `system_health_marker` row, so we never duplicate
-// their logic here.
+// `scripts/lan-host/verify-backup.ps1`).
+//
+// Task #394 (T-M): instead of returning 202 the moment the child is
+// spawned, we now wait for the script to exit and return a structured
+// result `{ ok, exitCode, durationMs, logPath }`. The dashboard's
+// inline buttons render a spinner while the request is in flight and
+// then a green/red badge with a "view log" link, so an operator
+// running an ad-hoc backup gets immediate feedback instead of having
+// to refresh AboutThisPc and watch the age dot turn green.
+//
+// Stdio is captured to a per-run log file under
+// `<HAWK_LAN_LOG_DIR or os.tmpdir>/about-actions/` so a follow-up
+// support call can re-read the script output without grovelling
+// through pino logs. We don't stream the log back over HTTP — these
+// scripts can emit megabytes — but `logPath` is included in the
+// response so the operator can copy/open it locally.
 //
 // Concurrency guard: refuse a second start while the previous one is
 // still in flight so the operator can't accidentally fork two
@@ -97,6 +109,12 @@ function lanScriptsDir(): string {
   return pathResolve(process.cwd(), "scripts", "lan-host");
 }
 
+function aboutLogDir(): string {
+  const raw = String(process.env["HAWK_LAN_LOG_DIR"] ?? "").trim();
+  const base = raw && isAbsolute(raw) ? raw : tmpdir();
+  return join(base, "about-actions");
+}
+
 function findPowershell(): string | null {
   // Prefer cross-platform `pwsh` (PowerShell Core) so dev hosts on
   // Linux/macOS can also exercise these endpoints. Fall back to the
@@ -144,33 +162,98 @@ async function runScript(
     return;
   }
 
+  // Set up the per-run log file before flipping inFlight so a mkdir
+  // failure doesn't strand the guard.
+  let logPath: string;
+  let logStream: ReturnType<typeof createWriteStream>;
+  try {
+    const logDir = aboutLogDir();
+    mkdirSync(logDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    logPath = join(logDir, `${opts.key}-${stamp}.log`);
+    logStream = createWriteStream(logPath, { flags: "w" });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    req.log?.error?.({ err }, `${opts.logTag}: log setup failed`);
+    res.status(500).json({ ok: false, error: `log_setup_failed: ${msg}` });
+    return;
+  }
+
   inFlight[opts.key] = true;
+  const startedAt = Date.now();
   try {
     const child = spawn(
       ps,
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
       {
         cwd: process.cwd(),
-        detached: true,
-        stdio: "ignore",
+        stdio: ["ignore", "pipe", "pipe"],
         env: process.env,
       },
     );
-    child.on("error", (err) => {
-      inFlight[opts.key] = false;
-      req.log?.error?.({ err }, `${opts.logTag}: spawn error`);
+    child.stdout?.pipe(logStream, { end: false });
+    child.stderr?.pipe(logStream, { end: false });
+
+    const result = await new Promise<{ exitCode: number | null; spawnError?: Error }>(
+      (resolve) => {
+        let settled = false;
+        child.on("error", (err) => {
+          if (settled) return;
+          settled = true;
+          resolve({ exitCode: null, spawnError: err });
+        });
+        child.on("exit", (code) => {
+          if (settled) return;
+          settled = true;
+          resolve({ exitCode: code });
+        });
+      },
+    );
+    try {
+      logStream.end();
+    } catch {
+      /* ignore */
+    }
+
+    const durationMs = Date.now() - startedAt;
+    inFlight[opts.key] = false;
+
+    if (result.spawnError) {
+      req.log?.error?.(
+        { err: result.spawnError, logPath, durationMs },
+        `${opts.logTag}: spawn error`,
+      );
+      res.status(500).json({
+        ok: false,
+        error: result.spawnError.message,
+        logPath,
+        durationMs,
+      });
+      return;
+    }
+
+    const exitCode = result.exitCode ?? -1;
+    const ok = exitCode === 0;
+    req.log?.info?.(
+      { exitCode, ok, logPath, durationMs },
+      `${opts.logTag}: exited`,
+    );
+    res.status(ok ? 200 : 500).json({
+      ok,
+      exitCode,
+      logPath,
+      durationMs,
     });
-    child.on("exit", (code) => {
-      inFlight[opts.key] = false;
-      req.log?.info?.({ code }, `${opts.logTag}: exited`);
-    });
-    child.unref();
-    res.status(202).json({ ok: true, started: true });
   } catch (err) {
     inFlight[opts.key] = false;
+    try {
+      logStream.end();
+    } catch {
+      /* ignore */
+    }
     const msg = err instanceof Error ? err.message : String(err);
-    req.log?.error?.({ err }, `${opts.logTag}: spawn threw`);
-    res.status(500).json({ ok: false, error: msg });
+    req.log?.error?.({ err, logPath }, `${opts.logTag}: spawn threw`);
+    res.status(500).json({ ok: false, error: msg, logPath });
   }
 }
 
