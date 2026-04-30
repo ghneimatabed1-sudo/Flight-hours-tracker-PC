@@ -683,3 +683,73 @@ Contact the developer (with logs) only when:
   any with `actor_unknown:true` outside an expected dev-no-auth window.
 
 Everything else is recoverable with the scripts in this folder.
+
+---
+
+## Appendix A — Visual install walkthrough
+
+**Status:** placeholder. The PNG screenshots referenced below are
+not yet captured because the install scripts in this commit were
+verified by static code review only — the build environment is
+Linux-only and cannot run PowerShell.
+
+The next operator who installs Hawk Eye on real Windows hardware
+should follow `installer/test-vm/README.md` and drop the captured
+screenshots into `installer/test-vm/dryrun-evidence/<date>/<role>/`.
+Once that is done, replace the bullet list below with inline image
+links so field operators have a known-good visual reference for
+each step.
+
+### A.1 Squadron Lan Host (`first-time-setup.ps1`)
+
+- `01-elevated-shell.png` — elevated PowerShell prompt at the repo
+  root, before the install command.
+- `02-step-3-postgres.png` — installer Step 3 detecting an existing
+  PostgreSQL service.
+- `03-step-6-schema.png` — Step 6b log line confirming
+  `/api/healthz` returned 200 (proves the new healthz polling
+  works).
+- `04-step-10-task-verify.png` — Step 10 log lines showing
+  `Triggering 'HawkEye-ApiServer-OnStartup' once to verify SYSTEM-context startup...`
+  followed by `OK — api-server is reachable on port 3847…`.
+- `05-task-scheduler.png` — Task Scheduler with both
+  `HawkEye-ApiServer-OnStartup` and
+  `HawkEye-Postgres-Backup-Daily` in `Ready` state after a reboot.
+- `06-dashboard-first-load.png` — browser at
+  `http://<squadron>.local/` rendering the dashboard.
+
+### A.2 Aggregator Hub (`setup-aggregator.ps1`)
+
+- `01-step-8b-poll.png` — Step 8b polling loop output.
+- `02-step-11-csp.png` — Step 11 log line
+  `Patched dashboard CSP connect-src to include http://<host>:3847`.
+- `03-step-12-task-verify.png` — Step 12 SYSTEM-task verification
+  succeeding.
+- `04-step-13-smoke.png` — Step 13 smoke verification of
+  `/api/aggregate/peers/health`.
+- `05-aggregator-dashboard.png` — DevTools console open, showing
+  zero CSP violations as the dashboard fetches from the local
+  aggregator origin.
+
+### A.3 Viewer / Kiosk PC (`setup-viewer.ps1` + `launch-viewer.ps1`)
+
+- `01-step-5b-urlacl.png` — Step 5b log line confirming
+  `Reserved http://127.0.0.1:18472/ for BUILTIN\Users.`
+- `02-non-admin-launch.png` — non-admin user double-clicking the
+  desktop shortcut and the launcher binding successfully (no
+  HRESULT 5 popup).
+- `03-port-busy-popup.png` — for contrast, the friendly popup when
+  port 18472 is genuinely in use.
+
+### A.4 Add Squadron Peer (`add-squadron-peer.ps1`)
+
+- `01-prompt.png` — wizard prompting for display name + address.
+- `02-pgpass-prompt.png` — postgres password prompt with a
+  reserved-character password being typed.
+- `03-peer-row.png` — `psql -c "select * from peer_squadrons;"`
+  showing the new row inserted.
+
+### A.5 Common pitfalls captured during the dry-run
+
+Per-PC quirks, AV warnings, console encoding gotchas, etc. To be
+filled in by the operator who runs the dry-run.

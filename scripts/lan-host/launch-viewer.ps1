@@ -140,13 +140,59 @@ $listener.Prefixes.Add($prefix)
 try {
     $listener.Start()
 } catch {
-    Show-FriendlyError -Title "Hawk Eye — local launcher port busy" -Message @"
+    # HttpListener.Start() can fail for two completely different
+    # reasons that need different fixes:
+    #
+    #   * HttpListenerException ErrorCode 5  → Access Denied
+    #     The current user has no URL ACL reservation for this prefix.
+    #     setup-viewer.ps1 Step 5b registers the ACL during install,
+    #     but if the viewer was unzipped manually or the install was
+    #     never elevated, we land here.
+    #
+    #   * HttpListenerException ErrorCode 32 / 183 → port in use
+    #     Another process owns the port; user must free it or pick
+    #     another with -LocalPort.
+    #
+    # Showing one generic "port busy" message for both is what kept
+    # field operators stuck. Distinguish them.
+    $inner = $_.Exception
+    while ($inner -and -not ($inner -is [System.Net.HttpListenerException])) {
+        $inner = $inner.InnerException
+    }
+    $code = if ($inner) { $inner.ErrorCode } else { 0 }
+    if ($code -eq 5) {
+        Show-FriendlyError -Title "Hawk Eye — launcher needs URL permission" -Message @"
+Could not bind to $prefix because Windows refused (Access Denied,
+HRESULT 5). This means there is no URL ACL reservation for the
+current user account.
+
+Fix on this PC by running ONE of the following from an elevated
+PowerShell:
+
+    netsh http add urlacl url=$prefix user="BUILTIN\Users"
+
+…or re-run setup-viewer.ps1 from an elevated shell — it registers
+the reservation in Step 5b.
+"@
+        exit 5
+    } elseif ($code -eq 32 -or $code -eq 183) {
+        Show-FriendlyError -Title "Hawk Eye — local launcher port busy" -Message @"
 Could not bind to $prefix
 
 Another program is already using port $LocalPort. Close it or pass
 -LocalPort <free-port> to launch-viewer.ps1.
 "@
-    exit 3
+        exit 3
+    } else {
+        Show-FriendlyError -Title "Hawk Eye — launcher could not start" -Message @"
+Could not bind to $prefix
+
+$($_.Exception.Message)
+
+Try -LocalPort <free-port> or contact your Ops Pilot.
+"@
+        exit 4
+    }
 }
 
 $mime = @{

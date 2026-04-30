@@ -97,7 +97,12 @@ if (-not $DatabaseUrl) {
         $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($pgPwSecure)
         $plainPg = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
         [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-        $DatabaseUrl = "postgresql://$DbUser`:$plainPg`@$DbHost`:$DbPort/$DbName"
+        # URL-encode the password — squadron-shared postgres passwords
+        # routinely contain `@`, `:`, `#`, `?`, `%` etc. which are
+        # reserved in URI userinfo and silently break the connection
+        # when interpolated raw. Same fix as setup-aggregator.ps1.
+        $encPg = [uri]::EscapeDataString($plainPg)
+        $DatabaseUrl = "postgresql://$DbUser`:$encPg`@$DbHost`:$DbPort/$DbName"
     } else {
         Fail "DATABASE_URL not set, and artifacts/api-server/.env does not contain one. Pass -DatabaseUrl explicitly." 60
     }

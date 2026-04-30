@@ -196,6 +196,11 @@ $plainPg = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
 [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
 
 $env:PGPASSWORD = $plainPg
+# URL-encode the password before baking it into a postgres:// URL.
+# Real-world passwords contain `@`, `:`, `/`, `#`, `?`, `%` etc. which
+# are reserved characters in URI userinfo and silently break the
+# connection string when interpolated raw.
+$encPg = [uri]::EscapeDataString($plainPg)
 $superUrl = "postgresql://$DbUser`@$DbHost`:$DbPort/postgres"
 
 # ── Step 3 — Create DB + role ──────────────────────────────────────────
@@ -235,7 +240,7 @@ if (Test-Path $apiEnv) {
 } else {
     $bootstrap = -join ((1..32) | ForEach-Object { [char[]]'abcdefghjkmnpqrstuvwxyz23456789' | Get-Random })
     @"
-DATABASE_URL=postgresql://$DbUser`:$plainPg`@$DbHost`:$DbPort/$DbName
+DATABASE_URL=postgresql://$DbUser`:$encPg`@$DbHost`:$DbPort/$DbName
 HAWK_INTERNAL_SESSION_AUTH=required
 HAWK_LAN_BOOTSTRAP_TOKEN=$bootstrap
 HAWK_LAN_DEV_NO_AUTH=0
@@ -296,10 +301,27 @@ if (-not (Test-Path $startScript)) {
         $proc = Start-Process -FilePath "powershell.exe" `
             -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File","`"$startScript`"","-SkipBuild" `
             -PassThru -WindowStyle Hidden
-        Start-Sleep -Seconds 6
+        # Poll /api/healthz instead of guessing — on a slow VM the
+        # api-server can take 10-20s to come up, and a fixed 6s sleep
+        # would race ensureFullSchema's IF NOT EXISTS DDL.
+        $ready = $false
+        for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 1
+            if ($proc.HasExited) { break }
+            try {
+                $h = Invoke-WebRequest -Uri "http://127.0.0.1:$ApiPort/api/healthz" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+                if ($h.StatusCode -eq 200) { $ready = $true; break }
+            } catch {
+                # keep polling
+            }
+        }
         if (-not $proc.HasExited) {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            Info "Schema bootstrap completed (server stopped)."
+            if ($ready) {
+                Info "Schema bootstrap completed (server stopped)."
+            } else {
+                Warn "api-server started but /api/healthz never returned 200. Schema may be partial; check the api-server console."
+            }
         } else {
             Warn "api-server exited early (code $($proc.ExitCode)). Check api-server logs and the .env path printed by start-api-host.ps1."
         }
@@ -329,7 +351,7 @@ if ([string]::IsNullOrWhiteSpace($adminUser)) {
         $bcryptModule = Join-Path $RepoRoot "node_modules\bcryptjs"
         $hash = & node -e "require('$($bcryptModule.Replace('\','/'))').hash(process.argv[1], 12).then(h => process.stdout.write(h));" $plainAdmin
         if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($hash)) {
-            $appUrl = "postgresql://$DbUser`:$plainPg`@$DbHost`:$DbPort/$DbName"
+            $appUrl = "postgresql://$DbUser`:$encPg`@$DbHost`:$DbPort/$DbName"
             $sqlFile = New-TemporaryFile
             @"
 insert into lan_users (id, username, display_name, role, password_hash)
@@ -528,8 +550,37 @@ if ($SkipScheduledTasks) {
 } else {
     Step 10 "Registering api-server scheduled task..."
     $apiTask = Join-Path $ScriptDir "install-api-startup-task.ps1"
+    $apiTaskName = "HawkEye-ApiServer-OnStartup"
     if (Test-Path $apiTask) {
         & powershell -ExecutionPolicy Bypass -File $apiTask
+        # Verify the task can actually start the api-server in SYSTEM
+        # context. The most common Windows install bug here is that
+        # node/pnpm are installed per-user only, so SYSTEM can't find
+        # them on PATH. Run the task NOW (not at next boot) and poll
+        # /api/healthz so the operator finds out at install time.
+        Info "Triggering '$apiTaskName' once to verify SYSTEM-context startup..."
+        & schtasks /Run /TN $apiTaskName 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Warn "schtasks /Run exit $LASTEXITCODE — could not trigger the task. Boot will still fire it; check Task Scheduler."
+        } else {
+            $taskReady = $false
+            for ($t = 0; $t -lt 45; $t++) {
+                Start-Sleep -Seconds 1
+                try {
+                    $h = Invoke-WebRequest -Uri "http://127.0.0.1:$ApiPort/api/healthz" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+                    if ($h.StatusCode -eq 200) { $taskReady = $true; break }
+                } catch { }
+            }
+            if ($taskReady) {
+                Info "OK — api-server is reachable on port $ApiPort under the scheduled task."
+                # Stop the test run; on real boot the task will fire again.
+                & schtasks /End /TN $apiTaskName 2>&1 | Out-Null
+            } else {
+                Warn "Task '$apiTaskName' was triggered but /api/healthz never returned 200."
+                Warn "Most likely cause: node or pnpm not on the SYSTEM PATH. Re-install Node 'for all users' and re-run."
+                Warn "Diagnose with: schtasks /Query /TN $apiTaskName /V /FO LIST"
+            }
+        }
     } else {
         Warn "install-api-startup-task.ps1 not found; skipped."
     }

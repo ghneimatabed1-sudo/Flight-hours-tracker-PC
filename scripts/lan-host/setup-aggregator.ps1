@@ -378,8 +378,13 @@ $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($pgPwSecure
 $plainPg = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
 [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
 $env:PGPASSWORD = $plainPg
+# URL-encode the password before baking it into a postgres:// URL.
+# Real passwords routinely contain `@`, `:`, `/`, `#`, `?`, `%` etc.
+# which are reserved characters in URI userinfo and silently break
+# the connection string when interpolated raw.
+$encPg = [uri]::EscapeDataString($plainPg)
 $superUrl = "postgresql://$DbUser`@$DbHost`:$DbPort/postgres"
-$appUrl   = "postgresql://$DbUser`:$plainPg`@$DbHost`:$DbPort/$DbName"
+$appUrl   = "postgresql://$DbUser`:$encPg`@$DbHost`:$DbPort/$DbName"
 
 # ── Step 5 — Create DB ────────────────────────────────────────────────
 Step 5 "Ensuring database '$DbName' exists"
@@ -408,7 +413,7 @@ if (Test-Path $apiEnv) {
 } else {
     $bootstrap = -join ((1..32) | ForEach-Object { [char[]]'abcdefghjkmnpqrstuvwxyz23456789' | Get-Random })
     @"
-DATABASE_URL=postgresql://$DbUser`:$plainPg`@$DbHost`:$DbPort/$DbName
+DATABASE_URL=postgresql://$DbUser`:$encPg`@$DbHost`:$DbPort/$DbName
 HAWK_INTERNAL_SESSION_AUTH=required
 HAWK_LAN_BOOTSTRAP_TOKEN=$bootstrap
 HAWK_LAN_DEV_NO_AUTH=0
@@ -468,10 +473,26 @@ if (-not (Test-Path $startScript)) {
         $proc = Start-Process -FilePath "powershell.exe" `
             -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File","`"$startScript`"","-SkipBuild" `
             -PassThru -WindowStyle Hidden
-        Start-Sleep -Seconds 8
+        # Poll /api/healthz until ready instead of guessing 8s. On
+        # aggregator PCs ensureFullSchema has more tables to create
+        # (peer_squadrons, install_profile_meta, …) so a fixed sleep
+        # races the DDL on slower hardware.
+        $ready = $false
+        for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 1
+            if ($proc.HasExited) { break }
+            try {
+                $h = Invoke-WebRequest -Uri "http://127.0.0.1:$ApiPort/api/healthz" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+                if ($h.StatusCode -eq 200) { $ready = $true; break }
+            } catch { }
+        }
         if (-not $proc.HasExited) {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            Info "Schema bootstrap completed (server stopped)."
+            if ($ready) {
+                Info "Schema bootstrap completed (server stopped)."
+            } else {
+                Warn "api-server started but /api/healthz never returned 200. Schema may be partial; check the api-server console."
+            }
         } else {
             Warn "api-server exited early (code $($proc.ExitCode)). Check logs and the .env path printed by start-api-host.ps1."
         }
@@ -577,6 +598,47 @@ if ($SkipDashboardBuild) {
     } finally {
         Pop-Location
     }
+
+    # Patch the bundled CSP so the dashboard's connect-src allows the
+    # local aggregator API origin. setup-viewer.ps1 does the same patch
+    # for viewer PCs; without it the browser blocks fetch() to anything
+    # other than the Supabase / replit.app origins the source HTML
+    # ships with, including the aggregator's own LAN host name.
+    $aggDistIndex = Join-Path $RepoRoot "artifacts\pilot-dashboard\dist\public\index.html"
+    if (Test-Path $aggDistIndex) {
+        try {
+            $html = Get-Content -Raw -Path $aggDistIndex
+            if ($html -match 'http-equiv=["'']Content-Security-Policy["'']') {
+                $wsOrigin = $baseUrl -replace '^http://','ws://' -replace '^https://','wss://'
+                # The CSP meta tag contains exactly one connect-src
+                # directive, so a single MatchEvaluator-style replace
+                # is sufficient. Using the (string, string, MatchEvaluator)
+                # overload — there is no static overload that takes a
+                # count, so don't pass one.
+                $patched = [regex]::Replace($html, "(connect-src)([^;]*);", {
+                    param($m)
+                    $tokens = $m.Groups[2].Value.Trim() -split '\s+' | Where-Object { $_ -ne "" }
+                    $set = New-Object System.Collections.Generic.HashSet[string]
+                    foreach ($t in $tokens) { [void]$set.Add($t) }
+                    [void]$set.Add($baseUrl)
+                    [void]$set.Add($wsOrigin)
+                    return "connect-src " + ($set -join ' ') + ";"
+                })
+                if ($patched -ne $html) {
+                    Set-Content -Path $aggDistIndex -Value $patched -Encoding UTF8 -NoNewline
+                    Info "Patched dashboard CSP connect-src to include $baseUrl (+$wsOrigin)."
+                } else {
+                    Info "Dashboard CSP already includes $baseUrl — no patch needed."
+                }
+            } else {
+                Warn "No CSP meta tag in $aggDistIndex; skipping patch (the bundle may not be ours)."
+            }
+        } catch {
+            Warn "Could not patch dashboard CSP: $_. Dashboard may show connect-src errors in the browser console."
+        }
+    } else {
+        Warn "$aggDistIndex not found; skipping CSP patch."
+    }
 }
 
 # ── Step 12 — Scheduled tasks ─────────────────────────────────────────
@@ -585,9 +647,34 @@ if ($SkipScheduledTasks) {
 } else {
     Step 12 "Registering api-server + dashboard scheduled tasks"
     $apiTask = Join-Path $ScriptDir "install-api-startup-task.ps1"
+    $apiTaskName = "HawkEye-ApiServer-OnStartup"
     if (Test-Path $apiTask) {
         & powershell -NoProfile -ExecutionPolicy Bypass -File $apiTask
         if ($LASTEXITCODE -ne 0) { Warn "install-api-startup-task.ps1 exited $LASTEXITCODE." }
+        # Verify SYSTEM-context startup. node/pnpm installed per-user
+        # only is the most common Windows-only failure here; this
+        # surfaces it at install time rather than after the next reboot.
+        Info "Triggering '$apiTaskName' once to verify SYSTEM-context startup..."
+        & schtasks /Run /TN $apiTaskName 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Warn "schtasks /Run exit $LASTEXITCODE — could not trigger the task. Boot will still fire it; check Task Scheduler manually."
+        } else {
+            $taskReady = $false
+            for ($t = 0; $t -lt 45; $t++) {
+                Start-Sleep -Seconds 1
+                try {
+                    $h = Invoke-WebRequest -Uri "http://127.0.0.1:$ApiPort/api/healthz" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+                    if ($h.StatusCode -eq 200) { $taskReady = $true; break }
+                } catch { }
+            }
+            if ($taskReady) {
+                Info "OK — api-server is reachable on port $ApiPort under the scheduled task."
+                & schtasks /End /TN $apiTaskName 2>&1 | Out-Null
+            } else {
+                Warn "Task '$apiTaskName' was triggered but /api/healthz never returned 200."
+                Warn "Most likely cause: node or pnpm not on the SYSTEM PATH. Re-install Node 'for all users' and re-run."
+            }
+        }
     } else {
         Warn "install-api-startup-task.ps1 not found; api-server will not auto-start on boot."
     }
@@ -610,7 +697,15 @@ if (Test-Path $startScript) {
         $probeProc = Start-Process -FilePath "powershell.exe" `
             -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File","`"$startScript`"","-SkipBuild" `
             -PassThru -WindowStyle Hidden
-        Start-Sleep -Seconds 6
+        # Poll healthz instead of guessing 6s.
+        for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 1
+            if ($probeProc.HasExited) { break }
+            try {
+                $h = Invoke-WebRequest -Uri "http://127.0.0.1:$ApiPort/api/healthz" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+                if ($h.StatusCode -eq 200) { break }
+            } catch { }
+        }
     } catch {
         Warn "Could not boot api-server for smoke check: $_"
     }

@@ -409,6 +409,33 @@ $conf = [ordered]@{
 $conf | ConvertTo-Json -Depth 4 | Out-File -FilePath $ViewerConfFile -Encoding ASCII
 Info "Wrote $ViewerConfFile"
 
+# ── Step 5b — Reserve the launcher URL ACL ───────────────────────────
+# launch-viewer.ps1 binds System.Net.HttpListener to
+# http://127.0.0.1:<LocalPort>/. On Windows that requires either:
+#   (a) the launcher running as administrator, OR
+#   (b) a netsh URL ACL reservation for the current user / Users group.
+# The desktop shortcut runs as a normal user, so without (b) every
+# launch fails with HRESULT 5 (Access Denied) — which is impossible to
+# diagnose from the friendly MessageBox alone. We register the
+# reservation here while we still have the elevated install shell.
+Step "5b" "Reserving HTTP URL ACL for the launcher"
+$urlAclTarget = "http://127.0.0.1:$LocalPort/"
+try {
+    # Idempotent: delete any prior reservation (returns nonzero if
+    # there isn't one — that's fine), then add a fresh one for the
+    # built-in Users group so the per-user shortcut can bind.
+    & netsh http delete urlacl url=$urlAclTarget 2>&1 | Out-Null
+    $aclOut = & netsh http add urlacl url=$urlAclTarget user="BUILTIN\Users" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Info "Reserved $urlAclTarget for BUILTIN\Users."
+    } else {
+        Warn "netsh add urlacl exit $LASTEXITCODE: $aclOut"
+        Warn "If the launcher fails with 'Access Denied', re-run setup-viewer.ps1 from an elevated shell."
+    }
+} catch {
+    Warn "Could not reserve URL ACL: $_. Launcher may need to run as administrator."
+}
+
 # ── Step 6 — Shortcuts ───────────────────────────────────────────────
 Step 6 "Register desktop + Start Menu shortcuts"
 if ($SkipShortcuts) {
