@@ -1,38 +1,55 @@
-# api-supervisor.ps1
+# dashboard-supervisor.ps1
 #
-# Hawk Eye — watchdog around the api-server hub process.
+# Hawk Eye — watchdog around the pilot-dashboard host process.
 #
-# Started by the HawkEye-ApiServer-OnStartup scheduled task in SYSTEM
-# context at boot. Loops forever: spawns `start-api-host.ps1`
-# (which loads artifacts/api-server/.env and execs node), waits for
-# it, and restarts it on any exit (OOM kill, unhandled exception,
-# postgres glitch, manual kill, …) within $RestartDelaySec seconds
-# (capped at $MaxRestartDelaySec to avoid busy-looping on a
-# permanently broken setup, e.g. missing DATABASE_URL or schema
-# corruption).
+# Started by the HawkEye-Dashboard-OnStartup scheduled task in SYSTEM
+# context at boot (on aggregator / Wing / Base PCs). Loops forever:
+# spawns the dashboard launcher (`start-dashboard-host.ps1` by default,
+# wraps `vite preview`), waits for it, and restarts it on any exit
+# (vite crash, dropped TCP socket, OOM kill, manual kill, viewer-kiosk
+# Edge --app close, …) within $RestartDelaySec seconds (capped at
+# $MaxRestartDelaySec to avoid busy-looping on a permanently broken
+# setup, e.g. a port collision or a missing dist folder).
 #
 # Writes a heartbeat file every $HeartbeatIntervalSec seconds so
-# operators (or check-host-health.ps1, or any monitoring tool) can
-# verify the api-server is alive without RDP'ing into the box.
+# operators (or check-host-health.ps1, or the AboutThisPc dashboard
+# panel) can verify the launcher is alive without RDP'ing into the
+# box.
 #
 # Output paths:
-#   %PROGRAMDATA%\HawkEye\api-supervisor.log         (rolling text log)
-#   %PROGRAMDATA%\HawkEye\api-supervisor.heartbeat   (latest JSON tick)
+#   %PROGRAMDATA%\HawkEye\dashboard-supervisor.log         (rolling text log)
+#   %PROGRAMDATA%\HawkEye\dashboard-supervisor.heartbeat   (latest JSON tick)
 #
-# Mirrors the structure of mdns-supervisor.ps1 deliberately so
+# Mirrors the structure of api-supervisor.ps1 deliberately so
 # operators only need to learn one watchdog idiom on the host PC.
 #
-# This script is invoked by install-api-startup-task.ps1; operators
-# do not need to call it directly. To run the api-server in the
-# foreground for manual debugging, call start-api-host.ps1 directly
-# (without the supervisor wrapper).
+# This script is invoked by install-dashboard-startup-task.ps1;
+# operators do not need to call it directly. To run the dashboard host
+# in the foreground for manual debugging, call start-dashboard-host.ps1
+# directly (without the supervisor wrapper).
+#
+# Wrapping the viewer kiosk launcher (launch-viewer.ps1) instead of
+# the vite preview backend is supported via -ChildScript: useful on a
+# Squadron / Flight Commander viewer where the operator's primary
+# surface is the Edge --app window itself. Closing the window will
+# trigger a re-launch within $RestartDelaySec seconds.
 
 [CmdletBinding()]
 param(
     [string]$RepoRoot          = "",
-    [string]$EnvFile           = "",
 
-    # How long to wait before respawning the api-server after a
+    # Path to the script the supervisor wraps. Defaults to
+    # start-dashboard-host.ps1 (vite preview backend) which matches
+    # the existing install-dashboard-startup-task.ps1 contract. Pass
+    # `launch-viewer.ps1` to wrap the kiosk Edge --app launcher
+    # instead.
+    [string]$ChildScript       = "",
+
+    # Forwarded to start-dashboard-host.ps1; ignored when wrapping
+    # other launchers.
+    [int]$DashboardPort        = 5173,
+
+    # How long to wait before respawning the dashboard host after a
     # crash. Doubles up to $MaxRestartDelaySec on repeated rapid
     # failures, then resets after a run that lasted at least 60s.
     [int]$RestartDelaySec      = 5,
@@ -46,19 +63,18 @@ param(
     # rotates to <log>.1 .. <log>.N when it exceeds $MaxLogBytes;
     # the oldest copy is discarded so the on-disk footprint is
     # bounded by roughly $MaxLogBytes * ($MaxLogBackups + 1).
-    # Defaults: 2 MiB per file, 3 rotated copies => ~8 MiB max,
-    # which is plenty for years of healthy operation and survives
-    # weeks of pathological flapping without filling the disk.
-    [int]$MaxLogBytes   = 2097152,
-    [int]$MaxLogBackups = 3
+    # Defaults: 2 MiB per file, 3 rotated copies => ~8 MiB max.
+    # Three supervisors total => ~24 MiB worst case, trivial on a
+    # workstation disk.
+    [int]$MaxLogBytes          = 2097152,
+    [int]$MaxLogBackups        = 3
 )
 
 $ErrorActionPreference = "Stop"
 
 # Shared in-process log rotation helpers (supervisor-log.ps1 was
 # introduced in #397 as the cross-supervisor rotation lib; both
-# mdns-supervisor.ps1 and dashboard-supervisor.ps1 dot-source it
-# too).
+# api-supervisor.ps1 and mdns-supervisor.ps1 dot-source it too).
 . (Join-Path $PSScriptRoot "supervisor-log.ps1")
 
 if ($RestartDelaySec -lt 1)                       { $RestartDelaySec = 1 }
@@ -66,6 +82,9 @@ if ($MaxRestartDelaySec -lt $RestartDelaySec)     { $MaxRestartDelaySec = $Resta
 if ($HeartbeatIntervalSec -lt 1)                  { $HeartbeatIntervalSec = 1 }
 if ($MaxLogBytes -lt 0)                           { $MaxLogBytes = 0 }
 if ($MaxLogBackups -lt 0)                         { $MaxLogBackups = 0 }
+if ($DashboardPort -lt 1 -or $DashboardPort -gt 65535) {
+    throw "DashboardPort '$DashboardPort' is out of range."
+}
 
 function Resolve-RepoRoot {
     param([string]$InputRoot)
@@ -81,17 +100,30 @@ function Resolve-RepoRoot {
 }
 
 $root = Resolve-RepoRoot -InputRoot $RepoRoot
-$startScript = Join-Path $root "scripts\lan-host\start-api-host.ps1"
-if (-not (Test-Path $startScript)) {
-    throw "start-api-host.ps1 not found at '$startScript'. Reinstall from the source tree."
+
+if ([string]::IsNullOrWhiteSpace($ChildScript)) {
+    $ChildScript = Join-Path $root "scripts\lan-host\start-dashboard-host.ps1"
+} elseif (-not [System.IO.Path]::IsPathRooted($ChildScript)) {
+    # Resolve a bare filename against scripts\lan-host\ first so the
+    # operator can pass `launch-viewer.ps1` without a full path.
+    $candidate = Join-Path $root "scripts\lan-host\$ChildScript"
+    if (Test-Path $candidate) {
+        $ChildScript = (Resolve-Path $candidate).Path
+    } else {
+        $ChildScript = (Resolve-Path $ChildScript).Path
+    }
+}
+
+if (-not (Test-Path $ChildScript)) {
+    throw "Dashboard launcher not found at '$ChildScript'. Reinstall from the source tree."
 }
 
 $dataDir = Join-Path $env:ProgramData "HawkEye"
 if (-not (Test-Path $dataDir)) {
     New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 }
-$logFile       = Join-Path $dataDir "api-supervisor.log"
-$heartbeatFile = Join-Path $dataDir "api-supervisor.heartbeat"
+$logFile       = Join-Path $dataDir "dashboard-supervisor.log"
+$heartbeatFile = Join-Path $dataDir "dashboard-supervisor.heartbeat"
 
 function Write-SupervisorLog {
     param([string]$Message)
@@ -112,8 +144,8 @@ function Write-Heartbeat {
     $payload = [ordered]@{
         timestamp     = (Get-Date).ToUniversalTime().ToString("o")
         repoRoot      = $root
-        startScript   = $startScript
-        envFile       = $EnvFile
+        childScript   = $ChildScript
+        dashboardPort = $DashboardPort
         childPid      = $ChildPid
         restartCount  = $RestartCount
         state         = $State
@@ -125,27 +157,27 @@ function Write-Heartbeat {
     } catch { }
 }
 
-Write-SupervisorLog "[supervisor] start: RepoRoot=$root StartScript=$startScript EnvFile=$EnvFile restartDelay=${RestartDelaySec}s maxDelay=${MaxRestartDelaySec}s heartbeat=${HeartbeatIntervalSec}s logRotate=${MaxLogBytes}B/${MaxLogBackups}backups"
+Write-SupervisorLog "[supervisor] start: RepoRoot=$root ChildScript=$ChildScript DashboardPort=$DashboardPort restartDelay=${RestartDelaySec}s maxDelay=${MaxRestartDelaySec}s heartbeat=${HeartbeatIntervalSec}s logRotate=${MaxLogBytes}B/${MaxLogBackups}backups"
 Write-Heartbeat -ChildPid 0 -RestartCount 0 -State "starting"
 
-# The startup task always passes -SkipBuild via install-api-startup-task.ps1
-# because the api-server is built once at install time. We mirror that
-# here so a freshly-spawned child boots in the same shape on every
-# restart and never blocks on a slow rebuild.
-#
-# Pre-quote paths so an install on a path containing spaces (e.g.
+# Quote paths so an install on a path containing spaces (e.g.
 # `C:\Program Files\HawkEye`) round-trips through Start-Process
 # correctly. Start-Process splits on whitespace if it sees an
-# unquoted token.
+# unquoted token. SkipBuild is always passed so reboot does not
+# block on a slow rebuild — start-dashboard-host.ps1 already accepts
+# it; for other launchers it is harmless when ignored.
 $childArgs = @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
-    "-File", "`"$startScript`"",
-    "-SkipBuild",
-    "-RepoRoot", "`"$root`""
+    "-File", "`"$ChildScript`""
 )
-if ($EnvFile -and $EnvFile.Trim() -ne "") {
-    $childArgs += @("-EnvFile", "`"$EnvFile`"")
+# start-dashboard-host.ps1 honours -DashboardPort and -SkipBuild; pass
+# them only when the wrapped child is actually that script. Other
+# launchers (e.g. launch-viewer.ps1) take their own params and would
+# choke on unknown ones.
+$childLeaf = [System.IO.Path]::GetFileName($ChildScript).ToLowerInvariant()
+if ($childLeaf -eq "start-dashboard-host.ps1") {
+    $childArgs += @("-SkipBuild", "-DashboardPort", "$DashboardPort", "-RepoRoot", "`"$root`"")
 }
 
 $childExe = (Get-Command powershell.exe -ErrorAction Stop).Source
@@ -158,14 +190,14 @@ while ($true) {
     try {
         $proc = Start-Process -FilePath $childExe -ArgumentList $childArgs -PassThru -WindowStyle Hidden
     } catch {
-        Write-SupervisorLog "[supervisor] failed to spawn start-api-host.ps1: $($_.Exception.Message). Sleeping ${currentDelay}s."
+        Write-SupervisorLog "[supervisor] failed to spawn dashboard launcher: $($_.Exception.Message). Sleeping ${currentDelay}s."
         Write-Heartbeat -ChildPid 0 -RestartCount $restartCount -State "spawn-failed"
         Start-Sleep -Seconds $currentDelay
         $currentDelay = [Math]::Min($currentDelay * 2, $MaxRestartDelaySec)
         continue
     }
 
-    Write-SupervisorLog "[supervisor] spawned start-api-host.ps1 pid=$($proc.Id)"
+    Write-SupervisorLog "[supervisor] spawned dashboard launcher pid=$($proc.Id)"
     Write-Heartbeat -ChildPid $proc.Id -RestartCount $restartCount -State "running"
 
     while (-not $proc.HasExited) {
@@ -189,7 +221,7 @@ while ($true) {
         -RanForSec $ranFor `
         -RestartDelaySec $RestartDelaySec `
         -MaxRestartDelaySec $MaxRestartDelaySec
-    Write-SupervisorLog ("[supervisor] start-api-host.ps1 pid={0} exited code={1} after {2:N0}s — restarting in {3}s" -f $proc.Id, $exitCode, $ranFor, $delay.ThisDelay)
+    Write-SupervisorLog ("[supervisor] dashboard launcher pid={0} exited code={1} after {2:N0}s — restarting in {3}s" -f $proc.Id, $exitCode, $ranFor, $delay.ThisDelay)
 
     $restartCount++
     Write-Heartbeat -ChildPid 0 -RestartCount $restartCount -State "restarting" -LastExitCode $exitCode -LastRunSec $ranFor

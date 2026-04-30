@@ -857,6 +857,34 @@ export type AboutThisPcLastBackupVerifyAge = {
   ok: boolean;
 };
 
+/**
+ * Dashboard-launcher watchdog snapshot.
+ *
+ * Mirrors `DashboardSupervisorReport` in `artifacts/api-server/src/lib/about.ts`,
+ * which the api-server derives from the on-disk JSON heartbeat written by
+ * `scripts/lan-host/dashboard-supervisor.ps1` (Task #399 / T-O).
+ *
+ * `null` on the parent `AboutThisPcReport` means the heartbeat file does
+ * not exist on this PC — typically a hub-only install where the
+ * dashboard is not auto-launched locally.
+ */
+export type AboutThisPcDashboardSupervisor = {
+  state:
+    | "alive"
+    | "stale"
+    | "restarting"
+    | "spawn-failed"
+    | "starting"
+    | "unreadable";
+  supervisorState: string | null;
+  ageSeconds: number | null;
+  staleThresholdSec: number;
+  restartCount: number | null;
+  childPid: number | null;
+  childScript: string | null;
+  heartbeatPath: string;
+};
+
 export type AboutThisPcReport = {
   installProfile: string;
   hostname: string;
@@ -868,6 +896,12 @@ export type AboutThisPcReport = {
   peerSquadronCount: number | null;
   lastBackupAge: AboutThisPcLastBackupAge | null;
   lastBackupVerifyAge: AboutThisPcLastBackupVerifyAge | null;
+  /**
+   * Watchdog over the dashboard launcher (vite preview on aggregator PCs,
+   * optionally `launch-viewer.ps1` on kiosk viewers). `null` when the
+   * heartbeat file is absent on this PC.
+   */
+  dashboardSupervisor: AboutThisPcDashboardSupervisor | null;
   nodeVersion: string;
 };
 

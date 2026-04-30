@@ -12,6 +12,14 @@ import {
 import { logger } from "./logger";
 
 /**
+ * Stale-threshold (seconds) for the dashboard-supervisor heartbeat.
+ * Matches `check-host-health.ps1`'s default and the `mdns-supervisor`
+ * threshold (`STALE_THRESHOLD_SEC` in `mdns-health.ts`) so all three
+ * watchdog rows on the About panel use the same goalposts.
+ */
+const DASHBOARD_SUPERVISOR_STALE_SEC = 90;
+
+/**
  * "About this PC" is a Settings-level snapshot intended for the
  * super_admin who is operating the LAN install. It bundles together
  * the small handful of facts an operator needs when reporting an
@@ -35,6 +43,38 @@ export type LastBackupVerifyAge = {
   ok: boolean;
 };
 
+/**
+ * Snapshot of the dashboard-launcher watchdog (Task #399 / T-O).
+ *
+ * Mirrors the on-disk JSON tick written by
+ * `scripts/lan-host/dashboard-supervisor.ps1` plus a derived
+ * `state` field. `null` here means the heartbeat file does not
+ * exist on disk yet — typically a hub-only install where the
+ * dashboard is consumed from a different PC.
+ */
+export type DashboardSupervisorReport = {
+  /** Derived badge state for the dashboard row. */
+  state:
+    | "alive"
+    | "stale"
+    | "restarting"
+    | "spawn-failed"
+    | "starting"
+    | "unreadable";
+  /** Raw `state` value from the heartbeat (when readable). */
+  supervisorState: string | null;
+  /** Heartbeat age in seconds (whole number). `null` if unparsed. */
+  ageSeconds: number | null;
+  /** Threshold used to flag `stale`; informational. */
+  staleThresholdSec: number;
+  restartCount: number | null;
+  childPid: number | null;
+  /** Path of the wrapped child script (for diagnostics). */
+  childScript: string | null;
+  /** Heartbeat path the agent actually read. */
+  heartbeatPath: string;
+};
+
 export type AboutThisPcReport = {
   installProfile: InstallProfile;
   hostname: string;
@@ -48,6 +88,12 @@ export type AboutThisPcReport = {
   peerSquadronCount: number | null;
   lastBackupAge: LastBackupAge | null;
   lastBackupVerifyAge: LastBackupVerifyAge | null;
+  /**
+   * Dashboard-launcher watchdog snapshot (Task T-O #399). `null`
+   * when the heartbeat file does not exist on this host (e.g. a
+   * hub PC that does not auto-launch the dashboard locally).
+   */
+  dashboardSupervisor: DashboardSupervisorReport | null;
   nodeVersion: string;
 };
 
@@ -147,6 +193,128 @@ async function readLastBackupAge(): Promise<LastBackupAge | null> {
   }
 }
 
+function dashboardSupervisorHeartbeatPath(): string {
+  // Override hook for tests + Linux dev hosts that have no
+  // `%PROGRAMDATA%`. Same convention as `mdns-health.ts`.
+  const raw = String(process.env["HAWK_DASHBOARD_HEARTBEAT_PATH"] ?? "").trim();
+  if (raw && isAbsolute(raw)) return raw;
+  const programData =
+    String(process.env["ProgramData"] ?? "").trim() ||
+    (process.platform === "win32" ? "C:\\ProgramData" : "/var/lib");
+  return join(programData, "HawkEye", "dashboard-supervisor.heartbeat");
+}
+
+type DashboardSupervisorHeartbeatJson = {
+  timestamp?: unknown;
+  childPid?: unknown;
+  restartCount?: unknown;
+  state?: unknown;
+  childScript?: unknown;
+};
+
+function asNullableInt(v: unknown): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+function asNullableString(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s ? s : null;
+}
+
+async function readDashboardSupervisorReport(
+  now: Date = new Date(),
+  heartbeatPath: string = dashboardSupervisorHeartbeatPath(),
+): Promise<DashboardSupervisorReport | null> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(heartbeatPath, "utf8");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === "ENOENT") return null;
+    logger.warn(
+      { err, heartbeatPath },
+      "about: dashboard-supervisor heartbeat unreadable",
+    );
+    return {
+      state: "unreadable",
+      supervisorState: null,
+      ageSeconds: null,
+      staleThresholdSec: DASHBOARD_SUPERVISOR_STALE_SEC,
+      restartCount: null,
+      childPid: null,
+      childScript: null,
+      heartbeatPath,
+    };
+  }
+
+  let parsed: DashboardSupervisorHeartbeatJson;
+  try {
+    parsed = JSON.parse(raw) as DashboardSupervisorHeartbeatJson;
+  } catch (err) {
+    logger.warn(
+      { err, heartbeatPath },
+      "about: dashboard-supervisor heartbeat JSON parse failed",
+    );
+    return {
+      state: "unreadable",
+      supervisorState: null,
+      ageSeconds: null,
+      staleThresholdSec: DASHBOARD_SUPERVISOR_STALE_SEC,
+      restartCount: null,
+      childPid: null,
+      childScript: null,
+      heartbeatPath,
+    };
+  }
+
+  const tsRaw = asNullableString(parsed.timestamp);
+  const supervisorState = asNullableString(parsed.state);
+  const restartCount = asNullableInt(parsed.restartCount);
+  const childPid = asNullableInt(parsed.childPid);
+  const childScript = asNullableString(parsed.childScript);
+
+  let ageSeconds: number | null = null;
+  if (tsRaw) {
+    const ts = new Date(tsRaw);
+    if (!Number.isNaN(ts.getTime())) {
+      ageSeconds = Math.max(
+        0,
+        Math.floor((now.getTime() - ts.getTime()) / 1000),
+      );
+    }
+  }
+
+  let state: DashboardSupervisorReport["state"];
+  if (ageSeconds == null) {
+    state = "unreadable";
+  } else if (ageSeconds > DASHBOARD_SUPERVISOR_STALE_SEC) {
+    state = "stale";
+  } else if (supervisorState === "running") {
+    state = "alive";
+  } else if (supervisorState === "restarting") {
+    state = "restarting";
+  } else if (supervisorState === "spawn-failed") {
+    state = "spawn-failed";
+  } else if (supervisorState === "starting") {
+    state = "starting";
+  } else {
+    state = "restarting";
+  }
+
+  return {
+    state,
+    supervisorState,
+    ageSeconds,
+    staleThresholdSec: DASHBOARD_SUPERVISOR_STALE_SEC,
+    restartCount,
+    childPid,
+    childScript,
+    heartbeatPath,
+  };
+}
+
 async function readLastBackupVerifyAge(): Promise<LastBackupVerifyAge | null> {
   try {
     const r = await pool.query<{ ok: boolean; observed_at: string }>(
@@ -178,12 +346,14 @@ export async function gatherAboutThisPc(): Promise<AboutThisPcReport> {
     peerSquadronCount,
     lastBackupAge,
     lastBackupVerifyAge,
+    dashboardSupervisor,
   ] = await Promise.all([
     readDatabaseName(),
     profile === "hub" ? readPeerTokenCount() : Promise.resolve(null),
     isAgg ? readPeerSquadronCount() : Promise.resolve(null),
     readLastBackupAge(),
     readLastBackupVerifyAge(),
+    readDashboardSupervisorReport(),
   ]);
   return {
     installProfile: profile,
@@ -196,6 +366,11 @@ export async function gatherAboutThisPc(): Promise<AboutThisPcReport> {
     peerSquadronCount,
     lastBackupAge,
     lastBackupVerifyAge,
+    dashboardSupervisor,
     nodeVersion: process.version,
   };
 }
+
+// Exported for tests so the heartbeat parsing can be exercised without
+// spinning up the express app.
+export { readDashboardSupervisorReport };

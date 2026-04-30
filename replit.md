@@ -177,6 +177,52 @@ support that lifetime:
 - `OPERATOR-RUNBOOK.md` § 9 — quarterly checklist the host-PC
   operator follows (≈10min). Mirrors the System Health tiles.
 
+## Watchdog supervisors (tasks #397, #398, #399 / T-O)
+
+Hawk Eye runs three long-lived background services on every host PC.
+Each is wrapped by an in-house PowerShell watchdog so a child crash
+respawns within ~5s (capped at 60s on rapid failures) without
+operator intervention. All three share one rotation library so a
+flapping service can never fill the disk:
+
+- `scripts/lan-host/api-supervisor.ps1` — wraps `start-api-host.ps1`
+  (Express api-server). Scheduled task `HawkEye-ApiServer-OnStartup`.
+- `scripts/lan-host/mdns-supervisor.ps1` — wraps the mDNS
+  broadcaster on hubs that opted into `-EnableMdns`. Scheduled task
+  `HawkEye-Mdns-OnStartup`.
+- `scripts/lan-host/dashboard-supervisor.ps1` — wraps
+  `start-dashboard-host.ps1` (vite preview) on aggregator PCs;
+  also supports wrapping `launch-viewer.ps1` for kiosk viewers.
+  Scheduled task `HawkEye-Dashboard-OnStartup`.
+- `scripts/lan-host/supervisor-log.ps1` — shared `Write-RotatingLog` /
+  `Get-RotatedLogCount` and the `Get-NextSupervisorDelay` backoff
+  helper used by all three supervisors. Log rotation defaults to
+  2 MiB per file × 3 backups (≈8 MiB per supervisor, ≈24 MiB total
+  worst case). The backoff schedule is 5→10→20→40→60s (capped at
+  `MaxRestartDelaySec`), reset to base after a healthy ≥60s run, so
+  the *first* rapid crash always respawns within the 5s SLA. Pester
+  tests live in `scripts/lan-host/tests/log-rotate.tests.ps1` and
+  `scripts/lan-host/tests/supervisor-backoff.tests.ps1`.
+
+Each supervisor writes a rolling text log and a JSON heartbeat under
+`%PROGRAMDATA%\HawkEye\<name>-supervisor.{log,heartbeat}`. The
+heartbeats are surfaced two ways:
+
+- `scripts/lan-host/check-host-health.ps1` — operator one-liner that
+  reports api + mDNS + dashboard heartbeats side-by-side. Uses the
+  shared `Show-SupervisorHeartbeat` helper in
+  `scripts/lan-host/supervisor-health.ps1` (unit-tested in
+  `scripts/lan-host/tests/supervisor-health.tests.ps1`).
+  `check-mdns-health.ps1` is still available as a focused mDNS-only
+  script with mDNS-specific exit codes.
+- `gatherAboutThisPc()` in `artifacts/api-server/src/lib/about.ts`
+  reads the dashboard heartbeat and exposes a `dashboardSupervisor`
+  block on `/api/internal/about` (and `/api/aggregate/about`). The
+  Settings → About this PC panel
+  (`artifacts/pilot-dashboard/src/components/AboutThisPc.tsx`)
+  renders it as a colour-dotted row so super_admins can see watchdog
+  freshness without leaving the dashboard.
+
 ## LAN-drop form preservation (task #371)
 
 Hawk Eye operators routinely lose connectivity mid-edit (squadron LAN

@@ -103,3 +103,43 @@ function Get-RotatedLogCount {
     }
     return $count
 }
+
+# Get-NextSupervisorDelay
+#
+# Pure helper used by api/mdns/dashboard supervisors to drive the
+# crash-respawn backoff sequence:
+#   first rapid crash  -> sleep RestartDelaySec       (e.g. 5s)
+#   second rapid crash -> sleep 2 * RestartDelaySec   (e.g. 10s)
+#   ...                -> doubles each time, capped at MaxRestartDelaySec
+#   healthy run (>= 60s of uptime) -> reset to RestartDelaySec
+#
+# Callers pattern:
+#   $next = Get-NextSupervisorDelay -CurrentDelay $currentDelay `
+#       -RanForSec $ranFor -RestartDelaySec 5 -MaxRestartDelaySec 60
+#   Start-Sleep -Seconds $next.ThisDelay
+#   $currentDelay = $next.NextDelay
+#
+# Returning both ThisDelay and NextDelay (instead of mutating in-place)
+# keeps the contract testable and rules out the off-by-one bug where
+# the *first* rapid crash wrongly waits 2 * RestartDelaySec because
+# the next-cycle value was computed before being slept.
+function Get-NextSupervisorDelay {
+    param(
+        [Parameter(Mandatory = $true)][int]$CurrentDelay,
+        [Parameter(Mandatory = $true)][double]$RanForSec,
+        [Parameter(Mandatory = $true)][int]$RestartDelaySec,
+        [Parameter(Mandatory = $true)][int]$MaxRestartDelaySec,
+        [int]$HealthyRunSec = 60
+    )
+
+    if ($RanForSec -ge $HealthyRunSec) {
+        $thisDelay = $RestartDelaySec
+    } else {
+        $thisDelay = $CurrentDelay
+    }
+    $nextDelay = [Math]::Min($thisDelay * 2, $MaxRestartDelaySec)
+    return [pscustomobject]@{
+        ThisDelay = [int]$thisDelay
+        NextDelay = [int]$nextDelay
+    }
+}

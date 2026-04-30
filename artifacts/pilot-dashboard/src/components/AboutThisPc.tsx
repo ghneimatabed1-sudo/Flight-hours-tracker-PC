@@ -26,6 +26,7 @@ import {
   fetchInternalAboutThisPc,
   postInternalAboutAction,
   type AboutThisPcAction,
+  type AboutThisPcDashboardSupervisor,
   type AboutThisPcReport,
 } from "@/lib/internal-migration";
 import {
@@ -33,7 +34,7 @@ import {
   lastBackupVerifySeverity,
   type AboutDotSeverity,
 } from "@/lib/about-health";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, type Key as I18nKey } from "@/lib/i18n";
 import { Card } from "@/components/Layout";
 import { Loader2, PlayCircle, Server } from "lucide-react";
 
@@ -73,6 +74,72 @@ function fmtAgeShort(seconds: number): string {
   if (h < 48) return `${h}h`;
   const d = Math.floor(h / 24);
   return `${d}d`;
+}
+
+/**
+ * Severity dot for the dashboard-supervisor row.
+ *
+ *   alive          -> ok
+ *   starting       -> ok    (boot path; converges within a few seconds)
+ *   restarting     -> warn  (transient between launcher exits)
+ *   stale          -> fail  (supervisor task itself died)
+ *   spawn-failed   -> fail  (cannot even start the launcher)
+ *   unreadable     -> warn  (heartbeat file is corrupt or partial)
+ */
+function dashboardSupervisorSeverity(
+  s: AboutThisPcDashboardSupervisor["state"],
+): AboutDotSeverity {
+  switch (s) {
+    case "alive":
+    case "starting":
+      return "ok";
+    case "restarting":
+    case "unreadable":
+      return "warn";
+    case "stale":
+    case "spawn-failed":
+      return "fail";
+    default:
+      return "unknown";
+  }
+}
+
+/**
+ * Render the dashboard-supervisor cell as `<state-label> · age · restarts`.
+ * `t` is the i18n lookup; we pass it explicitly so this stays a pure
+ * helper and the test can assert on the exact rendered string without
+ * mounting the whole component tree.
+ */
+function dashboardSupervisorStateKey(
+  state: AboutThisPcDashboardSupervisor["state"],
+): I18nKey {
+  // Map heartbeat states to the i18n keys we registered for both EN
+  // and AR. Using a switch keeps the keys statically typed (the `t`
+  // callback only accepts `keyof Dict`); a string template here
+  // would fail typecheck in strict mode.
+  switch (state) {
+    case "alive":          return "about_dashboard_supervisor_alive";
+    case "stale":          return "about_dashboard_supervisor_stale";
+    case "restarting":     return "about_dashboard_supervisor_restarting";
+    case "spawn-failed":   return "about_dashboard_supervisor_spawn_failed";
+    case "starting":       return "about_dashboard_supervisor_starting";
+    case "unreadable":     return "about_dashboard_supervisor_unreadable";
+  }
+}
+
+function fmtDashboardSupervisorValue(
+  d: AboutThisPcDashboardSupervisor | null,
+  t: (k: I18nKey) => string,
+): string {
+  if (!d) return t("about_dashboard_supervisor_absent");
+  const parts: string[] = [t(dashboardSupervisorStateKey(d.state))];
+  if (d.ageSeconds != null) {
+    parts.push(fmtAgeShort(d.ageSeconds));
+  }
+  if (d.restartCount != null && d.restartCount > 0) {
+    parts.push(`${d.restartCount}× restart`);
+  }
+  return parts.join(" · ");
 }
 
 function fmtBuildTime(s: string | null | undefined): string {
@@ -362,6 +429,27 @@ export default function AboutThisPc(): React.ReactElement {
                   onAfter={load}
                 />
               }
+            />
+            {/*
+              Dashboard launcher watchdog row (Task #399 / T-O).
+              `dashboardSupervisor === null` means the heartbeat file
+              was absent — typical on a hub-only PC that does not
+              auto-launch the dashboard locally. Render the row even
+              in that case so the operator can see the dashboard
+              watchdog is intentionally not installed (not silently
+              broken).
+            */}
+            <Row
+              label={t("about_field_dashboard_supervisor")}
+              value={fmtDashboardSupervisorValue(report.dashboardSupervisor, t)}
+              severity={
+                report.dashboardSupervisor
+                  ? dashboardSupervisorSeverity(
+                      report.dashboardSupervisor.state,
+                    )
+                  : "unknown"
+              }
+              testId="about-dashboard-supervisor"
             />
           </div>
         </div>

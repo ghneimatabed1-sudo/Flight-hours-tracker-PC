@@ -93,6 +93,25 @@ setG("matchMedia", matchMedia);
 (globalThis as unknown as { __GIT_SHORT_HASH__: string }).__GIT_SHORT_HASH__ = "deadbee";
 
 // ── fetch mock (configurable per-test) ─────────────────────────────
+// Mirrors `AboutThisPcDashboardSupervisor` in
+// artifacts/pilot-dashboard/src/lib/internal-migration.ts (Task #399 / T-O).
+type AboutReportDashboardSupervisor = {
+  state:
+    | "alive"
+    | "stale"
+    | "restarting"
+    | "spawn-failed"
+    | "starting"
+    | "unreadable";
+  supervisorState: string | null;
+  ageSeconds: number | null;
+  staleThresholdSec: number;
+  restartCount: number | null;
+  childPid: number | null;
+  childScript: string | null;
+  heartbeatPath: string;
+};
+
 type AboutReport = {
   installProfile: string;
   hostname: string;
@@ -104,6 +123,13 @@ type AboutReport = {
   peerSquadronCount: number | null;
   lastBackupAge: { ageSeconds: number; path: string; fileName: string } | null;
   lastBackupVerifyAge: { ageSeconds: number; ok: boolean } | null;
+  /**
+   * Dashboard-launcher watchdog snapshot. Default fixture treats this
+   * as a hub-only PC where the supervisor is intentionally not
+   * installed (heartbeat absent ⇒ `null`); individual tests can
+   * override via `makeReport({ dashboardSupervisor: {...} })`.
+   */
+  dashboardSupervisor: AboutReportDashboardSupervisor | null;
   nodeVersion: string;
 };
 
@@ -246,6 +272,7 @@ function makeReport(over: Partial<AboutReport> = {}): AboutReport {
       fileName: "2026-04-30.dump",
     },
     lastBackupVerifyAge: { ageSeconds: 5 * 86400, ok: true },
+    dashboardSupervisor: null,
     nodeVersion: "v20.11.1",
     ...over,
   };
@@ -301,8 +328,79 @@ test("AboutThisPc · super_admin sees every documented field on the hub", async 
     "peer-squadron count row must be hidden when the hub report omits it",
   );
 
+  // Dashboard-supervisor row is always rendered (Task #399 / T-O):
+  // when the heartbeat is absent (default fixture, hub-only PC) it
+  // shows the localized "not installed" label so operators can tell
+  // the difference between "supervisor down" and "supervisor never
+  // installed".
+  assert.ok(
+    text("about-dashboard-supervisor").length > 0,
+    "dashboard supervisor row should render even when the heartbeat is absent",
+  );
+
   // The panel's poll lives in a setInterval; tear down to prevent a
   // dangling timer keeping the test runner alive.
+  await act(async () => { root.unmount(); });
+  el.remove();
+});
+
+test("AboutThisPc · renders dashboard-supervisor row from a live heartbeat (alive + restarts)", async () => {
+  // Verifies that when the api-server returns a populated
+  // dashboardSupervisor block — alive launcher with a non-zero
+  // restartCount — the panel renders the localized state label and
+  // the restart counter so operators can see flap activity at a
+  // glance from Settings without RDP.
+  setSuperAdminSession();
+  fetchCalls.length = 0;
+  route.internal = {
+    status: 200,
+    body: {
+      ok: true,
+      report: makeReport({
+        dashboardSupervisor: {
+          state: "alive",
+          supervisorState: "running",
+          ageSeconds: 12,
+          staleThresholdSec: 90,
+          restartCount: 2,
+          childPid: 4242,
+          childScript: "C:\\Hawk\\scripts\\lan-host\\start-dashboard-host.ps1",
+          heartbeatPath:
+            "C:\\ProgramData\\HawkEye\\dashboard-supervisor.heartbeat",
+        },
+      }),
+    },
+  };
+  route.aggregate = null;
+
+  const el = w.document.createElement("div");
+  w.document.body.appendChild(el);
+  const root = createRoot(el);
+  await act(async () => { root.render(withProviders("hub")); });
+  await waitFor(
+    () => el.querySelector('[data-testid="about-dashboard-supervisor"]'),
+    "about-dashboard-supervisor",
+    el,
+  );
+
+  const text = (sel: string): string => {
+    const node = el.querySelector(`[data-testid="${sel}-value"]`);
+    return (node?.textContent ?? "").trim();
+  };
+  const value = text("about-dashboard-supervisor");
+  assert.ok(
+    value.includes("alive"),
+    `dashboard-supervisor row should surface the alive label; got: ${value}`,
+  );
+  assert.ok(
+    value.includes("12s"),
+    `dashboard-supervisor row should surface heartbeat age; got: ${value}`,
+  );
+  assert.ok(
+    value.includes("2×") || value.includes("2x") || value.includes("restart"),
+    `dashboard-supervisor row should surface restart counter; got: ${value}`,
+  );
+
   await act(async () => { root.unmount(); });
   el.remove();
 });

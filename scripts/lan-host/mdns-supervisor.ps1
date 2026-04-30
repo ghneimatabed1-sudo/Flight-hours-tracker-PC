@@ -138,21 +138,19 @@ while ($true) {
     $ranFor   = (New-TimeSpan -Start $startedAt -End (Get-Date)).TotalSeconds
     $exitCode = $proc.ExitCode
 
-    # Compute the *next* backoff first so the log line and the
-    # actual Start-Sleep agree. If the broadcast held up for at
-    # least a minute treat it as a healthy run and reset the
-    # backoff. Otherwise grow it so a permanently broken setup
-    # (missing Bonjour libs, port collision, etc.) does not pin a
-    # CPU core respawning every second.
-    if ($ranFor -ge 60) {
-        $currentDelay = $RestartDelaySec
-    } else {
-        $currentDelay = [Math]::Min($currentDelay * 2, $MaxRestartDelaySec)
-    }
-
-    Write-SupervisorLog ("[supervisor] dns-sd.exe pid={0} exited code={1} after {2:N0}s — restarting in {3}s" -f $proc.Id, $exitCode, $ranFor, $currentDelay)
+    # Drive the crash-respawn backoff via the shared helper so all
+    # three supervisors agree on the contract (first rapid crash
+    # sleeps RestartDelaySec, then 2x, 4x, … capped at
+    # MaxRestartDelaySec; reset to base after a healthy >=60s run).
+    $delay = Get-NextSupervisorDelay `
+        -CurrentDelay $currentDelay `
+        -RanForSec $ranFor `
+        -RestartDelaySec $RestartDelaySec `
+        -MaxRestartDelaySec $MaxRestartDelaySec
+    Write-SupervisorLog ("[supervisor] dns-sd.exe pid={0} exited code={1} after {2:N0}s — restarting in {3}s" -f $proc.Id, $exitCode, $ranFor, $delay.ThisDelay)
 
     $restartCount++
     Write-Heartbeat -ChildPid 0 -RestartCount $restartCount -State "restarting"
-    Start-Sleep -Seconds $currentDelay
+    Start-Sleep -Seconds $delay.ThisDelay
+    $currentDelay = $delay.NextDelay
 }
