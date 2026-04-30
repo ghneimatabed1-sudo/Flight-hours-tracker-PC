@@ -85,7 +85,16 @@ export function buildRouter(profile: InstallProfile): IRouter {
   }
 
   if (isAggregatorProfile(profile)) {
-    router.use("/aggregate", aggregateShellRouter);
+    // Aggregate routes follow the same security model as `/api/internal/*`
+    // on the hub: gated by `requireInternalLanSession` so the address-book
+    // CRUD and fan-out reads cannot be hit anonymously in production.
+    // In bring-up / dev (`HAWK_INTERNAL_SESSION_AUTH=off`) the middleware
+    // short-circuits, matching the hybrid default everywhere else.
+    const aggregate: IRouter = Router();
+    aggregate.use(lanAuthPublic);
+    aggregate.use(requireInternalLanSession);
+    aggregate.use(aggregateShellRouter);
+    router.use("/aggregate", aggregate);
   }
 
   return router;

@@ -623,6 +623,7 @@ export async function ensureFullSchema(): Promise<void> {
       squadron_name text,
       base_url text not null,
       token_hash text,
+      auth_token text,
       added_at timestamptz not null default now(),
       added_by text,
       last_ok_at timestamptz,
@@ -630,6 +631,16 @@ export async function ensureFullSchema(): Promise<void> {
       last_error_at timestamptz,
       removed_at timestamptz
     );
+    -- auth_token holds the plaintext bearer credential the aggregator
+    -- must send to the peer hub on every request. token_hash is the
+    -- SHA-256 mirror of that same secret, kept for parity with the
+    -- hub-side peer_tokens table and to support a future "rotate
+    -- token" UI without re-storing the plaintext. Both columns are
+    -- additive on legacy installs (added_at the time peer_squadrons
+    -- itself was first introduced) so the ALTER below is the
+    -- idempotent path for an already-bootstrapped DB.
+    alter table peer_squadrons
+      add column if not exists auth_token text;
     create unique index if not exists peer_squadrons_squadron_idx
       on peer_squadrons (squadron_id) where removed_at is null;
 

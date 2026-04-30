@@ -110,13 +110,22 @@ test("hub: /api/aggregate/* is NOT mounted (404)", async () => {
 });
 
 for (const profile of ["aggregator-wing", "aggregator-base"] as const) {
-  test(`${profile}: /api/aggregate/* shell mounts and returns 501 not_implemented_yet`, async () => {
+  test(`${profile}: /api/aggregate/* shell mounts and returns 404 surface for unknown subpaths`, async () => {
     await withServer(profile, async (baseUrl) => {
       const res = await fetch(`${baseUrl}/api/aggregate/anything`);
-      assert.equal(res.status, 501);
+      assert.equal(res.status, 404);
       const body = (await res.json()) as { error?: string; surface?: string };
-      assert.equal(body.error, "not_implemented_yet");
+      assert.equal(body.error, "not_found");
       assert.equal(body.surface, "aggregate");
+    });
+  });
+
+  test(`${profile}: /api/aggregate/peers exposes the address book`, async () => {
+    await withServer(profile, async (baseUrl) => {
+      const res = await fetch(`${baseUrl}/api/aggregate/peers`);
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { items?: unknown[] };
+      assert.ok(Array.isArray(body.items));
     });
   });
 
