@@ -16,7 +16,25 @@ import { isLanNoAuthEnabled } from "@/lib/internal-migration";
 import { useI18n } from "@/lib/i18n";
 import { useIdleTimeout } from "@/lib/use-idle-timeout";
 import LockScreen from "@/components/LockScreen";
-import { Languages, KeyRound, Lock } from "lucide-react";
+import { useInstallProfile } from "@/lib/install-profile";
+import { Languages, KeyRound, Lock, AlertTriangle } from "lucide-react";
+
+// `VITE_EXPECTED_INSTALL_PROFILE` is baked into the build (the operator
+// pins it during install). When set, we compare it against the value
+// the running api-server reports through `/api/healthz` and warn on
+// the login screen if the two disagree — that's the earliest the
+// operator can catch an INSTALL_PROFILE drift before signing in and
+// touching data.
+const EXPECTED_INSTALL_PROFILE: string = (() => {
+  try {
+    if (typeof import.meta === "undefined") return "";
+    const env = (import.meta as unknown as { env?: Record<string, string | boolean | undefined> }).env;
+    const raw = String(env?.VITE_EXPECTED_INSTALL_PROFILE ?? "").trim();
+    return raw;
+  } catch {
+    return "";
+  }
+})();
 
 // 1 hour of no input on the login page → screensaver. Stops a PC left
 // open overnight from sitting on the credentials prompt forever.
@@ -40,6 +58,11 @@ export default function LoginGate() {
   useIdleTimeout(LOGIN_AUTO_LOCK_MS, () => setScreenLocked(true));
 
   const lanNoAuth = isLanNoAuthEnabled();
+  const installProfileState = useInstallProfile();
+  const profileMismatch =
+    EXPECTED_INSTALL_PROFILE !== "" &&
+    installProfileState.loaded &&
+    installProfileState.profile !== EXPECTED_INSTALL_PROFILE;
 
   useEffect(() => {
     if (user) {
@@ -102,6 +125,25 @@ export default function LoginGate() {
         {pcRoleLock && (
           <div className="rounded border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-xs text-zinc-400">
             {t("roleLockedTo")}: <span className="font-medium text-zinc-100">{pcRoleLock}</span>
+          </div>
+        )}
+
+        {profileMismatch && (
+          <div
+            className="rounded border border-red-700/50 bg-red-950/40 px-3 py-2 text-xs text-red-200"
+            data-testid="banner-install-profile-mismatch"
+          >
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-red-300" />
+              <div>
+                <div className="font-semibold">{t("login_profile_mismatch_title")}</div>
+                <div className="mt-1">
+                  {t("login_profile_mismatch_body")
+                    .replace("{expected}", EXPECTED_INSTALL_PROFILE)
+                    .replace("{actual}", installProfileState.profile)}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

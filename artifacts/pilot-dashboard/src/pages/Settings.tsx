@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Card, PageHead } from "@/components/Layout";
+import AboutThisPc from "@/components/AboutThisPc";
 import { useI18n } from "@/lib/i18n";
 import {
   useAuth,
@@ -479,7 +480,8 @@ function InactivityTimeoutSection() {
 
 export default function Settings() {
   const { t, lang, setLang } = useI18n();
-  const { squadron, configureSquadron, fingerprint, releaseLicense, resetThisPC } = useAuth();
+  const { user, squadron, configureSquadron, fingerprint, releaseLicense, resetThisPC } = useAuth();
+  const isSuperAdmin = user?.role === "super_admin";
   const [name, setName] = useState(squadron?.name || "");
   const [num, setNum] = useState(squadron?.number || "");
   const [base, setBase] = useState(squadron?.base || "");
@@ -686,6 +688,7 @@ export default function Settings() {
             </div>
           </form>
         </Card>
+        {isSuperAdmin && <AboutThisPc />}
         <Card className="lg:col-span-2 flex items-center gap-5">
           <img src="brand/wings.png" className="h-16 object-contain shrink-0 opacity-95" alt="Pilot Wings" />
           <div className="space-y-1.5 flex-1">

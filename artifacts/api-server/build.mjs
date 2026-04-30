@@ -33,6 +33,19 @@ async function buildAll() {
   const distDir = path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
 
+  // Build-time constants surfaced to the bundle via `define`. The
+  // "About this PC" Settings panel reads these so an operator can
+  // tell at a glance which build the api-server was started from.
+  let pkgVersion = "0.0.0";
+  try {
+    const pkgRaw = readFileSync(path.resolve(artifactDir, "package.json"), "utf8");
+    const pkg = JSON.parse(pkgRaw);
+    if (typeof pkg?.version === "string" && pkg.version) pkgVersion = pkg.version;
+  } catch {
+    /* fall back to "0.0.0" */
+  }
+  const buildTime = new Date().toISOString();
+
   await esbuild({
     entryPoints: [path.resolve(artifactDir, "src/index.ts")],
     platform: "node",
@@ -43,6 +56,8 @@ async function buildAll() {
     logLevel: "info",
     define: {
       __API_SERVER_VERSION__: JSON.stringify(apiServerVersion),
+      __APISERVER_VERSION__: JSON.stringify(pkgVersion),
+      __BUILD_TIME__: JSON.stringify(buildTime),
     },
     // Some packages may not be bundleable, so we externalize them, we can add more here as needed.
     // Some of the packages below may not be imported or installed, but we're adding them in case they are in the future.

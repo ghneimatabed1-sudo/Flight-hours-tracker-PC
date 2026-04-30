@@ -757,6 +757,59 @@ export async function fetchInternalSystemHealth(): Promise<SystemHealthReport | 
   return null;
 }
 
+// ── About this PC ─────────────────────────────────────────────────
+// Settings-level snapshot. Mirrors fetchInternalSystemHealth: tries
+// `/api/internal/about` first (hub), falls back to
+// `/api/aggregate/about` (aggregator-wing / aggregator-base). Both
+// routes are super_admin only and return `{ ok, report }`.
+export type AboutThisPcLastBackupAge = {
+  ageSeconds: number;
+  path: string;
+  fileName: string;
+};
+
+export type AboutThisPcLastBackupVerifyAge = {
+  ageSeconds: number;
+  ok: boolean;
+};
+
+export type AboutThisPcReport = {
+  installProfile: string;
+  hostname: string;
+  apiServerVersion: string;
+  buildTime: string;
+  uptimeSeconds: number;
+  databaseName: string | null;
+  peerTokenCount: number | null;
+  peerSquadronCount: number | null;
+  lastBackupAge: AboutThisPcLastBackupAge | null;
+  lastBackupVerifyAge: AboutThisPcLastBackupVerifyAge | null;
+  nodeVersion: string;
+};
+
+export async function fetchInternalAboutThisPc(): Promise<AboutThisPcReport | null> {
+  const candidates = ["internal/about", "aggregate/about"];
+  for (const path of candidates) {
+    const url = getInternalApiPath(path);
+    if (!url) return null;
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        cache: "no-store",
+        headers: internalApiHeadersBase(),
+      });
+      if (res.status === 404) continue;
+      if (!res.ok) return null;
+      const body = (await res.json()) as { ok?: boolean; report?: AboutThisPcReport };
+      if (body?.ok && body.report) return body.report;
+      return null;
+    } catch {
+      // try the next candidate
+    }
+  }
+  return null;
+}
+
 export async function fetchInternalAuditLogRows(
   limit = 2500,
 ): Promise<
