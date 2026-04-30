@@ -77,7 +77,8 @@ const internalApiProxyPath = baseNorm
   ? `${baseNorm}/__hawk_eye_internal_api`
   : "/__hawk_eye_internal_api";
 const internalApiProxyTarget =
-  process.env.INTERNAL_API_PROXY_TARGET ?? "http://127.0.0.1:3847";
+  process.env.INTERNAL_API_PROXY_TARGET
+    ?? (process.env.REPL_ID ? "http://127.0.0.1:8080" : "http://127.0.0.1:3847");
 function internalApiProxyRewrite(path: string): string {
   const re = baseNorm
     ? new RegExp(
