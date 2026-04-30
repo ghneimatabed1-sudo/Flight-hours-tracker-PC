@@ -16,22 +16,30 @@
 //
 // Each row uses a colored dot (ok / warn / fail / unknown) so the
 // operator can scan for trouble at a glance without having to
-// interpret raw numbers.
+// interpret raw numbers. The "Last backup" / "Last verify" rows also
+// expose inline action buttons (task #390) so a super_admin can kick
+// off a fresh backup or verify-restore from the panel without
+// dropping to PowerShell.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   fetchInternalAboutThisPc,
+  postInternalAboutAction,
+  type AboutThisPcAction,
   type AboutThisPcReport,
 } from "@/lib/internal-migration";
+import {
+  lastBackupSeverity,
+  lastBackupVerifySeverity,
+  type AboutDotSeverity,
+} from "@/lib/about-health";
 import { useI18n } from "@/lib/i18n";
 import { Card } from "@/components/Layout";
-import { Server } from "lucide-react";
+import { Loader2, PlayCircle, Server } from "lucide-react";
 
 const POLL_MS = 60_000;
 
-type DotSeverity = "ok" | "warn" | "fail" | "unknown";
-
-function dotClass(s: DotSeverity): string {
+function dotClass(s: AboutDotSeverity): string {
   switch (s) {
     case "ok":
       return "bg-emerald-400";
@@ -67,24 +75,6 @@ function fmtAgeShort(seconds: number): string {
   return `${d}d`;
 }
 
-function lastBackupSeverity(seconds: number | null | undefined): DotSeverity {
-  if (seconds == null) return "unknown";
-  const days = seconds / 86400;
-  if (days > 7) return "fail";
-  if (days > 2) return "warn";
-  return "ok";
-}
-
-function lastBackupVerifySeverity(
-  v: { ageSeconds: number; ok: boolean } | null | undefined,
-): DotSeverity {
-  if (!v) return "warn";
-  if (!v.ok) return "fail";
-  const days = v.ageSeconds / 86400;
-  if (days > 120) return "warn";
-  return "ok";
-}
-
 function fmtBuildTime(s: string | null | undefined): string {
   if (!s) return "—";
   // ISO timestamp; render in the user's locale, short form.
@@ -96,11 +86,12 @@ function fmtBuildTime(s: string | null | undefined): string {
 interface RowProps {
   label: string;
   value: React.ReactNode;
-  severity?: DotSeverity;
+  severity?: AboutDotSeverity;
   testId?: string;
+  action?: React.ReactNode;
 }
 
-function Row({ label, value, severity = "ok", testId }: RowProps) {
+function Row({ label, value, severity = "ok", testId, action }: RowProps) {
   return (
     <div
       className="flex items-center justify-between gap-3 py-1 text-sm"
@@ -113,13 +104,78 @@ function Row({ label, value, severity = "ok", testId }: RowProps) {
         />
         <span className="truncate">{label}</span>
       </span>
-      <span
-        className="font-mono text-xs text-foreground break-all text-end"
-        data-testid={testId ? `${testId}-value` : undefined}
-      >
-        {value}
+      <span className="flex items-center gap-2 min-w-0 justify-end">
+        <span
+          className="font-mono text-xs text-foreground break-all text-end"
+          data-testid={testId ? `${testId}-value` : undefined}
+        >
+          {value}
+        </span>
+        {action}
       </span>
     </div>
+  );
+}
+
+interface ActionButtonProps {
+  action: AboutThisPcAction;
+  label: string;
+  runningLabel: string;
+  testId: string;
+  onAfter: () => void | Promise<void>;
+}
+
+function ActionButton({
+  action,
+  label,
+  runningLabel,
+  testId,
+  onAfter,
+}: ActionButtonProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onClick = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await postInternalAboutAction(action);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      await onAfter();
+    } finally {
+      setBusy(false);
+    }
+  }, [action, onAfter]);
+
+  return (
+    <span className="flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={busy}
+        data-testid={testId}
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-primary/15 text-primary border border-primary/40 hover:bg-primary/25 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {busy ? (
+          <Loader2 className="h-3 w-3 animate-spin" />
+        ) : (
+          <PlayCircle className="h-3 w-3" />
+        )}
+        <span>{busy ? runningLabel : label}</span>
+      </button>
+      {error && (
+        <span
+          className="text-[10px] text-destructive max-w-[8rem] truncate"
+          title={error}
+          data-testid={`${testId}-error`}
+        >
+          {error}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -130,38 +186,39 @@ export default function AboutThisPc(): React.ReactElement {
   const [error, setError] = useState<string | null>(null);
   const [lastPolledAt, setLastPolledAt] = useState<string | null>(null);
 
+  const load = useCallback(async () => {
+    try {
+      const r = await fetchInternalAboutThisPc();
+      if (r) {
+        setReport(r);
+        setError(null);
+      } else {
+        setError("about_unreachable");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoaded(true);
+      setLastPolledAt(new Date().toISOString());
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setInterval> | null = null;
 
-    async function load() {
-      try {
-        const r = await fetchInternalAboutThisPc();
-        if (cancelled) return;
-        if (r) {
-          setReport(r);
-          setError(null);
-        } else {
-          setError("about_unreachable");
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (!cancelled) {
-          setLoaded(true);
-          setLastPolledAt(new Date().toISOString());
-        }
-      }
+    async function tick() {
+      if (cancelled) return;
+      await load();
     }
 
-    void load();
-    timer = setInterval(load, POLL_MS);
+    void tick();
+    timer = setInterval(tick, POLL_MS);
     return () => {
       cancelled = true;
       if (timer) clearInterval(timer);
     };
-  }, []);
+  }, [load]);
 
   return (
     <Card
@@ -276,6 +333,15 @@ export default function AboutThisPc(): React.ReactElement {
               }
               severity={lastBackupSeverity(report.lastBackupAge?.ageSeconds ?? null)}
               testId="about-last-backup"
+              action={
+                <ActionButton
+                  action="run-backup"
+                  label={t("about_run_backup_now")}
+                  runningLabel={t("about_action_running")}
+                  testId="about-run-backup"
+                  onAfter={load}
+                />
+              }
             />
             <Row
               label={t("about_field_last_backup_verify")}
@@ -287,6 +353,15 @@ export default function AboutThisPc(): React.ReactElement {
               }
               severity={lastBackupVerifySeverity(report.lastBackupVerifyAge)}
               testId="about-last-backup-verify"
+              action={
+                <ActionButton
+                  action="run-verify"
+                  label={t("about_run_verify_now")}
+                  runningLabel={t("about_action_running")}
+                  testId="about-run-verify"
+                  onAfter={load}
+                />
+              }
             />
           </div>
         </div>

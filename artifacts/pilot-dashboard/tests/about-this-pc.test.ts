@@ -110,8 +110,18 @@ type AboutReport = {
 type RouteState = {
   internal: { status: number; body: unknown } | null;
   aggregate: { status: number; body: unknown } | null;
+  // Per-action POST responses for /about/run-backup and /about/run-verify.
+  // Default = 202 ok. Tests can override to simulate "already_running",
+  // "powershell_unavailable", etc.
+  runBackup: { status: number; body: unknown } | null;
+  runVerify: { status: number; body: unknown } | null;
 };
-const route: RouteState = { internal: null, aggregate: null };
+const route: RouteState = {
+  internal: null,
+  aggregate: null,
+  runBackup: null,
+  runVerify: null,
+};
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -138,6 +148,18 @@ const fetchImpl = async (
     if (route.aggregate) return jsonResponse(route.aggregate.body, route.aggregate.status);
     return jsonResponse({ error: "not_handled" }, 404);
   }
+  if (url.endsWith("/api/internal/about/run-backup") && method === "POST") {
+    if (route.runBackup) {
+      return jsonResponse(route.runBackup.body, route.runBackup.status);
+    }
+    return jsonResponse({ ok: true, started: true }, 202);
+  }
+  if (url.endsWith("/api/internal/about/run-verify") && method === "POST") {
+    if (route.runVerify) {
+      return jsonResponse(route.runVerify.body, route.runVerify.status);
+    }
+    return jsonResponse({ ok: true, started: true }, 202);
+  }
   // The AuthProvider / install-profile bootstraps may probe other
   // routes; return 404 so the test stays focused.
   return jsonResponse({ error: "not_handled" }, 404);
@@ -153,6 +175,10 @@ const { AuthProvider, __setInitialUserForTests } = await import(
 );
 const installProfile = await import("../src/lib/install-profile.tsx");
 const AboutThisPc = (await import("../src/components/AboutThisPc")).default;
+const AboutHealthRibbon = (
+  await import("../src/components/AboutHealthRibbon")
+).default;
+const aboutHealth = await import("../src/lib/about-health.ts");
 
 function setSuperAdminSession(): void {
   w.localStorage.clear();
@@ -353,6 +379,408 @@ test("AboutThisPc · shows the unreachable banner when both routes fail", async 
     el.querySelector('[data-testid="about-rows"]'),
     null,
     "data rows must NOT render when the endpoint is unreachable",
+  );
+
+  await act(async () => { root.unmount(); });
+  el.remove();
+});
+
+// ── ribbon visibility (task #390) ─────────────────────────────────
+//
+// `aboutHealthRibbonSeverity` is the gate for the top-of-Settings
+// warning ribbon: the ribbon must only mount when at least one health
+// dot is `fail`. The ribbon also exposes inline action buttons that
+// hit the new `/api/internal/about/run-backup` and `/run-verify`
+// endpoints, so we exercise that wiring too.
+
+test("aboutHealthRibbonSeverity · downgrades from fail to warn to ok", () => {
+  // Healthy: backup 1h ago, verify 5d ago → ok
+  assert.equal(
+    aboutHealth.aboutHealthRibbonSeverity({
+      installProfile: "hub",
+      hostname: "h",
+      apiServerVersion: "1",
+      buildTime: "",
+      uptimeSeconds: 0,
+      databaseName: "db",
+      peerTokenCount: 0,
+      peerSquadronCount: null,
+      lastBackupAge: { ageSeconds: 3600, path: "/x", fileName: "x.dump" },
+      lastBackupVerifyAge: { ageSeconds: 5 * 86400, ok: true },
+      nodeVersion: "v20",
+    }),
+    "ok",
+  );
+  // Backup 3d old → warn (>2d but <=7d)
+  assert.equal(
+    aboutHealth.aboutHealthRibbonSeverity({
+      installProfile: "hub",
+      hostname: "h",
+      apiServerVersion: "1",
+      buildTime: "",
+      uptimeSeconds: 0,
+      databaseName: "db",
+      peerTokenCount: 0,
+      peerSquadronCount: null,
+      lastBackupAge: { ageSeconds: 3 * 86400, path: "/x", fileName: "x.dump" },
+      lastBackupVerifyAge: { ageSeconds: 5 * 86400, ok: true },
+      nodeVersion: "v20",
+    }),
+    "warn",
+  );
+  // Backup 10d old → fail
+  assert.equal(
+    aboutHealth.aboutHealthRibbonSeverity({
+      installProfile: "hub",
+      hostname: "h",
+      apiServerVersion: "1",
+      buildTime: "",
+      uptimeSeconds: 0,
+      databaseName: "db",
+      peerTokenCount: 0,
+      peerSquadronCount: null,
+      lastBackupAge: { ageSeconds: 10 * 86400, path: "/x", fileName: "x.dump" },
+      lastBackupVerifyAge: { ageSeconds: 5 * 86400, ok: true },
+      nodeVersion: "v20",
+    }),
+    "fail",
+  );
+  // Verify FAIL → fail (overrides backup ok)
+  assert.equal(
+    aboutHealth.aboutHealthRibbonSeverity({
+      installProfile: "hub",
+      hostname: "h",
+      apiServerVersion: "1",
+      buildTime: "",
+      uptimeSeconds: 0,
+      databaseName: "db",
+      peerTokenCount: 0,
+      peerSquadronCount: null,
+      lastBackupAge: { ageSeconds: 3600, path: "/x", fileName: "x.dump" },
+      lastBackupVerifyAge: { ageSeconds: 86400, ok: false },
+      nodeVersion: "v20",
+    }),
+    "fail",
+  );
+  // Null report → unknown (we never show the ribbon for unknown)
+  assert.equal(aboutHealth.aboutHealthRibbonSeverity(null), "unknown");
+  assert.equal(aboutHealth.shouldShowAboutHealthRibbon(null), false);
+});
+
+function withRibbon(profile: installProfile.InstallProfile): React.ReactElement {
+  return React.createElement(
+    I18nProvider,
+    null,
+    React.createElement(
+      installProfile.InstallProfileProvider,
+      { initialProfile: profile },
+      React.createElement(AuthProvider, null, React.createElement(AboutHealthRibbon)),
+    ),
+  );
+}
+
+test("AboutHealthRibbon · stays hidden when every dot is healthy", async () => {
+  setSuperAdminSession();
+  fetchCalls.length = 0;
+  // Backup 1h ago, verify 5d ago — both healthy.
+  route.internal = {
+    status: 200,
+    body: {
+      ok: true,
+      report: makeReport({
+        lastBackupAge: {
+          ageSeconds: 3600,
+          path: "/var/x",
+          fileName: "fresh.dump",
+        },
+        lastBackupVerifyAge: { ageSeconds: 5 * 86400, ok: true },
+      }),
+    },
+  };
+  route.aggregate = null;
+
+  const el = w.document.createElement("div");
+  w.document.body.appendChild(el);
+  const root = createRoot(el);
+  await act(async () => {
+    root.render(withRibbon("hub"));
+  });
+  // Give the fetch + render a tick.
+  await flush(100);
+  assert.equal(
+    el.querySelector('[data-testid="about-health-ribbon"]'),
+    null,
+    "ribbon must NOT render when every dot is healthy",
+  );
+  await act(async () => { root.unmount(); });
+  el.remove();
+});
+
+test("AboutHealthRibbon · renders when last backup is over a week old", async () => {
+  setSuperAdminSession();
+  fetchCalls.length = 0;
+  route.internal = {
+    status: 200,
+    body: {
+      ok: true,
+      report: makeReport({
+        // 10 days old → fail bucket.
+        lastBackupAge: {
+          ageSeconds: 10 * 86400,
+          path: "/var/x",
+          fileName: "stale.dump",
+        },
+        lastBackupVerifyAge: { ageSeconds: 5 * 86400, ok: true },
+      }),
+    },
+  };
+  route.aggregate = null;
+
+  const el = w.document.createElement("div");
+  w.document.body.appendChild(el);
+  const root = createRoot(el);
+  await act(async () => {
+    root.render(withRibbon("hub"));
+  });
+  await waitFor(
+    () => el.querySelector('[data-testid="about-health-ribbon"]'),
+    "about-health-ribbon",
+    el,
+  );
+  // Backup is failing → the run-backup button should be present, the
+  // verify button should NOT (verify is still healthy).
+  assert.ok(
+    el.querySelector('[data-testid="about-ribbon-run-backup"]'),
+    "run-backup button should render for backup-fail",
+  );
+  assert.equal(
+    el.querySelector('[data-testid="about-ribbon-run-verify"]'),
+    null,
+    "run-verify button should be hidden when verify dot is healthy",
+  );
+
+  await act(async () => { root.unmount(); });
+  el.remove();
+});
+
+test("AboutHealthRibbon · renders when last verify is FAIL", async () => {
+  setSuperAdminSession();
+  fetchCalls.length = 0;
+  route.internal = {
+    status: 200,
+    body: {
+      ok: true,
+      report: makeReport({
+        lastBackupAge: {
+          ageSeconds: 3600,
+          path: "/var/x",
+          fileName: "fresh.dump",
+        },
+        lastBackupVerifyAge: { ageSeconds: 86400, ok: false },
+      }),
+    },
+  };
+  route.aggregate = null;
+
+  const el = w.document.createElement("div");
+  w.document.body.appendChild(el);
+  const root = createRoot(el);
+  await act(async () => {
+    root.render(withRibbon("hub"));
+  });
+  await waitFor(
+    () => el.querySelector('[data-testid="about-health-ribbon"]'),
+    "about-health-ribbon (verify fail)",
+    el,
+  );
+  assert.ok(
+    el.querySelector('[data-testid="about-ribbon-run-verify"]'),
+    "run-verify button should render for verify-fail",
+  );
+  assert.equal(
+    el.querySelector('[data-testid="about-ribbon-run-backup"]'),
+    null,
+    "run-backup button should be hidden when backup dot is healthy",
+  );
+
+  await act(async () => { root.unmount(); });
+  el.remove();
+});
+
+test("AboutThisPc · clicking Run backup POSTs to /run-backup and re-polls /about", async () => {
+  setSuperAdminSession();
+  fetchCalls.length = 0;
+  // Start with a fail-bucket backup so the action is meaningful.
+  route.internal = {
+    status: 200,
+    body: {
+      ok: true,
+      report: makeReport({
+        lastBackupAge: {
+          ageSeconds: 10 * 86400,
+          path: "/var/x",
+          fileName: "stale.dump",
+        },
+      }),
+    },
+  };
+  route.aggregate = null;
+  route.runBackup = { status: 202, body: { ok: true, started: true } };
+  route.runVerify = null;
+
+  const el = w.document.createElement("div");
+  w.document.body.appendChild(el);
+  const root = createRoot(el);
+  await act(async () => {
+    root.render(withProviders("hub"));
+  });
+  const btn = (await waitFor(
+    () => el.querySelector('[data-testid="about-run-backup"]'),
+    "about-run-backup button",
+    el,
+  )) as HTMLButtonElement;
+
+  // Snapshot how many GETs happened pre-click so we can assert the
+  // re-poll fires after a successful POST.
+  const getsBefore = fetchCalls.filter(
+    (c) => c.method === "GET" && c.url.endsWith("/api/internal/about"),
+  ).length;
+
+  await act(async () => {
+    btn.dispatchEvent(new w.Event("click", { bubbles: true }));
+  });
+  await flush(60);
+
+  const posts = fetchCalls.filter(
+    (c) =>
+      c.method === "POST" &&
+      c.url.endsWith("/api/internal/about/run-backup"),
+  );
+  assert.equal(posts.length, 1, "exactly one POST to /run-backup");
+  // Error label must NOT appear on success.
+  assert.equal(
+    el.querySelector('[data-testid="about-run-backup-error"]'),
+    null,
+    "no error label on a successful run-backup",
+  );
+  const getsAfter = fetchCalls.filter(
+    (c) => c.method === "GET" && c.url.endsWith("/api/internal/about"),
+  ).length;
+  assert.ok(
+    getsAfter > getsBefore,
+    `expected /about to be re-polled after the action ran (before=${getsBefore} after=${getsAfter})`,
+  );
+
+  await act(async () => { root.unmount(); });
+  el.remove();
+});
+
+test("AboutThisPc · surfaces server error label when Run verify fails", async () => {
+  setSuperAdminSession();
+  fetchCalls.length = 0;
+  route.internal = {
+    status: 200,
+    body: { ok: true, report: makeReport() },
+  };
+  route.aggregate = null;
+  route.runBackup = null;
+  route.runVerify = {
+    status: 503,
+    body: { ok: false, error: "powershell_unavailable" },
+  };
+
+  const el = w.document.createElement("div");
+  w.document.body.appendChild(el);
+  const root = createRoot(el);
+  await act(async () => {
+    root.render(withProviders("hub"));
+  });
+  const btn = (await waitFor(
+    () => el.querySelector('[data-testid="about-run-verify"]'),
+    "about-run-verify button",
+    el,
+  )) as HTMLButtonElement;
+
+  await act(async () => {
+    btn.dispatchEvent(new w.Event("click", { bubbles: true }));
+  });
+  await flush(60);
+
+  const errorLabel = el.querySelector('[data-testid="about-run-verify-error"]');
+  assert.ok(errorLabel, "error label should render after a failed action");
+  assert.ok(
+    (errorLabel?.textContent ?? "").includes("powershell_unavailable"),
+    `error label should surface the server's reason; got: ${errorLabel?.textContent}`,
+  );
+
+  await act(async () => { root.unmount(); });
+  el.remove();
+});
+
+test("AboutHealthRibbon · clicking Run backup hits the same POST endpoint", async () => {
+  setSuperAdminSession();
+  fetchCalls.length = 0;
+  route.internal = {
+    status: 200,
+    body: {
+      ok: true,
+      report: makeReport({
+        lastBackupAge: {
+          ageSeconds: 10 * 86400,
+          path: "/var/x",
+          fileName: "stale.dump",
+        },
+      }),
+    },
+  };
+  route.aggregate = null;
+  route.runBackup = { status: 202, body: { ok: true, started: true } };
+
+  const el = w.document.createElement("div");
+  w.document.body.appendChild(el);
+  const root = createRoot(el);
+  await act(async () => {
+    root.render(withRibbon("hub"));
+  });
+  const btn = (await waitFor(
+    () => el.querySelector('[data-testid="about-ribbon-run-backup"]'),
+    "about-ribbon-run-backup button",
+    el,
+  )) as HTMLButtonElement;
+
+  await act(async () => {
+    btn.dispatchEvent(new w.Event("click", { bubbles: true }));
+  });
+  await flush(60);
+
+  const posts = fetchCalls.filter(
+    (c) =>
+      c.method === "POST" &&
+      c.url.endsWith("/api/internal/about/run-backup"),
+  );
+  assert.equal(posts.length, 1, "ribbon must POST to the same /run-backup endpoint");
+
+  await act(async () => { root.unmount(); });
+  el.remove();
+});
+
+test("AboutHealthRibbon · stays hidden when the report is unreachable", async () => {
+  setSuperAdminSession();
+  fetchCalls.length = 0;
+  route.internal = { status: 500, body: { ok: false, error: "boom" } };
+  route.aggregate = { status: 500, body: { ok: false, error: "boom" } };
+
+  const el = w.document.createElement("div");
+  w.document.body.appendChild(el);
+  const root = createRoot(el);
+  await act(async () => {
+    root.render(withRibbon("hub"));
+  });
+  await flush(100);
+  assert.equal(
+    el.querySelector('[data-testid="about-health-ribbon"]'),
+    null,
+    "ribbon must NOT render when the about endpoint is unreachable (no false alarms)",
   );
 
   await act(async () => { root.unmount(); });

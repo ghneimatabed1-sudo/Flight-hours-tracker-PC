@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import AboutThisPc from "@/components/AboutThisPc";
+import AboutHealthRibbon from "@/components/AboutHealthRibbon";
 import { useI18n } from "@/lib/i18n";
 import {
   useAuth,
@@ -526,6 +527,7 @@ export default function Settings() {
   return (
     <div>
       <PageHead title={t("nav_settings")} />
+      {isSuperAdmin && <AboutHealthRibbon />}
       <div className="grid lg:grid-cols-2 gap-4">
         <Card>
           <form onSubmit={save} className="space-y-3">

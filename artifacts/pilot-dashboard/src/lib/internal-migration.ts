@@ -810,6 +810,61 @@ export async function fetchInternalAboutThisPc(): Promise<AboutThisPcReport | nu
   return null;
 }
 
+export type AboutThisPcAction = "run-backup" | "run-verify";
+
+export type AboutThisPcActionResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/**
+ * Trigger one of the LAN-host maintenance scripts via the api-server.
+ *
+ * Wraps the `POST /api/internal/about/run-backup` and
+ * `POST /api/internal/about/run-verify` endpoints added in task #390 so
+ * the inline buttons on the AboutThisPc panel and the Settings health
+ * ribbon can both fire them without re-implementing fetch glue.
+ *
+ * The api-server returns 202 immediately and runs the PowerShell
+ * script detached; the caller should re-poll `fetchInternalAboutThisPc`
+ * to watch the age dot go green.
+ */
+export async function postInternalAboutAction(
+  action: AboutThisPcAction,
+): Promise<AboutThisPcActionResult> {
+  const candidates = [
+    `internal/about/${action}`,
+    `aggregate/about/${action}`,
+  ];
+  let lastError = "internal_api_disabled";
+  for (const path of candidates) {
+    const url = getInternalApiPath(path);
+    if (!url) continue;
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        cache: "no-store",
+        headers: internalApiHeadersBase(),
+      });
+      if (res.status === 404) {
+        // The aggregator router doesn't mount the action routes today;
+        // fall through and let the next candidate try.
+        lastError = "not_found";
+        continue;
+      }
+      const body = (await res.json().catch(() => null)) as
+        | { ok?: boolean; error?: string }
+        | null;
+      if (res.ok && body?.ok) return { ok: true };
+      lastError = body?.error || `http_${res.status}`;
+      // Don't fan out a definitive server response across candidates.
+      return { ok: false, error: lastError };
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
+    }
+  }
+  return { ok: false, error: lastError };
+}
+
 export async function fetchInternalAuditLogRows(
   limit = 2500,
 ): Promise<
