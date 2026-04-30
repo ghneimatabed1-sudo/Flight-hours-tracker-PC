@@ -3,14 +3,17 @@
 // in `artifacts/api-server` actually changed.
 //
 // Cache key = sha256 of every `src/**/*.ts` file plus `package.json` and
-// `build.mjs` for the api-server. Cache layout mirrors a finished build
-// directory at `<cacheRoot>/<sha>/` (index.mjs + pino worker shims +
-// .map files), so we can point the spawned api-server child straight at
-// it without copying anything back into `artifacts/api-server/dist`.
+// `build.mjs` for the api-server, AND every `src/**/*.ts` + `package.json`
+// for each workspace lib under `<repoRoot>/lib/*`. The lib coverage was
+// added after #404: editing `lib/api-zod/src/*.ts` used to leave a stale
+// bundle around (the build inlines the lib via esbuild, but the cache
+// did not know that), and the multi-PC test would silently exercise the
+// previous lib version. Cache layout mirrors a finished build directory
+// at `<cacheRoot>/<sha>/` (index.mjs + pino worker shims + .map files),
+// so we can point the spawned api-server child straight at it without
+// copying anything back into `artifacts/api-server/dist`.
 //
-// Workspace dep changes (e.g. `lib/api-zod`) do *not* invalidate the
-// cache by design — the task scope is api-server source only. Manual
-// cache nuke: `rm -rf node_modules/.cache/multi-pc-test-build`.
+// Manual cache nuke: `rm -rf node_modules/.cache/multi-pc-test-build`.
 
 import { createHash } from "node:crypto";
 import {
@@ -22,7 +25,7 @@ import {
   renameSync,
   rmSync,
 } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 
 export type EnsureBuiltOpts = {
   /** Absolute path to `artifacts/api-server`. */
@@ -36,6 +39,12 @@ export type EnsureBuiltOpts = {
    * `destDist` with `index.mjs` (+ pino shims) and throw on failure.
    */
   build: () => void;
+  /**
+   * Optional: where to look for workspace libs whose source contributes
+   * to the bundle. Defaults to `<apiServerDir>/../../lib`. Pass a custom
+   * dir from unit tests so they can run against a fixture filesystem.
+   */
+  libsRoot?: string;
 };
 
 export type EnsureBuiltResult = {
@@ -70,21 +79,69 @@ function listSourceFiles(srcDir: string): string[] {
   return out.sort();
 }
 
+function defaultLibsRoot(apiServerDir: string): string {
+  // <repoRoot>/artifacts/api-server → <repoRoot>/lib
+  return resolve(apiServerDir, "..", "..", "lib");
+}
+
+function listLibInputs(libsRoot: string): string[] {
+  const out: string[] = [];
+  let libEnts;
+  try {
+    libEnts = readdirSync(libsRoot, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const lib of libEnts) {
+    if (!lib.isDirectory()) continue;
+    const libDir = join(libsRoot, lib.name);
+    const pkg = join(libDir, "package.json");
+    if (existsSync(pkg)) out.push(pkg);
+    const srcDir = join(libDir, "src");
+    if (existsSync(srcDir)) out.push(...listSourceFiles(srcDir));
+  }
+  return out;
+}
+
 /**
  * Deterministic sha256 over api-server build inputs. Exposed for the
  * cache-invalidation smoke test in
  * `tests/api-server-build-cache.test.ts`.
+ *
+ * Inputs covered:
+ *   - `<apiServerDir>/src/**\/*.ts`
+ *   - `<apiServerDir>/package.json` and `build.mjs`
+ *   - For every workspace lib `<libsRoot>/<lib>`:
+ *     - `<libsRoot>/<lib>/package.json`
+ *     - `<libsRoot>/<lib>/src/**\/*.ts`
+ *
+ * `libsRoot` defaults to `<apiServerDir>/../../lib`. Pass an explicit
+ * `libsRoot` from unit tests that build a fixture filesystem.
  */
-export function computeApiServerCacheKey(apiServerDir: string): string {
+export function computeApiServerCacheKey(
+  apiServerDir: string,
+  libsRoot: string = defaultLibsRoot(apiServerDir),
+): string {
   const srcDir = join(apiServerDir, "src");
-  const files: string[] = listSourceFiles(srcDir);
+  const apiFiles: string[] = listSourceFiles(srcDir);
   for (const extra of ["package.json", "build.mjs"]) {
     const p = join(apiServerDir, extra);
-    if (existsSync(p)) files.push(p);
+    if (existsSync(p)) apiFiles.push(p);
   }
   const hash = createHash("sha256");
-  for (const f of files) {
-    hash.update(relative(apiServerDir, f));
+  // Hash the api-server inputs first, namespaced by repo-relative-ish path
+  // (relative to apiServerDir for back-compat).
+  for (const f of apiFiles) {
+    hash.update(`api:${relative(apiServerDir, f)}`);
+    hash.update("\0");
+    hash.update(readFileSync(f));
+    hash.update("\0");
+  }
+  // Then the workspace libs, namespaced by lib path so reordering on
+  // disk does not perturb the hash.
+  const libFiles = listLibInputs(libsRoot).sort();
+  for (const f of libFiles) {
+    hash.update(`lib:${relative(libsRoot, f)}`);
     hash.update("\0");
     hash.update(readFileSync(f));
     hash.update("\0");
@@ -110,7 +167,10 @@ function copyDirSync(src: string, dst: string): void {
 export function ensureApiServerBuiltCached(
   opts: EnsureBuiltOpts,
 ): EnsureBuiltResult {
-  const cacheKey = computeApiServerCacheKey(opts.apiServerDir);
+  const cacheKey = computeApiServerCacheKey(
+    opts.apiServerDir,
+    opts.libsRoot ?? defaultLibsRoot(opts.apiServerDir),
+  );
   const cachedDir = join(opts.cacheRoot, cacheKey);
   const cachedEntry = join(cachedDir, "index.mjs");
   if (existsSync(cachedEntry)) {

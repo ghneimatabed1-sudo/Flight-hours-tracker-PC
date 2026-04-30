@@ -25,6 +25,7 @@ type Fixture = {
   apiServerDir: string;
   cacheRoot: string;
   destDist: string;
+  libsRoot: string;
   cleanup: () => void;
 };
 
@@ -33,6 +34,7 @@ function makeFixture(): Fixture {
   const apiServerDir = join(root, "api-server");
   const cacheRoot = join(root, ".cache");
   const destDist = join(apiServerDir, "dist");
+  const libsRoot = join(root, "lib");
   mkdirSync(join(apiServerDir, "src", "lib"), { recursive: true });
   writeFileSync(
     join(apiServerDir, "package.json"),
@@ -44,11 +46,36 @@ function makeFixture(): Fixture {
     join(apiServerDir, "src", "lib", "util.ts"),
     "export const y = 2;\n",
   );
+  // Two stand-in workspace libs so the new lib-walking branch is
+  // exercised without touching the real `<repoRoot>/lib`.
+  mkdirSync(join(libsRoot, "alpha", "src", "deep"), { recursive: true });
+  writeFileSync(
+    join(libsRoot, "alpha", "package.json"),
+    JSON.stringify({ name: "@workspace/alpha", version: "1.0.0" }),
+  );
+  writeFileSync(
+    join(libsRoot, "alpha", "src", "index.ts"),
+    "export const a = 1;\n",
+  );
+  writeFileSync(
+    join(libsRoot, "alpha", "src", "deep", "util.ts"),
+    "export const a2 = 2;\n",
+  );
+  mkdirSync(join(libsRoot, "beta", "src"), { recursive: true });
+  writeFileSync(
+    join(libsRoot, "beta", "package.json"),
+    JSON.stringify({ name: "@workspace/beta", version: "1.0.0" }),
+  );
+  writeFileSync(
+    join(libsRoot, "beta", "src", "index.ts"),
+    "export const b = 1;\n",
+  );
   return {
     root,
     apiServerDir,
     cacheRoot,
     destDist,
+    libsRoot,
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   };
 }
@@ -67,8 +94,8 @@ function fakeBuild(destDist: string): () => void {
 test("computeApiServerCacheKey is deterministic across calls", () => {
   const f = makeFixture();
   try {
-    const a = computeApiServerCacheKey(f.apiServerDir);
-    const b = computeApiServerCacheKey(f.apiServerDir);
+    const a = computeApiServerCacheKey(f.apiServerDir, f.libsRoot);
+    const b = computeApiServerCacheKey(f.apiServerDir, f.libsRoot);
     assert.equal(a, b, "key must be stable when nothing changes");
     assert.match(a, /^[0-9a-f]{64}$/);
   } finally {
@@ -79,12 +106,12 @@ test("computeApiServerCacheKey is deterministic across calls", () => {
 test("computeApiServerCacheKey changes when a src/**/*.ts file changes", () => {
   const f = makeFixture();
   try {
-    const before = computeApiServerCacheKey(f.apiServerDir);
+    const before = computeApiServerCacheKey(f.apiServerDir, f.libsRoot);
     writeFileSync(
       join(f.apiServerDir, "src", "lib", "util.ts"),
       "export const y = 999;\n",
     );
-    const after = computeApiServerCacheKey(f.apiServerDir);
+    const after = computeApiServerCacheKey(f.apiServerDir, f.libsRoot);
     assert.notEqual(before, after, "touching a src .ts must invalidate");
   } finally {
     f.cleanup();
@@ -94,13 +121,90 @@ test("computeApiServerCacheKey changes when a src/**/*.ts file changes", () => {
 test("computeApiServerCacheKey changes when package.json changes", () => {
   const f = makeFixture();
   try {
-    const before = computeApiServerCacheKey(f.apiServerDir);
+    const before = computeApiServerCacheKey(f.apiServerDir, f.libsRoot);
     writeFileSync(
       join(f.apiServerDir, "package.json"),
       JSON.stringify({ name: "fake", version: "0.0.1" }),
     );
-    const after = computeApiServerCacheKey(f.apiServerDir);
+    const after = computeApiServerCacheKey(f.apiServerDir, f.libsRoot);
     assert.notEqual(before, after, "package.json change must invalidate");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("computeApiServerCacheKey changes when a workspace lib's src/*.ts changes (#406)", () => {
+  // Regression for #404: editing `lib/api-zod/src/*.ts` left a stale
+  // bundle in the cache because the key only hashed api-server source.
+  // Touching any lib source — at any depth — must now invalidate.
+  const f = makeFixture();
+  try {
+    const before = computeApiServerCacheKey(f.apiServerDir, f.libsRoot);
+    writeFileSync(
+      join(f.libsRoot, "alpha", "src", "deep", "util.ts"),
+      "export const a2 = 999;\n",
+    );
+    const after = computeApiServerCacheKey(f.apiServerDir, f.libsRoot);
+    assert.notEqual(
+      before,
+      after,
+      "touching a lib's nested src .ts must invalidate",
+    );
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("computeApiServerCacheKey changes when a workspace lib's package.json changes (#406)", () => {
+  const f = makeFixture();
+  try {
+    const before = computeApiServerCacheKey(f.apiServerDir, f.libsRoot);
+    writeFileSync(
+      join(f.libsRoot, "beta", "package.json"),
+      JSON.stringify({ name: "@workspace/beta", version: "2.0.0" }),
+    );
+    const after = computeApiServerCacheKey(f.apiServerDir, f.libsRoot);
+    assert.notEqual(
+      before,
+      after,
+      "version bump in a lib package.json must invalidate",
+    );
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("computeApiServerCacheKey is unaffected by non-.ts files inside a lib (#406)", () => {
+  const f = makeFixture();
+  try {
+    const before = computeApiServerCacheKey(f.apiServerDir, f.libsRoot);
+    writeFileSync(
+      join(f.libsRoot, "alpha", "src", "README.md"),
+      "should not be hashed\n",
+    );
+    writeFileSync(
+      join(f.libsRoot, "alpha", "src", "data.json"),
+      "{}\n",
+    );
+    const after = computeApiServerCacheKey(f.apiServerDir, f.libsRoot);
+    assert.equal(
+      before,
+      after,
+      "non-.ts files in lib src must not perturb the cache key",
+    );
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("computeApiServerCacheKey tolerates an absent libsRoot (#406)", () => {
+  // Some test fixtures don't populate `<root>/lib` at all; the helper
+  // must degrade gracefully rather than throw ENOENT.
+  const f = makeFixture();
+  try {
+    rmSync(f.libsRoot, { recursive: true, force: true });
+    const k = computeApiServerCacheKey(f.apiServerDir, f.libsRoot);
+    assert.match(k, /^[0-9a-f]{64}$/);
   } finally {
     f.cleanup();
   }
@@ -117,6 +221,7 @@ test("ensureApiServerBuiltCached: cold → build runs; warm → build skipped", 
 
     const first = ensureApiServerBuiltCached({
       apiServerDir: f.apiServerDir,
+      libsRoot: f.libsRoot,
       cacheRoot: f.cacheRoot,
       destDist: f.destDist,
       build,
@@ -134,6 +239,7 @@ test("ensureApiServerBuiltCached: cold → build runs; warm → build skipped", 
 
     const second = ensureApiServerBuiltCached({
       apiServerDir: f.apiServerDir,
+      libsRoot: f.libsRoot,
       cacheRoot: f.cacheRoot,
       destDist: f.destDist,
       build,
@@ -157,6 +263,7 @@ test("ensureApiServerBuiltCached: source change invalidates and rebuilds", () =>
 
     const first = ensureApiServerBuiltCached({
       apiServerDir: f.apiServerDir,
+      libsRoot: f.libsRoot,
       cacheRoot: f.cacheRoot,
       destDist: f.destDist,
       build,
@@ -166,6 +273,7 @@ test("ensureApiServerBuiltCached: source change invalidates and rebuilds", () =>
     // No-op rerun: still 1.
     ensureApiServerBuiltCached({
       apiServerDir: f.apiServerDir,
+      libsRoot: f.libsRoot,
       cacheRoot: f.cacheRoot,
       destDist: f.destDist,
       build,
@@ -179,6 +287,7 @@ test("ensureApiServerBuiltCached: source change invalidates and rebuilds", () =>
     );
     const after = ensureApiServerBuiltCached({
       apiServerDir: f.apiServerDir,
+      libsRoot: f.libsRoot,
       cacheRoot: f.cacheRoot,
       destDist: f.destDist,
       build,
@@ -190,6 +299,7 @@ test("ensureApiServerBuiltCached: source change invalidates and rebuilds", () =>
     // And then another no-op rerun hits the new cache slot.
     ensureApiServerBuiltCached({
       apiServerDir: f.apiServerDir,
+      libsRoot: f.libsRoot,
       cacheRoot: f.cacheRoot,
       destDist: f.destDist,
       build,

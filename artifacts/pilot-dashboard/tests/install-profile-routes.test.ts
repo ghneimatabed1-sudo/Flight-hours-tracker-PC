@@ -129,7 +129,16 @@ test("hub: /api/peer/* mounts and rejects requests with no peer token (401)", as
     const res = await fetch(`${baseUrl}/api/peer/pilots`);
     assert.equal(res.status, 401);
     const body = (await res.json()) as { error?: string };
-    assert.equal(body.error, "invalid_peer_token");
+    // The peer middleware in `routes/peer-shell.ts` returns
+    // `invalid_token` for missing/garbage headers. The legacy body
+    // `invalid_peer_token` is still emitted by some sub-routes and
+    // is treated as the same `auth_invalid` kind by the aggregator
+    // (see peer-fanout.ts::classifyHttpError). Either one is a
+    // valid "no peer auth" rejection.
+    assert.ok(
+      body.error === "invalid_token" || body.error === "invalid_peer_token",
+      `expected invalid_token or invalid_peer_token, got ${body.error}`,
+    );
   });
 });
 

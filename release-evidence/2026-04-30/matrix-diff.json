@@ -1,0 +1,6 @@
+{
+  "generated_at": "2026-04-30T21:26:13.587Z",
+  "baseline_path": "scripts/src/release-evidence-baseline.json",
+  "current_path": "artifacts/pilot-dashboard/test-evidence/2026-04-30",
+  "drifts": []
+}

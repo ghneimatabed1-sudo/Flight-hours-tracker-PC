@@ -670,6 +670,29 @@ middle of a restart (try again in ~30s). The supervisor's rolling
 log lives at `%PROGRAMDATA%\HawkEye\mdns-supervisor.log` and the
 latest heartbeat at `%PROGRAMDATA%\HawkEye\mdns-supervisor.heartbeat`.
 
+#### Verifying log rotation on a host PC (one-time, install acceptance)
+
+The shared rotation helpers in `scripts\lan-host\supervisor-log.ps1`
+keep `%PROGRAMDATA%\HawkEye\*-supervisor.log` from growing without
+bound. A focused Pester suite at
+`scripts\lan-host\supervisor-log.Tests.ps1` exercises every branch
+(append, threshold-trigger rotation, .1→.N walk, oldest-discarded,
+`MaxBackups=0` discard-only, never-throws on a bad path, and the
+`Get-RotatedLogCount` plateau).
+
+The Linux dev container can't run PowerShell, so this suite is **not**
+part of `pnpm run release:verify`. Instead, run it once on each host
+PC during install acceptance:
+
+```powershell
+PS> Install-Module Pester -Scope CurrentUser -Force   # one-time per PC
+PS> Invoke-Pester -Path scripts\lan-host\supervisor-log.Tests.ps1
+```
+
+A green run confirms the supervisor will not blow out the host's disk
+even if mDNS or the api-server flap continuously for years. Re-run the
+suite after any upgrade that touches `supervisor-log.ps1`.
+
 ---
 
 ## 7. Push an updated build via USB

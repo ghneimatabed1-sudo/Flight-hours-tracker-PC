@@ -1,8 +1,6 @@
 {
-  "$comment": "Baseline matrix evidence snapshot for release-verify.mjs. Each entry pins the expected HTTP status code per probe per (profile, role_slug) cell as seen in the last GREEN matrix Playwright sweep. release-verify diffs the current run's test-evidence/<date>/<profile>/<role>/probes.json against this snapshot; any drift turns the verdict AMBER. To re-baseline after an intentional role-gate change: run `pnpm run release:verify` and copy the contents of `release-evidence/<date>/matrix-snapshot.json` over this file, then re-run and confirm GREEN.",
-  "version": 1,
-  "captured_at": "2026-04-30T20:54:41.130Z",
-  "captured_from": "artifacts/pilot-dashboard/test-evidence/2026-04-30 (matrix-playwright GREEN, task #406 step 1)",
+  "generated_at": "2026-04-30T21:26:13.587Z",
+  "date": "2026-04-30",
   "snapshot": {
     "aggregator-base": {
       "commander_base": {

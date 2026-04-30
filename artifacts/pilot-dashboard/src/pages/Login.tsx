@@ -86,6 +86,15 @@ export default function LoginGate() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting) return;
+    // Hard-stop: if the build's expected install profile disagrees with the
+    // one the api-server is reporting, signing in would silently funnel the
+    // operator's writes into the wrong topology (e.g. an aggregator front
+    // touching a hub backend). Surface a loud error and refuse to call
+    // `login()` until the operator fixes the mismatch.
+    if (profileMismatch) {
+      setErrorMsg("install_profile_mismatch");
+      return;
+    }
     setSubmitting(true);
     setErrorMsg(null);
     const r = await login(username.trim(), password);
@@ -97,6 +106,10 @@ export default function LoginGate() {
 
   async function onQuickLogin(kind: "super_admin" | "ops" | "commander") {
     if (submitting) return;
+    if (profileMismatch) {
+      setErrorMsg("install_profile_mismatch");
+      return;
+    }
     setSubmitting(true);
     setErrorMsg(null);
     const r = await lanDevQuickLogin(kind);
