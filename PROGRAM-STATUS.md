@@ -227,7 +227,7 @@ commits), so Replit main — the canonical source — was pushed with
 | GitHub repo | https://github.com/ghneimatabed1-sudo/Flight-hours-tracker-PC |
 | Tag pushed | `v1.1.110` |
 | Actions tab (watch build progress) | https://github.com/ghneimatabed1-sudo/Flight-hours-tracker-PC/actions |
-| Direct run (in_progress) | https://github.com/ghneimatabed1-sudo/Flight-hours-tracker-PC/actions/runs/25190700067 |
+| Direct run (in_progress) | https://github.com/ghneimatabed1-sudo/Flight-hours-tracker-PC/actions/runs/25190835581 |
 | GitHub Release (exe will appear here) | https://github.com/ghneimatabed1-sudo/Flight-hours-tracker-PC/releases/tag/v1.1.110 |
 | ETA for HawkEye-Setup.exe | ~10–15 minutes after CI starts |
 
