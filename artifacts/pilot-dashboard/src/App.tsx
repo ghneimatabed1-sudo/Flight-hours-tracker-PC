@@ -80,6 +80,16 @@ import FlightRecords from "@/pages/dashboard/FlightRecords";
 import StickyNotes from "@/pages/StickyNotes";
 import CommanderUnavailable from "@/pages/dashboard/UnavailableView";
 import CommanderCurrencies from "@/pages/dashboard/Currencies";
+import { InstallProfileProvider, useInstallProfile, isAggregatorProfile } from "@/lib/install-profile";
+import AggregatorOverview from "@/pages/aggregate/Overview";
+import AggregatePilots from "@/pages/aggregate/Pilots";
+import AggregateSorties from "@/pages/aggregate/Sorties";
+import AggregateCurrencies from "@/pages/aggregate/Currencies";
+import AggregateLeaves from "@/pages/aggregate/Leaves";
+import AggregateUnavailable from "@/pages/aggregate/Unavailable";
+import AggregateNotams from "@/pages/aggregate/Notams";
+import AggregateReadiness from "@/pages/aggregate/Readiness";
+import PeerSquadrons from "@/pages/admin/PeerSquadrons";
 
 function SquadronOpsRoutes() {
   return (
@@ -169,11 +179,43 @@ function CommanderRoutes() {
   );
 }
 
+// Aggregator-mode (Wing/Base PC) routes. Mounted in place of
+// AdminRoutes / CommanderRoutes whenever `installProfile` resolves to
+// `aggregator-wing` or `aggregator-base`. Every path here renders a
+// fan-out read view — there are no write routes (this PC owns no
+// squadron data). Super-admin operators additionally get the Peer
+// Squadrons admin page so they can edit the local address book.
+function AggregatorRoutes() {
+  return (
+    <Switch>
+      <Route path="/"><Redirect to="/aggregate" /></Route>
+      <Route path="/aggregate" component={AggregatorOverview} />
+      <Route path="/aggregate/pilots" component={AggregatePilots} />
+      <Route path="/aggregate/sorties" component={AggregateSorties} />
+      <Route path="/aggregate/currencies" component={AggregateCurrencies} />
+      <Route path="/aggregate/leaves" component={AggregateLeaves} />
+      <Route path="/aggregate/unavailable" component={AggregateUnavailable} />
+      <Route path="/aggregate/notams" component={AggregateNotams} />
+      <Route path="/aggregate/readiness" component={AggregateReadiness} />
+      <Route path="/admin/peer-squadrons" component={PeerSquadrons} />
+      <Route path="/admin/audit" component={AdminAuditLog} />
+      <Route path="/admin/users" component={AdminUsers} />
+      <Route path="/settings" component={SettingsPage} />
+      <Route component={NotFound} />
+    </Switch>
+  );
+}
+
+// 30 minutes of no input → automatic sign-out. Applies to every signed-in
+// role (super admin, commander, ops). The hook is gated on `enabled` so it
+// only runs while a user is actually signed in — no point arming a timer
+// when the login gate is showing.
 const IDLE_LOGOUT_MS = 30 * 60 * 1000;
 
 function Shell() {
   const { licensed, configured, user, logout } = useAuth();
   const [location] = useWouterLocation();
+  const { profile } = useInstallProfile();
 
   useIdleTimeout(IDLE_LOGOUT_MS, () => {
     if (user) logout();
@@ -192,6 +234,14 @@ function Shell() {
     return <FirstLaunch />;
   }
 
+  if (isAggregatorProfile(profile)) {
+    // On a Wing/Base PC every signed-in operator (super_admin or
+    // commander) gets the aggregator shell. Squadron-tier ops users
+    // who somehow log into an aggregator PC also land here — there
+    // is no SquadronOpsRoutes view available because no local
+    // squadron data exists on this box.
+    return <HQLayout><AggregatorRoutes /></HQLayout>;
+  }
   if (user.role === "super_admin") {
     return <HQLayout><AdminRoutes /></HQLayout>;
   }
@@ -224,24 +274,26 @@ function App() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <I18nProvider>
-          <AuthProvider>
-            <TooltipProvider>
-              <ErrorBoundary>
-                {isElectron() ? (
-                  <WouterRouter hook={useHashLocation}>
-                    <Shell />
-                  </WouterRouter>
-                ) : (
-                  <WouterRouter>
-                    <Shell />
-                  </WouterRouter>
-                )}
-              </ErrorBoundary>
-              <Toaster />
-              <OpeningAnimation />
-              <UndoToast />
-            </TooltipProvider>
-          </AuthProvider>
+          <InstallProfileProvider>
+            <AuthProvider>
+              <TooltipProvider>
+                <ErrorBoundary>
+                  {isElectron() ? (
+                    <WouterRouter hook={useHashLocation}>
+                      <Shell />
+                    </WouterRouter>
+                  ) : (
+                    <WouterRouter>
+                      <Shell />
+                    </WouterRouter>
+                  )}
+                </ErrorBoundary>
+                <Toaster />
+                <OpeningAnimation />
+                <UndoToast />
+              </TooltipProvider>
+            </AuthProvider>
+          </InstallProfileProvider>
         </I18nProvider>
       </QueryClientProvider>
     </ErrorBoundary>

@@ -168,8 +168,22 @@ interface AuthCtx extends AuthState {
 
 const Ctx = createContext<AuthCtx | null>(null);
 
+/**
+ * Test-only escape hatch. Production never sets this. Tests that need
+ * to render layouts which gate on `user` (e.g. the HQLayout sidebar
+ * smoke) can poke a {@link User} in here before mounting
+ * `<AuthProvider>` and the provider will seed its state synchronously
+ * on first render — bypassing the LAN-session fetch path which only
+ * runs in the browser when `VITE_LAN_SESSION_LOGIN`/`VITE_LAN_NO_AUTH`
+ * are enabled.
+ */
+let __TEST_INITIAL_USER__: User | null = null;
+export function __setInitialUserForTests(user: User | null): void {
+  __TEST_INITIAL_USER__ = user;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(__TEST_INITIAL_USER__);
   const [squadron, setSquadronState] = useState<SquadronConfig | null>(() => readSquadron());
   const [fingerprint] = useState<string>(() => readOrMintFingerprint());
   const [failedAttempts, setFailedAttempts] = useState(0);

@@ -4,9 +4,11 @@ import { useAuth } from "@/lib/auth";
 import { useI18n, type Key } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Languages, ShieldCheck, Activity, Users, Plane, ListChecks, BarChart3, AlertTriangle, Gauge, Lock, CalendarDays, UserX, StickyNote, Bell, KeyRound, Settings as SettingsIcon } from "lucide-react";
+import { LogOut, Languages, ShieldCheck, Activity, Users, Plane, ListChecks, BarChart3, AlertTriangle, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Bell, KeyRound, Settings as SettingsIcon, Server, FileText } from "lucide-react";
 import IdentityStrip from "@/components/IdentityStrip";
 import emblem from "@assets/rjaf_emblem.png";
+import { useInstallProfile, isAggregatorProfile } from "@/lib/install-profile";
+import SquadronStatusPanel from "@/components/SquadronStatusPanel";
 
 interface NavItem {
   path: string;
@@ -19,12 +21,45 @@ export function HQLayout({ children }: { children: ReactNode }) {
   void _squadron;
   const { t, lang, setLang, dir } = useI18n();
   const [location] = useLocation();
+  const { profile } = useInstallProfile();
+  const isAggregator = isAggregatorProfile(profile);
 
   if (!user) return <>{children}</>;
 
   const isAdmin = user.role === "super_admin";
 
-  const items: NavItem[] = isAdmin
+  // Aggregator-mode nav (Wing/Base PC). Replaces the squadron/admin
+  // sidebars entirely so write-flow pages (Weekly Roster, Schedule
+  // Chain, Pilot Devices, Pending Devices, etc.) never appear — this
+  // PC owns no local squadron data and cannot author. Super admins
+  // additionally see Peer Squadrons (the address book) and the local
+  // Users page so they can still manage operator accounts on the box.
+  const aggregatorItems: NavItem[] = isAggregator
+    ? [
+        { path: "/aggregate", labelKey: "aggregatorOverviewTitle", icon: <BarChart3 className="h-4 w-4" /> },
+        ...(isAdmin
+          ? ([{ path: "/admin/peer-squadrons", labelKey: "peerSquadronsTitle", icon: <Server className="h-4 w-4" /> }] satisfies NavItem[])
+          : []),
+        { path: "/aggregate/pilots", labelKey: "aggregatePilotsTitle", icon: <Users className="h-4 w-4" /> },
+        { path: "/aggregate/sorties", labelKey: "aggregateSortiesTitle", icon: <CalendarDays className="h-4 w-4" /> },
+        { path: "/aggregate/currencies", labelKey: "aggregateCurrenciesTitle", icon: <Gauge className="h-4 w-4" /> },
+        { path: "/aggregate/leaves", labelKey: "aggregateLeavesTitle", icon: <ClipboardList className="h-4 w-4" /> },
+        { path: "/aggregate/unavailable", labelKey: "aggregateUnavailableTitle", icon: <UserX className="h-4 w-4" /> },
+        { path: "/aggregate/notams", labelKey: "aggregateNotamsTitle", icon: <FileText className="h-4 w-4" /> },
+        { path: "/aggregate/readiness", labelKey: "aggregateReadinessTitle", icon: <Activity className="h-4 w-4" /> },
+        ...(isAdmin
+          ? ([
+              { path: "/admin/audit", labelKey: "auditLog", icon: <ListChecks className="h-4 w-4" /> },
+              { path: "/admin/users", labelKey: "nav_users", icon: <Users className="h-4 w-4" /> },
+            ] satisfies NavItem[])
+          : []),
+        { path: "/settings", labelKey: "nav_settings", icon: <SettingsIcon className="h-4 w-4" /> },
+      ]
+    : [];
+
+  const items: NavItem[] = isAggregator
+    ? aggregatorItems
+    : isAdmin
     ? [
         { path: "/admin", labelKey: "systemOverview", icon: <BarChart3 className="h-4 w-4" /> },
         { path: "/admin/squadrons", labelKey: "squadrons", icon: <Plane className="h-4 w-4" /> },
@@ -151,6 +186,11 @@ export function HQLayout({ children }: { children: ReactNode }) {
               );
             })}
           </ul>
+          {isAggregator && (
+            <div className="px-2 pb-3">
+              <SquadronStatusPanel />
+            </div>
+          )}
         </nav>
         <main className="flex-1 min-w-0 p-4 sm:p-6 space-y-4 overflow-y-auto">
           <IdentityStrip />

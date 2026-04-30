@@ -29,12 +29,59 @@ function trimSlash(s: string): string {
   return s.replace(/\/+$/, "");
 }
 
+// ── Active install profile ─────────────────────────────────────────
+// `install-profile.tsx` calls `setActiveInstallProfile` once it has
+// resolved the value from `/api/healthz`. Helpers below use the value
+// to decide whether `internal/auth/lan/*` paths should be rewritten
+// to `aggregate/auth/lan/*` (aggregator backends do not mount the
+// `/api/internal/*` shell at all).
+export type ActiveInstallProfile =
+  | "hub"
+  | "aggregator-wing"
+  | "aggregator-base"
+  | "viewer";
+
+let __activeInstallProfile: ActiveInstallProfile = "hub";
+
+export function setActiveInstallProfile(p: ActiveInstallProfile): void {
+  __activeInstallProfile = p;
+}
+
+export function getActiveInstallProfile(): ActiveInstallProfile {
+  return __activeInstallProfile;
+}
+
+export function _resetActiveInstallProfileForTests(): void {
+  __activeInstallProfile = "hub";
+}
+
+function isAggregator(p: ActiveInstallProfile = __activeInstallProfile): boolean {
+  return p === "aggregator-wing" || p === "aggregator-base";
+}
+
+/**
+ * Translate a logical path (e.g. `internal/auth/lan/me`,
+ * `aggregate/peers`, `healthz`) into the URL the API helpers should
+ * actually fetch. Aggregator backends do not mount `/api/internal/*`,
+ * so when the active profile is an aggregator we transparently
+ * rewrite `internal/auth/lan/*` to `aggregate/auth/lan/*` — the
+ * server mounts `lanAuthPublic` under `/api/aggregate` in that mode.
+ */
+function mapLogicalPath(path: string): string {
+  const stripped = path.replace(/^\/+/, "");
+  if (isAggregator() && stripped.startsWith("internal/auth/lan/")) {
+    return "aggregate/auth/lan/" + stripped.slice("internal/auth/lan/".length);
+  }
+  return stripped;
+}
+
 function getInternalApiPath(path: string): string | null {
+  const mapped = mapLogicalPath(path);
   const fromEnv = String(__viteEnv.VITE_INTERNAL_API_URL ?? "").trim();
-  if (fromEnv) return `${trimSlash(fromEnv)}/api/${path.replace(/^\/+/, "")}`;
+  if (fromEnv) return `${trimSlash(fromEnv)}/api/${mapped}`;
   if (__viteEnv.DEV === true) {
     const base = String(__viteEnv.BASE_URL || "/");
-    const p = `${INTERNAL_API_PROXY_PREFIX}/${path.replace(/^\/+/, "")}`;
+    const p = `${INTERNAL_API_PROXY_PREFIX}/${mapped}`;
     if (base === "/" || base === "") return `/${p}`;
     return `${trimSlash(base)}/${p}`;
   }
@@ -1520,5 +1567,301 @@ export async function postInternalPilotTransfer(
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Aggregator-mode helpers (Wing/Base PCs)
+//
+// These talk to `/api/aggregate/*`, the surface mounted only when the
+// active install profile is `aggregator-wing` or `aggregator-base`.
+// On a hub PC the routes don't exist, so the helpers return `null` /
+// surface a structured error rather than throwing.
+// ─────────────────────────────────────────────────────────────────────
+
+function aggregateApiPath(path: string): string | null {
+  const stripped = path.replace(/^\/+/, "");
+  return getInternalApiPath(`aggregate/${stripped}`);
+}
+
+export type PeerSquadronListRow = {
+  id: string;
+  squadron_id: string;
+  squadron_name: string | null;
+  base_url: string;
+  last_ok_at: string | null;
+  last_error: string | null;
+  last_error_at: string | null;
+  has_token: boolean;
+  added_by: string | null;
+  status: "online" | "offline";
+};
+
+function parsePeerListRow(r: Record<string, unknown>): PeerSquadronListRow {
+  const status = r.status === "online" ? "online" : "offline";
+  return {
+    id: String(r.id ?? ""),
+    squadron_id: String(r.squadron_id ?? ""),
+    squadron_name:
+      r.squadron_name == null || r.squadron_name === ""
+        ? null
+        : String(r.squadron_name),
+    base_url: String(r.base_url ?? ""),
+    last_ok_at:
+      r.last_ok_at == null || r.last_ok_at === "" ? null : String(r.last_ok_at),
+    last_error:
+      r.last_error == null || r.last_error === "" ? null : String(r.last_error),
+    last_error_at:
+      r.last_error_at == null || r.last_error_at === ""
+        ? null
+        : String(r.last_error_at),
+    has_token: Boolean(r.has_token),
+    added_by:
+      r.added_by == null || r.added_by === "" ? null : String(r.added_by),
+    status,
+  };
+}
+
+export async function fetchAggregatePeersList(): Promise<
+  PeerSquadronListRow[] | null
+> {
+  const url = aggregateApiPath("peers");
+  if (!url) return null;
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: internalApiHeadersBase(),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { items?: unknown };
+    if (!body || !Array.isArray(body.items)) return null;
+    return body.items
+      .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+      .map(parsePeerListRow);
+  } catch {
+    return null;
+  }
+}
+
+export type PeerHealthStatus = {
+  peer_squadron_id: string;
+  squadron_id: string;
+  squadron_name: string | null;
+  status: "online" | "offline";
+  last_success_at: string | null;
+  served_from_cache: boolean;
+  error?: string;
+};
+
+function parsePeerHealth(r: Record<string, unknown>): PeerHealthStatus {
+  const status = r.status === "online" ? "online" : "offline";
+  const out: PeerHealthStatus = {
+    peer_squadron_id: String(r.peer_squadron_id ?? ""),
+    squadron_id: String(r.squadron_id ?? ""),
+    squadron_name:
+      r.squadron_name == null || r.squadron_name === ""
+        ? null
+        : String(r.squadron_name),
+    status,
+    last_success_at:
+      r.last_success_at == null || r.last_success_at === ""
+        ? null
+        : String(r.last_success_at),
+    served_from_cache: Boolean(r.served_from_cache),
+  };
+  if (r.error != null && r.error !== "") {
+    out.error = String(r.error);
+  }
+  return out;
+}
+
+export async function fetchAggregatePeersHealth(): Promise<
+  PeerHealthStatus[] | null
+> {
+  const url = aggregateApiPath("peers/health");
+  if (!url) return null;
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: internalApiHeadersBase(),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { peers?: unknown };
+    if (!body || !Array.isArray(body.peers)) return null;
+    return body.peers
+      .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+      .map(parsePeerHealth);
+  } catch {
+    return null;
+  }
+}
+
+export type PostAggregatePeerInput = {
+  squadron_id: string;
+  squadron_name?: string | null;
+  base_url: string;
+  token: string;
+};
+
+export type PostAggregatePeerResult =
+  | {
+      ok: true;
+      id: string;
+      squadron_id: string;
+      squadron_name: string | null;
+      base_url: string;
+    }
+  | { ok: false; error: string; status?: number };
+
+export async function postAggregatePeer(
+  input: PostAggregatePeerInput,
+): Promise<PostAggregatePeerResult> {
+  const url = aggregateApiPath("peers");
+  if (!url) return { ok: false, error: "aggregate_api_disabled" };
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: internalWriteHeaders(),
+      body: JSON.stringify(input),
+    });
+    const parsed = (await res.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: String(parsed?.error ?? `http_${res.status}`),
+        status: res.status,
+      };
+    }
+    return {
+      ok: true,
+      id: String(parsed.id ?? ""),
+      squadron_id: String(parsed.squadron_id ?? input.squadron_id),
+      squadron_name:
+        parsed.squadron_name == null || parsed.squadron_name === ""
+          ? null
+          : String(parsed.squadron_name),
+      base_url: String(parsed.base_url ?? input.base_url),
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export type PatchAggregatePeerInput = {
+  squadron_name?: string | null;
+  base_url?: string;
+  token?: string;
+};
+
+export async function patchAggregatePeer(
+  id: string,
+  input: PatchAggregatePeerInput,
+): Promise<{ ok: true } | { ok: false; error: string; status?: number }> {
+  const url = aggregateApiPath(`peers/${encodeURIComponent(id)}`);
+  if (!url) return { ok: false, error: "aggregate_api_disabled" };
+  try {
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: internalWriteHeaders(),
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const parsed = (await res.json().catch(() => ({}))) as Record<
+        string,
+        unknown
+      >;
+      return {
+        ok: false,
+        error: String(parsed?.error ?? `http_${res.status}`),
+        status: res.status,
+      };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function deleteAggregatePeer(
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string; status?: number }> {
+  const url = aggregateApiPath(`peers/${encodeURIComponent(id)}`);
+  if (!url) return { ok: false, error: "aggregate_api_disabled" };
+  try {
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: internalWriteHeaders(),
+    });
+    if (!res.ok) {
+      const parsed = (await res.json().catch(() => ({}))) as Record<
+        string,
+        unknown
+      >;
+      return {
+        ok: false,
+        error: String(parsed?.error ?? `http_${res.status}`),
+        status: res.status,
+      };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export type AggregateRowKind =
+  | "pilots"
+  | "sorties"
+  | "leaves"
+  | "unavailable"
+  | "notams"
+  | "readiness-summary";
+
+export type AggregateRow = Record<string, unknown> & {
+  /** Tagged by `tagRows()` on the server — present on every row. */
+  squadron_id?: string;
+  squadron_name?: string | null;
+  source_peer_id?: string;
+};
+
+export type AggregateRowsResult = {
+  items: AggregateRow[];
+  peers: PeerHealthStatus[];
+};
+
+export async function fetchAggregateRows(
+  kind: AggregateRowKind,
+): Promise<AggregateRowsResult | null> {
+  const url = aggregateApiPath(kind);
+  if (!url) return null;
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: internalApiHeadersBase(),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { items?: unknown; peers?: unknown };
+    if (!body) return null;
+    const items = Array.isArray(body.items)
+      ? body.items.filter(
+          (x): x is Record<string, unknown> => !!x && typeof x === "object",
+        )
+      : [];
+    const peers = Array.isArray(body.peers)
+      ? body.peers
+          .filter(
+            (x): x is Record<string, unknown> => !!x && typeof x === "object",
+          )
+          .map(parsePeerHealth)
+      : [];
+    return { items, peers };
+  } catch {
+    return null;
   }
 }
