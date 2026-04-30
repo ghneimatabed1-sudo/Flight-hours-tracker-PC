@@ -96,6 +96,124 @@ If a dashboard PC cannot reach the host PC, check:
 
 ---
 
+## 2a. Install a Wing or Base Commander PC (aggregator)
+
+A Wing Commander or Base Commander PC is an **aggregator**. It runs
+the api-server in `aggregator-wing` or `aggregator-base` mode. That
+mode does **not** host squadron data of its own; instead it fans out
+reads to one or more squadron hub PCs and aggregates the responses
+into a single dashboard for the wing/base view.
+
+A small local Postgres database is still installed — it stores the
+local super_admin, the squadron-hub address book, the audit log, and
+a per-peer response cache. No squadron sortie/pilot data is ever
+written here.
+
+### Install
+
+On the new aggregator PC, with Node.js 20+ and the Hawk Eye source
+folder copied across (USB or LAN):
+
+1. Open PowerShell **as administrator** in the source folder.
+2. Run:
+   ```
+   pnpm install
+   .\scripts\lan-host\setup-aggregator.ps1
+   ```
+   The script prompts in order for:
+   - **PC role** — `wing` or `base`. Determines the install profile
+     (`aggregator-wing` vs `aggregator-base`) recorded in
+     `install_profile_meta` on first boot.
+   - **Local super_admin username + password** — the operator who
+     will manage the squadron-hub address book on this PC. Stored
+     hashed (bcrypt) in `lan_users` like every other Hawk Eye user.
+   - **Squadron hubs** — for each hub: display name (e.g. "Tigers"),
+     hostname or IP (e.g. `tigers-hub.local`), and the peer access
+     token from that hub's **Admin → Peer Tokens** page. The script
+     loops until you say "done".
+   - **Postgres superuser password** — used once to create the local
+     database and run the schema bootstrap.
+3. Optional auto-discover — re-run with `-AutoDiscover` to scan the
+   LAN for `_hawkeye-hub._tcp` first; the script lists every hub it
+   sees and asks Y/N for each one before falling through to manual
+   entry. Requires Bonjour Print Services for Windows (`dns-sd.exe`).
+4. The script writes:
+   - `artifacts\api-server\.env` with `INSTALL_PROFILE=
+     aggregator-<role>`, `DATABASE_URL`, `PORT`, a fresh bootstrap
+     token, and `HAWK_INTERNAL_SESSION_AUTH=required`.
+   - `artifacts\pilot-dashboard\.env.production.local` with
+     `VITE_INTERNAL_API_URL` pointing at this PC's local aggregator
+     (so the dashboard talks to its own api-server).
+5. The script then:
+   - Builds the api-server, boots it briefly to run
+     `ensureFullSchema()` (creates `peer_squadrons`, `peer_cache`,
+     `install_profile_meta`, `lan_users`, etc.).
+   - Mints the local super_admin (single transaction; bcrypt-hashed).
+   - Seeds `peer_squadrons` from the hubs you entered (single
+     transaction — a partial failure leaves nothing committed; same
+     for the audit log entries).
+   - Builds the dashboard once.
+   - Registers two scheduled tasks so both auto-start on boot:
+     `HawkEye-ApiServer-OnStartup` and `HawkEye-Dashboard-OnStartup`.
+6. The output ends with a self-check that hits
+   `/api/aggregate/peers/health` on the local api-server. A `200`
+   confirms the route is mounted with the configured peer count;
+   a `401`/`403` is also a healthy outcome — it means the route is
+   mounted correctly and just needs a signed-in super_admin to read
+   the body. Anything else gets a clear `[FAIL]` line.
+
+### Add a squadron later
+
+When a new squadron stands up after the initial install, do **not**
+re-run `setup-aggregator.ps1`. Use the lighter helper instead — same
+validation, same audit log entry:
+
+```
+.\scripts\lan-host\add-squadron-peer.ps1 `
+    -DisplayName "Eagles" `
+    -Address "eagles-hub.local" `
+    -Token   "<paste-from-hub>"
+```
+
+Without arguments the script prompts interactively. It picks up
+`DATABASE_URL` from `artifacts\api-server\.env` automatically.
+
+The address book is also editable via the dashboard later (super_admin
+only) under **Admin → Address Book** — that path uses the same
+`/api/aggregate/peers` API the script writes to.
+
+### Useful flags
+
+- `setup-aggregator.ps1 -Role wing` — skip the role prompt.
+- `setup-aggregator.ps1 -AutoDiscover` — scan the LAN first.
+- `setup-aggregator.ps1 -SkipDashboardBuild -SkipApiBuild` — useful
+  on a re-run when the bundles are already up to date.
+- `setup-aggregator.ps1 -SkipScheduledTasks` — install env + DB
+  only, don't touch Windows Task Scheduler. Pair with
+  `pnpm lan:host:install-startup-task` and
+  `pnpm lan:aggregator:install-dashboard-task` to register the
+  tasks later.
+- `add-squadron-peer.ps1 -SquadronId tigers-east` — override the
+  auto-slug if the default collides with an existing entry.
+
+### Day-to-day
+
+- The api-server scheduled task starts on boot and serves
+  `/api/aggregate/*` to anything on the LAN that authenticates as
+  the local super_admin.
+- The dashboard scheduled task starts on boot and serves the
+  built bundle on the configured local port (default 5173). Open it
+  in the browser of your choice on the same PC; sign in with the
+  local super_admin.
+- A separate dashboard task adds the squadron status panel (online /
+  offline indicator per peer) — until that ships, you can self-check
+  reachability with:
+  ```
+  Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3847/api/aggregate/peers/health
+  ```
+
+---
+
 ## 2b. Install a Commander laptop (viewer)
 
 Squadron Commanders and Flight Commanders use their own laptops, not
@@ -376,6 +494,9 @@ pnpm lan:host:health      # hits http://127.0.0.1:3847/api/healthz
 | Dashboard title bar shows "v? · nogit" | The build was made from a tarball without `.git`. Functionally fine; cosmetic. |
 | Auto-update toggled on by accident | Set `RJAF_ENABLE_AUTO_UPDATE=0` (or unset it) in the dashboard launch environment. The Settings → Auto-Update toggle in the app also controls this per-role. |
 | Audit log row shows `actor: unknown` | Someone made a write while the api-server was in `HAWK_LAN_DEV_NO_AUTH=1` mode. Flip it back to `0` immediately. |
+| `setup-aggregator.ps1` reports "Failed to seed peer_squadrons (transaction rolled back)" | One of the hubs you entered has the same auto-slug as another (the address book has a unique index on `squadron_id` per active row). Re-run with distinct display names, or run `add-squadron-peer.ps1 -SquadronId <unique>` to add the duplicate after the install completes. |
+| Aggregator dashboard shows an empty squadron list | Run `Invoke-WebRequest http://127.0.0.1:3847/api/aggregate/peers/health` on the aggregator PC. Empty `peers` means nothing was seeded — re-run `setup-aggregator.ps1` (it's idempotent) or use `add-squadron-peer.ps1`. |
+| Want to confirm this PC's install profile | Hit `http://127.0.0.1:3847/api/healthz`. The `installProfile` field is `hub`, `aggregator-wing`, or `aggregator-base`. The first-boot value is canonical and pinned in `install_profile_meta`. |
 
 ---
 

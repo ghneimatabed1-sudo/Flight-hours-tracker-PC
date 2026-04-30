@@ -21,6 +21,9 @@
     "lan:host:restore": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/restore-postgres.ps1",
     "lan:host:install-startup-task": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/install-api-startup-task.ps1",
     "lan:host:install-backup-task": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/install-backup-task.ps1",
+    "lan:aggregator:setup": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/setup-aggregator.ps1",
+    "lan:aggregator:add-peer": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/add-squadron-peer.ps1",
+    "lan:aggregator:install-dashboard-task": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/install-dashboard-startup-task.ps1",
     "lan:client:setup-env": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/setup-dashboard-lan-env.ps1",
     "lan:pilot:verify": "pnpm run typecheck && pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/pilot-dashboard run test"
   },
