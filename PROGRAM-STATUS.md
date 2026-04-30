@@ -140,3 +140,73 @@ verified in-session:
 
 T024 stays DEFERRED until the operator runs the runbook on real
 hardware and reports back per `GO-NO-GO-CHECKLIST.md` §E.
+
+---
+
+## T-Q (Task #411) — Final release tag + GitHub push: BLOCKED
+
+**Honest status, recorded 2026-04-30.**
+
+T-Q is the wrap-up task that bumps the version, regenerates the
+release-evidence bundle, tags `vX.Y.Z`, and pushes the merged main
+branch + the compiled `HawkEye-Setup.exe` to the operator's GitHub
+remote. It is gated on five sibling tasks (T-K through T-P) being
+merged first. Current state at the time of this entry:
+
+- **Last merged task in `git log`:** `#398` (LAN-broadcast health on
+  the operator dashboard).
+- **Sibling tasks in this consolidation series:** T-K (real-Windows
+  validation), T-L (test-coverage round 2), T-M (operator UX polish
+  round 2), T-N (audit-log expansion), T-O (watchdog completion), T-P
+  (dev-script cleanup). Spec files exist under `.local/tasks/multi-
+  pc-*.md`, but **none of them appear in `git log` as merged**. They
+  were planned but not executed.
+- **Current versions:**
+  - `artifacts/api-server/package.json` → `1.1.110`
+  - `artifacts/pilot-dashboard/package.json` → `1.1.110`
+  - `installer/HawkEye.iss` → `MyAppVersion "1.0.0"`
+- **Most recent local tag:** `v1.1.98`. Newer tags (`v1.1.110`+) have
+  not been cut.
+
+**What this task did NOT do, and why:**
+
+1. Did not run `pnpm run release:verify` — would just re-confirm the
+   pre-T-K state, which is not what the task is meant to ship.
+2. Did not bump versions in the three release files — premature
+   without the consolidated buckets actually merged. Bumping to
+   `2.0.0` (or any other number) before the work it represents is
+   merged would put a misleading tag on the timeline.
+3. Did not append a `CHANGELOG.md` entry — there is no consolidated
+   release to describe yet.
+4. Did not run `git tag` / `git push` — the task agent cannot run git
+   write operations from this isolated environment; version control
+   is platform-managed. The push to `github.com/ghneimatabed1-sudo/
+   Flight-hours-tracker-PC.git` and the GitHub Release upload of
+   `HawkEye-Setup.exe` need to be performed by a session that has
+   shell-level git access (the operator, or a non-isolated agent
+   session), once T-K through T-P are merged.
+5. Did not sweep the legacy proposed task queue (Step 8) — that step
+   uses the project-tasks tooling, which is not in scope for this
+   isolated session and would be safer to run alongside the actual
+   release.
+
+**What needs to happen to unblock T-Q:**
+
+1. Execute T-K (real-Windows installer walkthrough on a Windows 11
+   VM — the spec is in `.local/tasks/multi-pc-real-windows-
+   validation.md`). T-K is the largest blocker because it produces
+   the actual `installer/dist/HawkEye-Setup.exe` that this task is
+   supposed to upload as a release asset.
+2. Execute T-L through T-P (specs already written under `.local/
+   tasks/multi-pc-*.md`).
+3. Re-assign T-Q after the five sibling tasks are merged. At that
+   point the version bump, changelog entry, tag, push, and Release
+   asset upload can be performed in one consolidated session that
+   has git push access.
+
+**Honest risk note:** the LAN-only rebuild has been functionally
+complete since the late-April merges, and the `release:verify` runner
+exists (added in task #376). What is still missing is real-hardware
+validation of the installer (T-K) — until that is done, no version
+on disk should be marketed as "production-ready" to the operator,
+regardless of how many CI checks are green.
