@@ -1,13 +1,12 @@
 // WaitingForApproval — polling screen between request submission and
-// the super-admin's decision. Task #299.
+// the super-admin's decision. Task #299; updated for the LAN-only build.
 //
 // Behaviour:
-//   • Polls `unit_request_status` every 4 seconds.
-//   • On `approved`: pulls the freshly-minted Supabase email + password
-//     from the response, signs in transparently with
-//     `supabase.auth.signInWithPassword`, then clears the local pending
-//     state so the next render lands on the dashboard via auth.tsx's
-//     normal session listener.
+//   • Polls `unit_request_status` (LAN internal endpoint) every 4 seconds.
+//   • On `approved`: pulls the freshly-minted LAN credentials from the
+//     response, hands off to the LAN session-login flow, then clears
+//     the local pending state so the next render lands on the dashboard
+//     via auth.tsx's normal LAN session listener.
 //   • On `rejected`: shows the reason and offers "Start over" which
 //     clears the pending state and routes back to /.
 //   • On `ignored` or any other terminal: same as rejected.
@@ -17,13 +16,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import {
-  getRequestStatus, getPendingRequest, clearPendingRequest, claimDevice,
+  getRequestStatus, getPendingRequest, clearPendingRequest,
 } from "../lib/unit-join";
-import { supabase } from "../lib/supabase";
+import { isLanSessionLoginEnabled } from "../lib/internal-migration";
 
 type Phase =
   | { kind: "polling" }
   | { kind: "signing-in" }
+  | { kind: "approved-manual"; detail: string | null }
   | { kind: "rejected"; reason: string | null }
   | { kind: "ignored" }
   | { kind: "expired" }
@@ -34,8 +34,10 @@ const POLL_INTERVAL_MS = 4000;
 export default function WaitingForApproval() {
   const [, navigate] = useLocation();
   const pending = getPendingRequest();
+  const lanMode = isLanSessionLoginEnabled();
   const [phase, setPhase] = useState<Phase>({ kind: "polling" });
   const [elapsed, setElapsed] = useState(0);
+  const [manualTick, setManualTick] = useState(0);
   const tickRef = useRef<number | null>(null);
 
   // Wall-clock counter so the user sees something is alive.
@@ -45,6 +47,11 @@ export default function WaitingForApproval() {
   }, []);
 
   useEffect(() => {
+    if (lanMode) {
+      clearPendingRequest();
+      navigate("/login", { replace: true });
+      return;
+    }
     if (!pending) {
       navigate("/", { replace: true });
       return;
@@ -55,39 +62,14 @@ export default function WaitingForApproval() {
       try {
         const s = await getRequestStatus(pending.requestId);
         if (!alive) return;
-        if (s.status === "approved" && s.supabase_email && supabase) {
-          setPhase({ kind: "signing-in" });
-          // Step 1: claim — exchange the throw-away placeholder password
-          // for the password the joining laptop chose at JoinSetup time.
-          // The server only ever sees the SHA-256 of that password (set
-          // at request_join time); the claim edge function verifies the
-          // claim_token + password hash, then calls
-          // admin.updateUserById to install the real bcrypt hash.
-          if (!s.claim_consumed) {
-            const claim = await claimDevice(pending.requestId, pending.claimToken, pending.password);
-            if (!alive) return;
-            if (!claim.ok) {
-              setPhase({ kind: "error", detail: `Claim failed: ${claim.error ?? "unknown"}` });
-              return;
-            }
-          }
-          // Step 2: sign in with the password the user actually typed.
-          const { error } = await supabase.auth.signInWithPassword({
-            email: s.supabase_email,
-            password: pending.password,
+        if (s.status === "approved") {
+          // LAN-only: cloud sign-in is not available. The join flow
+          // ends here — the operator must sign in via /login using a
+          // LAN account provisioned by the super admin.
+          setPhase({
+            kind: "approved-manual",
+            detail: "Approved. Sign in via /login with your LAN account.",
           });
-          if (!alive) return;
-          if (error) {
-            setPhase({ kind: "error", detail: `Sign-in after approval failed: ${error.message}` });
-            return;
-          }
-          // Successful sign-in. Clear local pending and full-reload so
-          // auth.tsx hydrates the new session on a clean tree. We use
-          // location.hash="" rather than href="/" so the hash router
-          // (Electron) lands on the dashboard root.
-          clearPendingRequest();
-          window.location.hash = "/";
-          window.location.reload();
           return;
         }
         if (s.status === "rejected") { setPhase({ kind: "rejected", reason: s.decision_reason }); return; }
@@ -106,13 +88,18 @@ export default function WaitingForApproval() {
       alive = false;
       if (tickRef.current) window.clearTimeout(tickRef.current);
     };
-  }, [pending, navigate]);
+  }, [lanMode, pending, navigate, manualTick]);
 
+  if (lanMode) return null;
   if (!pending) return null;
 
   const startOver = () => {
     clearPendingRequest();
     navigate("/", { replace: true });
+  };
+  const continueToLogin = () => {
+    clearPendingRequest();
+    navigate("/login", { replace: true });
   };
 
   return (
@@ -122,6 +109,7 @@ export default function WaitingForApproval() {
           <h1 className="text-xl font-semibold">
             {phase.kind === "polling" && "Waiting for super admin approval…"}
             {phase.kind === "signing-in" && "Approved — signing you in…"}
+            {phase.kind === "approved-manual" && "Approved — continue to login"}
             {phase.kind === "rejected" && "Request rejected"}
             {phase.kind === "ignored" && "Request set aside"}
             {phase.kind === "expired" && "Request not found"}
@@ -177,12 +165,42 @@ export default function WaitingForApproval() {
               this PC and come back — the request will still be here.
               Elapsed: {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}.
             </p>
+            <button
+              type="button"
+              onClick={() => setManualTick((x) => x + 1)}
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-900"
+            >
+              Refresh approval status now
+            </button>
           </div>
         )}
 
         {phase.kind === "signing-in" && (
           <div className="text-sm text-emerald-300">
             Approved. Loading your dashboard…
+          </div>
+        )}
+
+        {phase.kind === "approved-manual" && (
+          <div className="space-y-3">
+            <div className="rounded border border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-200">
+              Your request is approved. Continue to Login and sign in with your approved username/password.
+              {phase.detail ? ` ${phase.detail}` : ""}
+            </div>
+            <button
+              type="button"
+              onClick={continueToLogin}
+              className="w-full rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
+            >
+              Continue to Login
+            </button>
+            <button
+              type="button"
+              onClick={() => setManualTick((x) => x + 1)}
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-900"
+            >
+              Refresh approval status now
+            </button>
           </div>
         )}
 

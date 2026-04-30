@@ -12,7 +12,6 @@ import { FlightBindingGate, FlightBindingBadge } from "@/components/FlightBindin
 import { LiveDataIndicator } from "@/components/LiveDataIndicator";
 import HeartbeatFailureBanner from "@/components/HeartbeatFailureBanner";
 import emblem from "@assets/rjaf_emblem.png";
-import { RecoveryCodesLowBanner } from "@/components/RecoveryCodesLowBanner";
 import { SessionCollisionBanner } from "@/components/SessionCollisionBanner";
 
 interface NavItem {
@@ -146,7 +145,16 @@ export function HQLayout({ children }: { children: ReactNode }) {
           <img src={emblem} alt="RJAF Emblem" className="h-10 w-10 object-contain" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-base sm:text-lg font-semibold truncate">{t("hqAppName")}</h1>
+              <h1 className="text-base sm:text-lg font-semibold truncate">
+                {t("hqAppName")}
+                <span
+                  className="ms-2 text-[10px] font-normal text-sidebar-foreground/60 align-middle"
+                  data-testid="title-bar-version"
+                  title={`Build ${__APP_VERSION__ ?? "unknown"} · ${__GIT_SHORT_HASH__ ?? "nogit"}`}
+                >
+                  v{__APP_VERSION__ ?? "?"} · {__GIT_SHORT_HASH__ ?? "nogit"}
+                </span>
+              </h1>
               {isAdmin ? (
                 <Badge className="bg-amber-500 text-amber-950 hover:bg-amber-500">
                   <ShieldCheck className="h-3 w-3 me-1" />{t("superAdminPanel")}
@@ -250,7 +258,6 @@ export function HQLayout({ children }: { children: ReactNode }) {
         <main className="flex-1 min-w-0 p-4 sm:p-6 space-y-4 overflow-y-auto">
           <HeartbeatFailureBanner diagnosticPath={isAdmin ? "/diagnostic" : "/dashboard/diagnostic"} />
           <SessionCollisionBanner />
-          {isAdmin && <RecoveryCodesLowBanner />}
           <IdentityStrip />
           <FlightBindingGate>
             {children}

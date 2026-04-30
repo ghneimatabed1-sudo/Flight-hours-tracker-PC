@@ -1,21 +1,23 @@
+// LAN-only Reminder Log viewer.
+//
+// Pre-LAN this page used a per-page password gate that minted a
+// short-lived JWT through a Supabase Edge Function before it would
+// fetch reminder log rows. In the LAN build:
+//   • The cloud Edge Function does not exist.
+//   • Page-level authz is enforced by the admin route guard
+//     (admin/super_admin only).
+// So the page now reads directly from the internal API and the
+// password dialog has been removed.
+
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useI18n } from "@/lib/i18n";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
-} from "@/components/ui/dialog";
-import { useToast } from "@/hooks/use-toast";
-import { supabase, supabaseConfigured } from "@/lib/supabase";
+import { fetchInternalReminderLogRows } from "@/lib/internal-migration";
 import { fmtDate, fmtDateTime } from "@/lib/format";
-import {
-  loadReminderSession, saveReminderSession, clearReminderSession,
-} from "@/lib/reminder-session";
-import {
-  ListChecks, ArrowLeft, Search, RefreshCw, AlertTriangle, Lock,
-} from "lucide-react";
+import { ListChecks, ArrowLeft, Search, RefreshCw, AlertTriangle } from "lucide-react";
 
 interface LogRow {
   sent_at: string;
@@ -27,8 +29,6 @@ interface LogRow {
   threshold_days: number;
 }
 
-const ADMIN_USERNAME = "admin";
-
 const CURRENCY_LABEL: Record<string, { en: string; ar: string }> = {
   day: { en: "Day", ar: "نهار" },
   night: { en: "Night", ar: "ليل" },
@@ -39,93 +39,26 @@ const CURRENCY_LABEL: Record<string, { en: string; ar: string }> = {
 
 export default function ReminderLog() {
   const { t, lang } = useI18n();
-  const { toast } = useToast();
-  const [hasSession, setHasSession] = useState<boolean>(() => !!loadReminderSession());
   const [rows, setRows] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
-  const [authOpen, setAuthOpen] = useState(false);
-  const [pwd, setPwd] = useState("");
-  const [code, setCode] = useState("");
-
-  function openAuth() {
-    setPwd("");
-    setCode("");
-    setAuthOpen(true);
-  }
-
-  async function loadLog(token: string) {
-    if (!supabase) return;
-    setLoading(true);
-    setError(null);
-    const res = await supabase.functions.invoke(
-      "manage-reminder-schedule",
-      { body: { action: "log", token } }
-    );
-    setLoading(false);
-    if (res.error || !res.data?.ok) {
-      const reason = res.data?.error ?? res.error?.message ?? "log_failed";
-      if (reason === "bad_token" || reason === "missing_token") {
-        clearReminderSession();
-        setHasSession(false);
-        openAuth();
-        return;
-      }
-      setError(reason);
-      return;
-    }
-    setRows((res.data.log as LogRow[]) ?? []);
-  }
 
   async function refresh() {
-    if (!supabaseConfigured || !supabase) {
-      setError("supabase_not_configured");
+    setLoading(true);
+    setError(null);
+    const data = await fetchInternalReminderLogRows();
+    setLoading(false);
+    if (!data) {
+      setError("internal_reminder_log_failed");
       return;
     }
-    const session = loadReminderSession();
-    if (!session) {
-      setHasSession(false);
-      openAuth();
-      return;
-    }
-    loadLog(session.token);
+    setRows(data);
   }
 
   useEffect(() => {
-    if (hasSession) refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void refresh();
   }, []);
-
-  async function submitAuth() {
-    if (!supabase) return;
-    setBusy(true);
-    const res = await supabase.functions.invoke("manage-reminder-schedule", {
-      body: { action: "session", username: ADMIN_USERNAME, password: pwd, code },
-    });
-    setBusy(false);
-    if (res.error || !res.data?.ok) {
-      const reason = res.data?.error ?? res.error?.message ?? "auth_failed";
-      toast({
-        title: t("authFailed"),
-        description: reason === "locked"
-          ? t("authLocked")
-          : reason === "bad_code"
-            ? t("authBadCode")
-            : t("authBadCreds"),
-        variant: "destructive",
-      });
-      return;
-    }
-    saveReminderSession({
-      token: res.data.token as string,
-      expiresAt: res.data.expiresAt as number,
-    });
-    setHasSession(true);
-    setAuthOpen(false);
-    loadLog(res.data.token as string);
-  }
 
   const today = new Date().toISOString().slice(0, 10);
   const todayCount = useMemo(
@@ -165,7 +98,7 @@ export default function ReminderLog() {
             variant="outline"
             size="sm"
             onClick={refresh}
-            disabled={loading || busy}
+            disabled={loading}
             data-testid="button-refresh-log"
           >
             <RefreshCw className={`h-4 w-4 me-1 ${loading ? "animate-spin" : ""}`} />
@@ -176,28 +109,16 @@ export default function ReminderLog() {
 
       <p className="text-sm text-muted-foreground">{t("reminderLogHelp")}</p>
 
-      {error ? (
+      {error && (
         <Card>
           <CardContent className="p-4 flex items-start gap-2 text-sm">
             <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5" />
             <span data-testid="text-log-error">
-              {error === "supabase_not_configured"
-                ? t("scheduleNeedsSupabase")
-                : `${t("scheduleStatusError")}: ${error}`}
+              {`${t("scheduleStatusError")}: ${error}`}
             </span>
           </CardContent>
         </Card>
-      ) : !hasSession ? (
-        <Card>
-          <CardContent className="p-4 flex flex-wrap items-center gap-3 text-sm">
-            <Lock className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1 min-w-0">{t("scheduleAuthRequired")}</span>
-            <Button size="sm" onClick={openAuth} data-testid="button-unlock">
-              {t("scheduleUnlock")}
-            </Button>
-          </CardContent>
-        </Card>
-      ) : null}
+      )}
 
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative max-w-md flex-1 min-w-[220px]">
@@ -268,51 +189,6 @@ export default function ReminderLog() {
           </div>
         </CardContent>
       </Card>
-
-      <Dialog open={authOpen} onOpenChange={(o) => !o && setAuthOpen(false)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("scheduleAuthTitle")}</DialogTitle>
-            <DialogDescription>{t("scheduleAuthHelp")}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">{t("password")}</label>
-              <Input
-                type="password"
-                value={pwd}
-                onChange={(e) => setPwd(e.target.value)}
-                autoComplete="current-password"
-                data-testid="input-confirm-password"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">{t("totpCode")}</label>
-              <Input
-                inputMode="numeric"
-                maxLength={6}
-                value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-                placeholder="123456"
-                className="font-mono tracking-widest"
-                data-testid="input-confirm-code"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAuthOpen(false)} disabled={busy}>
-              {t("cancel")}
-            </Button>
-            <Button
-              onClick={submitAuth}
-              disabled={busy || !pwd || code.length !== 6}
-              data-testid="button-confirm-submit"
-            >
-              {busy ? t("loading") : t("scheduleUnlock")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

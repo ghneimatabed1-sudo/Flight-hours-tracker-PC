@@ -7,7 +7,7 @@ import {
   useFrozenAccess,
   type FrozenAccessGrant,
 } from "@/lib/monthly-close";
-import { recordAuditEvent } from "@/lib/supabase";
+import { recordAuditEvent } from "@/lib/lan-legacy-shims";
 import { appendDemoAudit } from "@/lib/squadron-data";
 
 // Super-admin-only panel for managing which operations PCs are allowed to

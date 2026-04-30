@@ -55,6 +55,12 @@ const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const crypto = __importStar(require("crypto"));
 const isDev = !electron_1.app.isPackaged;
+// LAN migration safety: disable automatic updater polling by default so
+// local/private builds are not silently replaced by a cloud release track.
+// Operators can still enable update checks explicitly by setting this env
+// var before launching the app process.
+const startupAutoUpdateEnabled = String(process.env.RJAF_ENABLE_AUTO_UPDATE ?? "").trim().toLowerCase() === "1"
+    || String(process.env.RJAF_ENABLE_AUTO_UPDATE ?? "").trim().toLowerCase() === "true";
 // Mutable global controlled by the renderer's per-role auto-update toggle
 // (Settings → Auto-Update). Defaults ON to preserve historical behaviour
 // for installs that never set the preference. Updated via the
@@ -267,7 +273,7 @@ electron_1.app.whenReady().then(() => {
         electron_updater_1.autoUpdater.on("download-progress", (p) => send("rjaf:update", { kind: "progress", percent: p.percent, transferred: p.transferred, total: p.total, bytesPerSecond: p.bytesPerSecond }));
         electron_updater_1.autoUpdater.on("update-downloaded", (info) => send("rjaf:update", { kind: "downloaded", version: info.version }));
         electron_updater_1.autoUpdater.on("error", (err) => send("rjaf:update", { kind: "error", message: err?.message ?? String(err) }));
-        if (autoUpdateEnabled) {
+        if (autoUpdateEnabled && startupAutoUpdateEnabled) {
             electron_updater_1.autoUpdater.checkForUpdatesAndNotify().catch((err) => {
                 // eslint-disable-next-line no-console
                 console.warn("Update check failed:", err.message);

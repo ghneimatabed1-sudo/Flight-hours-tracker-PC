@@ -4,17 +4,14 @@ import { useI18n } from "@/lib/i18n";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
-} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { supabase, supabaseConfigured } from "@/lib/supabase";
+import {
+  fetchInternalReminderStatus,
+  postInternalReminderAction,
+} from "@/lib/internal-migration";
 import { fmtDateTime } from "@/lib/format";
 import {
-  loadReminderSession, saveReminderSession, clearReminderSession,
-} from "@/lib/reminder-session";
-import {
-  AlarmClock, RefreshCw, Power, PowerOff, ListChecks, AlertTriangle, Lock, Play, ChevronDown, ChevronRight,
+  AlarmClock, RefreshCw, Power, PowerOff, ListChecks, AlertTriangle, Play, ChevronDown, ChevronRight,
 } from "lucide-react";
 
 // Jordan is UTC+3 year-round (no daylight saving). The pg_cron schedule
@@ -80,15 +77,15 @@ interface ScheduleStatus {
   httpResults?: HttpResult[];
 }
 
-const ADMIN_USERNAME = "admin";
 const DEFAULT_CRON = "0 6 * * *";
-
-type PendingAction = "status" | "enable" | "disable" | "run-now";
 
 export default function RemindersSchedule() {
   const { t, lang } = useI18n();
   const { toast } = useToast();
-  const [hasSession, setHasSession] = useState<boolean>(() => !!loadReminderSession());
+  // LAN-only: there is no per-page password gate; the admin route guard
+  // already enforces super_admin / admin access. Hold session=true so
+  // existing JSX branches that gated on hasSession still render.
+  const hasSession = true;
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<ScheduleStatus | null>(null);
@@ -100,177 +97,59 @@ export default function RemindersSchedule() {
   // Default 06:00 UTC -> 09:00 Jordan, matching the existing default.
   const [localTime, setLocalTime] = useState<string>(() => cronToLocalTime(DEFAULT_CRON) ?? "09:00");
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [authOpen, setAuthOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
-  const [pwd, setPwd] = useState("");
-  const [code, setCode] = useState("");
-
-  function requireSession(action: PendingAction) {
-    setPendingAction(action);
-    setPwd("");
-    setCode("");
-    setAuthOpen(true);
-  }
-
-  async function callAction(action: "status" | "enable" | "disable" | "run-now", token: string) {
-    if (!supabase) return null;
-    const body: Record<string, unknown> = { action, token };
-    if (action === "enable") body.cron = cronInput.trim();
-    return await supabase.functions.invoke("manage-reminder-schedule", { body });
-  }
 
   async function refresh() {
-    if (!supabaseConfigured || !supabase) {
-      setError("supabase_not_configured");
-      return;
-    }
-    const session = loadReminderSession();
-    if (!session) {
-      setHasSession(false);
-      requireSession("status");
-      return;
-    }
     setLoading(true);
     setError(null);
-    const res = await callAction("status", session.token);
+    const s = await fetchInternalReminderStatus();
     setLoading(false);
-    if (res?.error || !res?.data?.ok) {
-      const reason = res?.data?.error ?? res?.error?.message ?? "status_failed";
-      if (reason === "bad_token" || reason === "missing_token") {
-        clearReminderSession();
-        setHasSession(false);
-        requireSession("status");
-        return;
-      }
-      setError(reason);
+    if (!s) {
+      setError("internal_reminder_status_failed");
       return;
     }
-    const s = res.data.status as ScheduleStatus;
     setStatus(s);
     if (s.schedule) {
       setCronInput(s.schedule);
-      // Try to reflect the server's current schedule back into the
-      // friendly time picker. If it's a non-daily cron (weekly, ranges,
-      // etc.) the helper returns null and we leave the picker alone —
-      // the operator will see the raw cron in the Advanced section.
       const localT = cronToLocalTime(s.schedule);
       if (localT) setLocalTime(localT);
     }
   }
 
-  // Auto-refresh on mount if a session is already cached.
+  // Auto-refresh on mount.
   useEffect(() => {
-    if (hasSession) refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void refresh();
   }, []);
 
-  async function submitAuth() {
-    if (!supabase || !pendingAction) return;
-    setBusy(true);
-    const res = await supabase.functions.invoke("manage-reminder-schedule", {
-      body: { action: "session", username: ADMIN_USERNAME, password: pwd, code },
-    });
-    if (res.error || !res.data?.ok) {
-      setBusy(false);
-      const reason = res.data?.error ?? res.error?.message ?? "auth_failed";
-      toast({
-        title: t("authFailed"),
-        description: reason === "locked"
-          ? t("authLocked")
-          : reason === "bad_code"
-            ? t("authBadCode")
-            : t("authBadCreds"),
-        variant: "destructive",
-      });
-      return;
-    }
-    saveReminderSession({
-      token: res.data.token as string,
-      expiresAt: res.data.expiresAt as number,
-    });
-    setHasSession(true);
-
-    // Carry the just-authenticated user straight into their pending action.
-    const action = pendingAction;
-    setAuthOpen(false);
-    setPendingAction(null);
-    setPwd("");
-    setCode("");
-
-    if (action === "status") {
-      setBusy(false);
-      refresh();
-      return;
-    }
-
-    // enable / disable / run-now
-    const token = res.data.token as string;
-    const op = await callAction(action, token);
-    setBusy(false);
-    if (op?.error || !op?.data?.ok) {
-      toast({
-        title: action === "run-now" ? t("runNowFailed") : t("scheduleActionFailed"),
-        description: op?.data?.error ?? op?.error?.message ?? "failed",
-        variant: "destructive",
-      });
-      return;
-    }
-    if (action === "run-now") {
-      const r = (op.data?.result ?? {}) as { sent?: number; failed?: number; candidates?: number };
-      toast({
-        title: t("runNowSuccess"),
-        description: t("runNowResult")
-          .replace("{sent}", String(r.sent ?? 0))
-          .replace("{failed}", String(r.failed ?? 0))
-          .replace("{candidates}", String(r.candidates ?? 0)),
-      });
-    } else {
-      toast({
-        title: action === "enable" ? t("scheduleEnabled") : t("scheduleDisabled"),
-      });
-    }
-    refresh();
-  }
-
   async function performMutation(action: "enable" | "disable" | "run-now") {
-    const session = loadReminderSession();
-    if (!session) {
-      requireSession(action);
-      return;
-    }
     setBusy(true);
-    const res = await callAction(action, session.token);
+    const r = await postInternalReminderAction(
+      action,
+      action === "enable" ? cronInput.trim() : undefined,
+    );
     setBusy(false);
-    if (res?.error || !res?.data?.ok) {
-      const reason = res?.data?.error ?? res?.error?.message ?? "failed";
-      if (reason === "bad_token" || reason === "missing_token") {
-        clearReminderSession();
-        setHasSession(false);
-        requireSession(action);
-        return;
-      }
+    if (!r.ok) {
       toast({
         title: action === "run-now" ? t("runNowFailed") : t("scheduleActionFailed"),
-        description: reason,
+        description: r.error,
         variant: "destructive",
       });
       return;
     }
     if (action === "run-now") {
-      const r = (res.data?.result ?? {}) as { sent?: number; failed?: number; candidates?: number };
+      const rr = r.result ?? {};
       toast({
         title: t("runNowSuccess"),
         description: t("runNowResult")
-          .replace("{sent}", String(r.sent ?? 0))
-          .replace("{failed}", String(r.failed ?? 0))
-          .replace("{candidates}", String(r.candidates ?? 0)),
+          .replace("{sent}", String(rr.sent ?? 0))
+          .replace("{failed}", String(rr.failed ?? 0))
+          .replace("{candidates}", String(rr.candidates ?? 0)),
       });
     } else {
       toast({
         title: action === "enable" ? t("scheduleEnabled") : t("scheduleDisabled"),
       });
     }
-    refresh();
+    await refresh();
   }
 
   return (
@@ -304,35 +183,14 @@ export default function RemindersSchedule() {
 
       <p className="text-sm text-muted-foreground">{t("remindersScheduleHelp")}</p>
 
-      {error === "supabase_not_configured" ? (
-        <Card>
-          <CardContent className="p-4 flex items-start gap-2 text-sm">
-            <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5" />
-            <span>{t("scheduleNeedsSupabase")}</span>
-          </CardContent>
-        </Card>
-      ) : error ? (
+      {error && (
         <Card>
           <CardContent className="p-4 flex items-start gap-2 text-sm">
             <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5" />
             <span data-testid="text-status-error">{t("scheduleStatusError")}: {error}</span>
           </CardContent>
         </Card>
-      ) : !hasSession ? (
-        <Card>
-          <CardContent className="p-4 flex flex-wrap items-center gap-3 text-sm">
-            <Lock className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1 min-w-0">{t("scheduleAuthRequired")}</span>
-            <Button
-              size="sm"
-              onClick={() => requireSession("status")}
-              data-testid="button-unlock"
-            >
-              {t("scheduleUnlock")}
-            </Button>
-          </CardContent>
-        </Card>
-      ) : null}
+      )}
 
       <Card>
         <CardHeader>
@@ -365,11 +223,9 @@ export default function RemindersSchedule() {
               <div className="font-medium" data-testid="text-status">
                 {loading
                   ? t("loading")
-                  : !hasSession
-                    ? "—"
-                    : status?.enabled
-                      ? t("scheduleRunningDaily")
-                      : t("scheduleNotConfigured")}
+                  : status?.enabled
+                    ? t("scheduleRunningDaily")
+                    : t("scheduleNotConfigured")}
               </div>
             </div>
             <div>
@@ -585,79 +441,6 @@ export default function RemindersSchedule() {
         </CardContent>
       </Card>
 
-      <Dialog open={authOpen} onOpenChange={(o) => { if (!o) { setAuthOpen(false); setPendingAction(null); } }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {pendingAction === "enable"
-                ? t("confirmEnableSchedule")
-                : pendingAction === "disable"
-                  ? t("confirmDisableSchedule")
-                  : pendingAction === "run-now"
-                    ? t("confirmRunNow")
-                    : t("scheduleAuthTitle")}
-            </DialogTitle>
-            <DialogDescription>
-              {pendingAction === "enable"
-                ? t("confirmEnableScheduleHelp")
-                : pendingAction === "disable"
-                  ? t("confirmDisableScheduleHelp")
-                  : pendingAction === "run-now"
-                    ? t("confirmRunNowHelp")
-                    : t("scheduleAuthHelp")}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">{t("password")}</label>
-              <Input
-                type="password"
-                value={pwd}
-                onChange={(e) => setPwd(e.target.value)}
-                autoComplete="current-password"
-                data-testid="input-confirm-password"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">{t("totpCode")}</label>
-              <Input
-                inputMode="numeric"
-                maxLength={6}
-                value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-                placeholder="123456"
-                className="font-mono tracking-widest"
-                data-testid="input-confirm-code"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => { setAuthOpen(false); setPendingAction(null); }}
-              disabled={busy}
-            >
-              {t("cancel")}
-            </Button>
-            <Button
-              onClick={submitAuth}
-              disabled={busy || !pwd || code.length !== 6}
-              variant={pendingAction === "disable" ? "destructive" : "default"}
-              data-testid="button-confirm-submit"
-            >
-              {busy
-                ? t("loading")
-                : pendingAction === "enable"
-                  ? t("scheduleEnable")
-                  : pendingAction === "disable"
-                    ? t("scheduleDisable")
-                    : pendingAction === "run-now"
-                      ? t("runNow")
-                      : t("scheduleUnlock")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

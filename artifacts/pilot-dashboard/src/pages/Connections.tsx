@@ -12,6 +12,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
+import { isLanSessionLoginEnabled } from "@/lib/internal-migration";
 import {
   getLocalPcId,
   useRegisteredPCs,
@@ -63,6 +64,7 @@ function seatLabel(user: ReturnType<typeof useAuth>["user"]): string | null {
 
 export default function Connections() {
   const { user, squadron } = useAuth();
+  const lanMode = isLanSessionLoginEnabled();
   const { toast } = useToast();
   const myPcId = getLocalPcId();
   const { data: pairs, isLoading } = useMyPairs();
@@ -100,6 +102,15 @@ export default function Connections() {
           <ShieldCheck className="h-3 w-3" /> Self-service
         </Badge>
       </div>
+      {lanMode && (
+        <Card className="p-3 border-sky-500/30 bg-sky-500/5">
+          <p className="text-xs text-sky-100">
+            <span className="font-semibold">LAN mode:</span> this pairing page stays active on
+            local-network installs. If peers do not appear, check that every PC is running the
+            same LAN backend and verify health in <span className="font-semibold">Connection Diagnostic</span>.
+          </p>
+        </Card>
+      )}
 
       {/* This PC */}
       <Card className="p-4">
@@ -448,7 +459,7 @@ function JoinCodeDialog(props: {
           <p className="text-xs text-muted-foreground">
             Codes expire 5 minutes after they are issued. If you get
             "code not recognised", confirm both PCs are pointed at the same
-            backend (open the Diagnostic page on each).
+            {isLanSessionLoginEnabled() ? " LAN backend" : " backend"} (open the Diagnostic page on each).
           </p>
         </div>
         <DialogFooter>

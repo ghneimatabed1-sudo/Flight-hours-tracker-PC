@@ -4,7 +4,7 @@ import { useI18n } from "@/lib/i18n";
 import { SIX_MONTH_TASKS } from "@/lib/mock";
 import { usePilots, useSorties } from "@/lib/squadron-data";
 import { computeAllTotals, formatHours } from "@/lib/calculations";
-import { supabaseConfigured } from "@/lib/supabase";
+import { supabaseConfigured } from "@/lib/lan-legacy-shims";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
 
 function rng(seed: number) { let s = seed; return () => (s = (s * 9301 + 49297) % 233280) / 233280; }

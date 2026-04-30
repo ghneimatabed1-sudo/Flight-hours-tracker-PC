@@ -14,8 +14,15 @@ import { Smartphone, ShieldOff, Loader2, AlertTriangle, Eraser, ArrowRight, Slid
 import { useRegisteredPCs } from "@/lib/cross-pc";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Link } from "wouter";
+import { isLanSessionLoginEnabled } from "@/lib/internal-migration";
 
-function ReleaseLicenseButton({ onConfirm }: { onConfirm: () => void }) {
+function ReleaseLicenseButton({
+  onConfirm,
+  disabled = false,
+}: {
+  onConfirm: () => void;
+  disabled?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [secs, setSecs] = useState(10);
   const [typed, setTyped] = useState("");
@@ -35,9 +42,11 @@ function ReleaseLicenseButton({ onConfirm }: { onConfirm: () => void }) {
   return (
     <>
       <button
+        type="button"
         onClick={() => setOpen(true)}
+        disabled={disabled}
         data-testid="button-release-license"
-        className="px-3 py-1.5 rounded-md text-sm bg-destructive/20 text-destructive border border-destructive/40 hover:bg-destructive/30"
+        className="px-3 py-1.5 rounded-md text-sm bg-destructive/20 text-destructive border border-destructive/40 hover:bg-destructive/30 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         Release license
       </button>
@@ -136,6 +145,7 @@ function ReleaseLicenseButton({ onConfirm }: { onConfirm: () => void }) {
 // The actual implementation lives in auth.tsx (resetThisPC) so it has
 // access to the supabase client and the auth state setters.
 function ResetPcButton({ onConfirm }: { onConfirm: () => Promise<void> }) {
+  const lanMode = isLanSessionLoginEnabled();
   const [open, setOpen] = useState(false);
   const [secs, setSecs] = useState(5);
   const [typed, setTyped] = useState("");
@@ -197,7 +207,7 @@ function ResetPcButton({ onConfirm }: { onConfirm: () => Promise<void> }) {
                 <div className="text-xs text-muted-foreground mt-1">
                   This is the nuclear option. After confirmation this PC will be
                   indistinguishable from a brand-new install — and the central
-                  Supabase registration for this device ID will be deleted.
+                  {lanMode ? "LAN server registration" : "cloud registration"} for this device ID will be deleted.
                 </div>
               </div>
             </div>
@@ -214,7 +224,9 @@ function ResetPcButton({ onConfirm }: { onConfirm: () => Promise<void> }) {
               </div>
 
               <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs space-y-1.5">
-                <div className="font-medium text-destructive">What gets deleted on Supabase:</div>
+                <div className="font-medium text-destructive">
+                  {lanMode ? "What gets deleted on the LAN server:" : "What gets deleted on the cloud backend:"}
+                </div>
                 <ul className="list-disc ms-4 space-y-0.5 text-foreground/90">
                   <li>This PC's row in <span className="font-mono">xpc_registry</span> (other PCs stop seeing it).</li>
                   <li>This PC's claim in <span className="font-mono">xpc_user_pcs</span>.</li>
@@ -710,6 +722,7 @@ export default function Settings() {
   const [curIrt, setCurIrt] = useState<string>(String(curWindow.instrument));
   const [curMed, setCurMed] = useState<string>(String(curWindow.medical));
   const [curSaved, setCurSaved] = useState(false);
+  const lanMode = isLanSessionLoginEnabled();
   const parseOr = (raw: string, fallback: number) => {
     const v = parseInt(raw, 10);
     return Number.isFinite(v) && v > 0 ? v : fallback;
@@ -799,12 +812,17 @@ export default function Settings() {
           <div className="text-xs text-muted-foreground">PC fingerprint (locked):</div>
           <div className="font-mono text-xs break-all bg-secondary p-2 rounded border border-border">{fingerprint}</div>
           <div className="flex flex-wrap items-center gap-2">
-            <ReleaseLicenseButton onConfirm={releaseLicense} />
+            <ReleaseLicenseButton onConfirm={releaseLicense} disabled={lanMode} />
             <ResetPcButton onConfirm={resetThisPC} />
           </div>
+          {lanMode && (
+            <p className="text-[11px] text-amber-300 -mt-1">
+              License release is disabled in LAN session mode. Use Sign out to end this session.
+            </p>
+          )}
           <p className="text-[11px] text-muted-foreground -mt-1">
             <span className="font-semibold">Reset this PC</span> wipes this device's
-            registration on the central server (xpc_registry + xpc_user_pcs) and clears
+            registration on {lanMode ? "the LAN backend" : "the central server"} (xpc_registry + xpc_user_pcs) and clears
             every Hawk Eye setting saved locally — leaving the PC ready to set up from
             scratch. Other PCs and squadron data are not affected.
           </p>

@@ -11,6 +11,7 @@ import {
   listSquadronsForJoin, requestJoin, persistPendingRequest,
   unitJoinConfigured, type UnitSquadron, type UnitRole,
 } from "../lib/unit-join";
+import { isLanSessionLoginEnabled } from "../lib/internal-migration";
 
 const ROLES: { value: UnitRole; label: string; multiSquadron: boolean }[] = [
   { value: "ops",      label: "Squadron Operator",        multiSquadron: false },
@@ -36,6 +37,7 @@ function getFingerprint(): string {
 }
 
 export default function JoinSetup() {
+  const lanMode = isLanSessionLoginEnabled();
   const [, navigate] = useLocation();
   const [squadrons, setSquadrons] = useState<UnitSquadron[]>([]);
   const [role, setRole] = useState<UnitRole>("ops");
@@ -122,6 +124,23 @@ export default function JoinSetup() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 grid place-items-center p-6">
+      {lanMode ? (
+        <div className="w-full max-w-lg space-y-4 rounded-xl border border-sky-700/40 bg-sky-900/20 p-6 text-center">
+          <h1 className="text-xl font-semibold">LAN session mode active</h1>
+          <p className="text-sm text-sky-100/90">
+            Cloud join-request flow is disabled in LAN mode. Sign in through LAN login
+            with an account created on your internal server.
+          </p>
+          <div className="flex items-center justify-center gap-3">
+            <Link href="/" className="rounded-md border border-slate-600 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800">
+              ← Back
+            </Link>
+            <Link href="/login" className="rounded-md border border-sky-400/40 px-3 py-2 text-sm text-sky-50 hover:bg-sky-800/40">
+              Go to LAN login
+            </Link>
+          </div>
+        </div>
+      ) : (
       <form onSubmit={onSubmit} className="w-full max-w-lg space-y-5 rounded-xl border border-slate-800 bg-slate-900/60 p-6">
         <div>
           <h1 className="text-xl font-semibold">Request to Join Your Unit</h1>
@@ -234,6 +253,7 @@ export default function JoinSetup() {
           </button>
         </div>
       </form>
+      )}
     </div>
   );
 }

@@ -11,18 +11,18 @@
 //
 // Per CO request after v1.1.123: the legacy "Super admin sign-in" entry
 // is restored as a third always-available button. This routes to the
-// existing /login page (standard supabase email-and-password auth) so
+// existing /login page (standard LAN username-and-password session auth) so
 // the super admin can come back in on a fresh laptop or after a
 // re-install — without it, an SA whose original laptop dies has no
 // way back in (the bootstrap path is locked once an SA already exists,
 // and the join roles list does not include super_admin). This does
 // NOT create a second SA, does NOT bypass the join-secret gate (which
 // only protects the join-request anti-spam flow), and does NOT widen
-// any RLS policy — the auth itself is standard supabase
-// signInWithPassword that the rest of the dashboard already relies on.
+// any authorization rule — the auth itself is the standard LAN
+// session-login the rest of the dashboard already relies on.
 //
 // Routed unconditionally from App.tsx when:
-//   • no Supabase session is live, AND
+//   • no LAN session is live, AND
 //   • no pending join request is parked in localStorage.
 
 import { Link } from "wouter";
@@ -31,10 +31,14 @@ import {
   checkSuperAdminExists, checkSuperAdminSetupAllowed, listSquadronsForJoin,
   unitJoinConfigured,
 } from "../lib/unit-join";
+import { isLanSessionLoginEnabled } from "../lib/internal-migration";
 
 type CloudState =
   | { kind: "loading" }
   | { kind: "offline" }
+  /** Cloud join/bootstrap is off, but LAN session login is on — use
+   * /login directly, skip the first-launch unit-join wizard. */
+  | { kind: "lan-local" }
   | { kind: "needs-setup"; squadronCount: number }
   | { kind: "ready"; squadronCount: number; superAdminExists: boolean };
 
@@ -44,6 +48,10 @@ export default function FirstLaunch() {
   useEffect(() => {
     let alive = true;
     if (!unitJoinConfigured) {
+      if (isLanSessionLoginEnabled()) {
+        setCloud({ kind: "lan-local" });
+        return () => { alive = false; };
+      }
       setCloud({ kind: "offline" });
       return () => { alive = false; };
     }
@@ -65,11 +73,13 @@ export default function FirstLaunch() {
     return () => { alive = false; };
   }, []);
 
-  const offline = cloud.kind === "offline" || cloud.kind === "loading";
+  const offline =
+    cloud.kind === "offline" || cloud.kind === "loading" || cloud.kind === "lan-local";
   const saButtonEnabled = cloud.kind === "needs-setup";
   const squadronCount =
     cloud.kind === "needs-setup" || cloud.kind === "ready" ? cloud.squadronCount : 0;
   const joinButtonEnabled = !offline && squadronCount > 0;
+  const lanLocal = cloud.kind === "lan-local";
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 grid place-items-center p-6">
@@ -106,7 +116,7 @@ export default function FirstLaunch() {
               aria-disabled="true"
               className="block w-full rounded-lg bg-slate-800 px-4 py-3 text-center font-semibold text-slate-500 cursor-not-allowed"
             >
-              Set up this unit's super admin
+              {lanLocal ? "First-launch setup not used in LAN mode" : "Set up this unit's super admin"}
             </button>
           )}
 
@@ -126,21 +136,22 @@ export default function FirstLaunch() {
               aria-disabled="true"
               className="block w-full rounded-lg bg-slate-800 px-4 py-3 text-center font-semibold text-slate-500 cursor-not-allowed"
             >
-              Request to join this unit
+              {lanLocal ? "Self-service join not used in LAN mode" : "Request to join this unit"}
             </button>
           )}
 
           {/* Always-available re-entry path. Targets the existing
               /login page (App.tsx routes /login through to LoginGate
-              regardless of FirstLaunch state). Standard email +
-              password sign-in via supabase auth. Designed primarily
+              regardless of FirstLaunch state). Standard username +
+              password LAN session sign-in via the api-server's
+              /api/internal/auth/lan/login endpoint. Designed primarily
               for the super admin coming back on a fresh laptop. */}
           <Link
             href="/login"
             data-testid="link-existing-account"
             className="block w-full rounded-lg border border-slate-700 bg-slate-900/60 px-4 py-3 text-center font-semibold text-slate-200 hover:bg-slate-800 transition"
           >
-            Super admin sign-in
+            {lanLocal ? "LAN sign-in" : "Super admin sign-in"}
           </Link>
         </div>
 
@@ -151,6 +162,17 @@ export default function FirstLaunch() {
           <div className="rounded-md border border-rose-500/30 bg-rose-500/5 p-3 text-xs text-rose-200">
             Cloud not reachable from this PC, or this build wasn't
             issued with a join secret. Both setup and join are disabled.
+          </div>
+        )}
+        {cloud.kind === "lan-local" && (
+          <div className="rounded-md border border-sky-500/30 bg-sky-500/5 p-3 text-xs text-sky-100">
+            <strong className="font-medium text-sky-50">LAN sign-in mode.</strong>{" "}
+            The first-screen unit setup and “request to join” wizards
+            are not used in LAN mode — the super admin is created by
+            the LAN host bootstrap script. Use{" "}
+            <strong className="font-medium">Super admin sign-in</strong> below
+            with the username and password you created on the LAN server
+            (bootstrap), or any other LAN account your server has.
           </div>
         )}
         {cloud.kind === "needs-setup" && (
@@ -177,8 +199,9 @@ export default function FirstLaunch() {
         )}
 
         <p className="text-center text-[11px] text-slate-500">
-          Joining will send a request to your unit's super admin. You'll
-          stay on the next screen until it's approved.
+          {lanLocal
+            ? "LAN mode is active. Sign in with a LAN account from your internal server."
+            : "Joining will send a request to your unit's super admin. You'll stay on the next screen until it's approved."}
         </p>
       </div>
     </div>

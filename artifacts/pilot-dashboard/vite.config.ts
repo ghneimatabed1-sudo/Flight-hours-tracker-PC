@@ -71,6 +71,29 @@ if (!basePath) {
   );
 }
 
+/** Dev/preview: proxy same-origin `__hawk_eye_internal_api` → monorepo api-server `/api` (see src/lib/internal-migration.ts). */
+const baseNorm = (basePath || "/").replace(/\/$/, "");
+const internalApiProxyPath = baseNorm
+  ? `${baseNorm}/__hawk_eye_internal_api`
+  : "/__hawk_eye_internal_api";
+const internalApiProxyTarget =
+  process.env.INTERNAL_API_PROXY_TARGET ?? "http://127.0.0.1:3847";
+function internalApiProxyRewrite(path: string): string {
+  const re = baseNorm
+    ? new RegExp(
+        `^${baseNorm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/__hawk_eye_internal_api`,
+      )
+    : /^\/__hawk_eye_internal_api/;
+  return path.replace(re, "/api");
+}
+const internalApiDevProxy = {
+  [internalApiProxyPath]: {
+    target: internalApiProxyTarget,
+    changeOrigin: true,
+    rewrite: internalApiProxyRewrite,
+  },
+} as const;
+
 // Read package.json version once at config time so the runtime error
 // reporter (Task #265 Part F) can tag rows with the build version.
 const pkgVersion = (() => {
@@ -82,10 +105,27 @@ const pkgVersion = (() => {
   } catch { return "unknown"; }
 })();
 
+// Resolve the short git hash at config time so the title bar can show
+// exactly which commit a given install was built from. Best-effort —
+// returns "nogit" if git isn't available (e.g. building from a tarball).
+const gitShortHash = (() => {
+  try {
+    // Lazy require so test runs that don't have child_process polyfilled
+    // (some bundler smoke tests) still load this config.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { execSync } = require("node:child_process") as typeof import("node:child_process");
+    return execSync("git rev-parse --short HEAD", {
+      cwd: path.resolve(import.meta.dirname, "..", ".."),
+      stdio: ["ignore", "pipe", "ignore"],
+    }).toString().trim() || "nogit";
+  } catch { return "nogit"; }
+})();
+
 export default defineConfig({
   base: basePath,
   define: {
     __APP_VERSION__: JSON.stringify(pkgVersion),
+    __GIT_SHORT_HASH__: JSON.stringify(gitShortHash),
   },
   plugins: [
     react(),
@@ -126,10 +166,13 @@ export default defineConfig({
       strict: true,
       deny: ["**/.*"],
     },
+    proxy:
+      process.env.NODE_ENV !== "production" ? { ...internalApiDevProxy } : undefined,
   },
   preview: {
     port,
     host: "0.0.0.0",
     allowedHosts: true,
+    proxy: { ...internalApiDevProxy },
   },
 });

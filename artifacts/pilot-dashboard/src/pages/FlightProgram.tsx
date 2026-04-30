@@ -21,6 +21,8 @@ import {
 } from "@/lib/cross-pc";
 import { useToast } from "@/hooks/use-toast";
 import { markFlightProgramSeen } from "@/lib/sidebar-badges";
+import { preferredSchedulePilotName } from "@/lib/schedule-names";
+import { fetchInternalPilotOptions } from "@/lib/internal-migration";
 
 type Mode = ScheduleProgram["mode"];
 
@@ -140,7 +142,7 @@ function programToShareRows(p: ScheduleProgram) {
 }
 
 export default function FlightProgram() {
-  const { t, lang, dir, rankOf } = useI18n();
+  const { t, lang, dir } = useI18n();
   const pilotsQ = usePilots();
   const PILOTS  = pilotsQ.data;
   const { user, squadron } = useAuth();
@@ -191,9 +193,23 @@ export default function FlightProgram() {
   useEffect(() => { setProg(loadProgram(date, defaults)); }, [date, defaults]);
 
   const pilotOptions = useMemo(
-    () => PILOTS.map(p => ({ value: p.name, label: `${rankOf(p)} ${p.name}` })),
+    () => PILOTS.map(p => {
+      const scheduleName = preferredSchedulePilotName(p);
+      return { value: scheduleName, label: scheduleName };
+    }),
     [PILOTS],
   );
+  const [internalPilotOptions, setInternalPilotOptions] = useState<Array<{ value: string; label: string }>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchInternalPilotOptions().then((rows) => {
+      if (cancelled) return;
+      if (rows.length === 0) return;
+      setInternalPilotOptions(rows.map((r) => ({ value: r.scheduleName, label: r.scheduleName })));
+    });
+    return () => { cancelled = true; };
+  }, [date]);
+  const effectivePilotOptions = internalPilotOptions.length > 0 ? internalPilotOptions : pilotOptions;
 
   // PCs that can receive a flight schedule. The squadron sends to its
   // monitoring Wing PC, but ops officers also share peer-to-peer for
@@ -657,7 +673,7 @@ export default function FlightProgram() {
       <FlightScheduleSheet
         prog={prog}
         onChange={update}
-        pilotOptions={pilotOptions}
+      pilotOptions={effectivePilotOptions}
       />
 
       {/* Print styles — only the sheet is visible on paper. */}
@@ -688,7 +704,6 @@ export default function FlightProgram() {
    ScheduleChain.tsx — same mutations, same RLS authority. */
 function FlightProgramShareInbox() {
   const { user } = useAuth();
-  const { rankOf } = useI18n();
   // v1.1.70 — `makePcMatcher` returns a plain `(id) => boolean` predicate
   // (see lib/cross-pc.ts:1789). The previous call site invoked it with no
   // argument and then accessed `.matchesMe(...)` on the result, which is
@@ -714,7 +729,10 @@ function FlightProgramShareInbox() {
   // schedule before stamping it.
   const { data: PILOTS = [] } = usePilots();
   const pilotOptions = useMemo(
-    () => PILOTS.map(p => ({ value: p.name, label: `${rankOf(p)} ${p.name}` })),
+    () => PILOTS.map(p => {
+      const scheduleName = preferredSchedulePilotName(p);
+      return { value: scheduleName, label: scheduleName };
+    }),
     [PILOTS],
   );
   const [viewingId, setViewingId] = useState<string | null>(null);

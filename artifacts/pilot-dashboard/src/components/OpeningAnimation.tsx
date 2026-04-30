@@ -19,6 +19,10 @@ export default function OpeningAnimation() {
   const { lang } = useI18n();
   const [visible, setVisible] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
+    // In packaged Electron builds this full-screen intro can be mistaken
+    // for a frozen black window during cold starts/relaunches. Keep it for
+    // browser sessions, skip it in desktop installs.
+    if (window.location.protocol === "file:") return false;
     try {
       return window.sessionStorage.getItem(SESSION_KEY) !== "1";
     } catch {

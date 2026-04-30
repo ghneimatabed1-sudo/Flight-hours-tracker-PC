@@ -12,6 +12,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
+import { isLanSessionLoginEnabled } from "@/lib/internal-migration";
 import { useRegisteredPCsIncludingStale, type RegisteredPC, type PcTier } from "@/lib/cross-pc";
 import {
   useAllPairs,
@@ -73,6 +74,7 @@ function rowsFromRegistry(pcs: RegisteredPC[]): PcRow[] {
 
 export default function ConnectionMap() {
   const { user } = useAuth();
+  const lanMode = isLanSessionLoginEnabled();
   const { toast } = useToast();
   const registry = useRegisteredPCsIncludingStale();
   const pairs = useAllPairs();
@@ -193,6 +195,15 @@ export default function ConnectionMap() {
           </Button>
         </div>
       </div>
+      {lanMode && (
+        <Card className="p-3 border-sky-500/30 bg-sky-500/5">
+          <p className="text-xs text-sky-100">
+            <span className="font-semibold">LAN mode:</span> pairing actions on this map now use the
+            internal LAN API path. If results look stale, run <span className="font-semibold">Sweep now</span> and
+            verify all PCs point to the same LAN backend from Connection Diagnostic.
+          </p>
+        </Card>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-4">
         {/* Left: PC list */}

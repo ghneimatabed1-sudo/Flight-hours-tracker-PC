@@ -8,8 +8,8 @@ import {
   usePendingApprovals,
   canViewFinalSchedules,
 } from "@/lib/cross-pc";
+import { isLanSessionLoginEnabled } from "@/lib/internal-migration";
 import { listPendingRequests } from "@/lib/unit-join";
-import { supabase } from "@/lib/supabase";
 
 export type SidebarBadgeMap = Record<string, number>;
 
@@ -71,7 +71,12 @@ function readLastSeenFlightProgram(): string {
 // ~1s of a new join landing.
 function usePendingDeviceCount(role: string | undefined): number {
   const [count, setCount] = useState(0);
+  const lanMode = isLanSessionLoginEnabled();
   useEffect(() => {
+    if (lanMode) {
+      setCount(0);
+      return;
+    }
     if (role !== "super_admin") {
       setCount(0);
       return;
@@ -87,24 +92,16 @@ function usePendingDeviceCount(role: string | undefined): number {
       }
     };
     void reload();
+    // LAN-only build: realtime postgres_changes subscriptions used to
+    // wake this badge within ~1s of a new device-join landing. With
+    // the cloud SDK gone we fall back to the 5s poll alone, which is
+    // well within the operator-perceptible threshold for a base LAN.
     const t = window.setInterval(reload, 5000);
-    let cleanup: (() => void) | null = null;
-    const sb = supabase;
-    if (sb) {
-      const ch = sb
-        .channel("device_requests:sidebar-badge")
-        .on("postgres_changes", { event: "*", schema: "public", table: "device_requests" }, () => {
-          void reload();
-        })
-        .subscribe();
-      cleanup = () => { void sb.removeChannel(ch); };
-    }
     return () => {
       alive = false;
       window.clearInterval(t);
-      if (cleanup) cleanup();
     };
-  }, [role]);
+  }, [role, lanMode]);
   return count;
 }
 

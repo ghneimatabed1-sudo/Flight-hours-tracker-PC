@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
-import { supabaseConfigured } from "@/lib/supabase";
+import { supabaseConfigured } from "@/lib/lan-legacy-shims";
+import { isLanSessionLoginEnabled } from "@/lib/internal-migration";
 import {
   useAuditLog,
   AUDIT_PAGE_SIZE,
@@ -24,6 +25,7 @@ import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 // All filters apply to the in-memory loaded set, then pagination slices
 // the filtered result; the visible "page X of Y" recomputes accordingly.
 export default function AuditLog() {
+  const lanMode = isLanSessionLoginEnabled();
   const { t } = useI18n();
   const { fingerprint } = useAuth();
   const auditQ = useAuditLog();
@@ -81,9 +83,11 @@ export default function AuditLog() {
       <PageHead
         title={t("nav_audit")}
         subtitle={
-          supabaseConfigured
+          lanMode
+            ? `LAN server · up to ${AUDIT_MAX_ROWS.toLocaleString()} most-recent events · ${AUDIT_PAGE_SIZE}/page`
+            : supabaseConfigured
             ? `Live · up to ${AUDIT_MAX_ROWS.toLocaleString()} most-recent events · ${AUDIT_PAGE_SIZE}/page`
-            : "Demo data · connect Supabase for live history"
+            : "Demo data · connect backend for live history"
         }
       />
       <DataUnavailableBanner queries={[auditQ]} testId="banner-audit-unavailable" />

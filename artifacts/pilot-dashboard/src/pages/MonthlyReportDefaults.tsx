@@ -63,27 +63,11 @@ export default function MonthlyReportDefaults() {
     setD(p => ({ ...p, [k]: v }));
 
   const onSave = async () => {
+    // LAN-only: defaults persist locally via saveSquadronDefaults.
+    // The previous cloud upsert into Supabase has no LAN equivalent —
+    // squadron rows are managed by the admin Squadrons page through
+    // the internal API.
     saveSquadronDefaults(sqdnNumber, d);
-    try {
-      const { supabase, supabaseConfigured } = await import("@/lib/supabase");
-      if (supabaseConfigured && supabase && sqdnNumber) {
-        const aircraftPayload = d.airframes.map(model => ({
-          model,
-          fuelBurn: d.fuelBurnByAirframe[model] ?? 0,
-        }));
-        const monthlyPerPilot = Math.max(1, Math.round(d.minSixMonthHours / 6));
-        const targetsPayload: Record<string, number> = {};
-        for (const m of d.airframes) targetsPayload[m] = monthlyPerPilot;
-        await supabase.from("squadrons").upsert({
-          number: sqdnNumber,
-          name: squadron?.name || sqdnNumber,
-          base: d.base || d.airbase || "",
-          wing: d.wing || null,
-          default_aircraft: aircraftPayload,
-          default_monthly_targets: targetsPayload,
-        }, { onConflict: "number" });
-      }
-    } catch { /* offline-tolerant */ }
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
   };

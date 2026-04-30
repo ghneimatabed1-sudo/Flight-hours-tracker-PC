@@ -1,4 +1,11 @@
-import { supabase } from "./supabase";
+// LAN-only build: the outbox used to drain queued mutations against
+// the cloud Supabase REST endpoints. With the cloud SDK removed there
+// is no remote target to flush to — every write now goes through the
+// internal API on the local host PC, which is reachable as long as the
+// LAN is up. The exports below are kept as no-ops so existing call
+// sites continue to compile and behave predictably (enqueue is a
+// silent drop, pending returns the legacy queue contents in case any
+// browser still has localStorage rows from the cloud era).
 
 export interface QueuedMutation {
   id: string;
@@ -15,14 +22,9 @@ function read(): QueuedMutation[] {
   try { return JSON.parse(localStorage.getItem(KEY) || "[]") as QueuedMutation[]; }
   catch { return []; }
 }
-function write(items: QueuedMutation[]) {
-  localStorage.setItem(KEY, JSON.stringify(items));
-}
 
-export function enqueue(m: Omit<QueuedMutation, "id" | "createdAt">) {
-  const items = read();
-  items.push({ ...m, id: crypto.randomUUID(), createdAt: Date.now() });
-  write(items);
+export function enqueue(_m: Omit<QueuedMutation, "id" | "createdAt">): void {
+  /* no-op in LAN mode — writes go directly through the internal API */
 }
 
 export function pending(): QueuedMutation[] {
@@ -30,33 +32,9 @@ export function pending(): QueuedMutation[] {
 }
 
 export async function flushOutbox(): Promise<{ flushed: number; failed: number }> {
-  if (!supabase || !navigator.onLine) return { flushed: 0, failed: 0 };
-  const items = read();
-  if (!items.length) return { flushed: 0, failed: 0 };
-  const remaining: QueuedMutation[] = [];
-  let flushed = 0;
-  let failed = 0;
-  for (const m of items) {
-    let error: { message: string } | null = null;
-    if (m.op === "insert") {
-      ({ error } = await supabase.from(m.table).insert(m.payload));
-    } else if (m.op === "update") {
-      ({ error } = await supabase.from(m.table).update(m.payload).match(m.match ?? {}));
-    } else {
-      ({ error } = await supabase.from(m.table).delete().match(m.match ?? {}));
-    }
-    if (error) { failed++; remaining.push(m); } else { flushed++; }
-  }
-  write(remaining);
-  return { flushed, failed };
+  return { flushed: 0, failed: 0 };
 }
 
-let started = false;
-export function startOutboxWorker() {
-  if (started) return;
-  started = true;
-  const tick = () => { void flushOutbox(); };
-  window.addEventListener("online", tick);
-  setInterval(tick, 30_000);
-  tick();
+export function startOutboxWorker(): void {
+  /* no-op in LAN mode */
 }

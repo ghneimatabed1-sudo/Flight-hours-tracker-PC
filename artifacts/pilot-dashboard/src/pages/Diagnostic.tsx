@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, PageHead } from "@/components/Layout";
 import { useAuth } from "@/lib/auth";
@@ -10,7 +10,13 @@ import {
   subscribeHeartbeatStatus,
   type PcTier,
 } from "@/lib/cross-pc";
-import { supabase, supabaseConfigured } from "@/lib/supabase";
+import { supabaseConfigured } from "@/lib/lan-legacy-shims";
+import {
+  fetchInternalApiHealth,
+  fetchInternalXpcRegistryRows,
+  getInternalApiHealthUrl,
+  isLanSessionLoginEnabled,
+} from "@/lib/internal-migration";
 
 // Diagnostic-specific online/offline threshold. Wider than the
 // ACTIVE_WINDOW_MS used by the picker queries (90 s — chosen to keep
@@ -35,6 +41,7 @@ import {
   Cpu,
   Users,
   Globe,
+  Network,
 } from "lucide-react";
 
 // The diagnostic page reaches into a couple of things that don't have
@@ -81,28 +88,35 @@ function useDiagnosticRegistry() {
   return useQuery<DiagnosticPC[]>({
     queryKey: ["xpc", "registry", "diagnostic"],
     queryFn: async () => {
-      if (!supabaseConfigured || !supabase) return [];
-      const cutoffIso = new Date(Date.now() - DIAG_INCLUDE_MS).toISOString();
-      const { data, error } = await supabase
-        .from("xpc_registry")
-        .select("id, squadron_name, tier, base, wing, device_name, last_seen")
-        .gte("last_seen", cutoffIso)
-        .order("last_seen", { ascending: false })
-        .limit(5000);
-      if (error) throw error;
-      const me = getLocalPcId();
-      return (data ?? [])
-        .filter((r: { id: string | null }) => r.id && !String(r.id).startsWith("TEST_DEMO:"))
-        .map((r: Record<string, unknown>): DiagnosticPC => ({
-          id: String(r.id),
-          squadronName: String(r.squadron_name ?? ""),
-          tier: (r.tier as PcTier) ?? "squadron",
-          base: r.base ? String(r.base) : undefined,
-          wing: r.wing ? String(r.wing) : undefined,
-          deviceName: r.device_name ? String(r.device_name) : undefined,
-          lastSeen: String(r.last_seen ?? new Date(0).toISOString()),
-          isSelf: String(r.id) === me,
-        }));
+      if (isLanSessionLoginEnabled()) {
+        const staleHours = Math.max(1, Math.ceil(DIAG_INCLUDE_MS / (60 * 60 * 1000)));
+        const data = await fetchInternalXpcRegistryRows({
+          includeStale: true,
+          staleHours,
+        });
+        if (!data) return [];
+        const me = getLocalPcId();
+        const cutoffMs = Date.now() - DIAG_INCLUDE_MS;
+        return data
+          .filter((r) => !!r.id && !String(r.id).startsWith("TEST_DEMO:"))
+          .map((r): DiagnosticPC => ({
+            id: String(r.id),
+            squadronName: String(r.squadron_name ?? ""),
+            tier: String(r.id).startsWith("FLIGHT:")
+              ? "flight"
+              : ((r.tier as PcTier) ?? "squadron"),
+            base: r.base ? String(r.base) : undefined,
+            wing: r.wing ? String(r.wing) : undefined,
+            deviceName: r.device_name ? String(r.device_name) : undefined,
+            lastSeen: String(r.last_seen ?? new Date(0).toISOString()),
+            isSelf: String(r.id) === me,
+          }))
+          .filter((r) => new Date(r.lastSeen).getTime() >= cutoffMs);
+      }
+      // LAN-only build: when the internal session-login plane is not
+      // active there is no other backend to query, so the diagnostic
+      // table is simply empty (the "Backend" card will explain why).
+      return [];
     },
     refetchInterval: 5_000,
     staleTime: 2_000,
@@ -260,11 +274,30 @@ function tierRoleLabel(tier: PcTier, isSelf: boolean): string {
 
 export default function DiagnosticPage() {
   const { user, squadron, fingerprint } = useAuth();
+  const lanMode = isLanSessionLoginEnabled();
   const pcsQ = useDiagnosticRegistry();
   const [now, setNow] = useState(Date.now());
   const [hb, setHb] = useState(getHeartbeatStatus());
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
+  const [internalApi, setInternalApi] = useState<{
+    loading: boolean;
+    result: Awaited<ReturnType<typeof fetchInternalApiHealth>> | null;
+  }>({ loading: false, result: null });
+
+  const runInternalApiCheck = useCallback(() => {
+    if (!getInternalApiHealthUrl()) {
+      setInternalApi({ loading: false, result: null });
+      return;
+    }
+    setInternalApi(prev => ({ ...prev, loading: true }));
+    void fetchInternalApiHealth().then((result) => {
+      setInternalApi({ loading: false, result });
+    });
+  }, []);
+  useEffect(() => {
+    runInternalApiCheck();
+  }, [runInternalApiCheck]);
 
   // Re-render every 5 s so the "Xs ago" labels stay live and the
   // online/offline pill flips as heartbeats arrive.
@@ -292,149 +325,58 @@ export default function DiagnosticPage() {
   const projectHost = urlHost(SUPABASE_URL);
   const expectedHost = urlHost(EXPECTED_SUPABASE_HOST);
   const hostMismatch = !!expectedHost && !!projectHost && expectedHost !== projectHost;
+  const lanApiHost = urlHost(getInternalApiHealthUrl() ?? "");
 
   const [sessionUserId, setSessionUserId] = useState<string>("");
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      if (!supabase) return;
-      try {
-        const { data } = await supabase.auth.getUser();
-        if (!cancelled) setSessionUserId(data?.user?.id ?? "");
-      } catch { /* ignore */ }
+      if (lanMode) {
+        if (!cancelled) setSessionUserId(user?.id ?? "");
+        return;
+      }
+      // LAN-only build: outside the internal session plane there is no
+      // separate auth identity to read — the displayed user is whatever
+      // the local auth context has, or empty if no one is signed in.
+      if (!cancelled) setSessionUserId(user?.id ?? "");
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [lanMode, user?.id]);
 
   const onVerify = async () => {
     setVerifying(true);
     setVerifyResult(null);
     const t0 = performance.now();
     try {
-      if (!supabaseConfigured || !supabase) {
-        setVerifyResult({
-          ok: false,
-          error: "Supabase is not configured on this PC — VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are empty.",
-        });
-        return;
-      }
-      if (!myPcId) {
-        setVerifyResult({ ok: false, error: "This PC has no registered id yet — sign in first." });
-        return;
-      }
-      // Use the canonical heartbeat path. registerLocalPC() runs the
-      // SAME claim + upsert sequence (with the legacy-schema fallback
-      // and ensureMyPcClaim retry behavior) that every 30 s heartbeat
-      // and every cross-PC mutation depends on — so the verify result
-      // reflects what would actually happen during normal operation,
-      // not a bespoke shortcut. The function is fire-and-forget but
-      // reports its outcome via subscribeHeartbeatStatus, which we
-      // await with a deadline below before reading the row back.
-      const tier: PcTier = myTier ?? "squadron";
-      const displayName = squadron?.name || user?.displayName || myPcId;
-      const baselineHb = getHeartbeatStatus();
-      const baselineErrAt = baselineHb.errorAt ?? 0;
-      const baselineOkAt = baselineHb.okAt ?? 0;
-      registerLocalPC({
-        id: myPcId,
-        displayName,
-        tier,
-        base: squadron?.base,
-      });
-      // Wait for the heartbeat status to actually change (either OK
-      // bumped or a fresh error appeared) up to ~6 s. If neither event
-      // fires we still proceed to the readback — better to surface the
-      // raw "row missing" diagnostic than block forever.
-      const hbOutcome = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
-        const deadline = window.setTimeout(() => {
-          unsub?.();
-          resolve({ ok: false, error: "Heartbeat did not respond within 6 s." });
-        }, 6_000);
-        const unsub = subscribeHeartbeatStatus(() => {
-          const cur = getHeartbeatStatus();
-          if ((cur.errorAt ?? 0) > baselineErrAt && cur.errorMsg) {
-            window.clearTimeout(deadline);
-            unsub?.();
-            resolve({ ok: false, error: cur.errorMsg });
-          } else if ((cur.okAt ?? 0) > baselineOkAt) {
-            window.clearTimeout(deadline);
-            unsub?.();
-            resolve({ ok: true });
-          }
-        });
-      });
-      if (!hbOutcome.ok && hbOutcome.error) {
+      if (lanMode) {
+        const health = await fetchInternalApiHealth();
         const ms = Math.round(performance.now() - t0);
+        if (!health.ok) {
+          setVerifyResult({
+            ok: false,
+            ms,
+            error: `Internal API check failed — ${health.error}`,
+          });
+          return;
+        }
         setVerifyResult({
-          ok: false,
+          ok: true,
           ms,
-          error: `Heartbeat reported: ${hbOutcome.error}`,
+          rowSeen: true,
+          rowLastSeen: new Date().toISOString(),
+          peerChecks: [],
         });
         return;
       }
-      // Readback — even when the heartbeat reports OK we still confirm
-      // the row is selectable from this client (covers the "upsert
-      // succeeded but RLS USING hides it on read" edge case where this
-      // PC would publish but never appear in its OWN registry view).
-      const readRes = await supabase
-        .from("xpc_registry")
-        .select("id, last_seen")
-        .eq("id", myPcId)
-        .maybeSingle();
-      if (readRes.error) {
-        const ms = Math.round(performance.now() - t0);
-        setVerifyResult({
-          ok: false,
-          ms,
-          error: `Readback failed — ${readRes.error.code ?? ""} ${readRes.error.message}`.trim(),
-        });
-        return;
-      }
-      if (!readRes.data) {
-        const ms = Math.round(performance.now() - t0);
-        setVerifyResult({
-          ok: false,
-          ms,
-          rowSeen: false,
-          error: "Row not found after upsert — RLS likely rejected the write silently.",
-        });
-        return;
-      }
-      // Refresh the registry cache so the per-PC checks below see the
-      // freshest last_seen for every peer (other PCs heartbeat every
-      // ~30 s; we want to evaluate against the latest snapshot, not the
-      // 5 s-stale cache).
-      const refreshed = await pcsQ.refetch();
-      const peers = (refreshed.data ?? pcs).filter(p => !p.isSelf);
-      const tNow = Date.now();
-      // Two-level threshold: ≤ DIAG_ONLINE_MS (2 min) = online, ≤ 3×
-      // window (~6 min) = stale (PC was online recently but its last
-      // heartbeat slipped — usually means OS sleep / Wi-Fi hiccup),
-      // beyond that = offline. Peers that haven't checked in within
-      // DIAG_INCLUDE_MS (1 week) are filtered out at the query level
-      // as decommissioned.
-      const peerChecks: PerPcCheck[] = peers.map(p => {
-        const ageMs = tNow - new Date(p.lastSeen).getTime();
-        const online = ageMs <= DIAG_ONLINE_MS;
-        const stale = !online && ageMs <= DIAG_ONLINE_MS * 3;
-        return {
-          id: p.id,
-          tier: p.tier,
-          label: p.deviceName || p.squadronName || p.id,
-          lastSeen: p.lastSeen,
-          ageMs,
-          online,
-          status: online ? "online" : stale ? "stale" : "offline",
-        } satisfies PerPcCheck;
-      });
-      const ms = Math.round(performance.now() - t0);
+      // LAN-only build: when the internal session plane is not active
+      // there is no remote backend to verify against. Tell the operator
+      // exactly that — they're either in demo mode or they need to
+      // bring the LAN API back up before this check can do anything.
       setVerifyResult({
-        ok: true,
-        ms,
-        rowSeen: true,
-        rowLastSeen: readRes.data.last_seen as string | undefined,
-        peerChecks,
+        ok: false,
+        error: "LAN API is not active on this PC — start the Hawk Eye host service or sign in to enable the internal data plane.",
       });
+      return;
     } catch (e) {
       setVerifyResult({
         ok: false,
@@ -474,16 +416,34 @@ export default function DiagnosticPage() {
     <div className="space-y-4">
       <PageHead
         title="Connection Diagnostic"
-        subtitle="See which PCs are linked to this backend and verify your link in seconds."
+        subtitle={lanMode
+          ? "LAN mode: verify local API reachability and this workstation identity."
+          : "See which PCs are linked to this backend and verify your link in seconds."}
       />
 
       <div className="grid lg:grid-cols-2 gap-4">
         <Card className="space-y-3">
           <div className="flex items-center gap-2">
             <Server className="h-4 w-4 text-primary" />
-            <div className="text-sm font-semibold">Backend (Supabase project)</div>
+            <div className="text-sm font-semibold">{lanMode ? "Backend (LAN API)" : "Backend (Supabase project)"}</div>
           </div>
-          {!supabaseConfigured ? (
+          {lanMode ? (
+            <>
+              <div className="text-xs text-muted-foreground">Internal API host</div>
+              <div className="font-mono text-xs break-all bg-secondary p-2 rounded border border-border">
+                {lanApiHost || "(not set)"}
+              </div>
+              {internalApi.result?.ok ? (
+                <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-2 text-xs text-emerald-200 flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4" /> Internal API reachable ({internalApi.result.ms} ms)
+                </div>
+              ) : (
+                <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-100">
+                  Internal API status is unknown. Use the "Check" button in the LAN panel below.
+                </div>
+              )}
+            </>
+          ) : !supabaseConfigured ? (
             <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-xs text-rose-200">
               <div className="flex items-center gap-2 font-semibold">
                 <AlertTriangle className="h-4 w-4" /> Not configured
@@ -625,8 +585,70 @@ export default function DiagnosticPage() {
         </Card>
       </div>
 
-      <BrowserSessionCard myPcId={myPcId} mySessionUserId={sessionUserId} />
+      {getInternalApiHealthUrl() && (
+        <Card className="space-y-3" data-testid="card-internal-api-health">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Network className="h-4 w-4 text-primary" />
+              <div className="text-sm font-semibold">Internal API (LAN migration)</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => runInternalApiCheck()}
+              disabled={internalApi.loading}
+              className="px-2.5 py-1 rounded-md text-xs bg-secondary border border-border hover:bg-secondary/70 inline-flex items-center gap-1.5 disabled:opacity-60"
+              data-testid="button-refresh-internal-api"
+            >
+              {internalApi.loading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3" />
+              )}
+              Check
+            </button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Monorepo <span className="font-mono">@workspace/api-server</span> at{" "}
+            <span className="font-mono">/api/healthz</span>. In dev, traffic is proxied from{" "}
+            <span className="font-mono">…/__hawk_eye_internal_api</span> (see{" "}
+            <span className="font-mono">vite.config.ts</span>).
+            Set <span className="font-mono">VITE_INTERNAL_API_URL</span> for a direct base URL; production
+            builds must allow that host in CSP <span className="font-mono">connect-src</span> (see internal-migration docs).
+          </p>
+          {internalApi.loading && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Contacting internal API…
+            </div>
+          )}
+          {!internalApi.loading && internalApi.result && (
+            internalApi.result.ok ? (
+              <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-2 text-xs text-emerald-200 flex flex-wrap items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                <span>OK · {internalApi.result.ms} ms</span>
+                <span className="text-muted-foreground font-mono break-all">
+                  {getInternalApiHealthUrl()}
+                </span>
+              </div>
+            ) : (
+              <div className="rounded-md border border-destructive/50 bg-destructive/10 p-2 text-xs text-rose-200 space-y-1">
+                <div className="flex items-center gap-2 font-semibold">
+                  <AlertTriangle className="h-4 w-4" /> {internalApi.result.error}
+                </div>
+                {internalApi.result.ms != null && (
+                  <p className="text-muted-foreground">After {internalApi.result.ms} ms</p>
+                )}
+                <p className="font-mono break-all text-[11px] opacity-80">
+                  {getInternalApiHealthUrl()}
+                </p>
+              </div>
+            )
+          )}
+        </Card>
+      )}
 
+      <BrowserSessionCard myPcId={myPcId} mySessionUserId={sessionUserId || user?.id || ""} />
+
+      {!lanMode && (
       <Card className="space-y-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2">
@@ -715,11 +737,12 @@ export default function DiagnosticPage() {
           Refreshes automatically every 5 s.
         </p>
       </Card>
+      )}
 
       <Card className="space-y-2">
         <div className="flex items-center gap-2">
           <Globe className="h-4 w-4 text-primary" />
-          <div className="text-sm font-semibold">Test-rig setup tips</div>
+          <div className="text-sm font-semibold">{lanMode ? "LAN test-rig setup tips" : "Test-rig setup tips"}</div>
         </div>
         <ul className="text-xs text-muted-foreground space-y-1 list-disc ms-5">
           <li>Every PC in your rig must show the same backend host above.</li>

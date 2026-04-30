@@ -4,6 +4,18 @@ import { Card, PageHead } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
 import { usePilots } from "@/lib/squadron-data";
+import {
+  useLeaveTypes,
+  useLeaveEntries,
+  useSetLeaveEntry,
+  useSetAvailableForDay,
+  useDeleteLeaveForDay,
+  useUpsertLeaveType,
+  useDeleteLeaveType,
+  type LeaveType,
+  type LeaveEntry,
+  OTHER_TYPE_ID,
+} from "@/lib/leaves-daily";
 import { Plus, Trash2, Save, Settings as Cog, CheckCircle2, ChevronLeft, ChevronRight, Printer } from "lucide-react";
 import { PrintHeader } from "@/components/PrintHeader";
 
@@ -28,46 +40,7 @@ import { PrintHeader } from "@/components/PrintHeader";
  * type any reason (stored in entry.note).
  */
 
-const TYPES_KEY   = "rjaf.leaves.types.v1";
-const ENTRIES_KEY = "rjaf.leaves.entries.v1";
-
 const PALETTE = ["#22c55e","#f59e0b","#ef4444","#3b82f6","#a855f7","#06b6d4","#eab308","#ec4899"];
-
-interface LeaveType { id: string; name: string; color: string; }
-interface LeaveEntry { id: string; pilotId: string; typeId: string; from: string; to: string; note?: string; }
-
-const OTHER_TYPE_ID = "other";
-
-// Built-in leave types. "Other" is always present and surfaces a free-
-// text reason field in the daily editor.
-const DEFAULT_TYPES: LeaveType[] = [
-  { id: "leave",         name: "Leave",         color: "#22c55e" },
-  { id: "morning-leave", name: "Morning Leave", color: "#84cc16" },
-  { id: "crew-rest",     name: "Crew Rest",     color: "#3b82f6" },
-  { id: "outside-duty",  name: "Outside Duty",  color: "#a855f7" },
-  { id: "sick",          name: "Sick",          color: "#ef4444" },
-  { id: OTHER_TYPE_ID,   name: "Other",         color: "#eab308" },
-];
-
-function loadTypes(): LeaveType[] {
-  try {
-    const raw = localStorage.getItem(TYPES_KEY);
-    if (raw) {
-      const parsed: LeaveType[] = JSON.parse(raw);
-      // Ensure the built-in "Other" type is always present so the daily
-      // editor's free-text option keeps working after upgrades.
-      if (!parsed.some(t => t.id === OTHER_TYPE_ID)) {
-        parsed.push(DEFAULT_TYPES.find(t => t.id === OTHER_TYPE_ID)!);
-      }
-      return parsed;
-    }
-  } catch { /* */ }
-  return DEFAULT_TYPES;
-}
-function loadEntries(): LeaveEntry[] {
-  try { const raw = localStorage.getItem(ENTRIES_KEY); if (raw) return JSON.parse(raw); } catch { /* */ }
-  return [];
-}
 
 function daysBetween(fromIso: string, toIso: string): Date[] {
   const out: Date[] = [];
@@ -90,10 +63,15 @@ export default function Leaves() {
   const pilotsQ = usePilots();
   const PILOTS = pilotsQ.data;
 
-  const [types, setTypes]   = useState<LeaveType[]>(() => loadTypes());
-  const [entries, setEntries] = useState<LeaveEntry[]>(() => loadEntries());
-  useEffect(() => { localStorage.setItem(TYPES_KEY, JSON.stringify(types)); }, [types]);
-  useEffect(() => { localStorage.setItem(ENTRIES_KEY, JSON.stringify(entries)); }, [entries]);
+  const typesQ = useLeaveTypes();
+  const entriesQ = useLeaveEntries();
+  const upsertLeaveType = useUpsertLeaveType();
+  const deleteLeaveType = useDeleteLeaveType();
+  const setLeaveEntry = useSetLeaveEntry();
+  const setAvailableForDay = useSetAvailableForDay();
+  const deleteLeaveForDay = useDeleteLeaveForDay();
+  const types = typesQ.data;
+  const entries = entriesQ.data;
 
   const [view, setView] = useState<"daily" | "weekly" | "monthly">("daily");
   const today = new Date();
@@ -179,31 +157,14 @@ export default function Leaves() {
     // Same surgery as setAvailable: pluck today out of any entry that
     // covers it, splitting multi-day ranges so surrounding days survive.
     if (!confirm("Remove this pilot's leave for the selected day?")) return;
-    setAvailable(pilotId);
+    void deleteLeaveForDay.mutateAsync({ pilotId, dayIso });
   }
 
   function setAvailable(pilotId: string) {
     // Mark "Available" by removing any single-day entry covering today.
     // Multi-day entries get split: anything that includes dayIso is
     // truncated/split so the rest of the range survives.
-    setEntries(prev => {
-      const out: LeaveEntry[] = [];
-      for (const e of prev) {
-        if (e.pilotId !== pilotId || dayIso < e.from || dayIso > e.to) {
-          out.push(e); continue;
-        }
-        // Split logic: keep the segments before and after dayIso.
-        if (e.from < dayIso) {
-          const beforeTo = new Date(new Date(dayIso + "T00:00:00").getTime() - 86400000);
-          out.push({ ...e, id: crypto.randomUUID(), to: fmtIso(beforeTo) });
-        }
-        if (e.to > dayIso) {
-          const afterFrom = new Date(new Date(dayIso + "T00:00:00").getTime() + 86400000);
-          out.push({ ...e, id: crypto.randomUUID(), from: fmtIso(afterFrom) });
-        }
-      }
-      return out;
-    });
+    void setAvailableForDay.mutateAsync({ pilotId, dayIso });
     setDrafts(d => ({ ...d, [pilotId]: { typeId: "", note: "" } }));
   }
 
@@ -217,33 +178,11 @@ export default function Leaves() {
       : "";
     if (typeId === OTHER_TYPE_ID && !note) return; // Other requires a reason.
 
-    setEntries(prev => {
-      // Remove any existing single-day entry that covers today for this
-      // pilot, then add a fresh single-day entry. Multi-day entries are
-      // split so we don't silently mutate a long-running leave.
-      const out: LeaveEntry[] = [];
-      for (const e of prev) {
-        if (e.pilotId !== pilotId || dayIso < e.from || dayIso > e.to) {
-          out.push(e); continue;
-        }
-        if (e.from < dayIso) {
-          const beforeTo = new Date(new Date(dayIso + "T00:00:00").getTime() - 86400000);
-          out.push({ ...e, id: crypto.randomUUID(), to: fmtIso(beforeTo) });
-        }
-        if (e.to > dayIso) {
-          const afterFrom = new Date(new Date(dayIso + "T00:00:00").getTime() + 86400000);
-          out.push({ ...e, id: crypto.randomUUID(), from: fmtIso(afterFrom) });
-        }
-      }
-      out.push({
-        id: crypto.randomUUID(),
-        pilotId,
-        typeId,
-        from: dayIso,
-        to: dayIso,
-        note: note || undefined,
-      });
-      return out;
+    void setLeaveEntry.mutateAsync({
+      pilotId,
+      dayIso,
+      typeId,
+      note: note || undefined,
     });
     setDrafts(d => ({ ...d, [pilotId]: { typeId: "", note: "" } }));
   }
@@ -258,10 +197,16 @@ export default function Leaves() {
   function addType() {
     const used = new Set(types.map(t => t.color));
     const next = PALETTE.find(c => !used.has(c)) ?? PALETTE[Math.floor(Math.random() * PALETTE.length)];
-    setTypes(prev => [...prev, { id: crypto.randomUUID(), name: "New type", color: next }]);
+    void upsertLeaveType.mutateAsync({
+      id: crypto.randomUUID(),
+      name: "New type",
+      color: next,
+    });
   }
   function updateType(id: string, patch: Partial<LeaveType>) {
-    setTypes(prev => prev.map(t => t.id === id ? { ...t, ...patch } : t));
+    const current = types.find((t) => t.id === id);
+    if (!current) return;
+    void upsertLeaveType.mutateAsync({ ...current, ...patch });
   }
   function removeType(id: string) {
     if (id === OTHER_TYPE_ID) {
@@ -269,7 +214,7 @@ export default function Leaves() {
       return;
     }
     if (!confirm("Delete this leave type? Existing entries that use it will keep showing the raw type id.")) return;
-    setTypes(prev => prev.filter(t => t.id !== id));
+    void deleteLeaveType.mutateAsync(id);
   }
 
   const typeById = useMemo(() => Object.fromEntries(types.map(t => [t.id, t])), [types]);

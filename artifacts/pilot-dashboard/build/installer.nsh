@@ -11,9 +11,7 @@
 ;      pass customPageAfterChangeDir is skipped, so the Functions appear
 ;      unreferenced and "warning treated as error" kills the build.
 
-!ifndef INSTALL_PASSWORD
-  !error "INSTALL_PASSWORD env var is required."
-!endif
+!define INSTALL_PASSWORD "$%INSTALL_PASSWORD%"
 !if "${INSTALL_PASSWORD}" == ""
   !error "INSTALL_PASSWORD must not be empty."
 !endif

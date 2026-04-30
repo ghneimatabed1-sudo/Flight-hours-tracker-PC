@@ -5,7 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { fmtDateTime } from "@/lib/format";
 import { ListChecks, Search, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
-import { supabase, AUDIT_RETENTION_ROWS } from "@/lib/supabase";
+import { AUDIT_RETENTION_ROWS } from "@/lib/lan-legacy-shims";
+import { fetchInternalAuditLogRows } from "@/lib/internal-migration";
+import {
+  applyAdminAuditFilters,
+  listAdminAuditTypes,
+  mapInternalAuditRowsToAdminRows,
+  paginateAdminAuditRows,
+} from "@/lib/admin-audit-lan";
 
 type AuditRow = {
   id: number | string;
@@ -36,30 +43,21 @@ export default function AuditLog() {
   const [knownTypes, setKnownTypes] = useState<string[]>([]);
 
   const fetchRows = async () => {
-    if (!supabase) {
-      setRows([]);
-      setTotal(0);
-      return;
-    }
+    // LAN-only: rows always come from the internal audit endpoint.
     setLoading(true);
     setError(null);
     try {
-      let q = supabase
-        .from("audit_log")
-        .select("id, type, actor, detail, occurred_at", { count: "exact" })
-        .order("occurred_at", { ascending: false });
-
-      if (actorFilter.trim()) q = q.ilike("actor", `%${actorFilter.trim()}%`);
-      if (typeFilter) q = q.eq("type", typeFilter);
-      if (fromDate) q = q.gte("occurred_at", `${fromDate}T00:00:00`);
-      if (toDate) q = q.lte("occurred_at", `${toDate}T23:59:59`);
-
-      const from = page * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
-      const { data, count, error: qErr } = await q.range(from, to);
-      if (qErr) throw qErr;
-      setRows((data ?? []) as AuditRow[]);
-      setTotal(count ?? 0);
+      const data = await fetchInternalAuditLogRows(AUDIT_RETENTION_ROWS);
+      if (!data) throw new Error("internal_audit_fetch_failed");
+      const mapped = mapInternalAuditRowsToAdminRows(data);
+      const filtered = applyAdminAuditFilters(mapped, {
+        actorFilter,
+        typeFilter,
+        fromDate,
+        toDate,
+      });
+      setTotal(filtered.length);
+      setRows(paginateAdminAuditRows(filtered, page, PAGE_SIZE));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg);
@@ -72,18 +70,10 @@ export default function AuditLog() {
 
   // Pull distinct types once for the dropdown — sampled from latest 1k rows.
   const fetchKnownTypes = async () => {
-    if (!supabase) return;
     try {
-      const { data } = await supabase
-        .from("audit_log")
-        .select("type")
-        .order("occurred_at", { ascending: false })
-        .limit(1000);
-      const set = new Set<string>();
-      for (const r of (data ?? []) as Array<{ type: string }>) {
-        if (r.type) set.add(r.type);
-      }
-      setKnownTypes(Array.from(set).sort());
+      const data = await fetchInternalAuditLogRows(AUDIT_RETENTION_ROWS);
+      const mapped = mapInternalAuditRowsToAdminRows(data ?? []);
+      setKnownTypes(listAdminAuditTypes(mapped));
     } catch {
       /* best-effort */
     }

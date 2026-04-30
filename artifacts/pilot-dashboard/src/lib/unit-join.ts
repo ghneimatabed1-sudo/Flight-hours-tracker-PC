@@ -17,7 +17,7 @@
 // `public.unit_config` (see migration 0070; rotation procedure
 // documented in 0076). Both must agree byte-for-byte.
 
-import { supabase } from "./supabase";
+import { isLanSessionLoginEnabled } from "./internal-migration";
 
 const env: Record<string, string | undefined> =
   typeof import.meta !== "undefined" && (import.meta as { env?: Record<string, string | undefined> }).env
@@ -147,6 +147,9 @@ function buildHeaders(extra: Record<string, string> = {}): Record<string, string
 async function rpcAnon(name: string, body: Record<string, unknown>, withSecret: boolean): Promise<{
   ok: true; data: unknown;
 } | { ok: false; error: UnitJoinError; detail?: unknown }> {
+  if (isLanSessionLoginEnabled()) {
+    return { ok: false, error: "server_misconfigured", detail: "unit-join cloud RPC disabled in LAN session mode" };
+  }
   if (!SUPABASE_URL || !ANON_KEY) return { ok: false, error: "server_misconfigured" };
   const headers = buildHeaders(withSecret ? { "x-unit-join-secret": JOIN_SECRET } : {});
   let res: Response;
@@ -165,30 +168,16 @@ async function rpcAnon(name: string, body: Record<string, unknown>, withSecret: 
   return { ok: true, data: parsed };
 }
 
-async function rpcAuth(name: string, body: Record<string, unknown>): Promise<{
+async function rpcAuth(_name: string, _body: Record<string, unknown>): Promise<{
   ok: true; data: unknown;
 } | { ok: false; error: UnitJoinError; detail?: unknown }> {
-  if (!supabase) return { ok: false, error: "server_misconfigured" };
-  const { data: sessRes } = await supabase.auth.getSession();
-  const jwt = sessRes?.session?.access_token;
-  if (!jwt) return { ok: false, error: "unauthorized" };
-  if (!SUPABASE_URL || !ANON_KEY) return { ok: false, error: "server_misconfigured" };
-  let res: Response;
-  try {
-    res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
-      method: "POST",
-      headers: { apikey: ANON_KEY, Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } catch (err) {
-    return { ok: false, error: "network", detail: String(err) };
-  }
-  let parsed: unknown = null;
-  if (res.status !== 204) {
-    try { parsed = await res.json(); } catch { parsed = await res.text().catch(() => null); }
-  }
-  if (!res.ok) return { ok: false, error: classifyPostgrestError(parsed), detail: parsed };
-  return { ok: true, data: parsed };
+  // LAN-only build: every authenticated cloud RPC path here used to
+  // require an internet round-trip + remote auth. Both have been
+  // removed for the closed-LAN install, so unit-join unconditionally
+  // surfaces `server_misconfigured` with detail `lan_mode_only` so a
+  // call site can tell "this is the LAN-mode short-circuit, not a
+  // genuine misconfiguration" apart in the UI.
+  return { ok: false, error: "server_misconfigured", detail: "lan_mode_only" };
 }
 
 // SHA-256 hex of an arbitrary string. Used to hash the joining
@@ -307,7 +296,12 @@ export async function updateMemberSquadrons(memberId: string, squadronNames: str
   return r.ok;
 }
 
-export async function removeMember(memberId: string, reason: string): Promise<boolean> {
+export interface RemoveMemberResult {
+  ok: boolean;
+  error?: UnitJoinError;
+  detail?: unknown;
+}
+export async function removeMember(memberId: string, reason: string): Promise<RemoveMemberResult> {
   // Calls the hardened unit_remove_member from migration 0075 — flips
   // status to 'removed', revokes devices, rotates the bcrypt hash,
   // sets banned_until='infinity', and deletes auth.sessions +
@@ -315,7 +309,8 @@ export async function removeMember(memberId: string, reason: string): Promise<bo
   // token is dead within ≤1h (its TTL) and password sign-in is blocked
   // immediately.
   const r = await rpcAuth("unit_remove_member", { p_member_id: memberId, p_reason: reason });
-  return r.ok;
+  if (!r.ok) return { ok: false, error: r.error, detail: r.detail };
+  return { ok: true };
 }
 
 export async function fetchMemberSelf(): Promise<UnitMemberSelf | null> {
@@ -335,40 +330,14 @@ export interface ApprovalResult {
   error?: UnitJoinError;
   detail?: unknown;
 }
-export async function approveRequest(requestId: string, squadronNamesOverride: string[] | null): Promise<ApprovalResult> {
-  if (!supabase) return { ok: false, error: "server_misconfigured" };
-  const reserve = await rpcAuth("unit_reserve_approval", {
-    p_request_id: requestId,
-    p_squadron_names_override: squadronNamesOverride,
-  });
-  if (!reserve.ok) return { ok: false, error: reserve.error, detail: reserve.detail };
-  const { data: sessRes } = await supabase.auth.getSession();
-  const jwt = sessRes?.session?.access_token;
-  if (!jwt) return { ok: false, error: "unauthorized" };
-  let res: Response;
-  try {
-    res = await fetch(`${SUPABASE_URL}/functions/v1/unit-approve-device`, {
-      method: "POST",
-      headers: { apikey: ANON_KEY, Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId }),
-    });
-  } catch (err) {
-    return { ok: false, error: "network", detail: String(err) };
-  }
-  let body: unknown = null;
-  try { body = await res.json(); } catch { body = await res.text().catch(() => null); }
-  if (!res.ok) {
-    const err = (body as { error?: string })?.error as UnitJoinError | undefined;
-    return { ok: false, error: err ?? "complete_approval_failed", detail: body };
-  }
-  const ok = (body as { ok?: boolean })?.ok === true;
-  if (!ok) return { ok: false, error: "complete_approval_failed", detail: body };
-  return {
-    ok: true,
-    supabaseEmail: (body as { supabaseEmail?: string }).supabaseEmail,
-    memberId: (body as { memberId?: string }).memberId,
-    deviceId: (body as { deviceId?: string }).deviceId,
-  };
+export async function approveRequest(_requestId: string, _squadronNamesOverride: string[] | null): Promise<ApprovalResult> {
+  // LAN-only build: the legacy `unit-approve-device` remote function
+  // and anonymous JWT auth path have no LAN equivalent. Operators
+  // provision members through the admin Users page directly. Returning
+  // `server_misconfigured` with detail `lan_mode_only` keeps any
+  // remaining caller in a consistent failure shape and lets the UI
+  // distinguish the LAN-mode short-circuit from a genuine server fault.
+  return { ok: false, error: "server_misconfigured", detail: "lan_mode_only" };
 }
 
 // ── Claim Device (joining laptop swaps placeholder password for its own) ──
@@ -380,6 +349,7 @@ export interface ClaimResult {
 }
 
 export async function claimDevice(requestId: string, claimToken: string, password: string): Promise<ClaimResult> {
+  if (isLanSessionLoginEnabled()) return { ok: false, error: "server_misconfigured" };
   if (!SUPABASE_URL || !ANON_KEY) return { ok: false, error: "server_misconfigured" };
   let res: Response;
   try {
@@ -414,6 +384,7 @@ export interface SetupSuperAdminResult {
   detail?: unknown;
 }
 export async function setupSuperAdmin(input: SetupSuperAdminInput): Promise<SetupSuperAdminResult> {
+  if (isLanSessionLoginEnabled()) return { ok: false, error: "server_misconfigured" };
   if (!SUPABASE_URL || !ANON_KEY) return { ok: false, error: "server_misconfigured" };
   let res: Response;
   try {
@@ -506,4 +477,4 @@ export function clearPendingRequest(): void {
   } catch { /* localStorage unavailable */ }
 }
 
-export const unitJoinConfigured = Boolean(SUPABASE_URL && ANON_KEY && JOIN_SECRET);
+export const unitJoinConfigured = !isLanSessionLoginEnabled() && Boolean(SUPABASE_URL && ANON_KEY && JOIN_SECRET);

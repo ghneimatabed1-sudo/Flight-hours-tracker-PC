@@ -18,7 +18,47 @@
 // they no-op successfully so the existing UI keeps functioning.
 
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { supabase, supabaseConfigured, recordAuditEvent } from "./supabase";
+import {
+  deleteInternalAlert,
+  fetchInternalActivePilotDevicesRows,
+  deleteInternalNotam,
+  deleteInternalUnavailableById,
+  fetchInternalAlertsRows,
+  fetchInternalAuditLogRows,
+  fetchInternalDutyWeekRows,
+  fetchInternalLeavesRows,
+  fetchInternalNotamsRows,
+  fetchInternalPilotTableRows,
+  fetchInternalSavedDutyWeeksRows,
+  fetchInternalScheduleRows,
+  fetchInternalSortieTableRows,
+  fetchInternalUnavailableRows,
+  fetchInternalPilotLinkStatus,
+  fetchInternalReminderOverviewRows,
+  internalWritesEnabled,
+  isLanSessionLoginEnabled,
+  patchInternalAlert,
+  patchInternalNotam,
+  internalPilotUpsertFetch,
+  internalPilotDeleteFetch,
+  postInternalAlertInsert,
+  postInternalIssuePilotLinkCode,
+  postInternalImportHistory,
+  postInternalNotamInsert,
+  postInternalPilotTransfer,
+  postInternalRevokePilotDevices,
+  postInternalSquadronUserCreate,
+  postInternalUndoImport,
+  fetchInternalSquadronUsersRows,
+  internalSortieInsertFetch,
+  internalSortieUpdateFetch,
+  internalSortieDeleteFetch,
+  postInternalUnavailableInsert,
+  postInternalUnavailableUpsertDay,
+  postInternalSavedDutyWeekUpsert,
+  deleteInternalOldSavedDutyWeeks,
+} from "@/lib/internal-migration";
+import { supabaseConfigured, recordAuditEvent } from "./lan-legacy-shims";
 import { lookupRankEn } from "./ranks";
 import {
   isFrozenMonth,
@@ -110,9 +150,97 @@ export interface UnavailEntry { id: string; pilotId: string; from: string; to: s
 export interface ScheduleEntry { id: string; ac: string; config: string; crew: string[]; mission: string; takeoff: string; land: string; fuel: string; }
 export interface LeaveRow { pilotId: string; months: number[]; total: number; }
 export interface CurrencyRow { pilotId: string; task: string; status: "done" | "partial" | "missing"; }
-export interface AppUser { id: string; username: string; role: "ops" | "deputy"; created: string; }
+export type AppUserRole =
+  | "deputy"
+  | "ops"
+  | "commander_squadron"
+  | "commander_wing"
+  | "commander_base"
+  | "commander"
+  | "admin"
+  | "super_admin";
 
-const isLive = () => supabaseConfigured && supabase !== null;
+export interface AppUser {
+  id: string;
+  username: string;
+  role: AppUserRole;
+  created: string;
+  squadronId?: string | null;
+  wingId?: string | null;
+  baseId?: string | null;
+}
+
+const ASSIGNABLE_ROLES: ReadonlyArray<AppUserRole> = [
+  "deputy",
+  "ops",
+  "commander_squadron",
+  "commander_wing",
+  "commander_base",
+];
+
+export function isAssignableUserRole(role: string): role is AppUserRole {
+  return (ASSIGNABLE_ROLES as ReadonlyArray<string>).includes(role);
+}
+
+function coerceRole(raw: unknown): AppUserRole {
+  const r = String(raw ?? "deputy").trim().toLowerCase();
+  if (
+    r === "deputy"
+    || r === "ops"
+    || r === "commander_squadron"
+    || r === "commander_wing"
+    || r === "commander_base"
+    || r === "commander"
+    || r === "admin"
+    || r === "super_admin"
+  ) {
+    return r;
+  }
+  return "deputy";
+}
+
+const isLive = () => false;
+const shouldUseInternalDataPlane = () => isLanSessionLoginEnabled() || internalWritesEnabled();
+
+async function sessionSquadronIdForInternalWrite(): Promise<string> {
+  if (isLanSessionLoginEnabled()) {
+    try {
+      const raw = localStorage.getItem("rjaf.user");
+      if (raw) {
+        const parsed = JSON.parse(raw) as { squadronIds?: unknown };
+        if (Array.isArray(parsed?.squadronIds) && parsed.squadronIds.length > 0) {
+          const sid = String(parsed.squadronIds[0] ?? "").trim();
+          if (sid) return sid;
+        }
+      }
+    } catch {
+      // fall through to Supabase session lookup if present
+    }
+  }
+  throw new Error("squadron_session_missing");
+}
+
+async function nextFreePilotIdFromInternal(): Promise<string> {
+  const rows = await fetchInternalPilotTableRows();
+  if (!rows || rows.length === 0) return "P001";
+  const used = new Set(rows.map((r) => String(r.id ?? "")));
+  const nums = rows
+    .map((r) => parseInt(String(r.id ?? "").replace(/\D/g, ""), 10))
+    .filter((n) => !Number.isNaN(n));
+  let n = (nums.length ? Math.max(...nums) : 0) + 1;
+  while (used.has(`P${String(n).padStart(3, "0")}`)) n++;
+  return `P${String(n).padStart(3, "0")}`;
+}
+
+async function readInternalJsonRow(res: Response): Promise<Record<string, unknown>> {
+  const j = (await res.json().catch(() => ({}))) as { row?: Record<string, unknown> };
+  if (!res.ok) {
+    const msg = JSON.stringify(j && Object.keys(j).length ? j : { status: res.status });
+    throw new Error(msg);
+  }
+  if (!j.row) throw new Error("internal_missing_row");
+  return j.row;
+}
 
 // ── pilots ──────────────────────────────────────────────────────────────
 function rowToPilot(r: Record<string, unknown>): Pilot {
@@ -253,19 +381,24 @@ function getMockPilots(): Pilot[] {
 }
 
 export function usePilots(): UseQueryResult<Pilot[]> & { data: Pilot[] } {
+  const useDemoSeed = !isLanSessionLoginEnabled();
   const q = useQuery<Pilot[]>({
     queryKey: ["pilots"],
     queryFn: async () => {
-      if (!isLive()) return [...getMockPilots()];
-      const { data, error } = await supabase!.from("pilots").select("*").order("id");
-      if (error) throw error;
-      return (data ?? []).map(rowToPilot);
+      if (!shouldUseInternalDataPlane()) return [...getMockPilots()];
+      if (isLanSessionLoginEnabled()) {
+        const rows = await fetchInternalPilotTableRows();
+        return rows ? rows.map(rowToPilot) : [];
+      }
+      // Internal LAN: load roster from the base server.
+      const internalRows = await fetchInternalPilotTableRows();
+      return internalRows ? internalRows.map(rowToPilot) : [];
     },
-    initialData: isLive() ? undefined : () => [...getMockPilots()],
+    initialData: useDemoSeed ? () => [...getMockPilots()] : undefined,
     staleTime: 30_000,
-    retry: isLive() ? 1 : false,
+    retry: false,
   });
-  const fallback: Pilot[] = isLive() ? [] : getMockPilots();
+  const fallback: Pilot[] = useDemoSeed ? getMockPilots() : [];
   return { ...q, data: q.data ?? fallback } as UseQueryResult<Pilot[]> & { data: Pilot[] };
 }
 
@@ -326,7 +459,7 @@ export function useUpdatePilot() {
     mutationFn: async (input: UpdatePilotInput) => {
       const { pilot: p, actor, prev } = unwrapUpdate(input);
       assertValidPilotInput(p);
-      if (!isLive()) {
+      if (!shouldUseInternalDataPlane()) {
         const arr = getMockPilots();
         const idx = arr.findIndex(x => x.id === p.id);
         if (idx >= 0) arr[idx] = p;
@@ -398,28 +531,29 @@ export function useUpdatePilot() {
           importedAt: p.importedAt,
         },
       };
-      let { data, error } = await supabase!.from("pilots").update(updatePayload).eq("id", p.id).select().single();
-      if (error && isMissingColumnError(error, "rank_en")) {
-        const { rank_en: _drop, ...without } = updatePayload as { rank_en?: unknown } & Record<string, unknown>;
-        void _drop;
-        // eslint-disable-next-line no-console
-        console.warn("[pilots.update] retrying without rank_en — DB missing migration 0031_pilots_rank_en");
-        ({ data, error } = await supabase!.from("pilots").update(without).eq("id", p.id).select().single());
-      }
-      if (error) throw error;
-      const saved = rowToPilot(data);
-      // Audit profile edits (live path). Fire-and-forget; the audit
-      // helper is non-throwing, but we still wrap in a try just in case
-      // a future change makes it surface.
-      const changes = pilotProfileDiff(prev, saved);
-      if (changes) {
-        void recordAuditEvent({
-          type: "pilot.profile.update",
-          actor,
-          detail: { pilotId: saved.id, pilotName: saved.name, changes },
+      if (shouldUseInternalDataPlane()) {
+        const squadronId = await sessionSquadronIdForInternalWrite();
+        const res = await internalPilotUpsertFetch({
+          squadron_id: squadronId,
+          id: p.id,
+          ...updatePayload,
         });
+        if (res.status === 409) {
+          throw new Error("Pilot save conflict — please refresh the roster.");
+        }
+        const data = await readInternalJsonRow(res);
+        const saved = rowToPilot(data);
+        const changes = pilotProfileDiff(prev, saved);
+        if (changes) {
+          void recordAuditEvent({
+            type: "pilot.profile.update",
+            actor,
+            detail: { pilotId: saved.id, pilotName: saved.name, changes },
+          });
+        }
+        return saved;
       }
-      return saved;
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pilots"] }),
   });
@@ -450,7 +584,7 @@ export function useCreatePilot() {
     mutationFn: async (input: CreatePilotInput) => {
       const { pilot: p, actor } = unwrapCreate(input);
       assertValidPilotInput(p);
-      if (!isLive()) {
+      if (!shouldUseInternalDataPlane()) {
         const arr = getMockPilots();
         if (arr.some(x => x.id === p.id)) {
           throw new Error(`Pilot ID ${p.id} already exists`);
@@ -527,61 +661,34 @@ export function useCreatePilot() {
         },
       });
 
-      const nextFreeId = async (): Promise<string> => {
-        const { data: rows } = await supabase!
-          .from("pilots")
-          .select("id")
-          .like("id", "P%");
-        const used = new Set((rows ?? []).map(r => String(r.id)));
-        const nums = (rows ?? [])
-          .map(r => parseInt(String(r.id).replace(/\D/g, ""), 10))
-          .filter(n => !isNaN(n));
-        let n = (nums.length ? Math.max(...nums) : 0) + 1;
-        // Defensive: skip any id that somehow appears in the used set
-        // (shouldn't happen if max is correct, but cheap insurance).
-        while (used.has(`P${String(n).padStart(3, "0")}`)) n++;
-        return `P${String(n).padStart(3, "0")}`;
-      };
-
-      let attemptId = p.id;
-      for (let attempt = 0; attempt < 10; attempt++) {
-        const payload = buildPayload(attemptId);
-        let { data, error } = await supabase!
-          .from("pilots")
-          .insert(payload)
-          .select()
-          .single();
-        // Defensive: same fallback as updatePilot for squadrons whose DB
-        // hasn't run migration 0031 (rank_en column). See
-        // `.local/memory/multi-squadron.md`.
-        if (error && isMissingColumnError(error, "rank_en")) {
-          const { rank_en: _drop, ...without } = payload as { rank_en?: unknown } & Record<string, unknown>;
-          void _drop;
-          // eslint-disable-next-line no-console
-          console.warn("[pilots.insert] retrying without rank_en — DB missing migration 0031_pilots_rank_en");
-          ({ data, error } = await supabase!.from("pilots").insert(without).select().single());
+      if (shouldUseInternalDataPlane()) {
+        const squadronId = await sessionSquadronIdForInternalWrite();
+        let attemptId = p.id;
+        for (let attempt = 0; attempt < 10; attempt++) {
+          const payload = { ...buildPayload(attemptId), squadron_id: squadronId };
+          const res = await internalPilotUpsertFetch(payload);
+          if (res.ok) {
+            const data = await readInternalJsonRow(res);
+            const created = rowToPilot(data);
+            void recordAuditEvent({
+              type: "pilot.profile.create",
+              actor,
+              detail: { pilotId: created.id, pilotName: created.name, militaryNumber: created.militaryNumber },
+            });
+            return created;
+          }
+          if (res.status === 409) {
+            attemptId = await nextFreePilotIdFromInternal();
+            continue;
+          }
+          throw new Error(await res.text());
         }
-        if (!error) {
-          const created = rowToPilot(data);
-          void recordAuditEvent({
-            type: "pilot.profile.create",
-            actor,
-            detail: { pilotId: created.id, pilotName: created.name, militaryNumber: created.militaryNumber },
-          });
-          return created;
-        }
-        // 23505 = unique_violation. Only retry if it's the primary-key
-        // collision we know how to recover from; surface anything else
-        // (e.g. the new militaryNumber unique index) to the caller so the
-        // form can show the proper validation message.
-        const code = (error as { code?: string }).code;
-        const msg = (error.message ?? "").toLowerCase();
-        if (code !== "23505" || !msg.includes("pilots_pkey")) throw error;
-        attemptId = await nextFreeId();
+        throw new Error(
+          "Could not allocate a free pilot ID after 10 attempts — please refresh and try again.",
+        );
       }
-      throw new Error(
-        "Could not allocate a free pilot ID after 10 attempts — please refresh and try again.",
-      );
+
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pilots"] }),
   });
@@ -592,7 +699,7 @@ export function useDeletePilot() {
   return useMutation({
     mutationFn: async (input: DeletePilotInput) => {
       const { id, actor, pilotName } = unwrapDelete(input);
-      if (!isLive()) {
+      if (!shouldUseInternalDataPlane()) {
         const arr = getMockPilots();
         const idx = arr.findIndex(x => x.id === id);
         if (idx >= 0) arr.splice(idx, 1);
@@ -604,14 +711,19 @@ export function useDeletePilot() {
         });
         return { id };
       }
-      const { error } = await supabase!.from("pilots").delete().eq("id", id);
-      if (error) throw error;
-      void recordAuditEvent({
-        type: "pilot.profile.delete",
-        actor,
-        detail: { pilotId: id, pilotName },
-      });
-      return { id };
+      if (shouldUseInternalDataPlane()) {
+        const res = await internalPilotDeleteFetch(id);
+        if (!res.ok && res.status !== 404) {
+          throw new Error(await res.text());
+        }
+        void recordAuditEvent({
+          type: "pilot.profile.delete",
+          actor,
+          detail: { pilotId: id, pilotName },
+        });
+        return { id };
+      }
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pilots"] }),
   });
@@ -630,6 +742,15 @@ export function useTransferPilot() {
     mutationFn: async ({ pilotId, toSquadronId, actor, pilotName, fromSquadronId }: TransferPilotInput) => {
       if (!pilotId || !toSquadronId) {
         throw new Error("pilotId and toSquadronId are required");
+      }
+      if (isLanSessionLoginEnabled()) {
+        const out = await postInternalPilotTransfer(pilotId, toSquadronId);
+        if (!out.ok) throw new Error(out.error);
+        return {
+          pilotId: out.pilotId,
+          fromSquadron: out.fromSquadron,
+          toSquadron: out.toSquadron,
+        };
       }
       if (!isLive()) {
         // Mock-mode behaviour: simply re-stamp an ad-hoc squadronId on
@@ -651,21 +772,7 @@ export function useTransferPilot() {
         });
         return { pilotId, fromSquadron: before, toSquadron: toSquadronId };
       }
-      // Live path: call the definer RPC. PostgREST exposes RPCs at
-      // /rest/v1/rpc/<fn_name> and the supabase-js .rpc() helper wraps
-      // it. The RPC writes the canonical audit rows itself (one per
-      // squadron) so we don't double-log here.
-      const { data, error } = await supabase!.rpc("transfer_pilot", {
-        p_pilot_id: pilotId,
-        p_to_squadron: toSquadronId,
-      });
-      if (error) throw error;
-      return {
-        pilotId,
-        fromSquadron: fromSquadronId ?? (data as { fromSquadron?: string } | null)?.fromSquadron ?? null,
-        toSquadron: toSquadronId,
-        result: data,
-      };
+      throw new Error("transfer_pilot_unavailable_in_lan");
     },
     onSuccess: () => {
       // Both pilots and sorties query keys need to refresh — the
@@ -880,20 +987,26 @@ export function deriveSortieBuckets(input: {
 }
 
 export function useSorties(): UseQueryResult<Sortie[]> & { data: Sortie[] } {
+  const useDemoSeed = !isLanSessionLoginEnabled();
   const q = useQuery<Sortie[]>({
     queryKey: ["sorties"],
     queryFn: async () => {
-      if (!isLive()) return [...getMockSorties()];
-      const { data, error } = await supabase!
-        .from("sorties").select("*").order("date", { ascending: false }).limit(500);
-      if (error) throw error;
-      return (data ?? []).map(rowToSortie);
+      if (!shouldUseInternalDataPlane()) return [...getMockSorties()];
+      if (isLanSessionLoginEnabled()) {
+        const rows = await fetchInternalSortieTableRows(500);
+        return rows ? rows.map(rowToSortie) : [];
+      }
+      if (shouldUseInternalDataPlane()) {
+        const rows = await fetchInternalSortieTableRows(500);
+        return rows ? rows.map(rowToSortie) : [];
+      }
+      return [];
     },
-    initialData: isLive() ? undefined : () => [...getMockSorties()],
+    initialData: useDemoSeed ? () => [...getMockSorties()] : undefined,
     staleTime: 30_000,
-    retry: isLive() ? 1 : false,
+    retry: false,
   });
-  const fallback: Sortie[] = isLive() ? [] : getMockSorties();
+  const fallback: Sortie[] = useDemoSeed ? getMockSorties() : [];
   return { ...q, data: q.data ?? fallback } as UseQueryResult<Sortie[]> & { data: Sortie[] };
 }
 
@@ -996,44 +1109,8 @@ async function applyCurrencyRefresh(
     );
     return;
   }
-  // Live mode: re-fetch pilots in cache, patch via update.
-  const cached = qc.getQueryData<Pilot[]>(["pilots"]) ?? [];
-  await refreshCurrenciesForSortie(
-    s,
-    (id) => cached.find((x) => x.id === id),
-    async (p) => {
-      const { error } = await supabase!.from("pilots").update({
-        data: {
-          callSign: p.callSign,
-          flightName: p.flightName,
-          name: p.name, arabicName: p.arabicName, rank: p.rank, phone: p.phone,
-          address: p.address, unit: p.unit, available: p.available,
-          openingDay: p.openingDay, openingNight: p.openingNight, openingNvg: p.openingNvg,
-          doctorNote: p.doctorNote,
-          monthDay: p.monthDay, monthNight: p.monthNight, monthNvg: p.monthNvg,
-          monthSim: p.monthSim, monthCaptain: p.monthCaptain,
-          totalDay: p.totalDay, totalNight: p.totalNight, totalNvg: p.totalNvg,
-          totalSim: p.totalSim, totalCaptain: p.totalCaptain,
-          expiry: p.expiry,
-          hiddenCurrencies: p.hiddenCurrencies,
-          rankEn: p.rankEn,
-          qualifications: p.qualifications,
-          qualification: p.qualification,
-          qualificationSeparator: p.qualificationSeparator,
-          lastSimDate: p.lastSimDate,
-          otherAircraft: p.otherAircraft,
-          initialHours: p.initialHours,
-          // Preserve provenance — currency refresh after a sortie save
-          // rewrites the entire JSONB blob, and would otherwise strip
-          // the "imported" tag from migrated pilots whose currencies
-          // happen to roll over.
-          imported: p.imported,
-          importedAt: p.importedAt,
-        },
-      }).eq("id", p.id);
-      if (error) throw error;
-    },
-  );
+  void qc;
+  throw new Error("internal_data_plane_required");
 }
 
 export function useCreateSortie() {
@@ -1048,7 +1125,7 @@ export function useCreateSortie() {
         acNumber: s.acNumber, sortieType: s.sortieType, sortieName: s.name, date: s.date,
       });
       const frozenOverride = enforceMonthlyClose([s.date]);
-      if (!isLive()) {
+      if (!shouldUseInternalDataPlane()) {
         const created = { ...s, id: "S" + Date.now() } as Sortie;
         getMockSorties().push(created);
         saveMockSorties();
@@ -1063,59 +1140,64 @@ export function useCreateSortie() {
         }
         return created;
       }
-      const { data, error } = await supabase!.from("sorties").insert({
-        pilot_id: s.pilotId,
-        co_pilot_id: s.coPilotId,
-        date: s.date,
-        ac_type: s.acType,
-        ac_number: s.acNumber,
-        sortie_type: s.sortieType,
-        sortie_name: s.name,
-        data: {
-          day1: s.day1, day2: s.day2, dayDual: s.dayDual,
-          night1: s.night1, night2: s.night2, nightDual: s.nightDual,
-          nvg: s.nvg,
-          // 9-bucket NVG split (1st/2nd/Dual). Persisted alongside the
-          // legacy combined `nvg` so existing readers stay correct.
-          nvg1: s.nvg1, nvg2: s.nvg2, nvgDual: s.nvgDual,
-          sim: s.sim, actual: s.actual,
-          condition: s.condition,
-          remarks: s.remarks,
-          pilotExternal: s.pilotExternal,
-          coPilotExternal: s.coPilotExternal,
-          time: s.time, dual: s.dual,
-          pilotPosition: s.pilotPosition,
-          coPilotPosition: s.coPilotPosition,
-          pilotSeatStatus: s.pilotSeatStatus,
-          coPilotSeatStatus: s.coPilotSeatStatus,
-          pilotIsCaptain: s.pilotIsCaptain,
-          coPilotIsCaptain: s.coPilotIsCaptain,
-          msnDuty: s.msnDuty,
-          instrumentFlight: s.instrumentFlight,
-          ifSim: s.ifSim, ifAct: s.ifAct, ils: s.ils, vor: s.vor,
-          // Provenance — round-tripped so the Sortie Log "Imported only"
-          // filter stays accurate. New entries leave both undefined.
-          imported: s.imported,
-          importedAt: s.importedAt,
-        },
-      }).select().single();
-      if (error) throw error;
-      await applyCurrencyRefresh(s, qc);
-      const created = rowToSortie(data);
-      if (frozenOverride) {
-        await recordAuditEvent({
-          type: "sortie.create",
-          actor,
-          detail: {
-            id: created.id, date: created.date, acNumber: created.acNumber,
-            frozenOverride: true,
-            frozenMonths: frozenOverride.months,
-            pcId: frozenOverride.pcId,
-            pcName: frozenOverride.pcName,
-          },
-        });
+      const sortieDataPayload = {
+        day1: s.day1, day2: s.day2, dayDual: s.dayDual,
+        night1: s.night1, night2: s.night2, nightDual: s.nightDual,
+        nvg: s.nvg,
+        nvg1: s.nvg1, nvg2: s.nvg2, nvgDual: s.nvgDual,
+        sim: s.sim, actual: s.actual,
+        condition: s.condition,
+        remarks: s.remarks,
+        pilotExternal: s.pilotExternal,
+        coPilotExternal: s.coPilotExternal,
+        time: s.time, dual: s.dual,
+        pilotPosition: s.pilotPosition,
+        coPilotPosition: s.coPilotPosition,
+        pilotSeatStatus: s.pilotSeatStatus,
+        coPilotSeatStatus: s.coPilotSeatStatus,
+        pilotIsCaptain: s.pilotIsCaptain,
+        coPilotIsCaptain: s.coPilotIsCaptain,
+        msnDuty: s.msnDuty,
+        instrumentFlight: s.instrumentFlight,
+        ifSim: s.ifSim, ifAct: s.ifAct, ils: s.ils, vor: s.vor,
+        imported: s.imported,
+        importedAt: s.importedAt,
+      };
+      if (shouldUseInternalDataPlane()) {
+        const squadronId = await sessionSquadronIdForInternalWrite();
+        const createdBy: string | null = null;
+        const body = {
+          squadron_id: squadronId,
+          pilot_id: s.pilotId,
+          co_pilot_id: s.coPilotId && String(s.coPilotId).trim() ? s.coPilotId : null,
+          date: s.date,
+          ac_type: s.acType,
+          ac_number: s.acNumber,
+          sortie_type: s.sortieType,
+          sortie_name: s.name,
+          created_by: createdBy,
+          data: sortieDataPayload,
+        };
+        const res = await internalSortieInsertFetch(body);
+        const row = await readInternalJsonRow(res);
+        await applyCurrencyRefresh(s, qc);
+        const created = rowToSortie(row);
+        if (frozenOverride) {
+          await recordAuditEvent({
+            type: "sortie.create",
+            actor,
+            detail: {
+              id: created.id, date: created.date, acNumber: created.acNumber,
+              frozenOverride: true,
+              frozenMonths: frozenOverride.months,
+              pcId: frozenOverride.pcId,
+              pcName: frozenOverride.pcName,
+            },
+          });
+        }
+        return created;
       }
-      return created;
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sorties"] });
@@ -1167,7 +1249,7 @@ export function useUpdateSortie() {
       const datesToCheck = [s.date];
       if (cached?.date && cached.date !== s.date) datesToCheck.push(cached.date);
       const frozenOverride = enforceMonthlyClose(datesToCheck);
-      if (!isLive()) {
+      if (!shouldUseInternalDataPlane()) {
         const arr = getMockSorties();
         const idx = arr.findIndex(x => x.id === s.id);
         if (idx < 0) throw new Error("sortie_not_found");
@@ -1188,39 +1270,44 @@ export function useUpdateSortie() {
         });
         return s;
       }
-      const { error } = await supabase!.from("sorties").update({
-        pilot_id: s.pilotId, co_pilot_id: s.coPilotId,
-        date: s.date, ac_type: s.acType, ac_number: s.acNumber,
-        sortie_type: s.sortieType, sortie_name: s.name,
-        data: {
-          day1: s.day1, day2: s.day2, dayDual: s.dayDual,
-          night1: s.night1, night2: s.night2, nightDual: s.nightDual,
-          nvg: s.nvg,
-          nvg1: s.nvg1, nvg2: s.nvg2, nvgDual: s.nvgDual,
-          sim: s.sim, actual: s.actual,
-          condition: s.condition,
-          remarks: s.remarks,
-          pilotExternal: s.pilotExternal,
-          coPilotExternal: s.coPilotExternal,
-          time: s.time, dual: s.dual,
-          pilotPosition: s.pilotPosition,
-          coPilotPosition: s.coPilotPosition,
-          pilotSeatStatus: s.pilotSeatStatus,
-          coPilotSeatStatus: s.coPilotSeatStatus,
-          pilotIsCaptain: s.pilotIsCaptain,
-          coPilotIsCaptain: s.coPilotIsCaptain,
-          msnDuty: s.msnDuty,
-          instrumentFlight: s.instrumentFlight,
-          ifSim: s.ifSim, ifAct: s.ifAct, ils: s.ils, vor: s.vor,
-          // Preserve legacy-import provenance across edits — without
-          // these the JSONB blob is rewritten on every save and the
-          // "Imported only" filter / row badge would silently drop the
-          // sortie from the migrated set.
-          imported: s.imported,
-          importedAt: s.importedAt,
-        },
-      }).eq("id", s.id);
-      if (error) throw error;
+      const sortieUpdateData = {
+        day1: s.day1, day2: s.day2, dayDual: s.dayDual,
+        night1: s.night1, night2: s.night2, nightDual: s.nightDual,
+        nvg: s.nvg,
+        nvg1: s.nvg1, nvg2: s.nvg2, nvgDual: s.nvgDual,
+        sim: s.sim, actual: s.actual,
+        condition: s.condition,
+        remarks: s.remarks,
+        pilotExternal: s.pilotExternal,
+        coPilotExternal: s.coPilotExternal,
+        time: s.time, dual: s.dual,
+        pilotPosition: s.pilotPosition,
+        coPilotPosition: s.coPilotPosition,
+        pilotSeatStatus: s.pilotSeatStatus,
+        coPilotSeatStatus: s.coPilotSeatStatus,
+        pilotIsCaptain: s.pilotIsCaptain,
+        coPilotIsCaptain: s.coPilotIsCaptain,
+        msnDuty: s.msnDuty,
+        instrumentFlight: s.instrumentFlight,
+        ifSim: s.ifSim, ifAct: s.ifAct, ils: s.ils, vor: s.vor,
+        imported: s.imported,
+        importedAt: s.importedAt,
+      };
+      if (shouldUseInternalDataPlane()) {
+        const res = await internalSortieUpdateFetch(s.id, {
+          pilot_id: s.pilotId,
+          co_pilot_id: s.coPilotId && String(s.coPilotId).trim() ? s.coPilotId : null,
+          date: s.date,
+          ac_type: s.acType,
+          ac_number: s.acNumber,
+          sortie_type: s.sortieType,
+          sortie_name: s.name,
+          data: sortieUpdateData,
+        });
+        await readInternalJsonRow(res);
+      } else {
+        throw new Error("internal_data_plane_required");
+      }
       await applyCurrencyRefresh(s, qc);
       await recordAuditEvent({
         type: "sortie.update",
@@ -1262,7 +1349,7 @@ export function useDeleteSortie() {
       const cached = (qc.getQueryData<Sortie[]>(["sorties"]) ?? []).find(x => x.id === input.id);
       const sortieDate = input.date ?? cached?.date ?? getMockSorties().find(x => x.id === input.id)?.date;
       const frozenOverride = sortieDate ? enforceMonthlyClose([sortieDate]) : null;
-      if (!isLive()) {
+      if (!shouldUseInternalDataPlane()) {
         const arr = getMockSorties();
         const idx = arr.findIndex(x => x.id === input.id);
         if (idx < 0) throw new Error("sortie_not_found");
@@ -1282,8 +1369,14 @@ export function useDeleteSortie() {
         });
         return { id: input.id };
       }
-      const { error } = await supabase!.from("sorties").delete().eq("id", input.id);
-      if (error) throw error;
+      if (shouldUseInternalDataPlane()) {
+        const res = await internalSortieDeleteFetch(input.id);
+        if (!res.ok && res.status !== 404) {
+          throw new Error(await res.text());
+        }
+      } else {
+        throw new Error("internal_data_plane_required");
+      }
       await recordAuditEvent({
         type: "sortie.delete",
         actor: input.actor,
@@ -1385,46 +1478,7 @@ export function useRestoreSortie() {
         });
         return s;
       }
-      // Live: restore pilots one by one, then upsert the sortie.
-      for (const p of pilots) {
-        const { error } = await supabase!.from("pilots").update({
-          name: p.name, arabic_name: p.arabicName, rank: p.rank, rank_en: p.rankEn ?? null, phone: p.phone,
-          unit: p.unit, available: p.available, data: pilotDataPayload(p),
-        }).eq("id", p.id);
-        if (error) throw error;
-      }
-      const { error } = await supabase!.from("sorties").upsert({
-        id: s.id,
-        pilot_id: s.pilotId,
-        co_pilot_id: s.coPilotId,
-        date: s.date,
-        ac_type: s.acType,
-        ac_number: s.acNumber,
-        sortie_type: s.sortieType,
-        sortie_name: s.name,
-        data: {
-          day1: s.day1, day2: s.day2, dayDual: s.dayDual,
-          night1: s.night1, night2: s.night2, nightDual: s.nightDual,
-          nvg: s.nvg, nvg1: s.nvg1, nvg2: s.nvg2, nvgDual: s.nvgDual,
-          sim: s.sim, actual: s.actual,
-          condition: s.condition, remarks: s.remarks,
-          pilotExternal: s.pilotExternal, coPilotExternal: s.coPilotExternal,
-          time: s.time, dual: s.dual,
-          pilotPosition: s.pilotPosition, coPilotPosition: s.coPilotPosition,
-          pilotSeatStatus: s.pilotSeatStatus, coPilotSeatStatus: s.coPilotSeatStatus,
-          pilotIsCaptain: s.pilotIsCaptain, coPilotIsCaptain: s.coPilotIsCaptain,
-          msnDuty: s.msnDuty,
-          instrumentFlight: s.instrumentFlight,
-          ifSim: s.ifSim, ifAct: s.ifAct, ils: s.ils, vor: s.vor,
-        },
-      }, { onConflict: "id" });
-      if (error) throw error;
-      await recordAuditEvent({
-        type: "sortie.restore",
-        actor,
-        detail: { id: s.id, reason: reason ?? "undo" },
-      });
-      return s;
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sorties"] });
@@ -1506,23 +1560,24 @@ export function useAlerts(): UseQueryResult<AlertRow[]> & { data: AlertRow[] } {
   const q = useQuery<AlertRow[]>({
     queryKey: ["alerts"],
     queryFn: async () => {
+      if (isLanSessionLoginEnabled()) {
+        const rows = await fetchInternalAlertsRows();
+        if (!rows) return [];
+        return rows.map((r) => ({
+          id: String(r.id ?? ""),
+          postedAt: String(r.posted_at ?? ""),
+          text: String(r.body ?? ""),
+          author: String(r.author ?? ""),
+          priority: (String(r.priority ?? "normal") as ItemPriority),
+        }));
+      }
       if (!isLive()) return [...getMockAlerts()];
-      const { data, error } = await supabase!
-        .from("alerts").select("id, posted_at, body, author, priority")
-        .order("posted_at", { ascending: false }).limit(200);
-      if (error) throw error;
-      return (data ?? []).map(r => ({
-        id: String(r.id),
-        postedAt: r.posted_at as string,
-        text: r.body as string,
-        author: (r.author as string) ?? "",
-        priority: ((r.priority as string) ?? "normal") as ItemPriority,
-      }));
+      return [];
     },
-    initialData: isLive() ? undefined : () => [...getMockAlerts()],
-    retry: isLive() ? 1 : false,
+    initialData: !isLanSessionLoginEnabled() ? () => [...getMockAlerts()] : undefined,
+    retry: false,
   });
-  const fallback: AlertRow[] = isLive() ? [] : getMockAlerts();
+  const fallback: AlertRow[] = !isLanSessionLoginEnabled() ? getMockAlerts() : [];
   return { ...q, data: q.data ?? fallback } as UseQueryResult<AlertRow[]> & { data: AlertRow[] };
 }
 
@@ -1532,27 +1587,30 @@ export function useCreateAlert() {
     mutationFn: async (input: { text: string; author: string; priority?: ItemPriority }) => {
       const postedAt = new Date().toISOString();
       const priority: ItemPriority = input.priority ?? "normal";
+      if (isLanSessionLoginEnabled()) {
+        const out = await postInternalAlertInsert({
+          posted_at: postedAt,
+          body: input.text,
+          author: input.author,
+          priority,
+        });
+        if (!out.ok) throw new Error(out.error);
+        const row = out.row;
+        return {
+          id: String(row?.id ?? "A" + Date.now()),
+          postedAt: String(row?.posted_at ?? postedAt),
+          text: String(row?.body ?? input.text),
+          author: String(row?.author ?? input.author),
+          priority: (String(row?.priority ?? priority) as ItemPriority),
+        };
+      }
       if (!isLive()) {
         const row: AlertRow = { id: "A" + Date.now(), postedAt, text: input.text, author: input.author, priority };
         getMockAlerts().unshift(row);
         saveMockAlerts();
         return row;
       }
-      const { data, error } = await supabase!.from("alerts").insert({
-        posted_at: postedAt, body: input.text, author: input.author, priority,
-      }).select("id").single();
-      if (error) throw error;
-      const newId = String(data?.id ?? "");
-      // Fire-and-forget push notification to every pilot in this squadron
-      // whose phone has reminders enabled. Failures are intentionally
-      // silent: the alert is already saved and visible in the app even
-      // if the push leg fails (e.g. Expo down, no devices registered).
-      if (newId) {
-        void supabase!.functions
-          .invoke("notify-alert", { body: { alertId: newId } })
-          .catch((err) => console.warn("[notify-alert]", err));
-      }
-      return { id: newId, postedAt, text: input.text, author: input.author, priority };
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
   });
@@ -1562,6 +1620,11 @@ export function useUpdateAlert() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (a: AlertRow) => {
+      if (isLanSessionLoginEnabled()) {
+        const out = await patchInternalAlert(a.id, { body: a.text, priority: a.priority });
+        if (!out.ok) throw new Error(out.error);
+        return a;
+      }
       if (!isLive()) {
         const arr = getMockAlerts();
         const idx = arr.findIndex(x => x.id === a.id);
@@ -1569,9 +1632,7 @@ export function useUpdateAlert() {
         saveMockAlerts();
         return a;
       }
-      const { error } = await supabase!.from("alerts").update({ body: a.text, priority: a.priority }).eq("id", a.id);
-      if (error) throw error;
-      return a;
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
   });
@@ -1581,6 +1642,11 @@ export function useDeleteAlert() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (a: AlertRow) => {
+      if (isLanSessionLoginEnabled()) {
+        const out = await deleteInternalAlert(a.id);
+        if (!out.ok) throw new Error(out.error);
+        return a;
+      }
       if (!isLive()) {
         const arr = getMockAlerts();
         const idx = arr.findIndex(x => x.id === a.id);
@@ -1588,9 +1654,7 @@ export function useDeleteAlert() {
         saveMockAlerts();
         return a;
       }
-      const { error } = await supabase!.from("alerts").delete().eq("id", a.id);
-      if (error) throw error;
-      return a;
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
   });
@@ -1600,23 +1664,24 @@ export function useNotams(): UseQueryResult<NotamRow[]> & { data: NotamRow[] } {
   const q = useQuery<NotamRow[]>({
     queryKey: ["notams"],
     queryFn: async () => {
+      if (isLanSessionLoginEnabled()) {
+        const rows = await fetchInternalNotamsRows();
+        if (!rows) return [];
+        return rows.map((r) => ({
+          id: String(r.notam_no ?? ""),
+          pk: String(r.id ?? ""),
+          date: String(r.posted_on ?? ""),
+          text: String(r.body ?? ""),
+          priority: (String(r.priority ?? "normal") as ItemPriority),
+        }));
+      }
       if (!isLive()) return [...getMockNotams()];
-      const { data, error } = await supabase!
-        .from("notams").select("id, notam_no, posted_on, body, priority")
-        .order("posted_on", { ascending: false });
-      if (error) throw error;
-      return (data ?? []).map(r => ({
-        id: r.notam_no as string,
-        pk: String(r.id),
-        date: r.posted_on as string,
-        text: r.body as string,
-        priority: ((r.priority as string) ?? "normal") as ItemPriority,
-      }));
+      return [];
     },
-    initialData: isLive() ? undefined : () => [...getMockNotams()],
-    retry: isLive() ? 1 : false,
+    initialData: !isLanSessionLoginEnabled() ? () => [...getMockNotams()] : undefined,
+    retry: false,
   });
-  const fallback: NotamRow[] = isLive() ? [] : getMockNotams();
+  const fallback: NotamRow[] = !isLanSessionLoginEnabled() ? getMockNotams() : [];
   return { ...q, data: q.data ?? fallback } as UseQueryResult<NotamRow[]> & { data: NotamRow[] };
 }
 
@@ -1629,27 +1694,30 @@ export function useCreateNotam() {
       const id = "N" + Date.now();
       const date = new Date().toISOString().slice(0, 10);
       assertValidNotamInput({ notamNo: id, body: text, postedOn: date });
+      if (isLanSessionLoginEnabled()) {
+        const out = await postInternalNotamInsert({
+          notam_no: id,
+          posted_on: date,
+          body: text,
+          priority,
+        });
+        if (!out.ok) throw new Error(out.error);
+        const row = out.row;
+        return {
+          id: String(row?.notam_no ?? id),
+          pk: String(row?.id ?? ""),
+          date: String(row?.posted_on ?? date),
+          text: String(row?.body ?? text),
+          priority: (String(row?.priority ?? priority) as ItemPriority),
+        };
+      }
       if (!isLive()) {
         const row: NotamRow = { id, date, text, priority };
         getMockNotams().unshift(row);
         saveMockNotams();
         return row;
       }
-      const { data, error } = await supabase!.from("notams").insert({
-        notam_no: id, posted_on: date, body: text, priority,
-      }).select("id").single();
-      if (error) throw error;
-      const newId = String(data?.id ?? "");
-      // Fire-and-forget push notification to every pilot in this squadron
-      // whose phone has reminders enabled. Mirrors the notify-alert leg
-      // in useCreateAlert: silent-fail so the NOTAM stays saved even if
-      // Expo is momentarily unavailable.
-      if (newId) {
-        void supabase!.functions
-          .invoke("notify-notam", { body: { notamId: newId } })
-          .catch((err) => console.warn("[notify-notam]", err));
-      }
-      return { id, date, text, priority };
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notams"] }),
   });
@@ -1660,6 +1728,12 @@ export function useUpdateNotam() {
   return useMutation({
     mutationFn: async (n: NotamRow) => {
       assertValidNotamInput({ notamNo: n.id, body: n.text, postedOn: n.date });
+      if (isLanSessionLoginEnabled()) {
+        const targetId = n.pk ?? n.id;
+        const out = await patchInternalNotam(targetId, { body: n.text, priority: n.priority });
+        if (!out.ok) throw new Error(out.error);
+        return n;
+      }
       if (!isLive()) {
         const arr = getMockNotams();
         const idx = arr.findIndex(x => x.id === n.id);
@@ -1667,12 +1741,7 @@ export function useUpdateNotam() {
         saveMockNotams();
         return n;
       }
-      // Always update by primary key (uuid) — notam_no is a text label and
-      // not guaranteed unique, so matching on it could mutate sibling rows.
-      if (!n.pk) throw new Error("Missing NOTAM primary key");
-      const { error } = await supabase!.from("notams").update({ body: n.text, priority: n.priority }).eq("id", n.pk);
-      if (error) throw error;
-      return n;
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notams"] }),
   });
@@ -1682,6 +1751,12 @@ export function useDeleteNotam() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (n: NotamRow) => {
+      if (isLanSessionLoginEnabled()) {
+        const targetId = n.pk ?? n.id;
+        const out = await deleteInternalNotam(targetId);
+        if (!out.ok) throw new Error(out.error);
+        return n;
+      }
       if (!isLive()) {
         const arr = getMockNotams();
         const idx = arr.findIndex(x => x.id === n.id);
@@ -1689,10 +1764,7 @@ export function useDeleteNotam() {
         saveMockNotams();
         return n;
       }
-      if (!n.pk) throw new Error("Missing NOTAM primary key");
-      const { error } = await supabase!.from("notams").delete().eq("id", n.pk);
-      if (error) throw error;
-      return n;
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notams"] }),
   });
@@ -1703,22 +1775,23 @@ export function useDutyWeek(): UseQueryResult<DutyDay[]> & { data: DutyDay[] } {
   const q = useQuery<DutyDay[]>({
     queryKey: ["duty_week"],
     queryFn: async () => {
+      if (isLanSessionLoginEnabled()) {
+        const rows = await fetchInternalDutyWeekRows();
+        if (!rows) return [];
+        return rows.map((r) => ({
+          day: String(r.day ?? ""),
+          mainDuty: String(r.main_duty ?? ""),
+          standby: String(r.standby ?? ""),
+          rcm: String(r.rcm ?? ""),
+        }));
+      }
       if (!isLive()) return MOCK_DUTY_WEEK;
-      const { data, error } = await supabase!
-        .from("duty_week").select("day, main_duty, standby, rcm")
-        .order("effective_from", { ascending: false }).limit(7);
-      if (error) throw error;
-      return (data ?? []).map(r => ({
-        day: r.day as string,
-        mainDuty: (r.main_duty as string) ?? "",
-        standby: (r.standby as string) ?? "",
-        rcm: (r.rcm as string) ?? "",
-      }));
+      return [];
     },
-    initialData: isLive() ? undefined : MOCK_DUTY_WEEK,
-    retry: isLive() ? 1 : false,
+    initialData: !isLanSessionLoginEnabled() ? MOCK_DUTY_WEEK : undefined,
+    retry: false,
   });
-  const fallback: DutyDay[] = isLive() ? [] : MOCK_DUTY_WEEK;
+  const fallback: DutyDay[] = !isLanSessionLoginEnabled() ? MOCK_DUTY_WEEK : [];
   return { ...q, data: q.data ?? fallback } as UseQueryResult<DutyDay[]> & { data: DutyDay[] };
 }
 
@@ -1727,20 +1800,23 @@ export function useLeaves(): UseQueryResult<LeaveRow[]> & { data: LeaveRow[] } {
   const q = useQuery<LeaveRow[]>({
     queryKey: ["leaves"],
     queryFn: async () => {
+      if (isLanSessionLoginEnabled()) {
+        const year = new Date().getFullYear();
+        const rows = await fetchInternalLeavesRows(year);
+        if (!rows) return [];
+        return rows.map((r) => {
+          const m = r.months as Record<string, number> | null | undefined;
+          const months = Array.from({ length: 12 }, (_, i) => Number(m?.[String(i)] ?? 0));
+          return { pilotId: String(r.pilot_id ?? ""), months, total: months.reduce((a, b) => a + b, 0) };
+        });
+      }
       if (!isLive()) return seedLeaves();
-      const year = new Date().getFullYear();
-      const { data, error } = await supabase!
-        .from("leaves").select("pilot_id, months").eq("year", year);
-      if (error) throw error;
-      return (data ?? []).map(r => {
-        const months = Array.from({ length: 12 }, (_, i) => Number((r.months as Record<string, number>)?.[String(i)] ?? 0));
-        return { pilotId: r.pilot_id as string, months, total: months.reduce((a, b) => a + b, 0) };
-      });
+      return [];
     },
-    initialData: isLive() ? undefined : seedLeaves(),
-    retry: isLive() ? 1 : false,
+    initialData: !isLanSessionLoginEnabled() ? seedLeaves() : undefined,
+    retry: false,
   });
-  const fallback: LeaveRow[] = isLive() ? [] : seedLeaves();
+  const fallback: LeaveRow[] = !isLanSessionLoginEnabled() ? seedLeaves() : [];
   return { ...q, data: q.data ?? fallback } as UseQueryResult<LeaveRow[]> & { data: LeaveRow[] };
 }
 
@@ -1785,23 +1861,24 @@ export function useUnavailable(): UseQueryResult<UnavailEntry[]> & { data: Unava
   const q = useQuery<UnavailEntry[]>({
     queryKey: ["unavailable"],
     queryFn: async () => {
+      if (isLanSessionLoginEnabled()) {
+        const rows = await fetchInternalUnavailableRows();
+        if (!rows) return [];
+        return rows.map((r) => ({
+          id: String(r.id ?? ""),
+          pilotId: String(r.pilot_id ?? ""),
+          from: String(r.from_date ?? ""),
+          to: String(r.to_date ?? ""),
+          reason: String(r.reason ?? "—"),
+        }));
+      }
       if (!isLive()) return [...getMockUnavail()];
-      const { data, error } = await supabase!
-        .from("unavailable").select("id, pilot_id, from_date, to_date, reason")
-        .order("from_date", { ascending: false });
-      if (error) throw error;
-      return (data ?? []).map(r => ({
-        id: String(r.id),
-        pilotId: r.pilot_id as string,
-        from: r.from_date as string,
-        to: r.to_date as string,
-        reason: (r.reason as string) ?? "—",
-      }));
+      return [];
     },
-    initialData: isLive() ? undefined : () => [...getMockUnavail()],
-    retry: isLive() ? 1 : false,
+    initialData: !isLanSessionLoginEnabled() ? () => [...getMockUnavail()] : undefined,
+    retry: false,
   });
-  const fallback: UnavailEntry[] = isLive() ? [] : getMockUnavail();
+  const fallback: UnavailEntry[] = !isLanSessionLoginEnabled() ? getMockUnavail() : [];
   return { ...q, data: q.data ?? fallback } as UseQueryResult<UnavailEntry[]> & { data: UnavailEntry[] };
 }
 
@@ -1817,23 +1894,40 @@ export function useCreateUnavailable() {
   return useMutation({
     mutationFn: async (entry: Omit<UnavailEntry, "id">) => {
       const id = "u-" + Date.now();
+      if (isLanSessionLoginEnabled()) {
+        if (entry.from === entry.to) {
+          const out = await postInternalUnavailableUpsertDay({
+            pilot_id: entry.pilotId,
+            day_iso: entry.from,
+            reason: entry.reason,
+          });
+          if (!out.ok) throw new Error(out.error);
+          return { ...entry, id };
+        }
+        const out = await postInternalUnavailableInsert({
+          pilot_id: entry.pilotId,
+          from_date: entry.from,
+          to_date: entry.to,
+          reason: entry.reason,
+        });
+        if (!out.ok) throw new Error(out.error);
+        const row = out.row;
+        if (!row) return { ...entry, id };
+        return {
+          id: String(row.id ?? id),
+          pilotId: String(row.pilot_id ?? entry.pilotId),
+          from: String(row.from_date ?? entry.from),
+          to: String(row.to_date ?? entry.to),
+          reason: String(row.reason ?? entry.reason ?? "—"),
+        };
+      }
       if (!isLive()) {
         const row = { ...entry, id };
         getMockUnavail().push(row);
         saveMockUnavail();
         return row;
       }
-      const { data, error } = await supabase!.from("unavailable").insert({
-        pilot_id: entry.pilotId, from_date: entry.from, to_date: entry.to, reason: entry.reason,
-      }).select().single();
-      if (error) throw error;
-      return {
-        id: String(data.id),
-        pilotId: data.pilot_id as string,
-        from: data.from_date as string,
-        to: data.to_date as string,
-        reason: (data.reason as string) ?? "—",
-      };
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["unavailable"] }),
   });
@@ -1843,6 +1937,11 @@ export function useDeleteUnavailable() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
+      if (isLanSessionLoginEnabled()) {
+        const out = await deleteInternalUnavailableById(id);
+        if (!out.ok) throw new Error(out.error);
+        return { id };
+      }
       if (!isLive()) {
         const arr = getMockUnavail();
         const idx = arr.findIndex(x => x.id === id);
@@ -1850,9 +1949,7 @@ export function useDeleteUnavailable() {
         saveMockUnavail();
         return { id };
       }
-      const { error } = await supabase!.from("unavailable").delete().eq("id", id);
-      if (error) throw error;
-      return { id };
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["unavailable"] }),
   });
@@ -1863,26 +1960,28 @@ export function useSchedule(): UseQueryResult<ScheduleEntry[]> & { data: Schedul
   const q = useQuery<ScheduleEntry[]>({
     queryKey: ["schedule"],
     queryFn: async () => {
+      if (isLanSessionLoginEnabled()) {
+        const today = new Date().toISOString().slice(0, 10);
+        const rows = await fetchInternalScheduleRows(today);
+        if (!rows) return [];
+        return rows.map((r) => ({
+          id: String(r.id ?? ""),
+          ac: String(r.ac ?? ""),
+          config: String(r.config ?? ""),
+          crew: Array.isArray(r.crew) ? r.crew.map((x) => String(x ?? "")) : [],
+          mission: String(r.mission ?? ""),
+          takeoff: String(r.takeoff ?? ""),
+          land: String(r.land ?? ""),
+          fuel: String(r.fuel ?? ""),
+        }));
+      }
       if (!isLive()) return seedSchedule();
-      const today = new Date().toISOString().slice(0, 10);
-      const { data, error } = await supabase!
-        .from("schedule").select("*").eq("flight_date", today).order("takeoff");
-      if (error) throw error;
-      return (data ?? []).map(r => ({
-        id: String(r.id),
-        ac: r.ac as string,
-        config: (r.config as string) ?? "",
-        crew: (r.crew as string[]) ?? [],
-        mission: (r.mission as string) ?? "",
-        takeoff: (r.takeoff as string) ?? "",
-        land: (r.land as string) ?? "",
-        fuel: (r.fuel as string) ?? "",
-      }));
+      return [];
     },
-    initialData: isLive() ? undefined : seedSchedule(),
-    retry: isLive() ? 1 : false,
+    initialData: !isLanSessionLoginEnabled() ? seedSchedule() : undefined,
+    retry: false,
   });
-  const fallback: ScheduleEntry[] = isLive() ? [] : seedSchedule();
+  const fallback: ScheduleEntry[] = !isLanSessionLoginEnabled() ? seedSchedule() : [];
   return { ...q, data: q.data ?? fallback } as UseQueryResult<ScheduleEntry[]> & { data: ScheduleEntry[] };
 }
 
@@ -1934,32 +2033,37 @@ function getMockUsers(): AppUser[] {
   return mockUsersList;
 }
 export function useSquadronUsers(): UseQueryResult<AppUser[]> & { data: AppUser[] } {
+  const useDemoSeed = !isLanSessionLoginEnabled();
   const q = useQuery<AppUser[]>({
     queryKey: ["users"],
     queryFn: async () => {
+      if (isLanSessionLoginEnabled()) {
+        const rows = await fetchInternalSquadronUsersRows();
+        if (!rows) return [];
+        return rows.map((r) => ({
+          id: String(r.id ?? ""),
+          username: String(r.username ?? ""),
+          role: coerceRole(r.role),
+          created: String(r.created_at ?? "").slice(0, 10),
+          squadronId: r.squadron_id == null ? null : String(r.squadron_id),
+          wingId: r.wing_id == null ? null : String(r.wing_id),
+          baseId: r.base_id == null ? null : String(r.base_id),
+        }));
+      }
       if (!isLive()) return [...getMockUsers()];
-      const { data, error } = await supabase!
-        .from("users").select("id, username, role, created_at")
-        .in("role", ["ops", "deputy"]).order("created_at");
-      if (error) throw error;
-      return (data ?? []).map(r => ({
-        id: String(r.id),
-        username: r.username as string,
-        role: r.role as AppUser["role"],
-        created: String(r.created_at).slice(0, 10),
-      }));
+      return [];
     },
-    initialData: isLive() ? undefined : () => [...getMockUsers()],
-    retry: isLive() ? 1 : false,
+    initialData: useDemoSeed ? () => [...getMockUsers()] : undefined,
+    retry: false,
   });
-  const fallback: AppUser[] = isLive() ? [] : getMockUsers();
+  const fallback: AppUser[] = useDemoSeed ? getMockUsers() : [];
   return { ...q, data: q.data ?? fallback } as UseQueryResult<AppUser[]> & { data: AppUser[] };
 }
 
 function seedUsers(): AppUser[] {
   return [
-    { id: "1", username: "ops.lead", role: "ops", created: "2026-01-12" },
-    { id: "2", username: "deputy.k", role: "deputy", created: "2026-02-04" },
+    { id: "1", username: "ops.lead", role: "ops", created: "2026-01-12", squadronId: null, wingId: null, baseId: null },
+    { id: "2", username: "deputy.k", role: "deputy", created: "2026-02-04", squadronId: null, wingId: null, baseId: null },
   ];
 }
 
@@ -1989,35 +2093,40 @@ export const AUDIT_MAX_PAGES = 50;
 export const AUDIT_MAX_ROWS = AUDIT_PAGE_SIZE * AUDIT_MAX_PAGES;
 
 export function useAuditLog(): UseQueryResult<AuditRow[]> & { data: AuditRow[] } {
+  const useSeedAudit = !isLanSessionLoginEnabled() && !isLive();
   const q = useQuery<AuditRow[]>({
     queryKey: ["audit_log"],
     queryFn: async () => {
+      if (isLanSessionLoginEnabled()) {
+        const data = await fetchInternalAuditLogRows(AUDIT_MAX_ROWS);
+        if (data) {
+          return data.map(r => ({
+            ts: new Date(String(r.occurred_at ?? new Date(0).toISOString())).toISOString().replace("T", " ").slice(0, 19),
+            user: String(r.actor ?? "system"),
+            action: String(r.type ?? "event"),
+            target: typeof r.detail === "object" && r.detail
+              ? Object.entries(r.detail as Record<string, unknown>).map(([k, v]) => `${k}=${String(v)}`).join(" ")
+              : "—",
+          }));
+        }
+      }
       if (!isLive()) return SEED_AUDIT;
-      const { data, error } = await supabase!
-        .from("audit_log")
-        .select("occurred_at, actor, type, detail")
-        .order("occurred_at", { ascending: false })
-        .limit(AUDIT_MAX_ROWS);
-      if (error) throw error;
-      return (data ?? []).map(r => ({
-        ts: new Date(r.occurred_at as string).toISOString().replace("T", " ").slice(0, 19),
-        user: (r.actor as string | null) ?? "system",
-        action: r.type as string,
-        target: typeof r.detail === "object" && r.detail
-          ? Object.entries(r.detail as Record<string, unknown>).map(([k, v]) => `${k}=${String(v)}`).join(" ")
-          : "—",
-      }));
+      return [];
     },
-    initialData: isLive() ? undefined : SEED_AUDIT,
-    retry: isLive() ? 1 : false,
+    initialData: useSeedAudit ? SEED_AUDIT : undefined,
+    retry: isLive() && !isLanSessionLoginEnabled() ? 1 : false,
   });
-  const fallback: AuditRow[] = isLive() ? [] : SEED_AUDIT;
+  const fallback: AuditRow[] = useSeedAudit ? SEED_AUDIT : [];
   return { ...q, data: q.data ?? fallback } as UseQueryResult<AuditRow[]> & { data: AuditRow[] };
 }
 
 export interface CreateSquadronUserInput {
   username: string;
   password: string;
+  role?: AppUserRole;
+  squadronId?: string | null;
+  wingId?: string | null;
+  baseId?: string | null;
 }
 
 export function useCreateSquadronUser() {
@@ -2026,61 +2135,107 @@ export function useCreateSquadronUser() {
     mutationFn: async (input: string | CreateSquadronUserInput) => {
       const username = typeof input === "string" ? input : input.username;
       const password = typeof input === "string" ? "changeme123" : input.password;
+      const role: AppUserRole = typeof input === "string" ? "deputy" : (input.role ?? "deputy");
+      const squadronId = typeof input === "string" ? null : (input.squadronId ?? null);
+      const wingId = typeof input === "string" ? null : (input.wingId ?? null);
+      const baseId = typeof input === "string" ? null : (input.baseId ?? null);
       const created = new Date().toISOString().slice(0, 10);
+      if (isLanSessionLoginEnabled()) {
+        const out = await postInternalSquadronUserCreate({
+          username,
+          password,
+          role,
+          squadron_id: squadronId,
+          wing_id: wingId,
+          base_id: baseId,
+        });
+        if (!out.ok) throw new Error(`Add user failed — ${out.error}`);
+        const row = out.row;
+        return {
+          id: String(row?.id ?? Date.now()),
+          username: String(row?.username ?? username),
+          role: coerceRole(row?.role ?? role),
+          created: String(row?.created_at ?? created).slice(0, 10),
+          squadronId: row?.squadron_id == null ? squadronId : String(row.squadron_id),
+          wingId: row?.wing_id == null ? wingId : String(row.wing_id),
+          baseId: row?.base_id == null ? baseId : String(row.base_id),
+        };
+      }
       if (!isLive()) {
-        const row = { id: String(Date.now()), username, role: "deputy" as const, created };
+        const row: AppUser = { id: String(Date.now()), username, role, created, squadronId, wingId, baseId };
         getMockUsers().push(row);
         saveMockUsers();
         return row;
       }
-      // Provisioning a Supabase auth user requires the service role key, so
-      // it must run server-side. The provision-user edge function creates
-      // the auth user (with squadron_id stamped into app_metadata) and the
-      // matching row in public.users in one transaction-like step.
-      //
-      // Defence-in-depth error surfacing: when supabase.functions.invoke
-      // gets a non-2xx response it returns FunctionsHttpError whose
-      // .context.response holds the raw HTTP response. Reading that body
-      // gives us the structured `{ error, detail }` payload instead of
-      // the generic "Edge Function returned a non-2xx status code"
-      // message — without this, a "no_squadron_in_token" / "forbidden"
-      // / "invalid_input" reply from the edge function shows up as just
-      // "Server error" in the toast, which is impossible to triage.
-      const { data, error } = await supabase!.functions.invoke("provision-user", {
-        body: { username, password, role: "deputy" },
-      });
-      if (error) {
-        let detail = "";
-        const resp = (error as { context?: { response?: Response } })?.context?.response;
-        if (resp) {
-          try {
-            const txt = await resp.clone().text();
-            try {
-              const parsed = JSON.parse(txt) as { error?: string; detail?: string };
-              const parts = [parsed?.error, parsed?.detail].filter(Boolean);
-              detail = parts.length > 0
-                ? `${parts.join(" — ")} (HTTP ${resp.status})`
-                : `HTTP ${resp.status}: ${txt.slice(0, 240)}`;
-            } catch {
-              detail = `HTTP ${resp.status}: ${txt.slice(0, 240)}`;
-            }
-          } catch {
-            detail = `HTTP ${resp.status} (no body)`;
-          }
+      throw new Error("internal_data_plane_required");
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+  });
+}
+
+export interface UpdateSquadronUserInput {
+  id: string;
+  password?: string;
+  role?: AppUserRole;
+  // Scope reassignment: each field is only sent when the caller
+  // explicitly sets it (use `null` to clear). Skipping a field
+  // leaves the existing column untouched on the server.
+  squadronId?: string | null;
+  wingId?: string | null;
+  baseId?: string | null;
+}
+
+export function useUpdateSquadronUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: UpdateSquadronUserInput) => {
+      if (!isLanSessionLoginEnabled()) {
+        // Demo mode: best-effort local edit so the UI feels responsive.
+        const list = getMockUsers();
+        const idx = list.findIndex((u) => u.id === input.id);
+        if (idx >= 0) {
+          const next = { ...list[idx] };
+          if (input.role) next.role = input.role;
+          if (input.squadronId !== undefined) next.squadronId = input.squadronId;
+          if (input.wingId !== undefined) next.wingId = input.wingId;
+          if (input.baseId !== undefined) next.baseId = input.baseId;
+          list[idx] = next;
+          saveMockUsers();
         }
-        throw new Error(`Add user failed — ${detail || (error as Error).message || "edge function returned non-2xx"}`);
+        return { ok: true as const };
       }
-      const payload = data as { ok?: boolean; error?: string; detail?: string; user?: { id: string } };
-      if (!payload?.ok) {
-        const parts = [payload?.error, payload?.detail].filter(Boolean);
-        throw new Error(`Add user failed — ${parts.length > 0 ? parts.join(" — ") : "provision_failed"}`);
+      const { patchInternalSquadronUser } = await import("@/lib/internal-migration");
+      const payload: Record<string, unknown> = {};
+      if (input.password) payload.password = input.password;
+      if (input.role) payload.role = input.role;
+      if (input.squadronId !== undefined) payload.squadron_id = input.squadronId;
+      if (input.wingId !== undefined) payload.wing_id = input.wingId;
+      if (input.baseId !== undefined) payload.base_id = input.baseId;
+      const res = await patchInternalSquadronUser(input.id, payload);
+      if (!res.ok) throw new Error(`Update user failed — ${res.error}`);
+      return { ok: true as const };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+  });
+}
+
+export function useDeleteSquadronUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      if (!isLanSessionLoginEnabled()) {
+        const list = getMockUsers();
+        const idx = list.findIndex((u) => u.id === id);
+        if (idx >= 0) {
+          list.splice(idx, 1);
+          saveMockUsers();
+        }
+        return { ok: true as const };
       }
-      return {
-        id: payload.user?.id ?? String(Date.now()),
-        username,
-        role: "deputy" as const,
-        created,
-      };
+      const { deleteInternalSquadronUser } = await import("@/lib/internal-migration");
+      const res = await deleteInternalSquadronUser(id);
+      if (!res.ok) throw new Error(`Delete user failed — ${res.error}`);
+      return { ok: true as const };
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
   });
@@ -2095,7 +2250,7 @@ export interface ImportPayload {
 export interface ImportResult {
   pilotsInserted: number;
   sortiesInserted: number;
-  mode: "supabase" | "demo";
+  mode: "internal" | "demo";
 }
 
 function tsNow(): string {
@@ -2130,6 +2285,21 @@ export function useImportHistory() {
       const taggedPilots = pilots.map(p => ({ ...p, imported: true, importedAt: stamp }));
       const taggedSorties = sorties.map(s => ({ ...s, imported: true, importedAt: stamp }));
 
+      if (isLanSessionLoginEnabled()) {
+        const out = await postInternalImportHistory({
+          stamp,
+          pilots: taggedPilots,
+          sorties: taggedSorties,
+          actor,
+        });
+        if (!out.ok) throw new Error(`Import failed: ${out.error}`);
+        return {
+          pilotsInserted: out.pilotsInserted,
+          sortiesInserted: out.sortiesInserted,
+          mode: "internal" as const,
+        };
+      }
+
       if (!isLive()) {
         // Demo mode: persist into the in-memory mock arrays so the rest of
         // the UI immediately reflects the imported data.
@@ -2152,37 +2322,7 @@ export function useImportHistory() {
         return { pilotsInserted: taggedPilots.length, sortiesInserted: taggedSorties.length, mode: "demo" as const };
       }
 
-      // Live Supabase: bulk insert each table. PostgREST treats each .insert
-      // array as a single statement, so the batch is atomic per table; if a
-      // row violates a constraint the whole batch is rejected.
-      const pilotRows = taggedPilots.map(p => ({
-        id: p.id, name: p.name, arabic_name: p.arabicName, rank: p.rank,
-        rank_en: p.rankEn ?? null,
-        phone: p.phone, unit: p.unit, available: p.available,
-        data: { ...p, imported: true, importedAt: stamp },
-      }));
-      const { error: pErr } = await supabase!.from("pilots").upsert(pilotRows, { onConflict: "id" });
-      if (pErr) throw new Error(`Pilots import failed: ${pErr.message}`);
-
-      const sortieRows = taggedSorties.map(s => ({
-        id: s.id, pilot_id: s.pilotId, co_pilot_id: s.coPilotId,
-        date: s.date, ac_type: s.acType, ac_number: s.acNumber,
-        sortie_type: s.sortieType, sortie_name: s.name,
-        data: { ...s, imported: true, importedAt: stamp },
-      }));
-      const { error: sErr } = await supabase!.from("sorties").upsert(sortieRows, { onConflict: "id" });
-      if (sErr) throw new Error(`Sorties import failed: ${sErr.message}`);
-
-      await recordAuditEvent({
-        type: "import.history.ok",
-        actor,
-        detail: {
-          imported: true,
-          pilots: taggedPilots.length,
-          sorties: taggedSorties.length,
-        },
-      });
-      return { pilotsInserted: taggedPilots.length, sortiesInserted: taggedSorties.length, mode: "supabase" as const };
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: (_res, vars) => {
       // Re-derive the stamp the same way mutationFn did so undo targets
@@ -2206,7 +2346,7 @@ export function useImportHistory() {
 export interface UndoImportResult {
   pilotsRemoved: number;
   sortiesRemoved: number;
-  mode: "supabase" | "demo";
+  mode: "internal" | "demo";
 }
 export function useUndoLastImport() {
   const qc = useQueryClient();
@@ -2215,6 +2355,17 @@ export function useUndoLastImport() {
       const actor = (input && "actor" in input) ? input.actor : undefined;
       const stamp = getLastImportStamp();
       if (!stamp) throw new Error("no_import_to_undo");
+
+      if (isLanSessionLoginEnabled()) {
+        const out = await postInternalUndoImport(stamp);
+        if (!out.ok) throw new Error(`Undo failed: ${out.error}`);
+        setLastImportStamp(null);
+        return {
+          pilotsRemoved: out.pilotsRemoved,
+          sortiesRemoved: out.sortiesRemoved,
+          mode: "internal" as const,
+        };
+      }
 
       if (!isLive()) {
         const beforeP = MOCK_PILOTS.length;
@@ -2239,32 +2390,7 @@ export function useUndoLastImport() {
         return { pilotsRemoved: removedP, sortiesRemoved: removedS, mode: "demo" as const };
       }
 
-      // Live Supabase: delete by JSONB stamp match. Sorties first because of
-      // the FK from sorties.pilot_id → pilots.id.
-      const { data: sDel, error: sErr } = await supabase!
-        .from("sorties")
-        .delete()
-        .filter("data->>importedAt", "eq", stamp)
-        .select("id");
-      if (sErr) throw new Error(`Sortie undo failed: ${sErr.message}`);
-      const { data: pDel, error: pErr } = await supabase!
-        .from("pilots")
-        .delete()
-        .filter("data->>importedAt", "eq", stamp)
-        .select("id");
-      if (pErr) throw new Error(`Pilot undo failed: ${pErr.message}`);
-
-      await recordAuditEvent({
-        type: "import.history.undone",
-        actor,
-        detail: { stamp, pilots: pDel?.length ?? 0, sorties: sDel?.length ?? 0 },
-      });
-      setLastImportStamp(null);
-      return {
-        pilotsRemoved: pDel?.length ?? 0,
-        sortiesRemoved: sDel?.length ?? 0,
-        mode: "supabase" as const,
-      };
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pilots"] });
@@ -2320,22 +2446,21 @@ export function useAllLinkedDevices(): UseQueryResult<LinkedDeviceRow[]> {
   return useQuery<LinkedDeviceRow[]>({
     queryKey: ["all_linked_devices"],
     queryFn: async () => {
+      if (isLanSessionLoginEnabled()) {
+        const rows = await fetchInternalActivePilotDevicesRows();
+        if (!rows) return [];
+        return rows.map((r) => ({
+          pilotId: String(r.pilot_id ?? ""),
+          linkedAt: String(r.linked_at ?? ""),
+          lastSeenAt: String(r.last_seen_at ?? ""),
+        }));
+      }
       if (!isLive()) {
         return mockDevices
           .filter(d => d.revokedAt === null)
           .map(d => ({ pilotId: d.pilotId, linkedAt: d.linkedAt, lastSeenAt: d.lastSeenAt }));
       }
-      const { data, error } = await supabase!
-        .from("pilot_devices")
-        .select("pilot_id, linked_at, last_seen_at")
-        .is("revoked_at", null)
-        .order("linked_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []).map(r => ({
-        pilotId:    String(r.pilot_id),
-        linkedAt:   String(r.linked_at),
-        lastSeenAt: String(r.last_seen_at),
-      }));
+      return [];
     },
     staleTime: 10_000,
   });
@@ -2347,29 +2472,24 @@ export function usePilotLinkStatus(pilotId: string | undefined): UseQueryResult<
     enabled: Boolean(pilotId),
     queryFn: async () => {
       if (!pilotId) return { device: null, pendingCode: null };
+      if (isLanSessionLoginEnabled()) {
+        const out = await fetchInternalPilotLinkStatus(pilotId);
+        if (!out.ok) throw new Error(out.error);
+        const d = out.body.device as Record<string, unknown> | null | undefined;
+        const c = out.body.pendingCode as Record<string, unknown> | null | undefined;
+        return {
+          device: d
+            ? {
+                linkedAt: String(d.linkedAt ?? ""),
+                lastSeenAt: String(d.lastSeenAt ?? ""),
+                revokedAt: d.revokedAt == null ? null : String(d.revokedAt),
+              }
+            : null,
+          pendingCode: c ? { expiresAt: String(c.expiresAt ?? "") } : null,
+        };
+      }
       if (!isLive()) return mockStatus(pilotId);
-      const [{ data: devRows, error: devErr }, { data: codeRows, error: codeErr }] = await Promise.all([
-        supabase!.from("pilot_devices")
-          .select("linked_at,last_seen_at,revoked_at")
-          .eq("pilot_id", pilotId)
-          .order("linked_at", { ascending: false })
-          .limit(1),
-        supabase!.from("pilot_link_codes")
-          .select("expires_at,consumed_at")
-          .eq("pilot_id", pilotId)
-          .is("consumed_at", null)
-          .gt("expires_at", new Date().toISOString())
-          .order("issued_at", { ascending: false })
-          .limit(1),
-      ]);
-      if (devErr) throw devErr;
-      if (codeErr) throw codeErr;
-      const d = devRows?.[0];
-      const c = codeRows?.[0];
-      return {
-        device: d ? { linkedAt: String(d.linked_at), lastSeenAt: String(d.last_seen_at), revokedAt: d.revoked_at ? String(d.revoked_at) : null } : null,
-        pendingCode: c ? { expiresAt: String(c.expires_at) } : null,
-      };
+      return { device: null, pendingCode: null };
     },
     staleTime: 5_000,
   });
@@ -2379,6 +2499,12 @@ export function useIssueLinkCode() {
   const qc = useQueryClient();
   return useMutation<{ code: string; expiresAt: string }, Error, { pilotId: string; actor?: string }>({
     mutationFn: async ({ pilotId, actor }) => {
+      if (isLanSessionLoginEnabled()) {
+        const out = await postInternalIssuePilotLinkCode(pilotId);
+        if (!out.ok) throw new Error(out.error);
+        await recordAuditEvent({ type: "mobile.code.issued", actor, detail: { pilotId, transport: "lan_internal_api" } });
+        return { code: out.code, expiresAt: out.expiresAt };
+      }
       if (!isLive()) {
         // Invalidate previous unconsumed codes for this pilot, mirroring the SQL.
         for (const c of mockCodes) if (c.pilotId === pilotId && c.consumedAt === null) c.consumedAt = new Date().toISOString();
@@ -2387,12 +2513,7 @@ export function useIssueLinkCode() {
         mockCodes.push({ pilotId, expiresAt, consumedAt: null });
         return { code, expiresAt };
       }
-      const { data, error } = await supabase!.rpc("issue_pilot_link_code", { p_pilot_id: pilotId });
-      if (error) throw error;
-      const code = String(data ?? "");
-      if (!code) throw new Error("Server did not return a code");
-      await recordAuditEvent({ type: "mobile.code.issued", actor, detail: { pilotId } });
-      return { code, expiresAt: new Date(Date.now() + LINK_CODE_TTL_MS).toISOString() };
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ["pilot_link_status", vars.pilotId] });
@@ -2405,6 +2526,16 @@ export function useRevokePilotDevices() {
   const qc = useQueryClient();
   return useMutation<{ revoked: number }, Error, { pilotId: string; actor?: string }>({
     mutationFn: async ({ pilotId, actor }) => {
+      if (isLanSessionLoginEnabled()) {
+        const out = await postInternalRevokePilotDevices(pilotId);
+        if (!out.ok) throw new Error(out.error);
+        await recordAuditEvent({
+          type: "mobile.device.revoked",
+          actor,
+          detail: { pilotId, devices: out.revoked, transport: "lan_internal_api" },
+        });
+        return { revoked: out.revoked };
+      }
       if (!isLive()) {
         let n = 0;
         const now = new Date().toISOString();
@@ -2415,26 +2546,7 @@ export function useRevokePilotDevices() {
         for (const c of mockCodes) if (c.pilotId === pilotId && c.consumedAt === null) c.consumedAt = now;
         return { revoked: n };
       }
-      const nowIso = new Date().toISOString();
-      const { data, error } = await supabase!
-        .from("pilot_devices")
-        .update({ revoked_at: nowIso })
-        .eq("pilot_id", pilotId)
-        .is("revoked_at", null)
-        .select("token_hash");
-      if (error) throw error;
-      // Also burn any outstanding unconsumed link codes so a previously issued
-      // code can't be used to relink after a revoke. RLS already restricts this
-      // to the caller's squadron.
-      const { error: codeErr } = await supabase!
-        .from("pilot_link_codes")
-        .update({ consumed_at: nowIso })
-        .eq("pilot_id", pilotId)
-        .is("consumed_at", null);
-      if (codeErr) throw codeErr;
-      const revoked = (data ?? []).length;
-      await recordAuditEvent({ type: "mobile.device.revoked", actor, detail: { pilotId, devices: revoked } });
-      return { revoked };
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ["pilot_link_status", vars.pilotId] });
@@ -2511,77 +2623,38 @@ function getMockReminderOverview(): ReminderOverviewRow[] {
 export function useReminderOverview(): UseQueryResult<ReminderOverviewRow[]> & {
   data: ReminderOverviewRow[];
 } {
+  const useDemoSeed = !isLanSessionLoginEnabled();
   const q = useQuery<ReminderOverviewRow[]>({
     queryKey: ["reminder_overview"],
     queryFn: async () => {
+      if (isLanSessionLoginEnabled()) {
+        const rows = await fetchInternalReminderOverviewRows();
+        if (!rows) return [];
+        return rows.map((r) => ({
+          pilotId: String(r.pilotId ?? ""),
+          pushEnabled: Boolean(r.pushEnabled),
+          expoPushToken: r.expoPushToken == null ? null : String(r.expoPushToken),
+          platform: r.platform == null ? null : String(r.platform),
+          thresholds: (r.thresholds as ReminderOverviewRow["thresholds"]) ?? {},
+          updatedAt: r.updatedAt == null ? null : String(r.updatedAt),
+          lastSentAt: r.lastSentAt == null ? null : String(r.lastSentAt),
+          lastSentCurrency: r.lastSentCurrency == null ? null : (String(r.lastSentCurrency) as CurrencyKeyName),
+          lastSentThresholdDays:
+            r.lastSentThresholdDays == null
+              ? null
+              : Number(r.lastSentThresholdDays),
+          lastSentExpiry: r.lastSentExpiry == null ? null : String(r.lastSentExpiry),
+        }));
+      }
       if (!isLive()) return [...getMockReminderOverview()];
-      // Pull the squadron's prefs (RLS already scopes by squadron_id) and the
-      // most recent fire from the dedupe log per pilot. We do two reads and
-      // join in JS to avoid relying on a SQL view.
-      const [{ data: prefs, error: prefErr }, { data: notifs, error: notifErr }] =
-        await Promise.all([
-          supabase!
-            .from("pilot_reminder_prefs")
-            .select("pilot_id, thresholds, push_enabled, expo_push_token, platform, updated_at"),
-          // Use the SQL DISTINCT-on equivalent via order + unique grouping in
-          // JS, but ensure we capture the latest fire per pilot regardless of
-          // squadron volume. We page through up to 5k recent rows; ops viewing
-          // is per-squadron so RLS already trims this server-side.
-          supabase!
-            .from("pilot_currency_notifications")
-            .select("pilot_id, currency_key, expiry_date, threshold_days, sent_at")
-            .order("sent_at", { ascending: false })
-            .limit(5000),
-        ]);
-      if (prefErr) throw prefErr;
-      if (notifErr) throw notifErr;
-      const lastByPilot = new Map<string, NonNullable<typeof notifs>[number]>();
-      for (const n of notifs ?? []) {
-        if (!lastByPilot.has(n.pilot_id as string)) {
-          lastByPilot.set(n.pilot_id as string, n);
-        }
-      }
-      const byPilot = new Map<string, ReminderOverviewRow>();
-      for (const r of prefs ?? []) {
-        const last = lastByPilot.get(r.pilot_id as string);
-        byPilot.set(r.pilot_id as string, {
-          pilotId: r.pilot_id as string,
-          pushEnabled: Boolean(r.push_enabled),
-          expoPushToken: (r.expo_push_token as string | null) ?? null,
-          platform: (r.platform as string | null) ?? null,
-          thresholds: (r.thresholds ?? {}) as ReminderOverviewRow["thresholds"],
-          updatedAt: (r.updated_at as string | null) ?? null,
-          lastSentAt: (last?.sent_at as string | null) ?? null,
-          lastSentCurrency: (last?.currency_key as CurrencyKeyName | null) ?? null,
-          lastSentThresholdDays: (last?.threshold_days as number | null) ?? null,
-          lastSentExpiry: (last?.expiry_date as string | null) ?? null,
-        });
-      }
-      // Surface pilots that have a fire log but no prefs row (edge case from
-      // pre-revoke history) so ops still sees their last reminder.
-      for (const [pid, last] of lastByPilot) {
-        if (byPilot.has(pid)) continue;
-        byPilot.set(pid, {
-          pilotId: pid,
-          pushEnabled: false,
-          expoPushToken: null,
-          platform: null,
-          thresholds: {},
-          updatedAt: null,
-          lastSentAt: (last.sent_at as string | null) ?? null,
-          lastSentCurrency: (last.currency_key as CurrencyKeyName | null) ?? null,
-          lastSentThresholdDays: (last.threshold_days as number | null) ?? null,
-          lastSentExpiry: (last.expiry_date as string | null) ?? null,
-        });
-      }
-      return Array.from(byPilot.values());
+      return [];
     },
-    initialData: () => [...getMockReminderOverview()],
+    initialData: useDemoSeed ? () => [...getMockReminderOverview()] : undefined,
     staleTime: 30_000,
   });
   return {
     ...q,
-    data: q.data ?? getMockReminderOverview(),
+    data: q.data ?? (useDemoSeed ? getMockReminderOverview() : []),
   } as UseQueryResult<ReminderOverviewRow[]> & { data: ReminderOverviewRow[] };
 }
 
@@ -2775,24 +2848,23 @@ export function useSavedDutyWeeks(squadron: string): UseQueryResult<SavedDutyWee
   const q = useQuery<SavedDutyWeek[]>({
     queryKey: ["saved_duty_weeks", squadron],
     queryFn: async () => {
+      if (isLanSessionLoginEnabled()) {
+        const rows = await fetchInternalSavedDutyWeeksRows(squadron);
+        if (!rows) return [];
+        return rows.map((r) => ({
+          squadron: String(r.squadron ?? squadron),
+          start: String(r.start_date ?? ""),
+          rows: (Array.isArray(r.rows) ? r.rows : []) as SavedDutyRow[],
+          savedAt: String(r.saved_at ?? new Date().toISOString()),
+        }));
+      }
       if (!isLive()) return readMockSavedWeeks(squadron);
-      const { data, error } = await supabase!
-        .from("saved_duty_weeks")
-        .select("squadron, start_date, rows, saved_at")
-        .eq("squadron", squadron)
-        .order("start_date", { ascending: false });
-      if (error) throw error;
-      return (data ?? []).map(r => ({
-        squadron: String(r.squadron),
-        start: r.start_date as string,
-        rows: (r.rows as SavedDutyRow[]) ?? [],
-        savedAt: (r.saved_at as string) ?? new Date().toISOString(),
-      }));
+      return [];
     },
-    initialData: isLive() ? undefined : () => readMockSavedWeeks(squadron),
-    retry: isLive() ? 1 : false,
+    initialData: !isLanSessionLoginEnabled() ? () => readMockSavedWeeks(squadron) : undefined,
+    retry: false,
   });
-  const fallback: SavedDutyWeek[] = isLive() ? [] : readMockSavedWeeks(squadron);
+  const fallback: SavedDutyWeek[] = !isLanSessionLoginEnabled() ? readMockSavedWeeks(squadron) : [];
   return { ...q, data: q.data ?? fallback } as UseQueryResult<SavedDutyWeek[]> & { data: SavedDutyWeek[] };
 }
 
@@ -2802,6 +2874,16 @@ export function useSaveDutyWeek() {
     mutationFn: async (entry: Omit<SavedDutyWeek, "savedAt">): Promise<SavedDutyWeek> => {
       const savedAt = new Date().toISOString();
       const full: SavedDutyWeek = { ...entry, savedAt };
+      if (isLanSessionLoginEnabled()) {
+        const out = await postInternalSavedDutyWeekUpsert({
+          squadron: entry.squadron,
+          start_date: entry.start,
+          rows: entry.rows,
+          saved_at: savedAt,
+        });
+        if (!out.ok) throw new Error(out.error);
+        return full;
+      }
       if (!isLive()) {
         const list = readMockSavedWeeks(entry.squadron).filter(w => w.start !== entry.start);
         list.push(full);
@@ -2809,14 +2891,7 @@ export function useSaveDutyWeek() {
         writeMockSavedWeeks(entry.squadron, list);
         return full;
       }
-      const { error } = await supabase!.from("saved_duty_weeks").upsert({
-        squadron: entry.squadron,
-        start_date: entry.start,
-        rows: entry.rows,
-        saved_at: savedAt,
-      }, { onConflict: "squadron,start_date" });
-      if (error) throw error;
-      return full;
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: (_d, vars) => qc.invalidateQueries({ queryKey: ["saved_duty_weeks", vars.squadron] }),
   });
@@ -2831,6 +2906,11 @@ export function useDeleteOldDutyWeeks() {
     mutationFn: async (squadron: string): Promise<number> => {
       const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - 1);
       const cutoffIso = cutoff.toISOString().slice(0, 10);
+      if (isLanSessionLoginEnabled()) {
+        const out = await deleteInternalOldSavedDutyWeeks(squadron, cutoffIso);
+        if (!out.ok) throw new Error(out.error);
+        return out.removed;
+      }
       if (!isLive()) {
         const list = readMockSavedWeeks(squadron);
         const kept = list.filter(w => w.start >= cutoffIso);
@@ -2838,12 +2918,7 @@ export function useDeleteOldDutyWeeks() {
         if (removed > 0) writeMockSavedWeeks(squadron, kept);
         return removed;
       }
-      const { data, error } = await supabase!
-        .from("saved_duty_weeks").delete()
-        .eq("squadron", squadron).lt("start_date", cutoffIso)
-        .select("start_date");
-      if (error) throw error;
-      return (data ?? []).length;
+      throw new Error("internal_data_plane_required");
     },
     onSuccess: (_n, sqn) => qc.invalidateQueries({ queryKey: ["saved_duty_weeks", sqn] }),
   });

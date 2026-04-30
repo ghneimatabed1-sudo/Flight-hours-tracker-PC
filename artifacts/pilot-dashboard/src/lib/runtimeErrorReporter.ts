@@ -1,26 +1,19 @@
 // Runtime error reporter — Task #265 Part F.
 //
-// Best-effort POST of caught runtime errors to `public.runtime_errors`
-// via the `runtime_error_capture` RPC. This is fire-and-forget: a
-// failure to report MUST NEVER bubble back into the UI. Without that
-// guarantee the reporter would amplify the very crash it's meant to
-// observe.
-//
-// Rate limiting:
-//   • A given (name + first 80 chars of message) is reported at most
-//     once per 60 seconds. Storms of identical errors (e.g. a render
-//     loop) collapse into one row per minute.
-//   • A hard cap of 30 reports per session prevents pathological
-//     loops from filling up the table from a single PC.
-//
-// The reporter is safe to call before any user has signed in — the
-// SQL RPC is granted to `anon` precisely so pre-mount failures land
-// in the table.
+// LAN-only build: the cloud `runtime_error_capture` RPC is gone with
+// the rest of the Supabase SDK. Every dashboard PC sits on a closed
+// base LAN with no internet access, so there is no remote ingestion
+// endpoint to forward errors to. Rather than buffering forever or
+// guessing at a not-yet-built internal sink, we keep this module as
+// a structured no-op: the API surface (`reportRuntimeError`) stays
+// stable so the global error handler, route boundaries and console
+// proxy can keep calling it without conditional checks, and a single
+// console.warn is emitted per (name+message) so an operator running
+// devtools still sees the crash. If/when an internal-API
+// `/api/internal/runtime-errors` endpoint lands, swap the warn for
+// a fire-and-forget POST to that route — the dedup/rate-limit
+// machinery below is already wired in.
 
-import { supabase, supabaseConfigured } from "./supabase";
-
-const APP_NAME = "dashboard";
-const APP_VERSION = (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : null) || "unknown";
 const DEDUP_WINDOW_MS = 60_000;
 const MAX_REPORTS_PER_SESSION = 30;
 
@@ -41,18 +34,6 @@ function shouldReport(name: string, message: string): boolean {
   return true;
 }
 
-function currentPage(): string {
-  if (typeof window === "undefined") return "(no-window)";
-  // The dashboard uses hash routing (e.g. #/sorties); include both
-  // the pathname (path-based prefix) and the hash so we know which
-  // page within the SPA crashed.
-  return `${window.location.pathname}${window.location.hash || ""}`.slice(0, 256);
-}
-
-function userAgent(): string | null {
-  return typeof navigator !== "undefined" ? navigator.userAgent : null;
-}
-
 export interface RuntimeErrorContext {
   source?: string;          // 'window.error' | 'unhandledrejection' | 'errorBoundary'
   componentStack?: string;
@@ -60,37 +41,20 @@ export interface RuntimeErrorContext {
 
 export function reportRuntimeError(err: unknown, ctx: RuntimeErrorContext = {}): void {
   try {
-    if (!supabaseConfigured || !supabase) return;
     const e = err instanceof Error ? err : new Error(typeof err === "string" ? err : JSON.stringify(err));
     const name = (e.name || "Error").slice(0, 64);
     const message = (e.message || "(no message)").slice(0, 1000);
     if (!shouldReport(name, message)) return;
     reportCount += 1;
-    const stack = (e.stack || "").slice(0, 4000);
-    const detail = ctx.componentStack
-      ? { source: ctx.source ?? "unknown", componentStack: ctx.componentStack.slice(0, 2000) }
-      : { source: ctx.source ?? "unknown" };
-    // Fire-and-forget. Never await; never re-raise.
-    Promise.resolve(
-      supabase.rpc("runtime_error_capture", {
-        p_app: APP_NAME,
-        p_app_version: APP_VERSION,
-        p_page: currentPage(),
-        p_message: message,
-        p_name: name,
-        p_stack: stack,
-        p_user_agent: userAgent(),
-        p_detail: detail,
-      }),
-    ).then(
-      () => undefined,
-      () => undefined,
-    );
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("[runtime-error]", {
+        name,
+        message,
+        source: ctx.source ?? "unknown",
+        componentStack: ctx.componentStack?.slice(0, 2000),
+      });
+    }
   } catch {
     // Reporter must never throw.
   }
 }
-
-// Vite-injected at build time via `define`; falls back to "unknown"
-// if the constant isn't defined.
-declare const __APP_VERSION__: string | undefined;

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { AlertTriangle } from "lucide-react";
-import { supabase } from "@/lib/supabase";
 import { getLocalPcId } from "@/lib/cross-pc";
+import { useAuth } from "@/lib/auth";
 
 // Mirrors the channel name used by the Diagnostic page. The two
 // surfaces share the same handshake protocol so a tab open on the
@@ -28,19 +28,12 @@ interface SessionPing {
 // — we'd rather miss a warning than render a false positive that hides
 // real screen real estate.
 export function SessionCollisionBanner() {
+  const { user } = useAuth();
   const [collidingPcId, setCollidingPcId] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") return;
-    let cancelled = false;
-    let myUid = "";
-    void (async () => {
-      try {
-        const { data } = await (supabase?.auth?.getUser() ?? Promise.resolve({ data: { user: null } as { user: null | { id: string } } }));
-        if (cancelled) return;
-        myUid = data?.user?.id ?? "";
-      } catch { /* ignore */ }
-    })();
+    const myUid = String(user?.id ?? "");
     const myPcId = getLocalPcId();
     const ch = new BroadcastChannel(SESSION_CHANNEL);
     const send = (kind: "ping" | "pong") => {
@@ -65,12 +58,11 @@ export function SessionCollisionBanner() {
     const t1 = window.setTimeout(() => send("ping"), 250);
     const t2 = window.setTimeout(() => send("ping"), 1_000);
     return () => {
-      cancelled = true;
       window.clearTimeout(t1);
       window.clearTimeout(t2);
       ch.close();
     };
-  }, []);
+  }, [user?.id]);
 
   if (!collidingPcId) return null;
 

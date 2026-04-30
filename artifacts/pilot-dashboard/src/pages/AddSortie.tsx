@@ -22,6 +22,7 @@ import { seatLabelFromRoleScope } from "@/lib/types";
 import { loadSquadronDefaults, hydrateSquadronDefaultsFromDb } from "@/lib/squadron-defaults";
 import type { ExternalPilotRef } from "@/lib/mock";
 import { useFrozenAccess } from "@/lib/monthly-close";
+import { analyzeSortieDraft } from "@/lib/add-sortie-smart";
 
 // Simple Add Sortie form — mirrors the legacy mobile app's logic:
 //   • One Position toggle: which seat is in 1st PLT (the other = 2nd PLT)
@@ -222,6 +223,27 @@ export default function AddSortie() {
     return { s, h: +h.toFixed(1) };
   }, [todaySorties]);
 
+  const smartSignals = useMemo(() => {
+    const time = parseFloat(form.time || "0") || 0;
+    const dual = parseFloat(form.dualHours || "0") || 0;
+    const sortieType = form.sortieType === "Other…"
+      ? (form.sortieTypeOther.trim() || "OTHER")
+      : form.sortieType;
+    return analyzeSortieDraft({
+      date: form.date,
+      acType: form.acType,
+      acNumber: form.acNumber,
+      sortieType,
+      condition: form.condition,
+      nvg: form.nvg,
+      time,
+      dualHours: dual,
+      instrumentFlight: form.instrumentFlight,
+      ifSim: parseFloat(form.ifSim || "0") || 0,
+      ifAct: parseFloat(form.ifAct || "0") || 0,
+    }, todaySorties);
+  }, [form, todaySorties]);
+
   const resetForm = () =>
     setForm(f => ({
       ...blankForm(),
@@ -231,14 +253,6 @@ export default function AddSortie() {
 
   const submit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (noAircraftConfigured) {
-      toast({
-        title: "No aircraft configured",
-        description: "Add the squadron's airframes from Monthly Report → Defaults before adding sorties.",
-        variant: "destructive",
-      });
-      return;
-    }
     if (!form.acType.trim()) {
       toast({ title: "A/C Type required", variant: "destructive" });
       return;
@@ -282,6 +296,14 @@ export default function AddSortie() {
       toast({
         title: "Guest co-pilot military number required",
         description: "Ask the visiting pilot for their military number so credit goes to the right person.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (smartSignals.errors.length > 0) {
+      toast({
+        title: "Sortie consistency check failed",
+        description: smartSignals.errors[0],
         variant: "destructive",
       });
       return;
@@ -608,9 +630,9 @@ export default function AddSortie() {
             <div className="flex-1">
               <div className="font-semibold">No aircraft configured for this squadron yet.</div>
               <div className="text-xs text-amber-200/90 mt-0.5">
-                Add the airframes your squadron flies under
-                Monthly Report → Defaults so Add Sortie /
-                Sortie Log / Flight Program can use them.
+                You can still add sorties now by typing A/C Type manually.
+                For consistent dropdown options across pages, add your squadron
+                airframes under Monthly Report → Defaults.
               </div>
             </div>
             <a
@@ -626,11 +648,20 @@ export default function AddSortie() {
 
       <Card className="mb-4">
         <form onSubmit={submit} className="space-y-3" data-testid="form-add-sortie">
-          <fieldset disabled={noAircraftConfigured} className="space-y-3 contents">
+          <fieldset className="space-y-3 contents">
           {/* Row 1: flight info */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             <Mini label="Date" type="date" value={form.date} onChange={v => set("date", v)} />
-            <MiniSelect label="A/C Type" value={form.acType} onChange={v => set("acType", v)} opts={acTypeOptions} />
+            {noAircraftConfigured ? (
+              <Mini
+                label="A/C Type"
+                value={form.acType}
+                onChange={v => set("acType", v)}
+                placeholder="e.g. UH-60M"
+              />
+            ) : (
+              <MiniSelect label="A/C Type" value={form.acType} onChange={v => set("acType", v)} opts={acTypeOptions} />
+            )}
             <Mini label="A/C No" value={form.acNumber} onChange={v => set("acNumber", v)} placeholder="e.g. 832" />
             <MiniSelect label="Sortie Type" value={form.sortieType} onChange={v => set("sortieType", v)} opts={SORTIE_TYPES} />
             <Mini label="Time (hrs)" type="number" step="0.1" value={form.time} onChange={v => set("time", v)} placeholder="0.0" />
@@ -736,6 +767,27 @@ export default function AddSortie() {
               </button>
             </div>
           </div>
+
+          {(smartSignals.errors.length > 0 || smartSignals.warnings.length > 0) && (
+            <div
+              className={`rounded-md border p-2 text-xs space-y-1 ${
+                smartSignals.errors.length > 0
+                  ? "border-destructive/60 bg-destructive/10 text-rose-200"
+                  : "border-amber-400/40 bg-amber-500/10 text-amber-100"
+              }`}
+              data-testid="sortie-smart-signals"
+            >
+              <div className="font-semibold">
+                {smartSignals.errors.length > 0 ? "Fix before saving" : "Smart checks"}
+              </div>
+              {smartSignals.errors.map((m, i) => (
+                <div key={`err-${i}`}>- {m}</div>
+              ))}
+              {smartSignals.warnings.map((m, i) => (
+                <div key={`warn-${i}`}>- {m}</div>
+              ))}
+            </div>
+          )}
 
           {/* Instrument Flight section */}
           <div className="border border-border rounded-md p-3 bg-sky-500/5">

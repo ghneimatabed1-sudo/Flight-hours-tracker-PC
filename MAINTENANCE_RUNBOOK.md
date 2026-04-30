@@ -5,10 +5,6 @@ admin. Plain English, no developer jargon.
 squadron #20 over a 15-year service life with no Replit Agent in
 the loop.
 
-> For the engineering-side handoff (live DB state, every migration / RPC /
-> edge function / cron job, source-tree index, known-broken list, release
-> process), see `HANDOFF.md` at the repo root.
-
 ---
 
 ## How the system fits together (one paragraph)
@@ -25,31 +21,10 @@ Major Eyad) is the only one who can change the pairing matrix.
 
 ## Adding a new squadron (e.g. squadron #2 — NO.10 SQDN)
 
-> ⚠️ **SUPERSEDED — see `HANDOFF.md` §10 (multi-PC join flow) and §11
-> (known-broken list, item #315 — `addSquadron` bug).**
->
-> The original instructions in this section described two flows that are no
-> longer correct on production:
->
-> 1. **"Settings → Squadrons → Add Squadron"** (UI). The dashboard
->    `addSquadron` helper currently writes only to local state — there is
->    no server-side insert path that the squadron-scoped RLS policy will
->    accept (filed as task #315). Until that ships, **new squadrons must be
->    inserted by the super admin via the Supabase Dashboard SQL editor**
->    (see HANDOFF §13 cookbook). Do not attempt the UI flow.
->
-> 2. **"Issue a license key for the squadron's first PC"**. The
->    `license_keys` table was dropped in migration 0081 and the entire
->    bootstrap mechanism is now the unit join flow
->    (`unit-super-admin-setup` for the very first PC of a brand-new unit,
->    then `device-requests` Join → Approve → Bind for every additional
->    PC). HANDOFF §10 has the step-by-step.
->
-> The remainder of this file (currencies, audit log, backup, etc.) is
-> still accurate. Only the squadron-creation and license-keys sections
-> are obsolete; treat HANDOFF.md as the single source of truth for those.
+Do these steps in order. Stop and call IT if any step does not
+behave as described.
 
-### 1. Create the squadron row (legacy — use HANDOFF §13 cookbook instead)
+### 1. Create the squadron row
 1. Open the dashboard on a PC that is logged in as **super_admin**.
 2. Go to **Settings → Squadrons → Add Squadron**.
 3. Enter:
@@ -61,7 +36,7 @@ Major Eyad) is the only one who can change the pairing matrix.
 4. Save. Confirm the squadron appears in the dropdown on the
    Pilots page.
 
-### 2. Issue a license key for the squadron's first PC (REMOVED — use unit join flow per HANDOFF §10)
+### 2. Issue a license key for the squadron's first PC
 1. Settings → **License Keys → Issue Key**.
 2. Pick the squadron you just created. Pick role **ops**.
 3. Copy the 12-character key. Hand it to the squadron's ops
@@ -70,9 +45,8 @@ Major Eyad) is the only one who can change the pairing matrix.
 ### 3. Install the dashboard on the squadron's PC
 1. Download the latest `HawkEye-Setup-vX.Y.Z.exe` from the shared
    IT drive. Always use the newest version.
-2. Run the installer. When the dashboard first opens, **complete the
-   join flow described in HANDOFF.md §10** (Join → Approve → Bind).
-   The legacy "paste a license key" screen no longer applies.
+2. Run the installer. When the dashboard first opens, paste the
+   license key.
 3. The dashboard will register this PC, name it (default
    `PC-XXXXXX`), and show the operations dashboard.
 

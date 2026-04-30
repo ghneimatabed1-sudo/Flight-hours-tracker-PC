@@ -8,11 +8,14 @@ import {
   rejectRequest, ignoreRequest,
   type UnitPendingRequest, type UnitSquadron,
 } from "../../lib/unit-join";
-import { supabase } from "../../lib/supabase";
+import { isLanSessionLoginEnabled } from "@/lib/internal-migration";
+import { useI18n } from "@/lib/i18n";
 
 const POLL_INTERVAL_MS = 5000;
 
 export default function PendingDevices() {
+  const { t } = useI18n();
+  const lanMode = isLanSessionLoginEnabled();
   const [rows, setRows] = useState<UnitPendingRequest[]>([]);
   const [squadrons, setSquadrons] = useState<UnitSquadron[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,29 +30,22 @@ export default function PendingDevices() {
   }, []);
 
   useEffect(() => {
+    if (lanMode) {
+      setLoading(false);
+      setRows([]);
+      setSquadrons([]);
+      setError(null);
+      return;
+    }
     void reload();
     void listSquadronsForJoin().then(setSquadrons);
 
-    // Poll fallback in case realtime drops.
+    // LAN-only: no realtime channel — poll the internal API instead.
     const t = window.setInterval(reload, POLL_INTERVAL_MS);
-
-    // Realtime subscription on device_requests for instant refresh.
-    let cleanup: (() => void) | null = null;
-    const sb = supabase;
-    if (sb) {
-      const ch = sb
-        .channel("device_requests:pending")
-        .on("postgres_changes", { event: "*", schema: "public", table: "device_requests" }, () => {
-          void reload();
-        })
-        .subscribe();
-      cleanup = () => { void sb.removeChannel(ch); };
-    }
     return () => {
       window.clearInterval(t);
-      if (cleanup) cleanup();
     };
-  }, [reload]);
+  }, [lanMode, reload]);
 
   const onApprove = async (req: UnitPendingRequest) => {
     setBusyId(req.id);
@@ -58,7 +54,13 @@ export default function PendingDevices() {
     const r = await approveRequest(req.id, override);
     setBusyId(null);
     if (!r.ok) {
-      setError(`Approve failed: ${r.error}`);
+      const detail =
+        typeof r.detail === "string"
+          ? r.detail
+          : r.detail && typeof r.detail === "object" && "detail" in (r.detail as Record<string, unknown>)
+            ? String((r.detail as Record<string, unknown>).detail ?? "")
+            : "";
+      setError(`Approve failed: ${r.error}${detail ? ` (${detail})` : ""}`);
       return;
     }
     void reload();
@@ -92,6 +94,22 @@ export default function PendingDevices() {
   };
 
   const heading = useMemo(() => `${rows.length} pending`, [rows.length]);
+
+  if (lanMode) {
+    return (
+      <div className="space-y-4 p-4">
+        <div>
+          <h1 className="text-xl font-semibold">Pending Devices</h1>
+          <p className="text-xs text-slate-400">
+            {t("pendingDevicesLanDisabledTitle")}
+          </p>
+        </div>
+        <div className="rounded-lg border border-sky-700/40 bg-sky-900/20 p-4 text-sm text-sky-100">
+          {t("pendingDevicesLanDisabledBody")}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 p-4">

@@ -7,7 +7,7 @@
 // "activate other PCs" flow was blocked. This version adds Create / Edit /
 // Delete / Enable-Disable, backed by the local squadron store.
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useI18n } from "@/lib/i18n";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import {
   updateSquadron,
   deleteSquadron,
   setSquadronEnabled,
+  refreshSquadronsFromDb,
 } from "@/lib/squadron-store";
 import {
   useRegisteredPCs,
@@ -29,6 +30,7 @@ import {
   publishSquadronFlightGroup,
   wipeAllRegisteredPCs,
 } from "@/lib/cross-pc";
+import { isLanSessionLoginEnabled } from "@/lib/internal-migration";
 import { useAuth } from "@/lib/auth";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Squadron } from "@/lib/types";
@@ -50,7 +52,13 @@ const EMPTY_DRAFT: DraftSquadron = {
 
 export default function Squadrons() {
   const { t, lang } = useI18n();
+  const lanMode = isLanSessionLoginEnabled();
   const list = useSquadrons();
+  useEffect(() => {
+    void refreshSquadronsFromDb().catch(() => {
+      // Fallback to local cache when offline or lacking DB access.
+    });
+  }, []);
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isSuperAdmin = user?.role === "super_admin";
@@ -161,7 +169,7 @@ export default function Squadrons() {
     })();
   }
 
-  function save() {
+  async function save() {
     setErr(null);
     const trimmedName = draft.name.trim();
     const trimmedCode = draft.code.trim().toUpperCase();
@@ -177,7 +185,7 @@ export default function Squadrons() {
         setErr(lang === "ar" ? "رمز السرب مستخدم مسبقاً." : "Squadron code already exists.");
         return;
       }
-      updateSquadron(editingId, {
+      const ok = await updateSquadron(editingId, {
         name: trimmedName,
         nameAr: draft.nameAr.trim() || trimmedName,
         code: trimmedCode,
@@ -186,6 +194,10 @@ export default function Squadrons() {
         wing: trimmedWing,
         wingAr: draft.wingAr.trim() || trimmedWing,
       });
+      if (!ok) {
+        setErr(lang === "ar" ? "تعذّر تحديث السرب." : "Could not update squadron.");
+        return;
+      }
       // Re-publish the squadron's flight-commander group with the
       // admin's current selection. The squadron commander PC's
       // heartbeat will converge on this new list within ~30s; flight
@@ -199,7 +211,7 @@ export default function Squadrons() {
         );
       }
     } else {
-      const res = addSquadron({
+      const res = await addSquadron({
         name: trimmedName,
         nameAr: draft.nameAr.trim(),
         code: trimmedCode,
@@ -220,13 +232,17 @@ export default function Squadrons() {
     setDialogOpen(false);
   }
 
-  function handleDelete(id: string) {
+  async function handleDelete(id: string) {
     // Two-click confirm pattern — consistent with Commanders / LicenseKeys UIs.
     if (pendingDeleteId !== id) {
       setPendingDeleteId(id);
       return;
     }
-    deleteSquadron(id);
+    const ok = await deleteSquadron(id);
+    if (!ok) {
+      setErr(lang === "ar" ? "تعذّر حذف السرب." : "Could not delete squadron.");
+      return;
+    }
     setPendingDeleteId(null);
   }
 
@@ -256,6 +272,14 @@ export default function Squadrons() {
           </Button>
         </div>
       </div>
+
+      {lanMode && (
+        <Card>
+          <CardContent className="py-3 text-xs text-sky-100 border border-sky-700/40 bg-sky-900/20 rounded-md">
+            {t("squadronsLanModeNote")}
+          </CardContent>
+        </Card>
+      )}
 
       {list.length === 0 ? (
         <Card>
@@ -304,7 +328,12 @@ export default function Squadrons() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => setSquadronEnabled(s.id, !s.enabled)}
+                              onClick={async () => {
+                                const ok = await setSquadronEnabled(s.id, !s.enabled);
+                                if (!ok) {
+                                  setErr(lang === "ar" ? "تعذّر تحديث حالة السرب." : "Could not update squadron status.");
+                                }
+                              }}
                               data-testid={`button-toggle-${s.id}`}
                             >
                               {s.enabled ? t("disable") : t("enable")}

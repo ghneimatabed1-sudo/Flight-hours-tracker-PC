@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { ensureLanAuthSchema } from "./lib/lan-auth-schema";
 import type { Server } from "node:http";
 
 const rawPort = process.env["PORT"];
@@ -35,14 +36,22 @@ process.on("uncaughtException", (err, origin) => {
 // ── HTTP server with graceful shutdown ───────────────────────────────────
 let server: Server | null = null;
 
-server = app.listen(port, (err?: Error) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
+(async () => {
+  try {
+    await ensureLanAuthSchema();
+  } catch (err) {
+    logger.error({ err }, "Failed to ensure LAN auth schema");
     process.exit(1);
   }
+  server = app.listen(port, (err?: Error) => {
+    if (err) {
+      logger.error({ err }, "Error listening on port");
+      process.exit(1);
+    }
 
-  logger.info({ port }, "Server listening");
-});
+    logger.info({ port }, "Server listening");
+  });
+})();
 
 // Stop accepting new connections, drain in-flight requests, then exit. The
 // 10-second cap prevents a hung socket from blocking shutdown indefinitely

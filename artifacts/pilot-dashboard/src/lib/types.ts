@@ -79,6 +79,13 @@ export interface Squadron {
   wingAr: string;
   enabled: boolean;
   keyHolder: string | null;
+  // Authorisation IDs from the api-server squadron row. Used by the
+  // admin Users page to hand real IDs (not display strings) to the
+  // create/edit-user routes when assigning a wing- or base-tier
+  // commander to a squadron. Optional for backwards compatibility
+  // with rows still cached in localStorage from earlier builds.
+  wingId?: string | null;
+  baseId?: string | null;
 }
 
 export interface Pilot {

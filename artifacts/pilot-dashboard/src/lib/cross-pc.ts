@@ -21,10 +21,29 @@
 
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import type { Sortie } from "./mock";
-import { supabase, supabaseConfigured, recordAuditEvent, withFreshSession } from "./supabase";
+import { recordAuditEvent } from "./lan-legacy-shims";
 import { recordDataError } from "./query-client";
+import {
+  deleteInternalXpcRegistryRows,
+  deleteInternalXpcScheduleShare,
+  fetchInternalXpcMessages,
+  fetchInternalXpcPending,
+  fetchInternalXpcRegistryRows,
+  fetchInternalXpcSnapshots,
+  fetchInternalXpcScheduleShareById,
+  fetchInternalXpcScheduleShares,
+  isLanSessionLoginEnabled,
+  patchInternalXpcScheduleShare,
+  postInternalXpcMessage,
+  postInternalXpcMessageRead,
+  postInternalXpcPending,
+  postInternalXpcPendingUpdate,
+  postInternalXpcSnapshot,
+  postInternalXpcScheduleShare,
+  postInternalXpcRegistryHeartbeat,
+} from "./internal-migration";
 
-const isLive = () => supabaseConfigured && supabase !== null;
+const isLive = () => false;
 
 // ---------------------------------------------------------------------
 // Heartbeat status — surfaces silent xpc_registry/xpc_user_pcs upsert
@@ -137,50 +156,6 @@ export function isHeartbeatFresh(): boolean {
 export function subscribeHeartbeatStatus(fn: () => void): () => void {
   heartbeatListeners.add(fn);
   return () => heartbeatListeners.delete(fn);
-}
-
-// PostgREST returns PGRST205 when a table referenced in code does not yet
-// exist in the central Supabase schema (i.e. migrations 0011/0012/0013
-// have not been applied). When that happens the cross-PC layer should
-// degrade gracefully — fall back to the local mirror and stay quiet —
-// instead of spamming a "Couldn't reach the server" toast every poll
-// interval. Detect both the structured Supabase error and a plain Error
-// whose .message embeds the PostgREST JSON.
-function isMissingTableError(err: unknown): boolean {
-  if (!err) return false;
-  const code = (err as { code?: string }).code;
-  if (code === "PGRST205" || code === "42P01") return true;
-  const msg = err instanceof Error ? err.message : typeof err === "string" ? err : "";
-  return /PGRST205|Could not find the table|does not exist/i.test(msg);
-}
-
-// Wrap a Supabase query so PGRST205 (missing table) is swallowed and a
-// caller-supplied local fallback runs instead. Other errors still throw.
-//
-// Task #234 — also routes the call through `withFreshSession` so a
-// stale-JWT 401 on first paint (the cached access token expired but
-// supabase-js has not yet auto-refreshed) triggers exactly ONE silent
-// `auth.refreshSession()` + retry. If the retry still 401s — or there
-// is no session at all to refresh — we fall back to the local mirror
-// silently (debug log) instead of letting a noisy red 401 bubble up
-// through React Query's onError handler. Without this guard, every
-// admin page that issues a background read on mount (Overview,
-// Squadrons, Commanders, License Keys, Messages, Schedule chain, …)
-// would emit a "Couldn't reach the server" toast in the narrow window
-// between an expired cached token and the next auto-refresh tick.
-async function liveOrLocal<T>(remote: () => Promise<T>, local: () => T | Promise<T>): Promise<T> {
-  const result = await withFreshSession(remote);
-  if (result.ok) return result.value;
-  if (result.reason === "auth") {
-    // Stale token + refresh failed (or no session to refresh). The
-    // network 401 is unavoidable but we keep the JS console clean —
-    // the caller's local mirror keeps the UI responsive while
-    // supabase-js sorts itself out on the next auth-state event.
-    console.debug("[xpc] silenced stale-JWT 401 — using local fallback");
-    return await local();
-  }
-  if (isMissingTableError(result.error)) return await local();
-  throw result.error;
 }
 
 // ── shared helpers ──────────────────────────────────────────────────────
@@ -334,22 +309,10 @@ export function listAdminFlightBindings(): AdminBindingMap {
 // distinguishes the April 2026 implementation from the previous
 // localStorage-only approach.
 export async function syncAdminFlightBindingsFromRemote(): Promise<void> {
-  if (!isLive() || !supabase) return;
-  const { data, error } = await supabase
-    .from("audit_log")
-    .select("detail")
-    .eq("type", "admin.flight.binding.set")
-    .order("occurred_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error || !data) return;
-  const detail = (data as { detail?: Record<string, unknown> }).detail ?? {};
-  const map = (detail.map ?? {}) as AdminBindingMap;
-  if (map && typeof map === "object") {
-    try {
-      localStorage.setItem(ADMIN_FLIGHT_BIND_KEY, JSON.stringify(map));
-    } catch { /* ignore */ }
-  }
+  // LAN-only build: admin flight bindings are sourced from the local
+  // mirror (and broadcast via the internal audit-log endpoint when
+  // setAdminFlightBindingFor is called). No remote pull is needed.
+  return;
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -401,68 +364,18 @@ export async function publishSquadronFlightGroup(
 // admin can add/remove members post-setup without visiting the
 // squadron commander PC.
 export async function getLatestSquadronFlightGroup(
-  squadronPcId: string,
+  _squadronPcId: string,
 ): Promise<SquadronFlightGroup | null> {
-  if (!isLive() || !supabase || !squadronPcId) return null;
-  const { data, error } = await supabase
-    .from("audit_log")
-    .select("detail, occurred_at")
-    .eq("type", "xpc.squadron.flight.group.set")
-    .order("occurred_at", { ascending: false })
-    .limit(50);
-  if (error || !data) return null;
-  for (const row of data as { detail?: Record<string, unknown> }[]) {
-    const d = row.detail ?? {};
-    const sid = typeof (d as { squadronPcId?: unknown }).squadronPcId === "string"
-      ? (d as { squadronPcId: string }).squadronPcId
-      : "";
-    if (sid !== squadronPcId) continue;
-    const ids = Array.isArray((d as { flightPcIds?: unknown }).flightPcIds)
-      ? ((d as { flightPcIds: unknown[] }).flightPcIds.filter(
-          (x): x is string => typeof x === "string",
-        ))
-      : [];
-    const name = typeof (d as { squadronPcName?: unknown }).squadronPcName === "string"
-      ? (d as { squadronPcName: string }).squadronPcName
-      : sid;
-    const at = typeof (d as { publishedAt?: unknown }).publishedAt === "string"
-      ? (d as { publishedAt: string }).publishedAt
-      : nowIso();
-    return { squadronPcId: sid, squadronPcName: name, flightPcIds: ids, publishedAt: at };
-  }
+  // LAN-only build: the latest squadron→flight group is sourced from
+  // the local mirror via the audit-log endpoint; no remote pull here.
   return null;
 }
 
 export async function syncSquadronFlightGroupForFlightPc(
-  flightPcId: string,
+  _flightPcId: string,
 ): Promise<FlightBinding | null> {
-  if (!isLive() || !supabase || !flightPcId) return null;
-  const { data, error } = await supabase
-    .from("audit_log")
-    .select("detail, occurred_at")
-    .eq("type", "xpc.squadron.flight.group.set")
-    .order("occurred_at", { ascending: false })
-    .limit(50);
-  if (error || !data) return null;
-  // Latest group (per squadron) wins — walk newest → oldest and return
-  // the first one whose flightPcIds includes us.
-  for (const row of data as { detail?: Record<string, unknown> }[]) {
-    const d = row.detail ?? {};
-    const ids = Array.isArray((d as { flightPcIds?: unknown }).flightPcIds)
-      ? ((d as { flightPcIds: unknown[] }).flightPcIds.filter(
-          (x): x is string => typeof x === "string",
-        ))
-      : [];
-    if (!ids.includes(flightPcId)) continue;
-    const sqId = typeof (d as { squadronPcId?: unknown }).squadronPcId === "string"
-      ? (d as { squadronPcId: string }).squadronPcId
-      : "";
-    const sqName = typeof (d as { squadronPcName?: unknown }).squadronPcName === "string"
-      ? (d as { squadronPcName: string }).squadronPcName
-      : sqId;
-    if (!sqId) continue;
-    return { pcId: sqId, pcName: sqName };
-  }
+  // LAN-only build: flight commander binding is sourced from local
+  // mirror / admin override path; no remote audit-log lookup here.
   return null;
 }
 
@@ -663,23 +576,12 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
   // but the registry UPSERT would silently fail under RLS — leaving
   // the PC invisible to everyone else. The new path captures the
   // error and surfaces it through the existing data-error indicator.
-  if (isLive() && !resetInProgress) {
+  if (isLanSessionLoginEnabled() && !resetInProgress) {
     void (async () => {
-      // Recheck the flag inside the async closure — the user may have
-      // started a "Reset this PC" between the outer check and the
-      // microtask actually running.
       if (resetInProgress) return;
-      const claimOk = await ensureMyPcClaim(o.id);
-      if (!claimOk) {
-        reportHeartbeatError(
-          `Could not claim PC "${o.id}" — cloud sign-in may not have completed yet. ` +
-          `If this persists, sign out and sign back in.`,
-        );
-        return;
-      }
       try {
         const dbTier = o.tier === "flight" ? "squadron" : o.tier;
-        const { error } = await supabase!.from("xpc_registry").upsert({
+        const hb = await postInternalXpcRegistryHeartbeat({
           id: o.id,
           squadron_name: o.displayName,
           tier: dbTier,
@@ -687,60 +589,20 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
           wing: o.wing ?? null,
           device_name: deviceName ?? null,
           last_seen: entry.lastSeen,
-          // v1.1.98 multi-squadron org-chart pointer. Older Supabase
-          // schemas (pre-0037) don't have these columns yet — PostgREST
-          // will surface a "column does not exist" error in that case.
-          // We catch + retry-without below so the upsert still wins.
           parent_pc_id: o.parentPcId ?? null,
           squadron_pc_id: o.squadronPcId ?? null,
-        }, { onConflict: "id" });
-        // Detect "column does not exist" across the multiple shapes
-        // PostgREST/Supabase emit it in:
-        //   - raw Postgres: 'column "parent_pc_id" does not exist' (SQLSTATE 42703)
-        //   - PostgREST schema cache miss: "Could not find the 'parent_pc_id' column of 'xpc_registry' in the schema cache" (PGRST204)
-        //   - Some proxies prefix with the column name only.
-        // Any of those means migration 0037 has not been applied yet —
-        // retry with the legacy 5-column upsert so heartbeat survives.
-        const errMsg = (error?.message ?? "") + " " + (error?.details ?? "") + " " + (error?.hint ?? "");
-        const errCode = error?.code ?? "";
-        const isMissingNewColumn =
-          /parent_pc_id|squadron_pc_id/i.test(errMsg) &&
-          (errCode === "42703" || errCode === "PGRST204" ||
-            /does not exist|schema cache|could not find/i.test(errMsg));
-        if (error && isMissingNewColumn) {
-          // Migration 0037 not applied yet on this project — retry with
-          // the legacy column set so heartbeat keeps working. Operator
-          // gets the routing benefits as soon as they paste 0037 in.
-          const legacy = await supabase!.from("xpc_registry").upsert({
-            id: o.id,
-            squadron_name: o.displayName,
-            tier: dbTier,
-            base: o.base ?? null,
-            wing: o.wing ?? null,
-            device_name: deviceName ?? null,
-            last_seen: entry.lastSeen,
-          }, { onConflict: "id" });
-          if (!legacy.error) { clearHeartbeatError(); return; }
-        }
-        if (error) {
+        });
+        if (!hb.ok) {
           reportHeartbeatError(
-            `Registry upsert rejected for "${o.id}" (${error.code ?? "?"}): ${error.message}`,
-            error.code,
+            `LAN registry heartbeat rejected for "${o.id}" (${hb.status ?? "?"}): ${hb.error}`,
+            hb.status ? String(hb.status) : undefined,
           );
           return;
         }
         clearHeartbeatError();
-        // Tick last_activity_at on every pair this PC participates in.
-        // This is what powers the 90-day inactivity sweep — without it
-        // the timer would always read "creation time" and the sweep
-        // would either never expire anything or expire everything in
-        // bulk on day 90. Best-effort: failures here do NOT touch the
-        // heartbeat error indicator (a missing 0038 migration must not
-        // break the registry tick).
-        try { await supabase!.rpc("xpc_pair_touch", { p_pc_id: o.id }); } catch { /* ignore */ }
       } catch (e) {
         reportHeartbeatError(
-          `Registry upsert threw for "${o.id}": ${(e as Error)?.message ?? String(e)}`,
+          `LAN registry heartbeat threw for "${o.id}": ${(e as Error)?.message ?? String(e)}`,
         );
       }
     })();
@@ -750,62 +612,19 @@ export function registerLocalPC(opts: RegisterPcOpts | string, base?: string, wi
 // ---------------------------------------------------------------------
 // PC-claim management.
 //
-// Every write to xpc_messages / xpc_schedule_shares / xpc_pending is
-// gated by the RLS policy `from_pc_id = ANY (xpc_my_pc_ids())`, where
-// `xpc_my_pc_ids()` returns the array of pc_ids claimed by the current
-// auth.uid in `xpc_user_pcs`. If the claim was never persisted (e.g.
-// the heartbeat fired BEFORE supabase finished restoring the session,
-// or the user signed in via signInWithPassword AFTER the first
-// registerLocalPC tick), every cross-PC operation fails with the
-// 42501 error users see as "Server error: row violates row-level
-// security policy for table xpc_messages".
-//
-// `ensureMyPcClaim` is called from registerLocalPC (every 30s
-// heartbeat), from useSendMessage / submit / decide / forward
-// mutationFns (defensive, just before the write), and once from the
-// auth flow right after signInWithPassword resolves. Each call retries
-// the auth.getUser lookup for up to ~5s with backoff, then upserts the
-// claim. A successful upsert is cached in-memory so subsequent calls
-// for the same (uid,pcId) pair are no-ops.
+// LAN-only build: PC seat ownership is now reconciled server-side by
+// the internal registry endpoint (heartbeat upsert keyed by deviceId
+// + tier). The client-side claim upsert that this helper used to
+// perform against the cloud-tier `xpc_user_pcs` table is no longer
+// needed and the call sites have been removed. The exported helper
+// stays as a no-op so external imports (Diagnostic.tsx) keep
+// resolving with the same signature.
 // ---------------------------------------------------------------------
 
-const claimedKeys = new Set<string>();
-
-export async function ensureMyPcClaim(pcId: string | null | undefined): Promise<boolean> {
-  if (!pcId || !isLive() || !supabase) return false;
-  // Try up to 6 times spaced ~750ms apart (≈4.5s) for the supabase
-  // session to settle after a fresh sign-in. Once we have a uid, the
-  // upsert itself is idempotent and synchronous from the client's
-  // point of view.
-  let uid: string | undefined;
-  for (let attempt = 0; attempt < 6; attempt++) {
-    try {
-      const { data } = await supabase.auth.getUser();
-      uid = data?.user?.id;
-      if (uid) break;
-    } catch { /* network blip — retry */ }
-    await new Promise(r => setTimeout(r, 750));
-  }
-  if (!uid) return false;
-  const cacheKey = `${uid}::${pcId}`;
-  if (claimedKeys.has(cacheKey)) return true;
-  try {
-    const { error } = await supabase.from("xpc_user_pcs").upsert(
-      { user_id: uid, pc_id: pcId },
-      { onConflict: "user_id,pc_id" },
-    );
-    if (error) {
-      // Surface the failure to the console — silent failure here is
-      // what kept the bug invisible in production for so long.
-      console.warn("[xpc] PC claim upsert failed:", error.message, { pcId });
-      return false;
-    }
-    claimedKeys.add(cacheKey);
-    return true;
-  } catch (e) {
-    console.warn("[xpc] PC claim threw:", (e as Error)?.message);
-    return false;
-  }
+export async function ensureMyPcClaim(_pcId: string | null | undefined): Promise<boolean> {
+  // LAN-only build: PC claims are managed server-side by the internal
+  // registry endpoint. No client-side claim upsert is required.
+  return false;
 }
 
 export function useRegisteredPCs(
@@ -819,85 +638,23 @@ export function useRegisteredPCs(
       const me = localPcId();
       const cutoff = Date.now() - ONLINE_WINDOW_MS;
       let rows: SquadronPC[] = [];
-      if (isLive()) {
-        rows = await liveOrLocal(
-          async () => {
-            // Defensive cap so the registry query stays fast even if the
-            // table grows to 1000+ PCs (active or retired) over the life
-            // of the deployment. Ordered by last_seen DESC so the most
-            // recently active PCs always make the cut. The schema has a
-            // matching index (xpc_registry_last_seen_idx) so this is a
-            // cheap index scan, not a sequential scan.
-            // v1.1.73: server-side enforce the 90 s active window. Every
-            // consumer of useRegisteredPCs() (Messages, ScheduleChain,
-            // FlightProgram, FinalSchedules, AddSortie, Overview,
-            // LicenseKeys, Commanders, Squadrons, ...) automatically
-            // sees only PCs whose heartbeat lands in the window — the
-            // single source of truth lives in ACTIVE_WINDOW_MS. Stale
-            // rows never cross the wire, so they cannot leak into any
-            // picker through a forgotten client filter. The
-            // isPcActive() / getActivePCs() helpers stay in place as
-            // defence-in-depth for any new call site.
-            const activeFloor = new Date(Date.now() - ACTIVE_WINDOW_MS).toISOString();
-            const { data, error } = await supabase!
-              .from("xpc_registry")
-              .select("*")
-              .gte("last_seen", activeFloor)
-              .order("last_seen", { ascending: false })
-              .limit(5000);
-            if (error) throw error;
-            // Opportunistic prune of long-stale rows so the registry stays
-            // bounded over years of personnel turnover. Runs ~1 in 20
-            // fetches and is fully fire-and-forget — never blocks the UI
-            // and never throws into the query. Deletes from BOTH the
-            // registry and the per-user PC claims table so a reimaged or
-            // decommissioned PC vanishes completely from every other
-            // operator's pickers within a single refresh cycle.
-            if (Math.random() < 0.05) {
-              void (async () => {
-                try {
-                  const staleBefore = new Date(Date.now() - STALE_REGISTRY_MS).toISOString();
-                  const { data: deadIds } = await supabase!
-                    .from("xpc_registry")
-                    .select("id")
-                    .lt("last_seen", staleBefore)
-                    .limit(500);
-                  const ids = (deadIds ?? []).map((r: { id: string }) => r.id).filter(Boolean);
-                  if (ids.length > 0) {
-                    await supabase!.from("xpc_registry").delete().in("id", ids);
-                    await supabase!.from("xpc_user_pcs").delete().in("pc_id", ids);
-                  }
-                } catch { /* prune is best-effort */ }
-                // Also prune long-stale schedule shares — flights that
-                // already happened more than 6 months ago. Local sortie
-                // logs keep the permanent record; the central share row
-                // exists only so the chain (squadron→wing→base→HQ) can
-                // review and approve in near-real-time. After 6 months
-                // it has served its purpose.
-                try {
-                  const sharesBefore = new Date(Date.now() - STALE_SHARE_MS).toISOString().slice(0, 10);
-                  await supabase!
-                    .from("xpc_schedule_shares")
-                    .delete()
-                    .lt("flight_date", sharesBefore);
-                } catch { /* prune is best-effort */ }
-                // And prune long-revoked mobile devices — once a phone
-                // has been "Unlinked" for 6+ months, the row is dead
-                // weight (it can never be reactivated, only re-paired
-                // fresh). Keeps the pilot_devices table from bloating
-                // over years of personnel turnover at 15+ squadrons.
-                try {
-                  const revokedBefore = new Date(Date.now() - STALE_SHARE_MS).toISOString();
-                  await supabase!
-                    .from("pilot_devices")
-                    .delete()
-                    .lt("revoked_at", revokedBefore);
-                } catch { /* prune is best-effort */ }
-              })();
-            }
-            return (data ?? []).map(rowToPc);
-          },
-          () => readRegistry(),
+      if (isLanSessionLoginEnabled()) {
+        const data = await fetchInternalXpcRegistryRows({
+          includeStale: false,
+          activeSeconds: Math.floor(ACTIVE_WINDOW_MS / 1000),
+        });
+        rows = (data ?? []).map((r) =>
+          rowToPc({
+            id: r.id,
+            squadron_name: r.squadron_name ?? "",
+            tier: r.tier ?? "squadron",
+            base: r.base ?? null,
+            wing: r.wing ?? null,
+            device_name: r.device_name ?? null,
+            last_seen: r.last_seen ?? nowIso(),
+            parent_pc_id: r.parent_pc_id ?? null,
+            squadron_pc_id: r.squadron_pc_id ?? null,
+          }),
         );
       } else {
         rows = readRegistry();
@@ -920,7 +677,7 @@ export function useRegisteredPCs(
     },
     refetchInterval: 30_000,
     staleTime: 10_000,
-    retry: isLive() ? 1 : false,
+    retry: false,
   });
   return { ...q, data: q.data ?? [] } as UseQueryResult<RegisteredPC[]> & { data: RegisteredPC[] };
 }
@@ -969,20 +726,23 @@ export function useRegisteredPCsIncludingStale(): UseQueryResult<RegisteredPC[]>
       const me = localPcId();
       const cutoff = Date.now() - ONLINE_WINDOW_MS;
       let rows: SquadronPC[] = [];
-      if (isLive()) {
-        rows = await liveOrLocal(
-          async () => {
-            const floor = new Date(Date.now() - STALE_PICKER_WINDOW_MS).toISOString();
-            const { data, error } = await supabase!
-              .from("xpc_registry")
-              .select("*")
-              .gte("last_seen", floor)
-              .order("last_seen", { ascending: false })
-              .limit(5000);
-            if (error) throw error;
-            return (data ?? []).map(rowToPc);
-          },
-          () => readRegistry(),
+      if (isLanSessionLoginEnabled()) {
+        const data = await fetchInternalXpcRegistryRows({
+          includeStale: true,
+          staleHours: Math.floor(STALE_PICKER_WINDOW_MS / (60 * 60_000)),
+        });
+        rows = (data ?? []).map((r) =>
+          rowToPc({
+            id: r.id,
+            squadron_name: r.squadron_name ?? "",
+            tier: r.tier ?? "squadron",
+            base: r.base ?? null,
+            wing: r.wing ?? null,
+            device_name: r.device_name ?? null,
+            last_seen: r.last_seen ?? nowIso(),
+            parent_pc_id: r.parent_pc_id ?? null,
+            squadron_pc_id: r.squadron_pc_id ?? null,
+          }),
         );
       } else {
         rows = readRegistry();
@@ -997,7 +757,7 @@ export function useRegisteredPCsIncludingStale(): UseQueryResult<RegisteredPC[]>
     },
     refetchInterval: 30_000,
     staleTime: 10_000,
-    retry: isLive() ? 1 : false,
+    retry: false,
   });
   return { ...q, data: q.data ?? [] } as UseQueryResult<RegisteredPC[]> & { data: RegisteredPC[] };
 }
@@ -1137,25 +897,18 @@ export function usePendingApprovals(homeSquadronId: string | null | undefined): 
       const localFallback = () => readPending()
         .filter(p => p.homeSquadronId === homeSquadronId && p.status === "pending")
         .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
-      if (isLive()) {
-        return await liveOrLocal(
-          async () => {
-            const { data, error } = await supabase!
-              .from("xpc_pending")
-              .select("*")
-              .eq("home_squadron_id", homeSquadronId)
-              .eq("status", "pending")
-              .order("submitted_at", { ascending: false });
-            if (error) throw error;
-            return (data ?? []).map(rowToPending);
-          },
-          localFallback,
-        );
+      if (isLanSessionLoginEnabled()) {
+        const rows = await fetchInternalXpcPending({
+          homeSquadronId,
+          statuses: ["pending"],
+        });
+        if (rows) return rows.map(rowToPending);
+        return localFallback();
       }
       return localFallback();
     },
     refetchInterval: 15_000,
-    retry: isLive() ? 1 : false,
+    retry: false,
   });
   return { ...q, data: q.data ?? [] } as UseQueryResult<PendingSortie[]> & { data: PendingSortie[] };
 }
@@ -1167,23 +920,15 @@ export function useAllPending(): UseQueryResult<PendingSortie[]> & { data: Pendi
     queryKey: ["xpc", "pending", "all"],
     queryFn: async () => {
       const localFallback = () => readPending().sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
-      if (isLive()) {
-        return await liveOrLocal(
-          async () => {
-            const { data, error } = await supabase!
-              .from("xpc_pending")
-              .select("*")
-              .order("submitted_at", { ascending: false });
-            if (error) throw error;
-            return (data ?? []).map(rowToPending);
-          },
-          localFallback,
-        );
+      if (isLanSessionLoginEnabled()) {
+        const rows = await fetchInternalXpcPending();
+        if (rows) return rows.map(rowToPending);
+        return localFallback();
       }
       return localFallback();
     },
     refetchInterval: 15_000,
-    retry: isLive() ? 1 : false,
+    retry: false,
   });
   return { ...q, data: q.data ?? [] } as UseQueryResult<PendingSortie[]> & { data: PendingSortie[] };
 }
@@ -1198,13 +943,9 @@ export function useSubmitPending() {
         submittedAt: nowIso(),
         status: "pending",
       };
-      if (isLive()) {
-        // RLS gate on xpc_pending.insert is
-        // (hosting_squadron_id = ANY (xpc_my_pc_ids())). The hosting
-        // PC is the local PC submitting the cross-squadron sortie.
-        await ensureMyPcClaim(row.hostingSquadronId);
-        const { error } = await supabase!.from("xpc_pending").insert(pendingToRow(row));
-        if (error) throw error;
+      if (isLanSessionLoginEnabled()) {
+        const resp = await postInternalXpcPending(pendingToRow(row));
+        if (!resp.ok) throw new Error(resp.error);
       } else {
         const rows = readPending();
         rows.push(row);
@@ -1243,14 +984,11 @@ export function useGuestEntriesNeedingBackfill(homeSquadronId: string | null | u
     queryFn: async () => {
       if (!homeSquadronId) return [];
       let rows: PendingSortie[] = [];
-      if (isLive()) {
-        const { data, error } = await supabase!
-          .from("xpc_pending")
-          .select("*")
-          .eq("home_squadron_id", homeSquadronId)
-          .in("status", ["pending", "accepted"])
-          .order("submitted_at", { ascending: false });
-        if (error) throw error;
+      if (isLanSessionLoginEnabled()) {
+        const data = await fetchInternalXpcPending({
+          homeSquadronId,
+          statuses: ["pending", "accepted"],
+        });
         rows = (data ?? []).map(rowToPending);
       } else {
         rows = readPending()
@@ -1260,7 +998,7 @@ export function useGuestEntriesNeedingBackfill(homeSquadronId: string | null | u
       return rows.filter(r => !(r.guestPilotMilitaryNumber ?? "").trim());
     },
     refetchInterval: 30_000,
-    retry: isLive() ? 1 : false,
+    retry: false,
   });
   return { ...q, data: q.data ?? [] } as UseQueryResult<PendingSortie[]> & { data: PendingSortie[] };
 }
@@ -1279,14 +1017,13 @@ export function useBackfillGuestMilNumber() {
       const value = input.militaryNumber.trim();
       if (!value) throw new Error("Military number required");
       let updated: PendingSortie | null = null;
-      if (isLive()) {
-        const { data, error } = await supabase!
-          .from("xpc_pending")
-          .update({ guest_pilot_military_number: value })
-          .eq("id", input.id)
-          .select()
-          .single();
-        if (error) throw error;
+      if (isLanSessionLoginEnabled()) {
+        const data = await postInternalXpcPendingUpdate({
+          id: input.id,
+          guest_pilot_military_number: value,
+          by: input.by,
+        });
+        if (!data) throw new Error("Pending entry not found");
         updated = rowToPending(data);
       } else {
         const rows = readPending();
@@ -1325,15 +1062,16 @@ export function useDecidePending() {
     }) => {
       const decidedAt = nowIso();
       let updated: PendingSortie | null = null;
-      if (isLive()) {
-        const { data, error } = await supabase!.from("xpc_pending").update({
+      if (isLanSessionLoginEnabled()) {
+        const data = await postInternalXpcPendingUpdate({
+          id: input.id,
           status: input.decision,
           decided_at: decidedAt,
           decided_by: input.decidedBy,
           decision_reason: input.reason ?? null,
           edited_sortie: input.editedSortie ?? null,
-        }).eq("id", input.id).select().single();
-        if (error) throw error;
+        });
+        if (!data) throw new Error("Pending entry not found");
         updated = rowToPending(data);
       } else {
         const rows = readPending();
@@ -1706,84 +1444,17 @@ export function useScheduleShares(
           .filter(visible)
           .sort((a, b) => b.date.localeCompare(a.date));
       };
-      if (isLive()) {
-        return await liveOrLocal(
-          async () => {
-            let qry = supabase!.from("xpc_schedule_shares").select("*").order("flight_date", { ascending: false });
-            if (viewAllApproved) {
-              // Base / HQ firehose: server-side narrow to status=approved.
-              // The client-side `visible()` filter then keeps only the
-              // Wing-signed finals (drops Sqn-only approvals).
-              qry = qry.eq("status", "approved");
-            } else if (forPcId) {
-              // Server-side narrowing keeps payload small; the client-side
-              // `visible()` filter then enforces the dismissal / rejecter
-              // rules so the logic stays in one place.
-              //
-              // v1.1.101 — widen the OR clause with logical-seat LIKE
-              // patterns + peer-squadron mirror (mirrors useMessages at
-              // cross-pc.ts:2154-2160). Without this, a commander who
-              // reinstalled Windows / cleared localStorage / moved to a
-              // replacement PC got a NEW device suffix (#xyz → #abc) and
-              // the strict eq filter silently dropped every share that
-              // had been routed to the OLD suffix. At 15-20 squadrons
-              // with 4-5 PCs per squadron, suffix drift becomes routine
-              // (new AV install, clean reimage, SSD swap, etc) — the
-              // logical-seat pattern keeps the inbox wired to the tier
-              // role regardless of which physical PC is currently on
-              // that desk. Stays in lock-step with the client-side
-              // makePcMatcher so visible() agrees with what the server
-              // returns on both paths (live + local fallback).
-              const hashIdx = forPcId.indexOf("#");
-              const logicalSeat = hashIdx < 0 ? null : forPcId.slice(0, hashIdx);
-              const peerSquadronId = forPcId.startsWith("SQDNCMD:")
-                ? forPcId.slice("SQDNCMD:".length)
-                : (!forPcId.includes(":") ? `SQDNCMD:${forPcId}` : null);
-              const orParts: string[] = [
-                `current_pc_id.eq.${forPcId}`,
-                `origin_squadron_id.eq.${forPcId}`,
-                // For the Schedule History audit page, drop the
-                // status=approved gate so chain participants see
-                // rejected + in-flight + forwarded rows too.
-                includeHistoryParticipant
-                  ? `chain_pc_ids.cs.{${forPcId}}`
-                  : `and(status.eq.approved,chain_pc_ids.cs.{${forPcId}})`,
-              ];
-              if (peerSquadronId !== null) {
-                orParts.push(
-                  `current_pc_id.eq.${peerSquadronId}`,
-                  `origin_squadron_id.eq.${peerSquadronId}`,
-                );
-                if (includeHistoryParticipant) {
-                  orParts.push(`chain_pc_ids.cs.{${peerSquadronId}}`);
-                }
-              }
-              if (includeHistoryParticipant && logicalSeat !== null) {
-                orParts.push(
-                  `chain_pc_ids.cs.{${logicalSeat}}`,
-                );
-              }
-              if (logicalSeat !== null) {
-                orParts.push(
-                  `current_pc_id.like.${logicalSeat}#*`,
-                  `origin_squadron_id.like.${logicalSeat}#*`,
-                  `current_pc_id.eq.${logicalSeat}`,
-                  `origin_squadron_id.eq.${logicalSeat}`,
-                );
-              }
-              qry = qry.or(orParts.join(","));
-            }
-            const { data, error } = await qry;
-            if (error) throw error;
-            return (data ?? []).map(rowToShare).filter(visible);
-          },
-          localFallback,
+      if (isLanSessionLoginEnabled()) {
+        const rows = await fetchInternalXpcScheduleShares(
+          viewAllApproved ? { status: "approved" } : undefined,
         );
+        if (rows) return rows.map(rowToShare).filter(visible);
+        return localFallback();
       }
       return localFallback();
     },
     refetchInterval: 15_000,
-    retry: isLive() ? 1 : false,
+    retry: false,
   });
   return { ...q, data: q.data ?? [] } as UseQueryResult<ScheduleShare[]> & { data: ScheduleShare[] };
 }
@@ -1841,59 +1512,9 @@ export function useSubmitSchedule() {
         program: input.program,
         chainPcIds: [input.originSquadronId, input.targetPcId],
       };
-      if (isLive()) {
-        // RLS gate on xpc_schedule_shares.insert is
-        // (origin_squadron_id = ANY (xpc_my_pc_ids())). Defensive
-        // claim, same reasoning as useSendMessage.
-        // v1.1.92: Previously the return value of ensureMyPcClaim was
-        // ignored, so when auth.uid() wasn't ready (or the claim upsert
-        // failed) the INSERT proceeded anyway and crashed with 42501
-        // "new row violates row-level security policy". Treat a failed
-        // claim as a hard precondition error with a user-actionable
-        // message, BEFORE we let PostgREST hand back an unreadable
-        // RLS code.
-        if (!share.originSquadronId || share.originSquadronId === "self") {
-          throw new Error(
-            "Cannot submit: this PC has no registered squadron seat. " +
-            "Sign out and sign back in, then try again."
-          );
-        }
-        const claimed = await ensureMyPcClaim(share.originSquadronId);
-        if (!claimed) {
-          throw new Error(
-            `Cannot submit: failed to claim PC seat "${share.originSquadronId}" ` +
-            "for the current Supabase session. Check that you're signed in " +
-            "(Settings → Account) and try again."
-          );
-        }
-        const { error } = await supabase!.from("xpc_schedule_shares").insert(shareToRow(share));
-        if (error) {
-          // v1.1.92: same diagnostic envelope as useDecideSchedule —
-          // dump auth state + intended row + full PostgREST error so
-          // the next 42501 in the field is one console line away from
-          // root cause instead of another guessing round.
-          try {
-            const { data: { session } } = await supabase!.auth.getSession();
-            const uid = session?.user?.id ?? null;
-            const { data: pcs } = await supabase!.from("xpc_user_pcs").select("pc_id").eq("user_id", uid ?? "");
-            console.error("[xpc.schedule.submit] RLS/INSERT failure", {
-              auth_uid: uid,
-              session_email: session?.user?.email ?? null,
-              owned_pc_ids: (pcs ?? []).map(p => p.pc_id),
-              attempted_origin_pc: share.originSquadronId,
-              attempted_target_pc: share.currentPcId,
-              attempted_target_tier: share.currentTier,
-              submitted_by: input.submittedBy,
-              error_code: (error as { code?: string }).code,
-              error_message: error.message,
-              error_details: (error as { details?: string }).details,
-              error_hint: (error as { hint?: string }).hint,
-            });
-          } catch (diagErr) {
-            console.error("[xpc.schedule.submit] diagnostic itself failed", diagErr);
-          }
-          throw error;
-        }
+      if (isLanSessionLoginEnabled()) {
+        const resp = await postInternalXpcScheduleShare(shareToRow(share));
+        if (!resp.ok) throw new Error(resp.error);
       } else {
         const all = readShares();
         all.push(share);
@@ -1933,11 +1554,11 @@ export function useDecideSchedule() {
       // originator's diff dialog can show what changed in context.
       editedProgram?: ScheduleProgram;
     }) => {
-      // Load current state (Supabase or local).
+      // Load current state (LAN service or local mirror).
       let cur: ScheduleShare;
-      if (isLive()) {
-        const { data, error } = await supabase!.from("xpc_schedule_shares").select("*").eq("id", input.id).single();
-        if (error) throw error;
+      if (isLanSessionLoginEnabled()) {
+        const data = await fetchInternalXpcScheduleShareById(input.id);
+        if (!data) throw new Error("Schedule not found");
         cur = rowToShare(data);
       } else {
         const all = readShares();
@@ -2068,43 +1689,9 @@ export function useDecideSchedule() {
         push("reviewed", `→ ${input.forwardPcName ?? ""}`);
       }
 
-      if (isLive()) {
-        const { error } = await supabase!.from("xpc_schedule_shares")
-          .update(shareToRow(cur)).eq("id", cur.id);
-        if (error) {
-          // v1.1.91: hard-diagnose RLS 42501 in the wild. When the
-          // Commander/Wing action throws, we want a single console
-          // payload that tells us:
-          //   - which user the browser thinks is logged in (auth.uid)
-          //   - what pc_ids that user owns server-side
-          //   - which row + which action was being attempted
-          //   - the full Supabase error envelope
-          // Without this, "new row violates RLS" is a black box and we
-          // ship blind fixes that miss the real cause.
-          try {
-            const { data: { session } } = await supabase!.auth.getSession();
-            const uid = session?.user?.id ?? null;
-            const { data: pcs } = await supabase!.from("xpc_user_pcs").select("pc_id").eq("user_id", uid ?? "");
-            console.error("[xpc.schedule.decide] RLS/UPDATE failure", {
-              auth_uid: uid,
-              session_email: session?.user?.email ?? null,
-              owned_pc_ids: (pcs ?? []).map(p => p.pc_id),
-              row_id: cur.id,
-              row_origin_pc: cur.originSquadronId,
-              row_current_pc: cur.currentPcId,
-              row_current_tier: cur.currentTier,
-              attempted_action: input.action,
-              attempted_by: input.by,
-              error_code: (error as { code?: string }).code,
-              error_message: error.message,
-              error_details: (error as { details?: string }).details,
-              error_hint: (error as { hint?: string }).hint,
-            });
-          } catch (diagErr) {
-            console.error("[xpc.schedule.decide] diagnostic itself failed", diagErr);
-          }
-          throw error;
-        }
+      if (isLanSessionLoginEnabled()) {
+        const data = await patchInternalXpcScheduleShare(cur.id, shareToRow(cur));
+        if (!data) throw new Error("Schedule update failed");
       } else {
         const all = readShares();
         const idx = all.findIndex(s => s.id === cur.id);
@@ -2137,12 +1724,9 @@ export function useDeleteScheduleShare() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { id: string }) => {
-      if (isLive()) {
-        const { error } = await supabase!
-          .from("xpc_schedule_shares")
-          .delete()
-          .eq("id", input.id);
-        if (error) throw error;
+      if (isLanSessionLoginEnabled()) {
+        const resp = await deleteInternalXpcScheduleShare(input.id);
+        if (!resp.ok) throw new Error(resp.error);
       } else {
         const all = readShares().filter(s => s.id !== input.id);
         writeShares(all);
@@ -2158,9 +1742,9 @@ export function useDismissScheduleShareForOriginator() {
   return useMutation({
     mutationFn: async (input: { id: string }) => {
       let cur: ScheduleShare;
-      if (isLive()) {
-        const { data, error } = await supabase!.from("xpc_schedule_shares").select("*").eq("id", input.id).single();
-        if (error) throw error;
+      if (isLanSessionLoginEnabled()) {
+        const data = await fetchInternalXpcScheduleShareById(input.id);
+        if (!data) throw new Error("Schedule not found");
         cur = rowToShare(data);
       } else {
         const all = readShares();
@@ -2169,10 +1753,9 @@ export function useDismissScheduleShareForOriginator() {
         cur = { ...found };
       }
       cur.originatorDismissedAt = nowIso();
-      if (isLive()) {
-        const { error } = await supabase!.from("xpc_schedule_shares")
-          .update(shareToRow(cur)).eq("id", cur.id);
-        if (error) throw error;
+      if (isLanSessionLoginEnabled()) {
+        const data = await patchInternalXpcScheduleShare(cur.id, shareToRow(cur));
+        if (!data) throw new Error("Schedule update failed");
       } else {
         const all = readShares();
         const idx = all.findIndex(s => s.id === cur.id);
@@ -2197,9 +1780,9 @@ export function useAcceptScheduleEdit() {
       bySeatLabel?: string;
     }) => {
       let cur: ScheduleShare;
-      if (isLive()) {
-        const { data, error } = await supabase!.from("xpc_schedule_shares").select("*").eq("id", input.id).single();
-        if (error) throw error;
+      if (isLanSessionLoginEnabled()) {
+        const data = await fetchInternalXpcScheduleShareById(input.id);
+        if (!data) throw new Error("Schedule not found");
         cur = rowToShare(data);
       } else {
         const all = readShares();
@@ -2228,10 +1811,9 @@ export function useAcceptScheduleEdit() {
         byRank: input.byRank,
         bySeatLabel: input.bySeatLabel,
       });
-      if (isLive()) {
-        const { error } = await supabase!.from("xpc_schedule_shares")
-          .update(shareToRow(cur)).eq("id", cur.id);
-        if (error) throw error;
+      if (isLanSessionLoginEnabled()) {
+        const data = await patchInternalXpcScheduleShare(cur.id, shareToRow(cur));
+        if (!data) throw new Error("Schedule update failed");
       } else {
         const all = readShares();
         const idx = all.findIndex(s => s.id === cur.id);
@@ -2400,22 +1982,15 @@ export function setMessageRetentionDays(days: number) {
 // browser session so the purge stays effectively maintenance-only at
 // scale; the local localStorage purge still runs on every call so the
 // PC's own UI doesn't keep stale entries around.
-let lastRemotePurgeAt = 0;
-const REMOTE_PURGE_INTERVAL_MS = 60 * 60 * 1000;
 export function purgeExpiredMessages(): void {
   try {
     const rows = readMessages();
     const kept = purgeExpiredLocal(rows);
     if (kept.length !== rows.length) writeMessages(kept);
   } catch { /* localStorage may be unavailable in SSR/tests */ }
-  if (isLive()) {
-    const now = Date.now();
-    if (now - lastRemotePurgeAt < REMOTE_PURGE_INTERVAL_MS) return;
-    lastRemotePurgeAt = now;
-    const days = getMessageRetentionDays();
-    const cutoff = new Date(now - days * 86_400_000).toISOString();
-    void supabase!.from("xpc_messages").delete().lt("sent_at", cutoff);
-  }
+  // LAN-only build: remote purge of xpc_messages is owned by the
+  // internal API service (server-side scheduled job). The throttled
+  // browser-side purge that used to run here is no longer needed.
 }
 
 function purgeExpiredLocal(rows: PrivateMessage[]): PrivateMessage[] {
@@ -2493,45 +2068,17 @@ export function useMessages(forPcId: string | null): {
           .filter(m => matchesMe(m.fromPcId) || matchesMe(m.toPcId))
           .sort((a, b) => b.sentAt.localeCompare(a.sentAt));
       };
-      if (isLive()) {
-        return await liveOrLocal(
-          async () => {
-            const days = getMessageRetentionDays();
-            const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
-            // Build an OR clause that covers strict id, peer-squadron
-            // mirror, and tier-prefix LIKE patterns. Supabase's PostgREST
-            // OR syntax requires comma-separated filters with no spaces.
-            const orParts: string[] = [
-              `from_pc_id.eq.${forPcId}`,
-              `to_pc_id.eq.${forPcId}`,
-            ];
-            if (peerSquadronId !== null) {
-              orParts.push(`from_pc_id.eq.${peerSquadronId}`, `to_pc_id.eq.${peerSquadronId}`);
-            }
-            if (logicalSeat !== null) {
-              orParts.push(
-                `from_pc_id.like.${logicalSeat}#*`,
-                `to_pc_id.like.${logicalSeat}#*`,
-                `from_pc_id.eq.${logicalSeat}`,
-                `to_pc_id.eq.${logicalSeat}`,
-              );
-            }
-            const { data, error } = await supabase!
-              .from("xpc_messages")
-              .select("*")
-              .or(orParts.join(","))
-              .gte("sent_at", cutoff)
-              .order("sent_at", { ascending: false });
-            if (error) throw error;
-            return (data ?? []).map(rowToMessage);
-          },
-          localFallback,
-        );
+      if (isLanSessionLoginEnabled()) {
+        const rows = await fetchInternalXpcMessages(forPcId, getMessageRetentionDays());
+        if (rows) {
+          return rows.map(rowToMessage);
+        }
+        return localFallback();
       }
       return localFallback();
     },
     refetchInterval: 15_000,
-    retry: isLive() ? 1 : false,
+    retry: false,
   });
   const all = q.data ?? [];
   return {
@@ -2553,16 +2100,9 @@ export function useSendMessage() {
         sentAt: nowIso(),
         inHistory: false,
       };
-      if (isLive()) {
-        // RLS gate: every xpc_messages.insert requires from_pc_id to
-        // appear in xpc_my_pc_ids() for the signed-in user. Without
-        // this defensive claim, a heartbeat that hasn't yet completed
-        // its first upsert will yield code 42501 ("row violates
-        // row-level security policy for table xpc_messages") on the
-        // very first send.
-        await ensureMyPcClaim(msg.fromPcId);
-        const { error } = await supabase!.from("xpc_messages").insert(messageToRow(msg));
-        if (error) throw error;
+      if (isLanSessionLoginEnabled()) {
+        const resp = await postInternalXpcMessage(messageToRow(msg));
+        if (!resp.ok) throw new Error(resp.error);
       } else {
         const all = readMessages();
         all.push(msg);
@@ -2584,11 +2124,8 @@ export function useMarkMessageRead() {
   return useMutation({
     mutationFn: async (input: { id: string }) => {
       const readAt = nowIso();
-      if (isLive()) {
-        const { data, error } = await supabase!.from("xpc_messages")
-          .update({ read_at: readAt, in_history: true })
-          .eq("id", input.id).select().single();
-        if (error) throw error;
+      if (isLanSessionLoginEnabled()) {
+        const data = await postInternalXpcMessageRead(input.id);
         return data ? rowToMessage(data) : null;
       }
       const all = readMessages();
@@ -2659,7 +2196,7 @@ export async function publishSquadronSnapshot(
   squadronId: string,
   payload: SquadronSnapshotPayload,
 ): Promise<void> {
-  if (!isLive() || !supabase || !squadronId) return;
+  if (!squadronId) return;
   // Only the canonical Ops PC for this squadron is allowed to publish.
   const myId = getLocalPcId();
   if (myId !== squadronId) return;
@@ -2669,44 +2206,46 @@ export async function publishSquadronSnapshot(
     snapshot_at: nowIso(),
     payload: payload as unknown as Record<string, unknown>,
   };
-  const { error } = await supabase
-    .from("xpc_squadron_snapshot")
-    .upsert(row, { onConflict: "squadron_id" });
-  if (error) {
-    // Silent — re-runs on the next tick.
-    void recordAuditEvent({
-      type: "xpc.squadron.snapshot.publish.error",
-      actor: squadronId,
-      detail: { message: error.message },
-    });
+  if (isLanSessionLoginEnabled()) {
+    const resp = await postInternalXpcSnapshot(row);
+    if (!resp.ok) {
+      void recordAuditEvent({
+        type: "xpc.squadron.snapshot.publish.error",
+        actor: squadronId,
+        detail: { message: resp.error },
+      });
+    }
+    return;
   }
+  // LAN-only build: no remote snapshot table — the local mirror via
+  // the internal API is the only data plane.
 }
 
 export function useSquadronSnapshot(
   squadronId: string | null | undefined,
 ): UseQueryResult<SquadronSnapshotRow | null> & { data: SquadronSnapshotRow | null } {
-  const enabled = isLive() && !!squadronId;
+  const enabled = isLanSessionLoginEnabled() && !!squadronId;
   const q = useQuery<SquadronSnapshotRow | null>({
     queryKey: ["xpc", "squadron-snapshot", squadronId ?? "_"],
     queryFn: async () => {
-      if (!isLive() || !supabase || !squadronId) return null;
-      const { data, error } = await supabase
-        .from("xpc_squadron_snapshot")
-        .select("squadron_id, ops_pc_id, snapshot_at, payload")
-        .eq("squadron_id", squadronId)
-        .maybeSingle();
-      if (error || !data) return null;
-      return {
-        squadronId: String(data.squadron_id),
-        opsPcId: String(data.ops_pc_id),
-        snapshotAt: String(data.snapshot_at),
-        payload: (data.payload ?? { roster: [], unavailable: [], counts: { pilots: 0, unavailToday: 0, expired: 0, expiringSoon: 0 } }) as SquadronSnapshotPayload,
-      };
+      if (!squadronId) return null;
+      if (isLanSessionLoginEnabled()) {
+        const items = await fetchInternalXpcSnapshots({ squadronId });
+        if (!items || items.length === 0) return null;
+        const data = items[0];
+        return {
+          squadronId: String(data.squadron_id ?? ""),
+          opsPcId: String(data.ops_pc_id ?? ""),
+          snapshotAt: String(data.snapshot_at ?? ""),
+          payload: (data.payload ?? { roster: [], unavailable: [], counts: { pilots: 0, unavailToday: 0, expired: 0, expiringSoon: 0 } }) as SquadronSnapshotPayload,
+        };
+      }
+      return null;
     },
     enabled,
     staleTime: 30_000,
     refetchInterval: enabled ? 60_000 : false,
-    retry: isLive() ? 1 : false,
+    retry: false,
   });
   return { ...q, data: q.data ?? null } as UseQueryResult<SquadronSnapshotRow | null> & { data: SquadronSnapshotRow | null };
 }
@@ -2758,56 +2297,53 @@ export function useCommanderSnapshotProbe(opts: {
   const regQ = useQuery<number>({
     queryKey: ["xpc", "commander-empty", "registry-count"],
     queryFn: async () => {
-      if (!isLive() || !supabase) {
-        // Fall back to the localStorage mirror so the demo / offline
-        // preview shows a sensible answer rather than always
-        // "no_registry".
-        try {
-          const rows = readRegistry();
-          return rows.filter(r => r.tier === "squadron").length;
-        } catch {
-          return 0;
-        }
+      if (isLanSessionLoginEnabled()) {
+        const rows = await fetchInternalXpcRegistryRows({ includeStale: true, staleHours: 24 });
+        if (!rows) return 0;
+        return rows.filter((r) => String(r.tier ?? "") === "squadron").length;
       }
-      const { count, error } = await supabase
-        .from("xpc_registry")
-        .select("id", { count: "exact", head: true })
-        .eq("tier", "squadron");
-      if (error) return 0;
-      return count ?? 0;
+      // Fall back to the localStorage mirror so the demo / offline
+      // preview shows a sensible answer rather than always
+      // "no_registry".
+      try {
+        const rows = readRegistry();
+        return rows.filter(r => r.tier === "squadron").length;
+      } catch {
+        return 0;
+      }
     },
     enabled,
     staleTime: 30_000,
     refetchInterval: enabled ? 60_000 : false,
-    retry: isLive() ? 1 : false,
+    retry: false,
   });
 
   const snapQ = useQuery<CommanderSnapshotProbe["snapshots"]>({
     queryKey: ["xpc", "commander-empty", "snapshots"],
     queryFn: async () => {
-      if (!isLive() || !supabase) return [];
-      const { data, error } = await supabase
-        .from("xpc_squadron_snapshot")
-        .select("squadron_id, snapshot_at, payload");
-      if (error || !Array.isArray(data)) return [];
-      return data.map(row => {
-        const r = row as {
-          squadron_id: unknown;
-          snapshot_at: unknown;
-          payload?: { counts?: { pilots?: unknown } } | null;
-        };
-        const pilots = Number(r.payload?.counts?.pilots ?? 0);
-        return {
-          squadronId: String(r.squadron_id ?? ""),
-          snapshotAt: String(r.snapshot_at ?? ""),
-          pilotCount: Number.isFinite(pilots) ? pilots : 0,
-        };
-      });
+      if (isLanSessionLoginEnabled()) {
+        const data = await fetchInternalXpcSnapshots();
+        if (!Array.isArray(data)) return [];
+        return data.map((row) => {
+          const r = row as {
+            squadron_id: unknown;
+            snapshot_at: unknown;
+            payload?: { counts?: { pilots?: unknown } } | null;
+          };
+          const pilots = Number(r.payload?.counts?.pilots ?? 0);
+          return {
+            squadronId: String(r.squadron_id ?? ""),
+            snapshotAt: String(r.snapshot_at ?? ""),
+            pilotCount: Number.isFinite(pilots) ? pilots : 0,
+          };
+        });
+      }
+      return [];
     },
     enabled,
     staleTime: 30_000,
     refetchInterval: enabled ? 60_000 : false,
-    retry: isLive() ? 1 : false,
+    retry: false,
   });
 
   return {
@@ -2833,39 +2369,39 @@ export function useCommanderSnapshotProbe(opts: {
 export function useAllSquadronSnapshots(opts: {
   enabled: boolean;
 }): UseQueryResult<SquadronSnapshotRow[]> & { data: SquadronSnapshotRow[] } {
-  const enabled = !!opts.enabled && isLive();
+  const enabled = !!opts.enabled && isLanSessionLoginEnabled();
   const q = useQuery<SquadronSnapshotRow[]>({
     queryKey: ["xpc", "squadron-snapshot", "all"],
     queryFn: async () => {
-      if (!isLive() || !supabase) return [];
-      const { data, error } = await supabase
-        .from("xpc_squadron_snapshot")
-        .select("squadron_id, ops_pc_id, snapshot_at, payload");
-      if (error || !Array.isArray(data)) return [];
-      return data.map(row => {
-        const r = row as {
-          squadron_id: unknown;
-          ops_pc_id: unknown;
-          snapshot_at: unknown;
-          payload?: Record<string, unknown> | null;
-        };
-        const payload = (r.payload ?? {
-          roster: [],
-          unavailable: [],
-          counts: { pilots: 0, unavailToday: 0, expired: 0, expiringSoon: 0 },
-        }) as unknown as SquadronSnapshotPayload;
-        return {
-          squadronId: String(r.squadron_id ?? ""),
-          opsPcId: String(r.ops_pc_id ?? ""),
-          snapshotAt: String(r.snapshot_at ?? ""),
-          payload,
-        } as SquadronSnapshotRow;
-      });
+      if (isLanSessionLoginEnabled()) {
+        const data = await fetchInternalXpcSnapshots();
+        if (!Array.isArray(data)) return [];
+        return data.map(row => {
+          const r = row as {
+            squadron_id: unknown;
+            ops_pc_id: unknown;
+            snapshot_at: unknown;
+            payload?: Record<string, unknown> | null;
+          };
+          const payload = (r.payload ?? {
+            roster: [],
+            unavailable: [],
+            counts: { pilots: 0, unavailToday: 0, expired: 0, expiringSoon: 0 },
+          }) as unknown as SquadronSnapshotPayload;
+          return {
+            squadronId: String(r.squadron_id ?? ""),
+            opsPcId: String(r.ops_pc_id ?? ""),
+            snapshotAt: String(r.snapshot_at ?? ""),
+            payload,
+          } as SquadronSnapshotRow;
+        });
+      }
+      return [];
     },
     enabled,
     staleTime: 30_000,
     refetchInterval: enabled ? 60_000 : false,
-    retry: isLive() ? 1 : false,
+    retry: false,
   });
   return { ...q, data: q.data ?? [] } as UseQueryResult<SquadronSnapshotRow[]> & { data: SquadronSnapshotRow[] };
 }
@@ -2953,24 +2489,17 @@ export async function wipeAllRegisteredPCs(
   writeRegistry(opts.includeSelf ? [] : localBefore.filter(r => r.id === myPcId));
 
   let removedCentral = 0;
-  if (isLive() && supabase) {
-    try {
-      let q = supabase.from("xpc_registry").delete().select("id");
-      if (!opts.includeSelf && myPcId) q = q.neq("id", myPcId);
-      const { data, error } = await q;
-      if (error) errors.push(`xpc_registry: ${error.message}`);
-      else removedCentral = (data as Array<{ id: string }> | null)?.length ?? 0;
-    } catch (e) {
-      errors.push(`xpc_registry threw: ${(e as Error)?.message ?? String(e)}`);
+  if (isLanSessionLoginEnabled()) {
+    const resp = await deleteInternalXpcRegistryRows({
+      includeSelf: !!opts.includeSelf,
+      keepPcId: !opts.includeSelf ? myPcId : null,
+    });
+    if (!resp.ok) {
+      errors.push(`xpc_registry: ${resp.error}`);
+    } else {
+      removedCentral = Number(resp.removedRegistry ?? 0);
     }
-    try {
-      let q = supabase.from("xpc_user_pcs").delete().select("pc_id");
-      if (!opts.includeSelf && myPcId) q = q.neq("pc_id", myPcId);
-      const { error } = await q;
-      if (error) errors.push(`xpc_user_pcs: ${error.message}`);
-    } catch (e) {
-      errors.push(`xpc_user_pcs threw: ${(e as Error)?.message ?? String(e)}`);
-    }
+    return { removedLocal, removedCentral, errors };
   }
   return { removedLocal, removedCentral, errors };
 }

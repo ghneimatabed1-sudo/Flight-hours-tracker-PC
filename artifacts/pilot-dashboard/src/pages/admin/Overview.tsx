@@ -1,28 +1,56 @@
 import { useI18n } from "@/lib/i18n";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plane, Users, AlertTriangle, KeyRound, Printer } from "lucide-react";
-import { pilots, licenseKeys } from "@/lib/mockData";
+import { Plane, Users, AlertTriangle, Printer } from "lucide-react";
 import { useSquadrons } from "@/lib/squadron-store";
-import { pilotWorstStatus } from "@/lib/format";
+import { currencyStatus, pilotWorstStatus } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { FrozenAccessPanel } from "@/components/FrozenAccessPanel";
 import { useAuth } from "@/lib/auth";
+import { useQuery } from "@tanstack/react-query";
+import { pilots as mockPilots } from "@/lib/mockData";
+import { fetchInternalPilotTableRows } from "@/lib/internal-migration";
+import { worstStatusFromPilotData } from "@/lib/admin-overview-pilot-stats";
+
+type AdminPilotStat = {
+  squadronId: string;
+  status: ReturnType<typeof currencyStatus> | ReturnType<typeof pilotWorstStatus>;
+};
 
 export default function AdminOverview() {
   const { t, lang } = useI18n();
   const { user } = useAuth();
   const squadrons = useSquadrons();
+  const pilotStatsQ = useQuery<AdminPilotStat[]>({
+    queryKey: ["admin_overview_pilot_stats"],
+    queryFn: async () => {
+      // LAN-only: pilot stats come from the internal API. The previous
+      // Supabase fall-through has been removed; if the LAN API is
+      // unreachable we fall back to the bundled mock pilots so the
+      // overview page still renders.
+      const rows = await fetchInternalPilotTableRows();
+      if (rows) {
+        return rows.map((row) => ({
+          squadronId: String(row.squadron_id ?? ""),
+          status: worstStatusFromPilotData((row.data ?? {}) as Record<string, unknown>),
+        }));
+      }
+      return mockPilots.map((p) => ({
+        squadronId: p.squadronId,
+        status: pilotWorstStatus(p),
+      }));
+    },
+    initialData: [],
+  });
+  const pilotStats = pilotStatsQ.data ?? [];
   const enabledSquadrons = squadrons.filter(s => s.enabled);
-  const expired = pilots.filter(p => { const s = pilotWorstStatus(p); return s === "expired" || s === "critical"; }).length;
-  const warning = pilots.filter(p => { const s = pilotWorstStatus(p); return s === "warning" || s === "expiringSoon"; }).length;
-  const activeKeys = licenseKeys.filter(k => k.status !== "revoked").length;
+  const expired = pilotStats.filter(p => p.status === "expired" || p.status === "critical").length;
+  const warning = pilotStats.filter(p => p.status === "warning" || p.status === "expiringSoon").length;
 
   const stats = [
     { icon: <Plane className="h-5 w-5" />, label: t("totalSquadrons"), value: `${enabledSquadrons.length}/${squadrons.length}` },
-    { icon: <Users className="h-5 w-5" />, label: t("totalPilots"), value: pilots.length },
+    { icon: <Users className="h-5 w-5" />, label: t("totalPilots"), value: pilotStats.length },
     { icon: <AlertTriangle className="h-5 w-5 text-red-500" />, label: t("expiredCurrencies"), value: expired },
-    { icon: <KeyRound className="h-5 w-5" />, label: t("licenseKeys"), value: `${activeKeys}/${licenseKeys.length}` },
   ];
 
   return (
@@ -68,9 +96,9 @@ export default function AdminOverview() {
               </thead>
               <tbody>
                 {squadrons.map(s => {
-                  const sp = pilots.filter(p => p.squadronId === s.id);
-                  const e = sp.filter(p => { const s = pilotWorstStatus(p); return s === "expired" || s === "critical"; }).length;
-                  const w = sp.filter(p => { const s = pilotWorstStatus(p); return s === "warning" || s === "expiringSoon"; }).length;
+                  const sp = pilotStats.filter(p => p.squadronId === s.id);
+                  const e = sp.filter(p => p.status === "expired" || p.status === "critical").length;
+                  const w = sp.filter(p => p.status === "warning" || p.status === "expiringSoon").length;
                   return (
                     <tr key={s.id} className="border-b border-border/60 hover:bg-accent/40" data-testid={`row-sqn-${s.id}`}>
                       <td className="py-2 px-2 font-medium">{lang === "ar" ? s.nameAr : s.name}</td>

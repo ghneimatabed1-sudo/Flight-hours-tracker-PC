@@ -1,18 +1,25 @@
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import DateInput from "@/components/DateInput";
 import MultiSegmentField, { splitQualificationSegments, joinQualificationSegments } from "@/components/MultiSegmentField";
 import { RJAF_RANKS, lookupRankEn } from "@/lib/ranks";
 import { Card, PageHead } from "@/components/Layout";
 import { useI18n } from "@/lib/i18n";
-import { usePilots, useUpdatePilot, useCreatePilot, useDeletePilot, useTransferPilot, type Pilot } from "@/lib/squadron-data";
+import {
+  useAllLinkedDevices,
+  usePilots,
+  useUpdatePilot,
+  useCreatePilot,
+  useDeletePilot,
+  useTransferPilot,
+  type Pilot,
+} from "@/lib/squadron-data";
 import { useDashSquadrons } from "@/lib/dash-pilots";
 import { useAuth } from "@/lib/auth";
 import { canTransferPilot, transferDestinationCandidates } from "@/lib/pilot-transfer-policy";
 import { EMPTY_INITIAL_HOURS, sumInitialHours, type InitialHours } from "@/lib/mock";
 import { getCurrencyWindow } from "@/lib/currency-settings";
-import { supabase, supabaseConfigured, recordAuditEvent } from "@/lib/supabase";
+import { recordAuditEvent } from "@/lib/lan-legacy-shims";
 import { fmtDateTimeDDMM } from "@/lib/format";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Plus, Search, Pencil, Trash2, X, Loader2, FileDown, ArrowRightLeft } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -32,51 +39,22 @@ interface PairRow {
   linked_at: string | null;
 }
 function usePilotPairing() {
-  const qc = useQueryClient();
-  const enabled = supabaseConfigured && !!supabase;
-  const q = useQuery<Map<string, PairRow>>({
-    queryKey: ["pilot-pairing"],
-    enabled,
-    // 30-second polling fallback so a flaky realtime channel never
-    // leaves a paired phone showing gray for long.
-    refetchInterval: 30_000,
-    queryFn: async () => {
-      if (!supabase) return new Map();
-      const { data, error } = await supabase
-        .from("pilot_devices")
-        .select("pilot_id, linked_at")
-        .is("revoked_at", null);
-      if (error || !Array.isArray(data)) return new Map();
-      const m = new Map<string, PairRow>();
-      for (const r of data as PairRow[]) {
-        // Keep the most recent pairing per pilot (a pilot may have
-        // re-paired multiple devices over time).
-        const prev = m.get(r.pilot_id);
-        if (!prev || (r.linked_at ?? "") > (prev.linked_at ?? "")) {
-          m.set(r.pilot_id, r);
-        }
+  const devicesQ = useAllLinkedDevices();
+  const data = useMemo(() => {
+    const m = new Map<string, PairRow>();
+    for (const r of devicesQ.data ?? []) {
+      const row: PairRow = {
+        pilot_id: String(r.pilotId ?? ""),
+        linked_at: r.linkedAt ?? null,
+      };
+      const prev = m.get(row.pilot_id);
+      if (!prev || (row.linked_at ?? "") > (prev.linked_at ?? "")) {
+        m.set(row.pilot_id, row);
       }
-      return m;
-    },
-  });
-
-  // Realtime subscription — refresh the cache whenever a pilot_devices
-  // row is inserted, updated (e.g. revoked), or deleted. Cleaned up on
-  // unmount so we never leave a zombie channel behind.
-  useEffect(() => {
-    if (!enabled || !supabase) return;
-    const channel = supabase
-      .channel("roster-pilot-devices")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "pilot_devices" },
-        () => { qc.invalidateQueries({ queryKey: ["pilot-pairing"] }); },
-      )
-      .subscribe();
-    return () => { if (supabase) void supabase.removeChannel(channel); };
-  }, [enabled, qc]);
-
-  return q;
+    }
+    return m;
+  }, [devicesQ.data]);
+  return { ...devicesQ, data };
 }
 function pairDotInfo(row: PairRow | undefined):
   { color: string; label: string; tooltip: string } {

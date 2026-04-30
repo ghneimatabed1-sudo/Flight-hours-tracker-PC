@@ -7,7 +7,7 @@ import {
   usePilots, useSorties, useNotams, useDutyWeek, useLeaves,
   useSchedule, useAuditLog, useReminderOverview,
 } from "@/lib/squadron-data";
-import { supabaseConfigured } from "@/lib/supabase";
+import { supabaseConfigured } from "@/lib/lan-legacy-shims";
 import { FileDown, FileText, Loader2, Globe, AlertTriangle, Info, Eye, X } from "lucide-react";
 import {
   exportAuthorizationReport,

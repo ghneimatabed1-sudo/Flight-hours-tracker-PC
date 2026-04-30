@@ -14,7 +14,7 @@ import { useLocation, Link } from "wouter";
 import {
   setupSuperAdmin, checkSuperAdminSetupAllowed, unitJoinConfigured,
 } from "../lib/unit-join";
-import { supabase } from "../lib/supabase";
+import { isLanSessionLoginEnabled } from "../lib/internal-migration";
 
 export default function SuperAdminSetup() {
   const [, navigate] = useLocation();
@@ -59,19 +59,32 @@ export default function SuperAdminSetup() {
       setErr(msg);
       return;
     }
-    if (!supabase) { setBusy(false); setErr("Created, but cloud sign-in isn't available."); return; }
-    const { error: signInErr } = await supabase.auth.signInWithPassword({ email: em, password });
+    // LAN-only: cloud sign-in is not available in the LAN build.
+    // Operators created via setupSuperAdmin must sign in through the LAN
+    // login page (which talks to the internal API), not the cloud SDK.
     setBusy(false);
-    if (signInErr) {
-      setErr(`Created, but sign-in failed: ${signInErr.message}. Try /login.`);
-      return;
-    }
-    window.location.hash = "/";
-    window.location.reload();
+    setErr("Created. Please sign in via /login to continue.");
+    window.location.hash = "/login";
   };
 
   if (allowed === null) {
     return <div className="min-h-screen bg-slate-950 text-slate-100 grid place-items-center text-sm text-slate-400">Checking…</div>;
+  }
+  if (isLanSessionLoginEnabled()) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 grid place-items-center p-6">
+        <div className="w-full max-w-md space-y-4 rounded-xl border border-sky-700/40 bg-sky-900/20 p-6 text-center">
+          <h1 className="text-lg font-semibold">LAN session mode active</h1>
+          <p className="text-sm text-sky-100/90">
+            Cloud super-admin bootstrap is disabled in LAN mode. Use LAN login
+            with an existing LAN account from your internal server.
+          </p>
+          <Link href="/login" className="inline-block rounded-md border border-sky-400/40 px-3 py-2 text-sm text-sky-50 hover:bg-sky-800/40">
+            Go to LAN login
+          </Link>
+        </div>
+      </div>
+    );
   }
   if (!allowed) {
     return (

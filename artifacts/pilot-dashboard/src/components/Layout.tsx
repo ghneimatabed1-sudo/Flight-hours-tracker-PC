@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useEffect, useState, type HTMLAttributes } from "react";
 import { Link, useLocation } from "wouter";
 import { useI18n, type Key as TKey } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
@@ -256,6 +256,18 @@ export default function Layout({ children }: { children: ReactNode }) {
           <button onClick={() => setOpen(o => !o)} className="p-2 rounded hover:bg-sidebar-accent" title="Toggle">
             <Menu className="h-4 w-4" />
           </button>
+          <button
+            onClick={logout}
+            aria-label={t("logout")}
+            className={`rounded hover:bg-sidebar-accent ${
+              open ? "px-2 py-1.5 inline-flex items-center gap-2 text-xs border border-sidebar-border" : "p-2"
+            }`}
+            title={t("logout")}
+            data-testid="button-sidebar-logout"
+          >
+            <LogOut className="h-4 w-4" />
+            {open && <span>{t("logout")}</span>}
+          </button>
           {open && <span className="text-[10px] text-muted-foreground">v1.0.0</span>}
         </div>
       </aside>
@@ -298,6 +310,15 @@ export default function Layout({ children }: { children: ReactNode }) {
               data-print-hide
             >
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
+            <button
+              onClick={logout}
+              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-border hover:bg-secondary"
+              title={t("logout")}
+              data-testid="button-topbar-logout"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              {t("logout")}
             </button>
             <div className="hidden md:flex items-center gap-2 ml-2 pl-3 border-l border-border">
               <div className="text-right rtl:text-left leading-tight" data-testid="text-signed-in-as">
@@ -342,6 +363,14 @@ export function PageHead({ title, subtitle, actions }: { title: string; subtitle
   );
 }
 
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <div className={`panel p-4 ${className}`}>{children}</div>;
+export function Card({
+  children,
+  className = "",
+  ...rest
+}: { children: ReactNode; className?: string } & HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={`panel p-4 ${className}`} {...rest}>
+      {children}
+    </div>
+  );
 }

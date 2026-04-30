@@ -1,10 +1,5 @@
 # Building the Hawk Eye Windows .exe Installer
 
-> For the production release process (iron rules, GitHub Actions secrets,
-> v1.1.124 release artifact, electron-updater behaviour, rollback policy)
-> see `HANDOFF.md` §12 at the repo root. This file is the deep dive on the
-> electron-builder configuration itself.
-
 This document explains how to package the Hawk Eye React app into a real
 Windows `.exe` installer (NSIS) with a master install password and silent
 auto-update support.

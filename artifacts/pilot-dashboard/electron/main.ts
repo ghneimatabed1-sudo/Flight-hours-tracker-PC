@@ -21,6 +21,13 @@ import * as os from "os";
 import * as crypto from "crypto";
 
 const isDev = !app.isPackaged;
+// LAN migration safety: disable automatic updater polling by default so
+// local/private builds are not silently replaced by a cloud release track.
+// Operators can still enable update checks explicitly by setting this env
+// var before launching the app process.
+const startupAutoUpdateEnabled =
+  String(process.env.RJAF_ENABLE_AUTO_UPDATE ?? "").trim().toLowerCase() === "1"
+  || String(process.env.RJAF_ENABLE_AUTO_UPDATE ?? "").trim().toLowerCase() === "true";
 
 // Mutable global controlled by the renderer's per-role auto-update toggle
 // (Settings → Auto-Update). Defaults ON to preserve historical behaviour
@@ -247,7 +254,7 @@ app.whenReady().then(() => {
     autoUpdater.on("update-downloaded", (info) => send("rjaf:update", { kind: "downloaded", version: info.version }));
     autoUpdater.on("error", (err) => send("rjaf:update", { kind: "error", message: err?.message ?? String(err) }));
 
-    if (autoUpdateEnabled) {
+    if (autoUpdateEnabled && startupAutoUpdateEnabled) {
       autoUpdater.checkForUpdatesAndNotify().catch((err: Error) => {
         // eslint-disable-next-line no-console
         console.warn("Update check failed:", err.message);

@@ -34,6 +34,7 @@ import { UndoToast } from "@/components/UndoToast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { I18nProvider } from "@/lib/i18n";
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { isLanSessionLoginEnabled } from "@/lib/internal-migration";
 import { useIdleTimeout } from "@/lib/use-idle-timeout";
 import Layout from "@/components/Layout";
 import OpeningAnimation from "@/components/OpeningAnimation";
@@ -45,7 +46,7 @@ import WaitingForApproval from "@/pages/WaitingForApproval";
 import SuperAdminSetup from "@/pages/SuperAdminSetup";
 import PendingDevices from "@/pages/admin/PendingDevices";
 import DevicesUsers from "@/pages/admin/DevicesUsers";
-import { getPendingRequest } from "@/lib/unit-join";
+import { clearPendingRequest, getPendingRequest } from "@/lib/unit-join";
 import Dashboard from "@/pages/Dashboard";
 import SortieLog from "@/pages/SortieLog";
 import AddSortie from "@/pages/AddSortie";
@@ -265,6 +266,13 @@ function Shell() {
   // user is already mid-request we route them straight back to the
   // waiting screen so they don't lose progress on tab reopen.
   if (!user) {
+    // LAN session mode is a hard fork away from cloud join/bootstrap.
+    // Even if stale join-pending keys exist from an older cloud run, do
+    // not route to join/waiting — clear and force the LAN login gate.
+    if (isLanSessionLoginEnabled()) {
+      if (getPendingRequest()) clearPendingRequest();
+      return <LoginGate />;
+    }
     if (location.startsWith("/join/setup")) return <JoinSetup />;
     if (location.startsWith("/join/waiting")) return <WaitingForApproval />;
     if (location.startsWith("/setup/super-admin")) return <SuperAdminSetup />;
@@ -281,7 +289,8 @@ function Shell() {
   }
 
   // Squadron Ops users still require local license + squadron config.
-  if (!licensed || !configured) return <LoginGate />;
+  if (!configured) return <LoginGate />;
+  if (!isLanSessionLoginEnabled() && !licensed) return <LoginGate />;
 
   return (
     <Layout>

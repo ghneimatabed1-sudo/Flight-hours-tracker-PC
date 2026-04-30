@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import DateInput from "@/components/DateInput";
 import { Card, PageHead } from "@/components/Layout";
 import { useAuth } from "@/lib/auth";
 import { seatLabelFromRoleScope, composeIdentityLabel } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
+import { preferredSchedulePilotName } from "@/lib/schedule-names";
+import { fetchInternalPilotOptions } from "@/lib/internal-migration";
 import {
   useScheduleShares,
   useSubmitSchedule,
@@ -117,7 +119,6 @@ const blankRow = (): ScheduleRow => ({
 
 export default function ScheduleChain() {
   const { user, squadron } = useAuth();
-  const { rankOf } = useI18n();
   const { toast } = useToast();
   const allowed = canUseScheduleChain(user?.role, user?.scope);
   // v1.0.45: "flight" is now a first-class schedule-chain tier so a
@@ -162,20 +163,26 @@ export default function ScheduleChain() {
   const dismissMine = useDismissScheduleShareForOriginator();
   const deleteShare = useDeleteScheduleShare();
   const pilotsQ = usePilots();
-  // v1.1.35: pilot/co-pilot autofill in the schedule composer defaults
-  // to the short Flight Name when the pilot has one set on the roster
-  // (operators write schedules with call-sign-style names like "Falcon
-  // 1", not the full English name). Fallback to "Rank Full Name" for
-  // pilots whose Flight Name field is empty so nothing breaks.
-  // The saved value is unchanged (still the full English name) so
-  // existing schedule rows and downstream lookups are untouched.
+  // Schedule composer stores pilot/co-pilot as the roster Flight Name
+  // (or call-sign/id fallback), never the full pilot name.
   const pilotOptions = useMemo(
     () => pilotsQ.data.map(p => ({
-      value: p.name,
-      label: p.flightName?.trim() || `${rankOf(p)} ${p.name}`,
+      value: preferredSchedulePilotName(p),
+      label: preferredSchedulePilotName(p),
     })),
     [pilotsQ.data],
   );
+  const [internalPilotOptions, setInternalPilotOptions] = useState<Array<{ value: string; label: string }>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchInternalPilotOptions().then((rows) => {
+      if (cancelled) return;
+      if (rows.length === 0) return;
+      setInternalPilotOptions(rows.map((r) => ({ value: r.scheduleName, label: r.scheduleName })));
+    });
+    return () => { cancelled = true; };
+  }, []);
+  const effectivePilotOptions = internalPilotOptions.length > 0 ? internalPilotOptions : pilotOptions;
 
   const [draftRows, setDraftRows] = useState<ScheduleRow[]>([blankRow()]);
   const [draftDate, setDraftDate] = useState(new Date().toISOString().slice(0, 10));
@@ -817,7 +824,7 @@ export default function ScheduleChain() {
                           onChange={editBuffer[share.id]
                             ? (next) => setEditBuffer(b => ({ ...b, [share.id]: next }))
                             : undefined}
-                          pilotOptions={pilotOptions}
+                          pilotOptions={effectivePilotOptions}
                           statusLabel={editBuffer[share.id] ? "EDITING" : share.status.toUpperCase()}
                           approvedAt={share.approvedAt}
                           approvedBy={share.approvedBy}
@@ -1259,7 +1266,7 @@ export default function ScheduleChain() {
                 {share.program ? (
                   <FlightScheduleSheet
                     prog={share.editedProgram ?? share.program}
-                    pilotOptions={pilotOptions}
+                    pilotOptions={effectivePilotOptions}
                     statusLabel={share.editedProgram ? "EDIT PROPOSED" : share.status.toUpperCase()}
                     approvedAt={share.approvedAt}
                     approvedBy={share.approvedBy}

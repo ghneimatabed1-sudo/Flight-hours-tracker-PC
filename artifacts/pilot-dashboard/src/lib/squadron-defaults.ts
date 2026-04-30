@@ -22,6 +22,8 @@
  * the per-period saved inputs in monthly-report.ts.
  */
 
+import { fetchInternalSquadronDefaultsRow } from "@/lib/internal-migration";
+
 const KEY_PREFIX = "rjaf.monthlyReport.defaults.";
 
 /** Default lecture topics taught every month at the squadron level. */
@@ -174,66 +176,82 @@ export function loadSquadronDefaults(squadronNumber: string | undefined): Squadr
  * and overlay them onto the local cache so any sibling PC for the
  * same squadron picks up the wizard's output without re-running it.
  *
- * Returns true when a populated row was found and merged in (caller
- * uses this to auto-mark the Setup Wizard "complete" so the gate
- * doesn't redirect existing installs). Returns false when the
- * Supabase client is offline / the row is absent / the row has no
- * aircraft configured yet — i.e. the wizard is still required.
+ * **Internal migration:** when `VITE_INTERNAL_API_URL` (or the dev Vite
+ * proxy) is active, reads the same columns from the LAN `api-server` first;
+ * if that returns no row, falls back to Supabase.
+ *
+ * Returns true when a squadron row was found and merged into local
+ * storage (caller uses this to auto-mark the Setup Wizard "complete"
+ * when identity fields exist, even if `default_aircraft` is still empty).
+ * Returns false when both internal and Supabase paths are unavailable
+ * or no matching squadron row exists.
  */
+/**
+ * Merges a `squadrons` defaults row (Supabase or internal API) into the
+ * in-memory defaults object. Exported for unit tests.
+ */
+export function mergeSquadronsRemoteRowIntoDefaults(
+  cur: SquadronDefaults,
+  data: {
+    base: string | null | undefined;
+    wing: string | null | undefined;
+    default_aircraft: unknown;
+    default_monthly_targets: unknown;
+  },
+): SquadronDefaults {
+  const ac = Array.isArray(data.default_aircraft) ? data.default_aircraft : [];
+  if (ac.length === 0) {
+    // Row exists but no aircraft configured yet — upgraded install
+    // pre-dating migration 0039. Seed identity fields only.
+    return {
+      ...cur,
+      airbase: (data.base as string | null) ?? cur.airbase,
+      base: (data.base as string | null) ?? cur.base,
+      wing: (data.wing as string | null) ?? cur.wing,
+    };
+  }
+  const burn: Record<string, number> = { ...cur.fuelBurnByAirframe };
+  const airframes: string[] = [];
+  for (const row of ac as Array<{ model?: string; fuelBurn?: number }>) {
+    const m = (row?.model || "").trim();
+    if (!m) continue;
+    airframes.push(m);
+    if (typeof row.fuelBurn === "number") burn[m] = row.fuelBurn;
+  }
+  const targets =
+    data.default_monthly_targets && typeof data.default_monthly_targets === "object"
+      ? (data.default_monthly_targets as Record<string, number>)
+      : {};
+  const monthly = Object.values(targets).find(v => typeof v === "number" && v > 0);
+  return {
+    ...cur,
+    airbase: (data.base as string | null) ?? cur.airbase,
+    base: (data.base as string | null) ?? cur.base,
+    wing: (data.wing as string | null) ?? cur.wing,
+    airframes: airframes.length ? airframes : cur.airframes,
+    primaryAirframe: airframes[0] || cur.primaryAirframe,
+    fuelBurnByAirframe: burn,
+    minSixMonthHours: monthly ? monthly * 6 : cur.minSixMonthHours,
+  };
+}
+
 export async function hydrateSquadronDefaultsFromDb(
   squadronNumber: string | undefined,
 ): Promise<boolean> {
   if (!squadronNumber) return false;
   try {
-    const { supabase, supabaseConfigured } = await import("@/lib/supabase");
-    if (!supabaseConfigured || !supabase) return false;
-    const { data, error } = await supabase
-      .from("squadrons")
-      .select("number, name, base, wing, default_aircraft, default_monthly_targets")
-      .eq("number", squadronNumber)
-      .maybeSingle();
-    if (error || !data) return false;
-    const ac = Array.isArray(data.default_aircraft) ? data.default_aircraft : [];
-    const cur = loadSquadronDefaults(squadronNumber);
-    if (ac.length === 0) {
-      // Row exists but no aircraft configured yet — this is an
-      // upgraded install pre-dating migration 0039. Seed identity
-      // fields onto the local cache and report success so the
-      // SetupGate marks the wizard complete (existing PCs are never
-      // force-redirected). The operator can still navigate to
-      // Monthly Report → Defaults to configure airframes.
-      saveSquadronDefaults(squadronNumber, {
-        ...cur,
-        airbase: (data.base as string | null) ?? cur.airbase,
-        base: (data.base as string | null) ?? cur.base,
-        wing: (data.wing as string | null) ?? cur.wing,
-      });
+    // LAN-only: hydrate from the internal API. The previous fall-through
+    // to a Supabase query is no longer reachable in the LAN build.
+    const internal = await fetchInternalSquadronDefaultsRow(squadronNumber);
+    if (internal) {
+      const cur = loadSquadronDefaults(squadronNumber);
+      saveSquadronDefaults(
+        squadronNumber,
+        mergeSquadronsRemoteRowIntoDefaults(cur, internal),
+      );
       return true;
     }
-    const burn: Record<string, number> = { ...cur.fuelBurnByAirframe };
-    const airframes: string[] = [];
-    for (const row of ac as Array<{ model?: string; fuelBurn?: number }>) {
-      const m = (row?.model || "").trim();
-      if (!m) continue;
-      airframes.push(m);
-      if (typeof row.fuelBurn === "number") burn[m] = row.fuelBurn;
-    }
-    const targets =
-      data.default_monthly_targets && typeof data.default_monthly_targets === "object"
-        ? (data.default_monthly_targets as Record<string, number>)
-        : {};
-    const monthly = Object.values(targets).find(v => typeof v === "number" && v > 0);
-    saveSquadronDefaults(squadronNumber, {
-      ...cur,
-      airbase: (data.base as string | null) ?? cur.airbase,
-      base: (data.base as string | null) ?? cur.base,
-      wing: (data.wing as string | null) ?? cur.wing,
-      airframes: airframes.length ? airframes : cur.airframes,
-      primaryAirframe: airframes[0] || cur.primaryAirframe,
-      fuelBurnByAirframe: burn,
-      minSixMonthHours: monthly ? monthly * 6 : cur.minSixMonthHours,
-    });
-    return true;
+    return false;
   } catch {
     return false;
   }
