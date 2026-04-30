@@ -61,11 +61,17 @@ const requirePeerToken: RequestHandler = async (req, res, next) => {
     if (row.revoked_at) {
       // Distinct from `invalid_token` so the aggregator can show the
       // operator a "token revoked → paste new one" prompt instead of a
-      // generic "auth failed" badge.
+      // generic "auth failed" badge. `peer-fanout.ts::classifyHttpError`
+      // maps this body string onto `PeerErrorKind.auth_revoked` so the
+      // /aggregate/peers/health surface stays stable.
       res.status(401).json({ error: "revoked_token" });
       return;
     }
     if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) {
+      // Lapsed-expiry is treated as revocation by the consumer side
+      // (it's never going to recover without operator action), so it
+      // shares the same `revoked_token` body — `classifyHttpError`
+      // routes both onto `auth_revoked`.
       res.status(401).json({ error: "revoked_token" });
       return;
     }

@@ -660,6 +660,8 @@ type AggregatePilotsResp = {
     status: "online" | "offline";
     served_from_cache: boolean;
     error?: string;
+    /** Lifted from `body.error` on a 4xx peer response (e.g. `auth_revoked`). */
+    error_kind?: string;
   }>;
 };
 
@@ -873,4 +875,104 @@ test("PC2 cross-squadron gate: ops in A cannot upsert into B", async () => {
   });
   assert.equal(r.status, 403);
   assert.deepEqual(r.body, { error: "foreign_squadron_forbidden" });
+});
+
+// ─── Peer-token revocation: end-to-end across two real api-servers ───
+//
+// Guards the most important LAN-mesh failure mode: an operator clicks
+// "Revoke" on the squadron HQ's peer token (PC2) and the aggregator
+// (PC1) MUST notice on the very next fan-out. Specifically:
+//
+//   * `/api/peer/*` on PC2 returns 401 `{error:"auth_revoked"}` (the
+//     distinct error code added in T001 to peer-shell.ts).
+//   * `lib/peer-fanout.ts` lifts that body code into PeerStatus.error_kind.
+//   * `/api/aggregate/peers/health` and `/api/aggregate/pilots` both
+//     surface `error_kind:"auth_revoked"` so the dashboard can show
+//     "Revoked" instead of a generic "offline" pill.
+//
+// Run last so the destructive UPDATE doesn't hide tigers from earlier
+// fan-out tests in this file.
+test("3-PC fan-out: revoking PC2's peer token surfaces auth_revoked on PC1", async () => {
+  const t = requireTopo();
+
+  // Sanity: tigers must be reachable right now or the test below
+  // proves nothing. (The "kill PC2 / restart" test above leaves PC2
+  // healthy, but be defensive.)
+  const before = await fetchAggregatePilots();
+  const beforeTigers = before.peers.find(
+    (p) => p.squadron_id === t.tigers.squadronId,
+  );
+  assert.ok(
+    beforeTigers && beforeTigers.status === "online",
+    "tigers must be online before we revoke its peer token",
+  );
+
+  // Flip the row in PC2's peer_tokens table directly. This is exactly
+  // what `peer-tokens-routes.ts` does when the operator clicks Revoke
+  // in the dashboard; doing it inline here means we don't have to
+  // authenticate as super_admin against PC2.
+  //
+  // Note: `peer_tokens.token_hash` stores a scrypt hash of just the
+  // SECRET portion of the token (compared via `verifyPeerSecret` in
+  // peer-shell.ts) — NOT a sha256 of the full plaintext like
+  // `peer_squadrons.token_hash` does. The simplest, hash-agnostic way
+  // to revoke "the only peer token in this fresh test schema" is an
+  // unscoped UPDATE; assert exactly-one-row to catch any future seed
+  // change that adds a second token.
+  await withSchemaClient(SCHEMA_TIGERS, async (c) => {
+    const r = await c.query(
+      `update peer_tokens
+          set revoked_at = now()
+        where revoked_at is null`,
+    );
+    assert.equal(
+      r.rowCount, 1,
+      "the test schema should contain exactly one active peer_token to revoke",
+    );
+  });
+
+  // The next fan-out should mark tigers offline AND lift the auth_revoked
+  // error code from peer-shell's body.error → PeerStatus.error_kind.
+  const after = await fetchAggregatePilots();
+  const afterTigers = after.peers.find(
+    (p) => p.squadron_id === t.tigers.squadronId,
+  );
+  assert.ok(afterTigers, "tigers peer status must still be present in fan-out output");
+  assert.equal(
+    afterTigers!.status, "offline",
+    "tigers must flip to offline once the peer token is revoked",
+  );
+  assert.equal(
+    (afterTigers as { error_kind?: string }).error_kind,
+    "auth_revoked",
+    "fanOutResource must propagate body.error onto PeerStatus.error_kind",
+  );
+
+  // /aggregate/peers/health is a separate code path (pingPeers, not
+  // fanOutResource) — verify it surfaces the same code so the
+  // dashboard's status sidebar matches the row-level fan-out.
+  const healthResp = await fetch(`${t.pc1.baseUrl}/api/aggregate/peers/health`);
+  assert.equal(
+    healthResp.status, 200,
+    "/api/aggregate/peers/health should answer 200 (PC1 runs in bring-up auth mode)",
+  );
+  const health = (await healthResp.json()) as {
+    peers: Array<{
+      squadron_id: string;
+      status: string;
+      error_kind?: string;
+    }>;
+  };
+  const healthTigers = health.peers.find(
+    (p) => p.squadron_id === t.tigers.squadronId,
+  );
+  assert.ok(healthTigers, "tigers must appear in the /peers/health snapshot");
+  assert.equal(
+    healthTigers!.status, "offline",
+    "/peers/health must also flip tigers to offline",
+  );
+  assert.equal(
+    healthTigers!.error_kind, "auth_revoked",
+    "pingPeers must propagate body.error onto PeerStatus.error_kind too",
+  );
 });

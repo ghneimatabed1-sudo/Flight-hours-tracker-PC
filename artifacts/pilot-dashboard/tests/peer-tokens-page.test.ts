@@ -430,6 +430,287 @@ test("PeerTokens · super_admin issue → copy → revoke flow", async () => {
   await act(async () => { root.unmount(); });
 });
 
+// ── Subtests added for Task #375 ──────────────────────────────────
+//
+// All three subtests share the helpers defined above and re-use the
+// same fetch interceptor / clipboard mock. Each one resets the
+// peerTokens store + fetchCalls counter at the top so the assertions
+// run on a clean slate, then mounts a fresh PeerTokens tree against a
+// fresh QueryClient to avoid cross-test cache leakage.
+
+async function mountPeerTokens(): Promise<{
+  el: HTMLElement;
+  unmount: () => Promise<void>;
+  flush: (ms?: number) => Promise<void>;
+  waitFor: <T>(probe: () => T | null | undefined, label: string, timeoutMs?: number) => Promise<T>;
+}> {
+  const React = (await import("react")).default;
+  const { createRoot } = await import("react-dom/client");
+  const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+  const { Router } = await import("wouter");
+  const { memoryLocation } = await import("wouter/memory-location");
+  const { I18nProvider } = await import("../src/lib/i18n.tsx");
+  const { AuthProvider } = await import("../src/lib/auth.tsx");
+  const { default: PeerTokens } = await import("../src/pages/admin/PeerTokens.tsx");
+
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { hook } = memoryLocation({ path: "/admin/peer-tokens", static: true });
+  const el = w.document.createElement("div");
+  w.document.body.appendChild(el);
+  const root = createRoot(el);
+
+  const tree = React.createElement(
+    QueryClientProvider, { client: qc },
+    React.createElement(I18nProvider, null,
+      React.createElement(AuthProvider, null,
+        React.createElement(
+          Router as unknown as React.ComponentType<{
+            hook: unknown;
+            children?: React.ReactNode;
+          }>,
+          { hook, children: React.createElement(PeerTokens) },
+        ),
+      ),
+    ),
+  );
+
+  await act(async () => { root.render(tree); });
+
+  const flush = async (ms = 60) => {
+    await act(async () => {
+      await new Promise<void>((r) => setTimeout(r, ms));
+    });
+  };
+
+  async function waitFor<T>(probe: () => T | null | undefined, label: string, timeoutMs = 4000): Promise<T> {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      const hit = probe();
+      if (hit) return hit;
+      await flush(40);
+    }
+    const snippet = (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
+    throw new Error(`timeout waiting for ${label}. body snippet: ${snippet}`);
+  }
+
+  return {
+    el: el as unknown as HTMLElement,
+    unmount: async () => { await act(async () => { root.unmount(); }); el.remove(); },
+    flush,
+    waitFor,
+  };
+}
+
+test("PeerTokens · expiry date submits a server-shaped expires_at", async () => {
+  // Fresh state so we don't see the row issued by the prior test.
+  peerTokens.length = 0;
+  fetchCalls.length = 0;
+  nextIdSeq = 100;
+
+  const { el, unmount, waitFor, flush } = await mountPeerTokens();
+
+  await waitFor(
+    () => el.querySelector('[data-testid="page-peer-tokens"]'),
+    "page-peer-tokens shell",
+  );
+  await waitFor(
+    () => el.querySelector('[data-testid="peer-tokens-empty"]'),
+    "peer-tokens-empty",
+  );
+
+  const issueBtn = el.querySelector('[data-testid="button-issue-peer-token"]') as HTMLButtonElement | null;
+  assert.ok(issueBtn, "Issue token button");
+  await act(async () => { issueBtn!.click(); });
+  await flush();
+
+  const labelInput = await waitFor(
+    () => w.document.querySelector('[data-testid="input-peer-token-label"]') as HTMLInputElement | null,
+    "input-peer-token-label",
+  );
+  await act(async () => { setInputValue(labelInput, "rotating-token"); });
+
+  const expiryInput = w.document.querySelector(
+    '[data-testid="input-peer-token-expires"]',
+  ) as HTMLInputElement | null;
+  assert.ok(expiryInput, "expiry date input");
+  // Use a fixed YYYY-MM-DD so the toISOString() result is deterministic.
+  await act(async () => { setInputValue(expiryInput, "2030-12-31"); });
+  await flush();
+
+  const submitBtn = w.document.querySelector('[data-testid="button-submit-issue-peer-token"]') as HTMLButtonElement | null;
+  assert.ok(submitBtn, "submit button");
+  await act(async () => { submitBtn!.click(); });
+  await flush(150);
+
+  const postCalls = fetchCalls.filter(
+    (c) => c.method === "POST" && c.url.endsWith("/api/internal/peer-tokens"),
+  );
+  assert.equal(postCalls.length, 1, "one POST emitted");
+  const body = postCalls[0]!.body as { label?: string; expires_at?: string | null };
+  assert.equal(body.label, "rotating-token");
+  assert.ok(typeof body.expires_at === "string" && body.expires_at.length > 0,
+    "expires_at must be a non-empty ISO string when the date is filled");
+  // The page sends midnight LOCAL time as ISO (so the date the user
+  // sees comes back). Whichever timezone Node runs in, the YYYY-MM-DD
+  // portion of the resulting ISO string must contain the picked date
+  // OR the day before/after — we accept any of those three.
+  const datePart = body.expires_at!.slice(0, 10);
+  assert.ok(
+    /^2030-12-3[01]$|^2031-01-01$/.test(datePart),
+    `expires_at date part should be near 2030-12-31, got ${datePart}`,
+  );
+
+  await unmount();
+});
+
+test("PeerTokens · clipboard.writeText throws → execCommand fallback fires + Copied ack still shows", async () => {
+  peerTokens.length = 0;
+  fetchCalls.length = 0;
+  nextIdSeq = 200;
+  lastCopied = null;
+
+  // Swap clipboard.writeText to throw, and instrument document.execCommand
+  // so the fallback path is observable.
+  let clipboardCalls = 0;
+  Object.defineProperty(w.navigator, "clipboard", {
+    value: {
+      writeText: async (_t: string) => {
+        clipboardCalls++;
+        throw new Error("clipboard_blocked_by_test");
+      },
+    },
+    writable: true,
+    configurable: true,
+  });
+  let execCommandCalls = 0;
+  let execCommandLastArg: string | null = null;
+  let fallbackCapturedValue: string | null = null;
+  const origExec = (w.document as unknown as { execCommand?: (cmd: string) => boolean }).execCommand;
+  (w.document as unknown as { execCommand: (cmd: string) => boolean }).execCommand =
+    (cmd: string) => {
+      execCommandCalls++;
+      execCommandLastArg = cmd;
+      // PeerTokens.tsx mounts a fixed/opacity-0 textarea, selects it,
+      // then calls execCommand("copy"). Capture the textarea's value so
+      // we can assert the fallback truly carries the plain token.
+      const ta = w.document.querySelector("textarea") as HTMLTextAreaElement | null;
+      if (ta) fallbackCapturedValue = ta.value;
+      return true;
+    };
+
+  const { el, unmount, waitFor, flush } = await mountPeerTokens();
+
+  try {
+    await waitFor(
+      () => el.querySelector('[data-testid="page-peer-tokens"]'),
+      "page-peer-tokens shell",
+    );
+
+    const issueBtn = el.querySelector('[data-testid="button-issue-peer-token"]') as HTMLButtonElement | null;
+    assert.ok(issueBtn);
+    await act(async () => { issueBtn!.click(); });
+    await flush();
+
+    const labelInput = await waitFor(
+      () => w.document.querySelector('[data-testid="input-peer-token-label"]') as HTMLInputElement | null,
+      "input-peer-token-label",
+    );
+    await act(async () => { setInputValue(labelInput, "fallback-pc"); });
+
+    const submitBtn = w.document.querySelector('[data-testid="button-submit-issue-peer-token"]') as HTMLButtonElement | null;
+    assert.ok(submitBtn);
+    await act(async () => { submitBtn!.click(); });
+    await flush(150);
+
+    const copyBtn = await waitFor(
+      () => el.querySelector('[data-testid="button-copy-peer-token"]') as HTMLButtonElement | null,
+      "button-copy-peer-token",
+    );
+    await act(async () => { copyBtn.click(); });
+    await flush();
+
+    assert.equal(clipboardCalls, 1, "navigator.clipboard.writeText was called once");
+    assert.equal(execCommandCalls, 1, "execCommand fallback was called exactly once");
+    assert.equal(execCommandLastArg, "copy", "execCommand was invoked with 'copy'");
+    assert.equal(
+      fallbackCapturedValue,
+      PLAIN_TOKEN,
+      "fallback textarea must contain the plain token before execCommand runs",
+    );
+    await waitFor(
+      () => el.querySelector('[data-testid="text-peer-token-copied"]'),
+      "text-peer-token-copied (copy ack via fallback)",
+    );
+  } finally {
+    // Restore both stubs so subsequent tests see the original mocks.
+    if (typeof origExec === "function") {
+      (w.document as unknown as { execCommand: (cmd: string) => boolean }).execCommand = origExec;
+    } else {
+      delete (w.document as unknown as { execCommand?: unknown }).execCommand;
+    }
+    Object.defineProperty(w.navigator, "clipboard", {
+      value: { writeText: async (t: string) => { lastCopied = String(t); } },
+      writable: true,
+      configurable: true,
+    });
+    await unmount();
+  }
+});
+
+test("PeerTokens · Issue dialog Cancel closes the dialog + emits no POST", async () => {
+  peerTokens.length = 0;
+  fetchCalls.length = 0;
+  nextIdSeq = 300;
+
+  const { el, unmount, waitFor, flush } = await mountPeerTokens();
+
+  await waitFor(
+    () => el.querySelector('[data-testid="page-peer-tokens"]'),
+    "page-peer-tokens shell",
+  );
+
+  const issueBtn = el.querySelector('[data-testid="button-issue-peer-token"]') as HTMLButtonElement | null;
+  assert.ok(issueBtn);
+  await act(async () => { issueBtn!.click(); });
+  await flush();
+
+  const labelInput = await waitFor(
+    () => w.document.querySelector('[data-testid="input-peer-token-label"]') as HTMLInputElement | null,
+    "input-peer-token-label (dialog open)",
+  );
+  // Type something so we know cancel really does discard, not just no-op.
+  await act(async () => { setInputValue(labelInput, "should-not-submit"); });
+  await flush();
+
+  // The dialog footer hosts a `Cancel` Button + the submit Button. The
+  // submit one carries a testid; the Cancel one is the only OTHER button
+  // in the dialog content. Find it by walking the dialog container.
+  const dialog = w.document.querySelector(
+    '[data-testid="dialog-issue-peer-token"]',
+  ) as HTMLElement | null;
+  assert.ok(dialog, "issue dialog rendered");
+  const buttons = Array.from(dialog!.querySelectorAll("button")) as HTMLButtonElement[];
+  const cancelBtn = buttons.find(b => !b.dataset.testid);
+  assert.ok(cancelBtn, "Cancel button in issue dialog");
+  await act(async () => { cancelBtn!.click(); });
+  await flush(120);
+
+  // Dialog closes → its content (and the label input) is removed.
+  await waitFor(
+    () => (w.document.querySelector('[data-testid="input-peer-token-label"]') === null
+      ? true : null),
+    "dialog to close (label input gone)",
+  );
+
+  const postCalls = fetchCalls.filter(
+    (c) => c.method === "POST" && c.url.endsWith("/api/internal/peer-tokens"),
+  );
+  assert.equal(postCalls.length, 0, "Cancel must NOT emit a create POST");
+  assert.equal(peerTokens.length, 0, "no row should have been issued");
+
+  await unmount();
+});
+
 test("PeerTokens · teardown jsdom", () => {
   try { (dom.window as unknown as { close?: () => void }).close?.(); }
   catch { /* best-effort teardown */ }

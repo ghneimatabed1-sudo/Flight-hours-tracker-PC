@@ -478,6 +478,9 @@ export default function PeerTokens() {
         <DialogContent className="max-w-md" data-testid="dialog-issue-peer-token">
           <DialogHeader>
             <DialogTitle>{t("peerTokensIssue")}</DialogTitle>
+            <DialogDescription>
+              {t("peerTokensIssueDialogDescription")}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
