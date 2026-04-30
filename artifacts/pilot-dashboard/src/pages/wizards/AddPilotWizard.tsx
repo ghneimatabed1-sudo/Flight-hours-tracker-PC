@@ -15,6 +15,8 @@ import { usePilots, useCreatePilot } from "@/lib/squadron-data";
 import type { Pilot } from "@/lib/mock";
 import { lookupRankEn, RJAF_RANKS } from "@/lib/ranks";
 import { getCurrencyWindow } from "@/lib/currency-settings";
+import { useFormDraft } from "@/lib/use-form-draft";
+import { FormDraftBanner } from "@/components/FormDraftBanner";
 
 interface FormState {
   id: string;
@@ -89,6 +91,15 @@ export default function AddPilotWizard() {
 
   const [form, setForm] = useState<FormState>(() => blankForm(nextId));
   const [step, setStep] = useState(0);
+
+  // Persist the in-flight wizard state (form + current step) so a
+  // LAN drop or reload mid-wizard doesn't cost the operator their
+  // typing. We bundle into a single blob keyed by `draft.add-pilot-wizard`
+  // so Restore puts the operator back on the exact step they left.
+  type WizardDraft = { form: FormState; step: number };
+  const wizardState: WizardDraft = useMemo(() => ({ form, step }), [form, step]);
+  const setWizardState = (next: WizardDraft) => { setForm(next.form); setStep(next.step); };
+  const draft = useFormDraft<WizardDraft>("draft.add-pilot-wizard", wizardState, setWizardState);
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm(f => ({ ...f, [k]: v }));
@@ -375,6 +386,10 @@ export default function AddPilotWizard() {
     };
     try {
       await create.mutateAsync({ pilot, actor: auth.user?.username });
+      // Successful create — drop the persisted draft so the next visit
+      // to the wizard starts clean. Failed creates intentionally keep
+      // the draft so the operator can retry without retyping.
+      draft.discardDraft();
       toast({ title: t("pilotWizardSavedTitle") });
       navigate("/roster");
     } catch (e) {
@@ -383,17 +398,25 @@ export default function AddPilotWizard() {
   };
 
   return (
-    <WizardShell
-      title={t("pilotWizardTitle")}
-      subtitle={t("pilotWizardSubtitle")}
-      steps={steps}
-      current={step}
-      onChange={setStep}
-      onFinish={submit}
-      busy={create.isPending}
-      testIdPrefix="wiz-pilot"
-      onCancel={() => navigate("/roster")}
-    />
+    <div className="space-y-2">
+      <FormDraftBanner
+        hasDraft={draft.hasDraft}
+        onRestore={draft.restoreDraft}
+        onDiscard={draft.discardDraft}
+        testIdSuffix="add-pilot-wizard"
+      />
+      <WizardShell
+        title={t("pilotWizardTitle")}
+        subtitle={t("pilotWizardSubtitle")}
+        steps={steps}
+        current={step}
+        onChange={setStep}
+        onFinish={submit}
+        busy={create.isPending}
+        testIdPrefix="wiz-pilot"
+        onCancel={() => navigate("/roster")}
+      />
+    </div>
   );
 }
 

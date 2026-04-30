@@ -23,6 +23,8 @@ import { Link } from "wouter";
 import { Plus, Search, Pencil, Trash2, X, Loader2, FileDown, ArrowRightLeft } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataUnavailableBanner } from "@/components/DataUnavailableBanner";
+import { useFormDraft } from "@/lib/use-form-draft";
+import { FormDraftBanner } from "@/components/FormDraftBanner";
 
 export default function Roster() {
   const { t, rankOf } = useI18n();
@@ -494,6 +496,15 @@ interface LastFlown { day: string; night: string; nvg: string; irt: string; medi
 function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pilot; onClose: () => void; onSave: (p: Pilot) => void; saving: boolean; isNew?: boolean }) {
   const { t, rankOf } = useI18n();
   const [p, setP] = useState<Pilot>(pilot);
+  // Persist the in-flight Add Pilot form so a LAN drop / reload
+  // doesn't cost the operator their typing. Edits use a per-pilot key
+  // so two browser tabs editing different pilots don't trample each
+  // other; new-pilot entries share `draft.add-pilot` (only one Add
+  // dialog can be open at a time). Edits also persist  if the
+  // operator partially edits a pilot then drops the LAN, the next
+  // open of that pilot offers Restore.
+  const draftKey = isNew ? "draft.add-pilot" : `draft.edit-pilot.${pilot.id}`;
+  const formDraft = useFormDraft<Pilot>(draftKey, p, setP);
   // Qualification editor state — segmented input replaces the legacy
   // comma-separated text box. We keep it in local state so the operator
   // can add/remove boxes and toggle the separator without touching the
@@ -599,6 +610,11 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
       }).catch(() => { /* swallow — audit is best-effort */ });
     }
     onSave({ ...p, expiry, qualifications, qualification, qualificationSeparator: qualSep, lastSimDate, initialHours: ihToPersist });
+    // Successful submit  drop the persisted draft. If the parent
+    // mutation later fails, the form stays mounted (parent keeps
+    // `adding`/`editing` truthy on error) and the operator can retry,
+    // re-saving will write a fresh draft on the next keystroke.
+    formDraft.discardDraft();
   };
   return (
     // NOTE: no backdrop-blur. Chromium's backdrop-filter on Windows w/ HW
@@ -612,6 +628,12 @@ function PilotEditDialog({ pilot, onClose, onSave, saving, isNew }: { pilot: Pil
           <button onClick={onClose} className="p-1 rounded hover:bg-secondary"><X className="h-4 w-4" /></button>
         </div>
         <form onSubmit={submit} className="p-4 space-y-3" data-testid="form-edit-pilot">
+          <FormDraftBanner
+            hasDraft={formDraft.hasDraft}
+            onRestore={formDraft.restoreDraft}
+            onDiscard={formDraft.discardDraft}
+            testIdSuffix={isNew ? "add-pilot" : `edit-pilot-${pilot.id}`}
+          />
           <div className="grid grid-cols-2 gap-3">
             {isNew && (
               <Field label="ID" value={p.id} onChange={v => set("id", v)} testId="input-id" autoFocus />

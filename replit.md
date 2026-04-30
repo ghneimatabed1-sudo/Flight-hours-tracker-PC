@@ -171,6 +171,43 @@ support that lifetime:
 - `OPERATOR-RUNBOOK.md` § 9 — quarterly checklist the host-PC
   operator follows (≈10min). Mirrors the System Health tiles.
 
+## LAN-drop form preservation (task #371)
+
+Hawk Eye operators routinely lose connectivity mid-edit (squadron LAN
+drops, browser refreshes, Windows updates). Every long-form input now
+persists its in-flight state to `localStorage` so a reload never costs
+the operator their typing.
+
+- `lib/use-form-draft.ts` — generic React hook keyed by a form-stable
+  string. Persists the live form snapshot on every change with a 500ms
+  debounce, advertises `hasDraft` only when the persisted blob differs
+  from the empty baseline (so fresh visits don't trip the banner), and
+  exposes `restoreDraft` / `discardDraft` callbacks. SSR-safe.
+- `components/FormDraftBanner.tsx` — sky-themed Restore/Discard banner
+  the form renders above its fields when `hasDraft` is true. Never
+  auto-restores; the operator must consent.
+- `components/OnlineStatusBanner.tsx` — amber pinned banner driven by
+  `window` `online`/`offline` events; rendered once at the App root so
+  the operator always knows when their writes won't reach the LAN
+  server.
+- Wiring: AddSortie, NotamsPage (NewNotamDraft = text+priority),
+  Roster's PilotEditDialog, plus all four wizards
+  (AddSortieWizard, AddPilotWizard, DutyWeekWizard, SetupWizard).
+  Wizards persist `{form, step}` together so Restore returns the
+  operator to the exact step they left. SetupWizard deliberately
+  omits the password fields from the persisted blob — credentials in
+  localStorage would be a security regression.
+- DutyWeekWizard's prefill effect (saved-week → row autofill) now
+  guards a one-shot skip flag set by the restore path; without it the
+  effect would clobber restored rows on the next render.
+- i18n: `formDraftTitle/Body/Restore/Discard` and
+  `onlineStatusOfflineMsg` added to both EN and AR dictionaries.
+- Tests: `tests/use-form-draft.test.ts` (8 cases, jsdom + react act):
+  empty baseline silence, debounce-after-typing, debounce coalescing,
+  remount sees draft, restore applies state, discard wipes blob,
+  corrupt-blob defence, clearing back to baseline removes blob.
+  Wired into `npm test` as `test:use-form-draft`.
+
 ## Repo conventions
 
 - pnpm monorepo, TypeScript strict, contract-first OpenAPI + Orval

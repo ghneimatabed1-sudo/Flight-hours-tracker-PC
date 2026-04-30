@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { Card, PageHead } from "@/components/Layout";
+import { useFormDraft } from "@/lib/use-form-draft";
+import { FormDraftBanner } from "@/components/FormDraftBanner";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import {
@@ -57,8 +59,15 @@ export default function NotamsPage() {
   const create = useCreateNotam();
   const update = useUpdateNotam();
   const remove = useDeleteNotam();
-  const [text, setText] = useState("");
-  const [priority, setPriority] = useState<ItemPriority>("normal");
+  // Group the new-NOTAM inputs into a single object so the form-draft
+  // hook can persist them as one blob keyed by `draft.add-notam`.
+  interface NewNotamDraft { text: string; priority: ItemPriority }
+  const [newNotam, setNewNotam] = useState<NewNotamDraft>({ text: "", priority: "normal" });
+  const text = newNotam.text;
+  const priority = newNotam.priority;
+  const setText = (v: string) => setNewNotam(prev => ({ ...prev, text: v }));
+  const setPriority = (v: ItemPriority) => setNewNotam(prev => ({ ...prev, priority: v }));
+  const newNotamDraft = useFormDraft<NewNotamDraft>("draft.add-notam", newNotam, setNewNotam);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [editPriority, setEditPriority] = useState<ItemPriority>("normal");
@@ -69,8 +78,11 @@ export default function NotamsPage() {
     if (!text.trim()) return;
     try {
       await create.mutateAsync({ text, priority });
-      setText("");
-      setPriority("normal");
+      setNewNotam({ text: "", priority: "normal" });
+      // Successful publish — drop the persisted draft so the next
+      // visit starts clean. Failed publishes keep the draft so the
+      // operator can retry without retyping.
+      newNotamDraft.discardDraft();
       toast({ title: t("notamPublished") });
     } catch (e) {
       toast({ title: "Could not publish NOTAM", description: (e as Error).message, variant: "destructive" });
@@ -190,7 +202,13 @@ export default function NotamsPage() {
         </div>
         {canWrite && (
           <Card>
-            <form onSubmit={add} className="space-y-3">
+            <FormDraftBanner
+              hasDraft={newNotamDraft.hasDraft}
+              onRestore={newNotamDraft.restoreDraft}
+              onDiscard={newNotamDraft.discardDraft}
+              testIdSuffix="add-notam"
+            />
+            <form onSubmit={add} className="space-y-3 mt-2">
               <div className="text-sm font-semibold">New NOTAM</div>
               <textarea rows={5} value={text} onChange={e=>setText(e.target.value)} placeholder="Enter NOTAM text…"
                 data-testid="input-new-notam"

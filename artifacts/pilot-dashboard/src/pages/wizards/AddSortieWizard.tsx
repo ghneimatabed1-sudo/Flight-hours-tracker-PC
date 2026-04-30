@@ -17,6 +17,8 @@ import { analyzeSortieDraft } from "@/lib/add-sortie-smart";
 import {
   loadSquadronDefaults, hydrateSquadronDefaultsFromDb,
 } from "@/lib/squadron-defaults";
+import { useFormDraft } from "@/lib/use-form-draft";
+import { FormDraftBanner } from "@/components/FormDraftBanner";
 
 const SORTIE_TYPES = [
   "MSN DAY", "MSN NIGHT", "MSN NVG",
@@ -120,6 +122,15 @@ export default function AddSortieWizard() {
   const [form, setForm] = useState<FormState>(() =>
     blankForm(sqdnDefaults.primaryAirframe || acTypeOptions[0] || "UH-60M"));
   const [step, setStep] = useState(0);
+
+  // Persist the in-flight wizard state (form + current step) so a
+  // LAN drop or reload mid-wizard doesn't cost the operator their
+  // typing. We bundle into a single blob keyed by `draft.add-sortie-wizard`
+  // so Restore puts the operator back on the exact step they left.
+  type WizardDraft = { form: FormState; step: number };
+  const wizardState: WizardDraft = useMemo(() => ({ form, step }), [form, step]);
+  const setWizardState = (next: WizardDraft) => { setForm(next.form); setStep(next.step); };
+  const draft = useFormDraft<WizardDraft>("draft.add-sortie-wizard", wizardState, setWizardState);
 
   // Seed pilot defaults once roster loads.
   useEffect(() => {
@@ -501,6 +512,10 @@ export default function AddSortieWizard() {
     };
     try {
       await create.mutateAsync(payload);
+      // Successful create — drop the persisted draft so the next visit
+      // to the wizard starts clean. Failed creates keep the draft so
+      // the operator can retry without retyping.
+      draft.discardDraft();
       toast({ title: t("sortieWizardSavedTitle") });
       navigate("/sortie-add");
     } catch {
@@ -509,17 +524,25 @@ export default function AddSortieWizard() {
   };
 
   return (
-    <WizardShell
-      title={t("sortieWizardTitle")}
-      subtitle={t("sortieWizardSubtitle")}
-      steps={steps}
-      current={step}
-      onChange={setStep}
-      onFinish={submit}
-      busy={create.isPending}
-      testIdPrefix="wiz-sortie"
-      onCancel={() => navigate("/sortie-add")}
-    />
+    <div className="space-y-2">
+      <FormDraftBanner
+        hasDraft={draft.hasDraft}
+        onRestore={draft.restoreDraft}
+        onDiscard={draft.discardDraft}
+        testIdSuffix="add-sortie-wizard"
+      />
+      <WizardShell
+        title={t("sortieWizardTitle")}
+        subtitle={t("sortieWizardSubtitle")}
+        steps={steps}
+        current={step}
+        onChange={setStep}
+        onFinish={submit}
+        busy={create.isPending}
+        testIdPrefix="wiz-sortie"
+        onCancel={() => navigate("/sortie-add")}
+      />
+    </div>
   );
 }
 

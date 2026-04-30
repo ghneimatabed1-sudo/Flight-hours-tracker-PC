@@ -3,7 +3,7 @@
 // through the same useSaveDutyWeek mutation so the result is identical to
 // a roster created via the legacy DutyWeek page. Task #337.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import DateInput from "@/components/DateInput";
 import { ReviewRow, WizardShell, type WizardStep } from "@/components/wizard/WizardShell";
@@ -11,6 +11,8 @@ import { useI18n } from "@/lib/i18n";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import { usePilots, useSavedDutyWeeks, useSaveDutyWeek } from "@/lib/squadron-data";
+import { useFormDraft } from "@/lib/use-form-draft";
+import { FormDraftBanner } from "@/components/FormDraftBanner";
 
 const AR_DAYS = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
 const RANK_OPTIONS = [
@@ -52,6 +54,25 @@ export default function DutyWeekWizard() {
   const [step, setStep] = useState(0);
   const [prefilledFrom, setPrefilledFrom] = useState<string | null>(null);
 
+  // After a draft restore we need to suppress exactly one run of the
+  // prefill effect below — otherwise it would clobber the just-restored
+  // rows with whatever the saved-week prefill thinks belongs there for
+  // the restored start date. The skip is one-shot.
+  const skipNextPrefillRef = useRef(false);
+
+  // Persist the in-flight wizard state (start date + duty rows + step)
+  // so a LAN drop or reload mid-wizard doesn't cost the operator their
+  // typing. We bundle into a single blob keyed by `draft.duty-week-wizard`.
+  type WizardDraft = { start: string; rows: DutyRow[]; step: number };
+  const wizardState: WizardDraft = useMemo(() => ({ start, rows, step }), [start, rows, step]);
+  const setWizardState = (next: WizardDraft) => {
+    skipNextPrefillRef.current = true;
+    setStart(next.start);
+    setRows(next.rows);
+    setStep(next.step);
+  };
+  const draft = useFormDraft<WizardDraft>("draft.duty-week-wizard", wizardState, setWizardState);
+
   // Prior week = the latest saved week strictly BEFORE the chosen start.
   const priorWeek = useMemo(() => {
     if (!savedQ.data.length) return null;
@@ -66,6 +87,11 @@ export default function DutyWeekWizard() {
   // operator only has to tweak the diff. Falls back to blank when no
   // history exists at all.
   useEffect(() => {
+    if (skipNextPrefillRef.current) {
+      // Just restored a draft — keep the rows the operator had saved.
+      skipNextPrefillRef.current = false;
+      return;
+    }
     const exact = savedQ.data.find(w => w.start === start);
     if (exact) {
       setRows(exact.rows.map(r => ({ ...r })));
@@ -226,6 +252,9 @@ export default function DutyWeekWizard() {
   const submit = async () => {
     try {
       await saveMut.mutateAsync({ squadron: sqnNumber, start, rows });
+      // Successful save — drop the persisted draft so the next visit
+      // starts clean. Failed saves keep the draft for retry.
+      draft.discardDraft();
       toast({ title: t("dutyWizardSavedTitle") });
       navigate("/duty");
     } catch {
@@ -234,16 +263,24 @@ export default function DutyWeekWizard() {
   };
 
   return (
-    <WizardShell
-      title={t("dutyWizardTitle")}
-      subtitle={t("dutyWizardSubtitle")}
-      steps={steps}
-      current={step}
-      onChange={setStep}
-      onFinish={submit}
-      busy={saveMut.isPending}
-      testIdPrefix="wiz-duty"
-      onCancel={() => navigate("/duty")}
-    />
+    <div className="space-y-2">
+      <FormDraftBanner
+        hasDraft={draft.hasDraft}
+        onRestore={draft.restoreDraft}
+        onDiscard={draft.discardDraft}
+        testIdSuffix="duty-week-wizard"
+      />
+      <WizardShell
+        title={t("dutyWizardTitle")}
+        subtitle={t("dutyWizardSubtitle")}
+        steps={steps}
+        current={step}
+        onChange={setStep}
+        onFinish={submit}
+        busy={saveMut.isPending}
+        testIdPrefix="wiz-duty"
+        onCancel={() => navigate("/duty")}
+      />
+    </div>
   );
 }

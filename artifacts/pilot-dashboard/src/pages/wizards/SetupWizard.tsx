@@ -4,7 +4,7 @@
 // the operator gets context before submitting credentials. Renders the
 // existing fallback panels (LAN mode, not-allowed) unchanged. Task #337.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { ReviewRow, WizardShell, type WizardStep } from "@/components/wizard/WizardShell";
 import { useI18n } from "@/lib/i18n";
@@ -12,6 +12,8 @@ import {
   setupSuperAdmin, checkSuperAdminSetupAllowed, unitJoinConfigured,
 } from "@/lib/unit-join";
 import { isLanSessionLoginEnabled } from "@/lib/internal-migration";
+import { useFormDraft } from "@/lib/use-form-draft";
+import { FormDraftBanner } from "@/components/FormDraftBanner";
 
 export default function SetupWizard() {
   const { t } = useI18n();
@@ -29,6 +31,28 @@ export default function SetupWizard() {
   const [unitLabel, setUnitLabel] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
+
+  // Persist the in-flight wizard state so a LAN drop or reload mid-setup
+  // doesn't cost the operator their typing. We deliberately do NOT
+  // persist password / confirmPw — writing credentials to localStorage
+  // would be a security regression. The operator re-enters those after
+  // a Restore.
+  type WizardDraft = {
+    email: string; username: string; displayName: string;
+    unitLabel: string; step: number;
+  };
+  const wizardState: WizardDraft = useMemo(
+    () => ({ email, username, displayName, unitLabel, step }),
+    [email, username, displayName, unitLabel, step],
+  );
+  const setWizardState = (next: WizardDraft) => {
+    setEmail(next.email);
+    setUsername(next.username);
+    setDisplayName(next.displayName);
+    setUnitLabel(next.unitLabel);
+    setStep(next.step);
+  };
+  const draft = useFormDraft<WizardDraft>("draft.setup-wizard", wizardState, setWizardState);
 
   useEffect(() => {
     let alive = true;
@@ -104,6 +128,10 @@ export default function SetupWizard() {
       setServerError(msg);
       return;
     }
+    // Successful super-admin create — drop the persisted draft so a
+    // future visit starts clean. Failed attempts keep the draft so the
+    // operator can correct and retry.
+    draft.discardDraft();
     setSuccess(true);
   };
 
@@ -213,7 +241,13 @@ export default function SetupWizard() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-6">
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-2xl mx-auto space-y-2">
+        <FormDraftBanner
+          hasDraft={draft.hasDraft}
+          onRestore={draft.restoreDraft}
+          onDiscard={draft.discardDraft}
+          testIdSuffix="setup-wizard"
+        />
         <WizardShell
           title={t("setupWizardTitle")}
           subtitle={t("setupWizardSubtitle")}

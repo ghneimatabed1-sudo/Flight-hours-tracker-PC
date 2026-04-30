@@ -22,6 +22,8 @@ import { loadSquadronDefaults, hydrateSquadronDefaultsFromDb } from "@/lib/squad
 import type { ExternalPilotRef } from "@/lib/mock";
 import { useFrozenAccess } from "@/lib/monthly-close";
 import { analyzeSortieDraft } from "@/lib/add-sortie-smart";
+import { useFormDraft } from "@/lib/use-form-draft";
+import { FormDraftBanner } from "@/components/FormDraftBanner";
 
 // Simple Add Sortie form — mirrors the legacy mobile app's logic:
 //   • One Position toggle: which seat is in 1st PLT (the other = 2nd PLT)
@@ -160,6 +162,9 @@ export default function AddSortie() {
     ...blankForm(),
     acType: sqdnDefaults.primaryAirframe || acTypeOptions[0] || "",
   }));
+  // Persist the live form to localStorage on every change so a LAN
+  // drop / page reload doesn't cost the operator their typing.
+  const draft = useFormDraft<FormState>("draft.add-sortie", form, setForm);
   const [confirmDel, setConfirmDel] = useState<Sortie | null>(null);
   // Pending edit waiting for the change-summary dialog. We capture both
   // the original record (for the diff + undo snapshot) and the proposed
@@ -432,6 +437,10 @@ export default function AddSortie() {
       // cross-PC pending-approval handoff; the host squadron owns the
       // record locally.
       void savedId;
+      // Successful save  drop the persisted draft so the next visit
+      // starts clean. Failed saves intentionally KEEP the draft so the
+      // operator can retry without retyping.
+      draft.discardDraft();
       resetForm();
     } catch (err) {
       // The frozen-records gate throws `month_frozen` when this PC isn't
@@ -541,6 +550,9 @@ export default function AddSortie() {
       await update.mutateAsync({ sortie: after, actor: auth.user?.username });
       registerSortieUndo({ sortie: before, pilots: pilotsBefore }, "Sortie edited.");
       setPendingEdit(null);
+      // Successful edit  also drop the persisted draft so a stale
+      // restore prompt doesn't appear next visit.
+      draft.discardDraft();
       resetForm();
     } catch {
       /* surfaced by global error toast */
@@ -616,6 +628,15 @@ export default function AddSortie() {
           </div>
         </Card>
       )}
+
+      <div className="mb-3">
+        <FormDraftBanner
+          hasDraft={draft.hasDraft}
+          onRestore={draft.restoreDraft}
+          onDiscard={draft.discardDraft}
+          testIdSuffix="add-sortie"
+        />
+      </div>
 
       <Card className="mb-4">
         <form onSubmit={submit} className="space-y-3" data-testid="form-add-sortie">
