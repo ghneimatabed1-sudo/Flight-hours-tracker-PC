@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, type Key as I18nKey } from "@/lib/i18n";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,10 @@ import {
   mapInternalAuditRowsToAdminRows,
   paginateAdminAuditRows,
 } from "@/lib/admin-audit-lan";
+import {
+  buildOpAuditDisplay,
+  type OpAuditOutcome,
+} from "@/lib/audit-op-event-render";
 
 type AuditRow = {
   id: number | string;
@@ -108,6 +112,14 @@ export default function AuditLog() {
     } catch {
       return "—";
     }
+  };
+
+  // Per-row "Show details" expander state. Keyed by the synthetic
+  // row id from `mapInternalAuditRowsToAdminRows`.
+  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+  const toggleRowExpanded = (id: string | number) => {
+    const k = String(id);
+    setExpandedRows(prev => ({ ...prev, [k]: !prev[k] }));
   };
 
   // Page number window (compact, like Google) — show first, last, current ±2.
@@ -212,18 +224,85 @@ export default function AuditLog() {
                     </td>
                   </tr>
                 )}
-                {rows.map(a => (
-                  <tr key={a.id} className="border-b border-border/60" data-testid={`row-audit-${a.id}`}>
-                    <td className="py-2 px-3 tabular-nums whitespace-nowrap">{fmtDateTime(a.occurred_at, lang)}</td>
-                    <td className="py-2 px-3">
-                      <span className="font-mono text-xs">{a.actor ?? "—"}</span>
-                    </td>
-                    <td className="py-2 px-3 font-mono text-xs">{a.type}</td>
-                    <td className="py-2 px-3 text-xs text-muted-foreground max-w-[420px] truncate" title={formatDetail(a.detail)}>
-                      {formatDetail(a.detail)}
-                    </td>
-                  </tr>
-                ))}
+                {rows.map(a => {
+                  const display = buildOpAuditDisplay(a.type, a.detail);
+                  const expanded = !!expandedRows[String(a.id)];
+                  if (display.isOpEvent) {
+                    return (
+                      <tr
+                        key={a.id}
+                        className="border-b border-border/60"
+                        data-testid={`row-audit-${a.id}`}
+                        data-op-event="true"
+                      >
+                        <td className="py-2 px-3 tabular-nums whitespace-nowrap align-top">
+                          {fmtDateTime(a.occurred_at, lang)}
+                        </td>
+                        <td className="py-2 px-3 align-top">
+                          <span className="font-mono text-xs">{a.actor ?? "—"}</span>
+                        </td>
+                        <td className="py-2 px-3 align-top">
+                          <div className="font-medium">{display.titleKey ? t(display.titleKey as I18nKey) : a.type}</div>
+                          <div className="text-[10px] font-mono text-muted-foreground">{a.type}</div>
+                        </td>
+                        <td className="py-2 px-3 text-xs align-top" data-testid={`cell-op-event-${a.id}`}>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <OutcomeChip outcome={display.outcome} t={t} />
+                            {display.summary && (
+                              <span className="text-foreground">{display.summary}</span>
+                            )}
+                          </div>
+                          {display.highlights.length > 0 && (
+                            <ul className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5 text-muted-foreground">
+                              {display.highlights.map((h, i) => (
+                                <li key={`${h.labelKey}:${i}`}>
+                                  <span className="font-medium">{t(h.labelKey as I18nKey)}:</span>{" "}
+                                  <span className="font-mono">{h.value}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {display.evidencePath && (
+                            <div className="mt-1 text-muted-foreground">
+                              <span className="font-medium">{t("audit_op_field_evidence")}:</span>{" "}
+                              <span className="font-mono">{display.evidencePath}</span>
+                            </div>
+                          )}
+                          <div className="mt-1">
+                            <button
+                              type="button"
+                              onClick={() => toggleRowExpanded(a.id)}
+                              className="text-[11px] underline text-muted-foreground hover:text-foreground"
+                              data-testid={`button-toggle-details-${a.id}`}
+                            >
+                              {expanded ? t("audit_op_hide_details") : t("audit_op_show_details")}
+                            </button>
+                          </div>
+                          {expanded && (
+                            <pre
+                              className="mt-1 whitespace-pre-wrap break-all bg-muted/40 rounded p-2 font-mono text-[10px] max-w-[560px]"
+                              data-testid={`details-json-${a.id}`}
+                            >
+                              {JSON.stringify(a.detail ?? {}, null, 2)}
+                            </pre>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  }
+                  return (
+                    <tr key={a.id} className="border-b border-border/60" data-testid={`row-audit-${a.id}`}>
+                      <td className="py-2 px-3 tabular-nums whitespace-nowrap">{fmtDateTime(a.occurred_at, lang)}</td>
+                      <td className="py-2 px-3">
+                        <span className="font-mono text-xs">{a.actor ?? "—"}</span>
+                      </td>
+                      <td className="py-2 px-3 font-mono text-xs">{a.type}</td>
+                      <td className="py-2 px-3 text-xs text-muted-foreground max-w-[420px] truncate" title={formatDetail(a.detail)}>
+                        {formatDetail(a.detail)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -281,5 +360,31 @@ export default function AuditLog() {
         </div>
       )}
     </div>
+  );
+}
+
+function OutcomeChip({
+  outcome,
+  t,
+}: {
+  outcome: OpAuditOutcome;
+  t: (k: I18nKey) => string;
+}) {
+  const cls =
+    outcome === "success"
+      ? "bg-green-500/15 text-green-400 border-green-500/30"
+      : outcome === "failure"
+        ? "bg-red-500/15 text-red-400 border-red-500/30"
+        : outcome === "partial"
+          ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+          : "bg-muted text-muted-foreground border-border";
+  const labelKey = `audit_op_outcome_${outcome}` as I18nKey;
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide ${cls}`}
+      data-testid={`chip-outcome-${outcome}`}
+    >
+      {t(labelKey)}
+    </span>
   );
 }

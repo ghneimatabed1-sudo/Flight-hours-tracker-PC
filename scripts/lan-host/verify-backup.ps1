@@ -1,7 +1,10 @@
 param(
   [string]$DatabaseUrl = "",
   [string]$BackupDir = "",
-  [string]$ScratchDbName = "hawk_eye_verify_scratch"
+  [string]$ScratchDbName = "hawk_eye_verify_scratch",
+  [string]$AuditUrl = "",
+  [string]$SystemIdentityToken = "",
+  [string]$SystemIdentityTokenFile = ""
 )
 
 # Hawk Eye — backup verification script.
@@ -70,6 +73,109 @@ function Replace-DbAdmin([string]$url) {
   return Replace-DbName -url $url -newName "postgres"
 }
 
+function Resolve-AuditUrl([string]$cliValue) {
+  # Priority: CLI arg → env override → localhost default. The default
+  # is the local hub api-server's internal audit route, derived from
+  # the same HAWK_API_PORT env that other host scripts (check-host-
+  # health.ps1, first-time-setup.ps1) rely on (fallback 3847). This
+  # makes audit-posting default-on for scheduled / manual runs without
+  # requiring the operator to set HAWKEYE_VERIFY_BACKUP_AUDIT_URL.
+  # To opt out explicitly, pass -AuditUrl "off" or set the env to "off".
+  if ($cliValue -and $cliValue.Trim() -ne "") { return $cliValue.Trim() }
+  $env = [System.Environment]::GetEnvironmentVariable("HAWKEYE_VERIFY_BACKUP_AUDIT_URL", "Process")
+  if ($env -and $env.Trim() -ne "") { return $env.Trim() }
+  $port = [System.Environment]::GetEnvironmentVariable("HAWK_API_PORT", "Process")
+  if (-not $port -or $port.Trim() -eq "") { $port = "3847" }
+  return "http://127.0.0.1:$port/api/internal/audit/op-event"
+}
+
+function Resolve-SystemIdentityToken([string]$cliValue, [string]$cliFile) {
+  # Precedence (matches the api-server loader at
+  # artifacts/api-server/src/lib/system-identity.ts and the Node
+  # release-verify resolver in scripts/src/release-verify.mjs):
+  #   1. -SystemIdentityToken CLI arg
+  #   2. HAWK_SYSTEM_IDENTITY_TOKEN env (canonical, matches api-server)
+  #   3. HAWKEYE_SYSTEM_IDENTITY_TOKEN env (legacy alias, kept for
+  #      back-compat with installers that already wrote this name)
+  #   4. -SystemIdentityTokenFile CLI arg
+  #   5. HAWK_SYSTEM_IDENTITY_TOKEN_FILE env
+  #   6. HAWKEYE_SYSTEM_IDENTITY_TOKEN_FILE env (legacy alias)
+  #   7. ${PROGRAMDATA}\HawkEye\system-identity.token (default install path)
+  if ($cliValue -and $cliValue.Trim() -ne "") { return $cliValue.Trim() }
+  $envTokenCanonical = [System.Environment]::GetEnvironmentVariable("HAWK_SYSTEM_IDENTITY_TOKEN", "Process")
+  if ($envTokenCanonical -and $envTokenCanonical.Trim() -ne "") { return $envTokenCanonical.Trim() }
+  $envTokenLegacy = [System.Environment]::GetEnvironmentVariable("HAWKEYE_SYSTEM_IDENTITY_TOKEN", "Process")
+  if ($envTokenLegacy -and $envTokenLegacy.Trim() -ne "") { return $envTokenLegacy.Trim() }
+  $candidates = @()
+  if ($cliFile -and $cliFile.Trim() -ne "") { $candidates += $cliFile.Trim() }
+  $envFileCanonical = [System.Environment]::GetEnvironmentVariable("HAWK_SYSTEM_IDENTITY_TOKEN_FILE", "Process")
+  if ($envFileCanonical -and $envFileCanonical.Trim() -ne "") { $candidates += $envFileCanonical.Trim() }
+  $envFileLegacy = [System.Environment]::GetEnvironmentVariable("HAWKEYE_SYSTEM_IDENTITY_TOKEN_FILE", "Process")
+  if ($envFileLegacy -and $envFileLegacy.Trim() -ne "") { $candidates += $envFileLegacy.Trim() }
+  $programData = [System.Environment]::GetEnvironmentVariable("PROGRAMDATA", "Process")
+  if ($programData -and $programData.Trim() -ne "") {
+    $candidates += (Join-Path $programData "HawkEye\system-identity.token")
+  }
+  foreach ($p in $candidates) {
+    if (Test-Path $p) {
+      try {
+        $raw = Get-Content -Path $p -Raw
+        if ($raw) {
+          $clean = ($raw -replace "\s", "").Trim()
+          if ($clean -ne "") { return $clean }
+        }
+      } catch {
+        # try next candidate
+      }
+    }
+  }
+  return ""
+}
+
+function Post-AuditRow(
+  [string]$auditUrl,
+  [string]$token,
+  [bool]$ok,
+  [string]$summary,
+  [hashtable]$details,
+  [string]$evidencePath
+) {
+  if (-not $auditUrl -or $auditUrl.Trim() -eq "") {
+    Write-Host "[hawk-eye:verify-backup] audit URL not configured — skipping audit POST"
+    return
+  }
+  if ($auditUrl.Trim().ToLower() -eq "off") {
+    # Operator explicitly opted out of audit posting via -AuditUrl off.
+    return
+  }
+  if (-not $token -or $token.Trim() -eq "") {
+    Write-Host "[hawk-eye:verify-backup] system-identity token not found at HAWK_SYSTEM_IDENTITY_TOKEN / HAWKEYE_SYSTEM_IDENTITY_TOKEN_FILE / `${PROGRAMDATA}\\HawkEye\\system-identity.token — skipping audit POST to $auditUrl"
+    return
+  }
+  $outcome = $(if ($ok) { "success" } else { "failure" })
+  $body = @{
+    event_type      = "op.verify_backup_run"
+    actor_username  = "system:verify-backup"
+    outcome         = $outcome
+    summary         = $summary
+    details         = $details
+  }
+  if ($evidencePath -and $evidencePath.Trim() -ne "") {
+    $body["evidence_path"] = $evidencePath
+  }
+  $json = $body | ConvertTo-Json -Compress -Depth 8
+  try {
+    Invoke-RestMethod -Method Post -Uri $auditUrl `
+      -ContentType "application/json" `
+      -Headers @{ "x-hawk-system-identity" = $token } `
+      -Body $json `
+      -TimeoutSec 10 | Out-Null
+    Write-Host "[hawk-eye:verify-backup] audit row posted to $auditUrl"
+  } catch {
+    Write-Host "[hawk-eye:verify-backup] audit POST failed (continuing): $($_.Exception.Message)"
+  }
+}
+
 function Write-HealthMarker([string]$databaseUrl, [bool]$ok, [string]$message, [hashtable]$detail) {
   $detailJson = $detail | ConvertTo-Json -Compress -Depth 4
   $okLit = $(if ($ok) { "true" } else { "false" })
@@ -107,6 +213,11 @@ if (-not (Test-Path $BackupDir)) {
   throw "Backup directory not found: $BackupDir"
 }
 
+$AuditUrl = Resolve-AuditUrl -cliValue $AuditUrl
+$SystemIdentityToken = Resolve-SystemIdentityToken `
+  -cliValue $SystemIdentityToken `
+  -cliFile $SystemIdentityTokenFile
+
 $latest = Get-ChildItem -Path $BackupDir -Filter "*.dump" -File `
   | Sort-Object LastWriteTime -Descending `
   | Select-Object -First 1
@@ -114,6 +225,9 @@ if (-not $latest) {
   $msg = "No .dump backup found in $BackupDir"
   Write-Host "[hawk-eye:verify-backup] $msg"
   Write-HealthMarker -databaseUrl $DatabaseUrl -ok $false -message $msg -detail @{ backupDir = $BackupDir }
+  Post-AuditRow -auditUrl $AuditUrl -token $SystemIdentityToken -ok $false `
+    -summary $msg -details @{ backup_dir = $BackupDir; phase = "no_backup_found" } `
+    -evidencePath $BackupDir
   exit 1
 }
 
@@ -181,6 +295,8 @@ if ($restoreOk -and $sanityOk) {
          ($sanityCounts.Keys | ForEach-Object { "$_=$($sanityCounts[$_])" }) -join " "
   Write-HealthMarker -databaseUrl $DatabaseUrl -ok $true -message $msg -detail $detail
   Write-Host "[hawk-eye:verify-backup] OK"
+  Post-AuditRow -auditUrl $AuditUrl -token $SystemIdentityToken -ok $true `
+    -summary $msg -details $detail -evidencePath $dumpFile
   exit 0
 }
 
@@ -188,4 +304,6 @@ $msg = "Verification FAILED for $($latest.Name): $restoreError"
 $detail["error"] = $restoreError
 Write-HealthMarker -databaseUrl $DatabaseUrl -ok $false -message $msg -detail $detail
 Write-Host "[hawk-eye:verify-backup] $msg"
+Post-AuditRow -auditUrl $AuditUrl -token $SystemIdentityToken -ok $false `
+  -summary $msg -details $detail -evidencePath $dumpFile
 exit 1

@@ -671,9 +671,186 @@ async function main() {
   console.log(`Report: ${relFromRepo(reportPath)}`);
   console.log(`Evidence: ${relFromRepo(evidenceDir)}/`);
 
+  // Best-effort post one audit row per release-verify run so an
+  // investigator can see "GO/NO-GO at <timestamp>" without having to
+  // grep release-evidence/ on the host PC. Controlled by
+  // HAWKEYE_RELEASE_VERIFY_AUDIT_URL — when unset, this is a no-op so
+  // a developer running release:verify on their laptop without a
+  // running api-server doesn't see a misleading network error.
+  await maybePostAuditRow({
+    date,
+    verdict,
+    results,
+    drifts,
+    baselineInitialized,
+    evidenceDir,
+    reportPath,
+    overallStartedAt,
+    overallEndedAt,
+  }).catch((err) => {
+    console.warn(
+      `release-verify: audit POST failed (continuing): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  });
+
   if (verdict.tag === "RED") process.exit(1);
   if (verdict.tag === "AMBER") process.exit(2);
   process.exit(0);
+}
+
+// ── Audit-log POST ───────────────────────────────────────────────
+//
+// Writes one `op.release_verify` row into the LAN api-server's
+// audit_log table per release-verify run. Authenticates with the
+// system-identity header.
+//
+// Default-on behaviour:
+//   - URL defaults to the local hub api-server at
+//     http://127.0.0.1:${HAWK_API_PORT||3847}/api/internal/audit/op-event
+//     so a host run with no extra env still posts. Override with
+//     HAWKEYE_RELEASE_VERIFY_AUDIT_URL when running cross-host.
+//   - Token resolution mirrors the api-server loader in
+//     artifacts/api-server/src/lib/system-identity.ts:
+//       1. HAWK_SYSTEM_IDENTITY_TOKEN          (canonical env)
+//       2. HAWKEYE_SYSTEM_IDENTITY_TOKEN       (legacy alias)
+//       3. file at HAWK_SYSTEM_IDENTITY_TOKEN_FILE
+//       4. file at HAWKEYE_SYSTEM_IDENTITY_TOKEN_FILE (legacy alias)
+//     Aligning the canonical-first order across api-server,
+//     release-verify, and verify-backup.ps1 prevents the case where an
+//     operator sets HAWKEYE_… on the host (legacy) and HAWK_… in the
+//     api-server env (canonical) and silently sends a token the server
+//     rejects. If both canonical and legacy env vars are set to
+//     different values, we log a warning so the misconfig is surfaced.
+//   - To explicitly opt out, set HAWKEYE_RELEASE_VERIFY_AUDIT_URL=off.
+// When the token cannot be resolved we log a single warn line and
+// continue — release-verify must never fail because audit is down.
+
+export function resolveReleaseVerifyAuditUrl() {
+  const explicit = String(
+    process.env.HAWKEYE_RELEASE_VERIFY_AUDIT_URL ?? "",
+  ).trim();
+  if (explicit) return explicit;
+  const port = String(process.env.HAWK_API_PORT ?? "3847").trim() || "3847";
+  return `http://127.0.0.1:${port}/api/internal/audit/op-event`;
+}
+
+export function resolveReleaseVerifySystemIdentityToken() {
+  const canonical = String(
+    process.env.HAWK_SYSTEM_IDENTITY_TOKEN ?? "",
+  ).trim();
+  const legacy = String(
+    process.env.HAWKEYE_SYSTEM_IDENTITY_TOKEN ?? "",
+  ).trim();
+  if (canonical && legacy && canonical !== legacy) {
+    console.warn(
+      "release-verify: HAWK_SYSTEM_IDENTITY_TOKEN and HAWKEYE_SYSTEM_IDENTITY_TOKEN are both set to different values — using HAWK_… (canonical). Unset the legacy alias to silence this warning.",
+    );
+  }
+  if (canonical) return canonical;
+  if (legacy) return legacy;
+  const tokenFile = String(
+    process.env.HAWK_SYSTEM_IDENTITY_TOKEN_FILE ?? "",
+  ).trim();
+  if (tokenFile) {
+    try {
+      const v = readFileSync(tokenFile, "utf8").trim();
+      if (v) return v;
+    } catch (err) {
+      console.warn(
+        `release-verify: HAWK_SYSTEM_IDENTITY_TOKEN_FILE set but unreadable (${err instanceof Error ? err.message : String(err)})`,
+      );
+    }
+  }
+  const tokenFileLegacy = String(
+    process.env.HAWKEYE_SYSTEM_IDENTITY_TOKEN_FILE ?? "",
+  ).trim();
+  if (tokenFileLegacy) {
+    try {
+      const v = readFileSync(tokenFileLegacy, "utf8").trim();
+      if (v) return v;
+    } catch (err) {
+      console.warn(
+        `release-verify: HAWKEYE_SYSTEM_IDENTITY_TOKEN_FILE set but unreadable (${err instanceof Error ? err.message : String(err)})`,
+      );
+    }
+  }
+  return "";
+}
+
+export async function maybePostAuditRow({
+  date,
+  verdict,
+  results,
+  drifts,
+  baselineInitialized,
+  evidenceDir,
+  reportPath,
+  overallStartedAt,
+  overallEndedAt,
+}) {
+  const auditUrl = resolveReleaseVerifyAuditUrl();
+  if (auditUrl.toLowerCase() === "off") return; // explicit opt-out
+  const token = resolveReleaseVerifySystemIdentityToken();
+  if (!token) {
+    console.warn(
+      `release-verify: system-identity token not configured (set HAWK_SYSTEM_IDENTITY_TOKEN or HAWK_SYSTEM_IDENTITY_TOKEN_FILE) — skipping audit POST to ${auditUrl}.`,
+    );
+    return;
+  }
+  const failed = results.filter((r) => !r.skipped && r.exitCode !== 0).length;
+  const passed = results.filter((r) => !r.skipped && r.exitCode === 0).length;
+  const skipped = results.filter((r) => r.skipped).length;
+  const outcome =
+    verdict.tag === "GREEN"
+      ? "success"
+      : verdict.tag === "AMBER"
+        ? "partial"
+        : "failure";
+  const summary =
+    `${verdict.tag} — ${passed} pass / ${failed} fail / ${skipped} skip` +
+    (drifts.length > 0 ? `, ${drifts.length} drift` : "");
+  const body = JSON.stringify({
+    event_type: "op.release_verify",
+    actor_username: "system:release-verify",
+    outcome,
+    summary,
+    evidence_path: relFromRepo(evidenceDir),
+    details: {
+      date,
+      verdict_tag: verdict.tag,
+      verdict_recommendation: verdict.recommendation,
+      baseline_initialized: baselineInitialized,
+      counts: {
+        passed,
+        failed,
+        skipped,
+        drifts: drifts.length,
+      },
+      report_path: relFromRepo(reportPath),
+      started_at: overallStartedAt,
+      ended_at: overallEndedAt,
+      checks: results.map((r) => ({
+        slug: r.slug,
+        label: r.label,
+        skipped: !!r.skipped,
+        exit_code: r.exitCode ?? null,
+        duration_ms: r.durationMs ?? 0,
+      })),
+      drifts,
+    },
+  });
+  const res = await fetch(auditUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-hawk-system-identity": token,
+    },
+    body,
+  });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  }
+  console.log(`release-verify: audit row posted to ${auditUrl}`);
 }
 
 const invokedDirectly =

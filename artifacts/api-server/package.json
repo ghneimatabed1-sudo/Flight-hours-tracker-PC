@@ -7,7 +7,9 @@
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --tsconfig tests/tsconfig.json --test --test-force-exit tests/audit-op-event.test.ts tests/audit-op-event-integration.test.ts",
+    "test:audit-op-event": "tsx --tsconfig tests/tsconfig.json --test --test-force-exit tests/audit-op-event.test.ts tests/audit-op-event-integration.test.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

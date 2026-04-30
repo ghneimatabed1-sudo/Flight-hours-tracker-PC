@@ -6,7 +6,7 @@
   "scripts": {
     "hello": "tsx ./src/hello.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test --test-force-exit ./tests/release-verify.test.ts"
+    "test": "tsx --test --test-force-exit ./tests/release-verify.test.ts ./tests/release-verify-audit.test.mjs"
   },
   "devDependencies": {
     "@types/node": "catalog:",

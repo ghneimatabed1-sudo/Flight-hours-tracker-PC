@@ -8,6 +8,7 @@ import pilotsWritesRouter from "./pilots-writes";
 import sortiesWritesRouter from "./sorties-writes";
 import sortiesReadRouter from "./sorties-read";
 import auditLogReadRouter from "./audit-log-read";
+import internalAuditRouter from "./internal-audit";
 import unavailableInternalRouter from "./unavailable-internal";
 import opsReadLanRouter from "./ops-read-lan";
 import opsBoardInternalRouter from "./ops-board-internal";
@@ -50,6 +51,13 @@ export function buildRouter(profile: InstallProfile): IRouter {
   if (profile === "hub") {
     const internal: IRouter = Router();
     internal.use(lanAuthPublic);
+    // The op-event ingress is mounted ahead of requireInternalLanSession
+    // so non-human callers (verify-backup.ps1, release-verify.mjs) that
+    // present a valid `x-hawk-system-identity` header can write rows
+    // without holding a LAN session. Requests without the header fall
+    // through to requireInternalLanSession inside the route handler
+    // itself — see internal-audit.ts for the auth composition.
+    internal.use(internalAuditRouter);
     internal.use(requireInternalLanSession);
     // Refuse non-GET writes when the data disk is critically low. Reads
     // (including the system-health route below) stay reachable so the

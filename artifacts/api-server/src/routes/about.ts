@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve as pathResolve } from "node:path";
 
 import { gatherAboutThisPc } from "../lib/about";
+import { recordOpAuditEvent } from "../lib/audit-log";
 import { normalizeLanRole, readLanUser } from "../lib/lan-authz";
 
 const router = Router();
@@ -74,6 +75,7 @@ router.post("/about/run-backup", async (req: Request, res: Response) => {
     key: "backup",
     scriptName: "backup-postgres.ps1",
     logTag: "about: run-backup",
+    auditEventType: "op.backup_run",
   });
 });
 
@@ -83,6 +85,7 @@ router.post("/about/run-verify", async (req: Request, res: Response) => {
     key: "verify",
     scriptName: "verify-backup.ps1",
     logTag: "about: run-verify",
+    auditEventType: "op.verify_backup_run_manual",
   });
 });
 
@@ -144,7 +147,12 @@ function findPowershell(): string | null {
 async function runScript(
   req: Request,
   res: Response,
-  opts: { key: "backup" | "verify"; scriptName: string; logTag: string },
+  opts: {
+    key: "backup" | "verify";
+    scriptName: string;
+    logTag: string;
+    auditEventType: "op.backup_run" | "op.verify_backup_run_manual";
+  },
 ): Promise<void> {
   if (inFlight[opts.key]) {
     res.status(409).json({ ok: false, error: "already_running" });
@@ -179,16 +187,36 @@ async function runScript(
     return;
   }
 
+  // Capture the actor before any async work so the op.* audit row
+  // attributes the run to the operator who clicked the button, not
+  // to "unknown".
+  const u = readLanUser(req);
+  const actorUsername = u?.username ?? null;
+  const actorUserId = u?.user_id ?? null;
+
   inFlight[opts.key] = true;
   const startedAt = Date.now();
   try {
+    // Suppression: verify-backup.ps1 now posts its own op.verify_backup_run
+    // audit row by default (right behaviour for the quarterly scheduled
+    // task). But when WE spawn it from a Settings-button click we
+    // ALREADY emit an op.verify_backup_run_manual row below — without
+    // this opt-out, one click would land two audit rows for the same
+    // run. The script honors HAWKEYE_VERIFY_BACKUP_AUDIT_URL=off as a
+    // documented skip-audit signal. Setting it on the spawned env is a
+    // no-op for backup-postgres.ps1 (which doesn't post audit rows) and
+    // is overridden by the scheduled-task env, so nothing else regresses.
+    const childEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      HAWKEYE_VERIFY_BACKUP_AUDIT_URL: "off",
+    };
     const child = spawn(
       ps,
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
       {
         cwd: process.cwd(),
         stdio: ["ignore", "pipe", "pipe"],
-        env: process.env,
+        env: childEnv,
       },
     );
     child.stdout?.pipe(logStream, { end: false });
@@ -223,6 +251,23 @@ async function runScript(
         { err: result.spawnError, logPath, durationMs },
         `${opts.logTag}: spawn error`,
       );
+      void recordOpAuditEvent({
+        event_type: opts.auditEventType,
+        actor_user_id: actorUserId,
+        actor_username: actorUsername,
+        outcome: "failure",
+        summary: `${opts.scriptName} failed to start: ${result.spawnError.message}`,
+        details: {
+          script: opts.scriptName,
+          phase: "spawn",
+          error: result.spawnError.message,
+          log_path: logPath,
+          duration_ms: durationMs,
+          triggered_via: "settings_button",
+        },
+      }).catch((auditErr) => {
+        req.log?.error?.({ err: auditErr }, `${opts.logTag}: audit insert failed`);
+      });
       res.status(500).json({
         ok: false,
         error: result.spawnError.message,
@@ -238,6 +283,24 @@ async function runScript(
       { exitCode, ok, logPath, durationMs },
       `${opts.logTag}: exited`,
     );
+    void recordOpAuditEvent({
+      event_type: opts.auditEventType,
+      actor_user_id: actorUserId,
+      actor_username: actorUsername,
+      outcome: ok ? "success" : "failure",
+      summary: ok
+        ? `${opts.scriptName} completed successfully (${Math.round(durationMs / 1000)}s)`
+        : `${opts.scriptName} exited with code ${exitCode}`,
+      details: {
+        script: opts.scriptName,
+        exit_code: exitCode,
+        duration_ms: durationMs,
+        log_path: logPath,
+        triggered_via: "settings_button",
+      },
+    }).catch((auditErr) => {
+      req.log?.error?.({ err: auditErr }, `${opts.logTag}: audit insert failed`);
+    });
     res.status(ok ? 200 : 500).json({
       ok,
       exitCode,
@@ -253,6 +316,22 @@ async function runScript(
     }
     const msg = err instanceof Error ? err.message : String(err);
     req.log?.error?.({ err, logPath }, `${opts.logTag}: spawn threw`);
+    void recordOpAuditEvent({
+      event_type: opts.auditEventType,
+      actor_user_id: actorUserId,
+      actor_username: actorUsername,
+      outcome: "failure",
+      summary: `${opts.scriptName} could not be started: ${msg}`,
+      details: {
+        script: opts.scriptName,
+        phase: "spawn_throw",
+        error: msg,
+        log_path: logPath,
+        triggered_via: "settings_button",
+      },
+    }).catch((auditErr) => {
+      req.log?.error?.({ err: auditErr }, `${opts.logTag}: audit insert failed`);
+    });
     res.status(500).json({ ok: false, error: msg, logPath });
   }
 }
