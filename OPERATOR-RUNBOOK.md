@@ -33,21 +33,47 @@ restore, or reset anything in this system.
    pnpm install
    .\scripts\lan-host\first-time-setup.ps1
    ```
+   To also broadcast this hub on the LAN as `_hawkeye-hub._tcp` so an
+   aggregator install wizard can suggest it automatically, append
+   `-EnableMdns` (off by default — leave it off on sites that block
+   multicast):
+   ```
+   .\scripts\lan-host\first-time-setup.ps1 -EnableMdns
+   ```
 6. Answer the prompts:
+   - **Squadron name** — a short, friendly name for this hub PC such
+     as `tigers-hub` or `eagles-hub` (1-15 chars, letters / digits /
+     hyphen, no leading or trailing hyphen, not all digits). This
+     becomes the Windows computer name, so the PC is reachable on the
+     LAN as `<name>.local`. If the name changes the script queues a
+     **rename + reboot** — finish the script first, then run
+     `shutdown /r /t 0`.
    - Postgres superuser password (the one from step 1).
    - First super-admin username.
    - First super-admin password (8+ characters).
-7. The script writes both `.env.production` files, creates the
-   database, lays out every Hawk Eye table, mints the super-admin, and
-   registers two scheduled tasks: one to start the api-server on boot
+7. The script writes both `.env.production` files (including
+   `SQUADRON_NAME`), creates the database, lays out every Hawk Eye
+   table, mints the super-admin, and registers two scheduled tasks:
+   one to start the api-server on boot
    (`HawkEye-ApiServer-OnStartup`), and one to back up the database
-   every night at 02:30 (`HawkEye-Postgres-Backup-Daily`).
+   every night at 02:30 (`HawkEye-Postgres-Backup-Daily`). When
+   `-EnableMdns` was passed, a third task
+   (`HawkEye-Mdns-OnStartup`) keeps the Bonjour broadcast alive
+   across reboots.
 8. Note the **bootstrap token** the script prints. Store it somewhere
    safe — it is only used once, the first time you sign in remotely.
+9. Note the **initial peer access token** the script prints in a green
+   banner near the end. It looks like `phk_<uuid>_<hex>`. Copy it
+   immediately — it is shown **once**. The Wing Commander PC operator
+   will paste it when adding this squadron. A copy is also saved to
+   `%PROGRAMDATA%\HawkEye\peer-token-initial.txt` (readable only by
+   local Administrators) in case it scrolls off-screen. Lost it?
+   See section 6 — `reset-peer-token.ps1` mints a fresh one any time.
 
-The host PC is now ready. Reboot it once and confirm the api-server
-comes back up automatically (check Task Scheduler → "Hawk Eye API
-Server" → status: Running).
+The host PC is now ready. Reboot it once (mandatory if the squadron
+name changed the computer name) and confirm the api-server comes back
+up automatically (check Task Scheduler → "Hawk Eye API Server" →
+status: Running).
 
 ---
 
@@ -256,6 +282,48 @@ hashed (never stored as plain text) and written directly to the
 unreachable — it bypasses the audit chain that the **Admin → Users**
 page provides.
 
+### Re-issue a peer access token
+
+The peer access token is what the Wing Commander PC sends to read this
+hub's data. The first one is printed by `first-time-setup.ps1` and
+saved to `%PROGRAMDATA%\HawkEye\peer-token-initial.txt`. To mint a
+fresh one (lost token, suspected leak, or routine rotation), on the
+host PC, with the api-server running:
+
+```
+.\scripts\lan-host\reset-peer-token.ps1 -Username "superadmin"
+```
+
+You will be prompted for that super_admin's password. The script logs
+in over HTTP, calls `POST /api/internal/peer-tokens`, prints the new
+plain token in a green banner (shown **once**), and rewrites
+`%PROGRAMDATA%\HawkEye\peer-token-initial.txt`. Earlier tokens stay
+valid until you revoke them — sign in as super_admin and remove them
+from the dashboard, or `DELETE /api/internal/peer-tokens/<id>`.
+
+If the api-server is not running, start it first:
+```
+schtasks /Run /TN HawkEye-ApiServer-OnStartup
+```
+
+### Turn the LAN broadcast on or off later
+
+If you skipped `-EnableMdns` during first-time setup but later want
+this hub to be auto-discovered by an aggregator install wizard:
+
+```
+.\scripts\lan-host\register-mdns.ps1 -SquadronName "tigers-hub" -ApiPort 3847
+```
+
+To stop broadcasting:
+```
+.\scripts\lan-host\register-mdns.ps1 -SquadronName "tigers-hub" -Unregister
+```
+
+This requires `dns-sd.exe` (ships with Apple Bonjour Print Services).
+On a stripped-down PC the script warns and exits cleanly so you can
+install Bonjour and re-run.
+
 ---
 
 ## 7. Push an updated build via USB
@@ -303,6 +371,8 @@ pnpm lan:host:health      # hits http://127.0.0.1:3847/api/healthz
 | Sign-in keeps failing | Check the audit log on the host PC's Postgres for `lan_login_failed` rows. Ask user to wait 5 minutes (rate limit) and try again. If the user account was disabled, sign in as super-admin and re-enable it from **Admin → Users**. |
 | Sign-in returns "lan_user_disabled" | The account is soft-disabled. Sign in as super-admin and toggle it back to **Active** from **Admin → Users**. |
 | All sign-ins fail and we just rebuilt the host | Run `reset-admin-password.ps1` for the super-admin on the host PC, then sign in and use **Admin → Users** to reset everything else. |
+| Wing Commander PC asks for the squadron's peer token and we don't have it | The initial token is in `%PROGRAMDATA%\HawkEye\peer-token-initial.txt` on the host (Local Administrators only). If that file is gone, mint a fresh one with `reset-peer-token.ps1 -Username "<super_admin>"` — it overwrites the file and prints the new token in a green banner. |
+| Aggregator wizard cannot see this hub on the LAN | mDNS may be off. Re-run `register-mdns.ps1 -SquadronName "<name>" -ApiPort 3847` on the host. If `dns-sd.exe` is missing, install Apple Bonjour Print Services and re-run. Either way, the operator can still type `<squadron>.local` by hand. |
 | Dashboard title bar shows "v? · nogit" | The build was made from a tarball without `.git`. Functionally fine; cosmetic. |
 | Auto-update toggled on by accident | Set `RJAF_ENABLE_AUTO_UPDATE=0` (or unset it) in the dashboard launch environment. The Settings → Auto-Update toggle in the app also controls this per-role. |
 | Audit log row shows `actor: unknown` | Someone made a write while the api-server was in `HAWK_LAN_DEV_NO_AUTH=1` mode. Flip it back to `0` immediately. |

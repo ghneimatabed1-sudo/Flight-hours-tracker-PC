@@ -11,6 +11,8 @@
     "check:super-admin-jwt-gate": "node scripts/src/check-super-admin-jwt-gate.mjs",
     "lan:host:first-time-setup": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/first-time-setup.ps1",
     "lan:host:reset-admin-password": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/reset-admin-password.ps1",
+    "lan:host:reset-peer-token": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/reset-peer-token.ps1",
+    "lan:host:register-mdns": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/register-mdns.ps1",
     "lan:host:start": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/start-api-host.ps1",
     "lan:host:setup-env": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/setup-api-lan-env.ps1",
     "lan:host:preflight": "powershell -ExecutionPolicy Bypass -File ./scripts/lan-host/verify-host-prereqs.ps1",
