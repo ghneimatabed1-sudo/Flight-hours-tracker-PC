@@ -68,6 +68,7 @@ import AdminOverview from "@/pages/admin/Overview";
 import AdminSquadrons from "@/pages/admin/Squadrons";
 import AdminAuditLog from "@/pages/admin/AuditLog";
 import AdminSecurity from "@/pages/admin/Security";
+import AdminSystemHealth from "@/pages/admin/SystemHealth";
 import AdminUsers from "@/pages/admin/Users";
 import AdminPeerTokens from "@/pages/admin/PeerTokens";
 import CommanderOverview from "@/pages/dashboard/Overview";
@@ -134,6 +135,7 @@ function AdminRoutes() {
       <Route path="/admin/squadrons" component={AdminSquadrons} />
       <Route path="/admin/audit" component={AdminAuditLog} />
       <Route path="/admin/security" component={AdminSecurity} />
+      <Route path="/admin/health" component={AdminSystemHealth} />
       <Route path="/admin/users" component={AdminUsers} />
       <Route path="/admin/peer-tokens" component={AdminPeerTokens} />
       <Route path="/settings" component={SettingsPage} />

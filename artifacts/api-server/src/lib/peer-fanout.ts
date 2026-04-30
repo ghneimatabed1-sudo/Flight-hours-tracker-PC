@@ -68,6 +68,12 @@ export type PeerStatus = {
   last_success_at: string | null;
   served_from_cache: boolean;
   error?: string;
+  /**
+   * Difference (peer clock − this PC's clock) in milliseconds, parsed
+   * from the responder's `Date` header. Positive = peer is ahead of us.
+   * `null` when we couldn't parse the header (e.g. cached/offline).
+   */
+  clock_skew_ms?: number | null;
 };
 
 export type FanoutResult<R> = {
@@ -102,6 +108,37 @@ const DEFAULT_TIMEOUT_MS = 5_000;
 
 export function hashPeerToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+// ── Clock-skew tracking ────────────────────────────────────────────────
+//
+// Every successful peer call captures the responder's `Date` header and
+// records the skew from this PC's clock. The System Health route reads
+// the most-recent values to surface a warning on operator dashboards
+// when one of the squadron PCs has a battery-dead CMOS or wandered
+// time. We don't persist this to the DB — a transient in-process map
+// is enough for "right now" health.
+const recentPeerSkewMs = new Map<string, number>();
+
+function recordPeerSkew(peerSquadronId: string, dateHeader: string | null): void {
+  if (!dateHeader) return;
+  const t = Date.parse(dateHeader);
+  if (Number.isNaN(t)) return;
+  // Positive skew = peer clock is ahead of ours.
+  const skew = t - Date.now();
+  recentPeerSkewMs.set(peerSquadronId, skew);
+}
+
+/** Snapshot of {peer_squadron_id: skew_ms} for the last call per peer. */
+export function getRecentPeerSkewMs(): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, v] of recentPeerSkewMs.entries()) out[k] = v;
+  return out;
+}
+
+/** Test-only: reset the in-process skew cache between cases. */
+export function _resetRecentPeerSkewForTests(): void {
+  recentPeerSkewMs.clear();
 }
 
 /** Read-only address-book listing for the route handlers. */
@@ -249,7 +286,7 @@ function extractItems(payload: unknown): unknown[] {
 }
 
 type PeerCallOutcome =
-  | { kind: "ok"; payload: unknown }
+  | { kind: "ok"; payload: unknown; dateHeader: string | null }
   | { kind: "fail"; error: string; transient: boolean };
 
 async function callPeer(
@@ -281,7 +318,9 @@ async function callPeer(
       } catch {
         payload = null;
       }
-      return { kind: "ok", payload };
+      const dateHeader = res.headers?.get?.("date") ?? null;
+      recordPeerSkew(peer.id, dateHeader);
+      return { kind: "ok", payload, dateHeader };
     }
     let body: unknown = null;
     try {
@@ -361,6 +400,7 @@ export async function fanOutResource<R extends Record<string, unknown>>(
         status: "online",
         last_success_at: new Date().toISOString(),
         served_from_cache: false,
+        clock_skew_ms: recentPeerSkewMs.get(peer.id) ?? null,
       });
     } else {
       const cached = await getCache(peer.id, cacheKind);
@@ -434,6 +474,7 @@ export async function pingPeers(
           status: "online" as const,
           last_success_at: new Date().toISOString(),
           served_from_cache: false,
+          clock_skew_ms: recentPeerSkewMs.get(peer.id) ?? null,
         };
       }
       await recordPeerError(peer.id, outcome.error);

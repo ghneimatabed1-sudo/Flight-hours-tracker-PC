@@ -18,7 +18,9 @@ import peerTokensInternalRouter from "./peer-tokens-internal";
 import lanAuthPublic from "./lan-auth-public";
 import peerShellRouter from "./peer-shell";
 import aggregateShellRouter from "./aggregate-shell";
+import systemHealthRouter from "./system-health";
 import { requireInternalLanSession } from "../lib/lan-auth-middleware";
+import { diskGuard } from "../middlewares/disk-guard";
 import {
   isAggregatorProfile,
   type InstallProfile,
@@ -46,6 +48,11 @@ export function buildRouter(profile: InstallProfile): IRouter {
     const internal: IRouter = Router();
     internal.use(lanAuthPublic);
     internal.use(requireInternalLanSession);
+    // Refuse non-GET writes when the data disk is critically low. Reads
+    // (including the system-health route below) stay reachable so the
+    // operator can still see what's wrong.
+    internal.use(diskGuard);
+    internal.use(systemHealthRouter);
     internal.use(pilotOptionsRouter);
     internal.use(squadronAirframesRouter);
     internal.use(squadronsListRouter);
@@ -75,6 +82,8 @@ export function buildRouter(profile: InstallProfile): IRouter {
     const aggregate: IRouter = Router();
     aggregate.use(lanAuthPublic);
     aggregate.use(requireInternalLanSession);
+    aggregate.use(diskGuard);
+    aggregate.use(systemHealthRouter);
     aggregate.use(aggregateShellRouter);
     router.use("/aggregate", aggregate);
   }

@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { useI18n, type Key } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Languages, ShieldCheck, Activity, Users, Plane, ListChecks, BarChart3, AlertTriangle, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Bell, KeyRound, Settings as SettingsIcon, Server, FileText } from "lucide-react";
+import { LogOut, Languages, ShieldCheck, Activity, Users, Plane, ListChecks, BarChart3, AlertTriangle, Gauge, Lock, CalendarDays, ClipboardList, UserX, StickyNote, Bell, HeartPulse, KeyRound, Settings as SettingsIcon, Server, FileText } from "lucide-react";
 import IdentityStrip from "@/components/IdentityStrip";
 import emblem from "@assets/rjaf_emblem.png";
 import { useInstallProfile, isAggregatorProfile } from "@/lib/install-profile";
@@ -65,6 +65,7 @@ export function HQLayout({ children }: { children: ReactNode }) {
         { path: "/admin/squadrons", labelKey: "squadrons", icon: <Plane className="h-4 w-4" /> },
         { path: "/admin/audit", labelKey: "auditLog", icon: <ListChecks className="h-4 w-4" /> },
         { path: "/admin/security", labelKey: "nav_security", icon: <Lock className="h-4 w-4" /> },
+        { path: "/admin/health", labelKey: "nav_system_health", icon: <HeartPulse className="h-4 w-4" /> },
         { path: "/admin/users", labelKey: "nav_users", icon: <Users className="h-4 w-4" /> },
         { path: "/admin/peer-tokens", labelKey: "nav_peer_tokens", icon: <KeyRound className="h-4 w-4" /> },
         { path: "/settings", labelKey: "nav_settings", icon: <SettingsIcon className="h-4 w-4" /> },

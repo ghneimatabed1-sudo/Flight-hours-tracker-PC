@@ -129,6 +129,48 @@ PowerShell script and follows the runbook:
 no-op stub so legacy call sites still type-check; new code MUST NOT
 introduce additional `supabase.X` reads.
 
+## 15-year unattended-operation hardening (task #338)
+
+Hawk Eye is intended to run for ~15 years on each squadron host PC with
+only a quarterly operator walk-through. The hardening pieces that
+support that lifetime:
+
+- `lib/system-health.ts` + `routes/system-health.ts` (api-server) —
+  GET-only diagnostic, mounted on `/api/internal/system-health` (hub)
+  and `/api/aggregate/system-health` (aggregator), super_admin only.
+  Reports disk free, Postgres status, audit-log size, last backup
+  age, last backup-verify outcome, install profile drift, and peer
+  reachability + clock skew. Polled by **Admin → System Health** in
+  the dashboard every 30 seconds.
+- `middlewares/disk-guard.ts` — refuses non-GET writes under
+  `/api/internal/*` and `/api/aggregate/*` when the data disk is
+  <1% free, with `disk_full` JSON error and HTTP 507. Reads stay
+  reachable so the operator can still see the System Health page.
+  Cached 60s to avoid statting on every request.
+- `lan-auth-schema.ts` — adds the `(occurred_at desc, type)`
+  composite index on `audit_log` (keeps queries fast at 10M+ rows)
+  and the `system_health_marker` table (cross-process state shared
+  with the PowerShell verify script).
+- `peer-fanout.ts` — captures the `Date` response header on every
+  successful peer call and exposes `clock_skew_ms` on `PeerStatus`
+  + a process-global snapshot via `getRecentPeerSkewMs()`. The
+  System Health route flags any peer with >5min skew.
+- `scripts/lan-host/verify-backup.ps1` +
+  `install-verify-backup-task.ps1` — restore the latest `.dump` into
+  a scratch DB, run sanity SELECTs, drop the scratch DB, write the
+  outcome into `system_health_marker.last_backup_verify`. Quarterly
+  Scheduled Task at 03:30 on the 15th of Jan/Apr/Jul/Oct.
+- `scripts/src/check-no-external-urls.mjs` — scans the built
+  `artifacts/pilot-dashboard/dist/` for non-allow-listed external
+  URLs so a CDN/Google-Fonts slip can't ship to an air-gapped LAN.
+  Run via `pnpm check:no-external-urls` after a dashboard build.
+- `tests/ensure-schema-idempotent.test.ts` (pilot-dashboard) — runs
+  `ensureFullSchema()` 3× back-to-back against a stubbed pool and
+  asserts every CREATE/ALTER/INSERT is idempotent. Forward-compat
+  guard for the next 15 years of binary upgrades.
+- `OPERATOR-RUNBOOK.md` § 9 — quarterly checklist the host-PC
+  operator follows (≈10min). Mirrors the System Health tiles.
+
 ## Repo conventions
 
 - pnpm monorepo, TypeScript strict, contract-first OpenAPI + Orval

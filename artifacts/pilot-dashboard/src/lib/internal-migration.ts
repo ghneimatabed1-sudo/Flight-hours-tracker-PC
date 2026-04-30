@@ -653,6 +653,50 @@ export async function fetchInternalSortieTableRows(
   }
 }
 
+/**
+ * Operator-facing health snapshot. The api-server route is mounted on
+ * both `/internal/system-health` (hub) and `/aggregate/system-health`
+ * (aggregator) — we try the hub path first, then fall back. Returns
+ * `null` when the internal API is disabled (browser dev / non-LAN).
+ */
+export type SystemHealthComponent = {
+  key: string;
+  severity: "ok" | "warn" | "fail";
+  message: string;
+  detail?: Record<string, unknown> | null;
+};
+
+export type SystemHealthReport = {
+  generatedAt: string;
+  installProfile: string;
+  schemaVersion: number;
+  overall: "ok" | "warn" | "fail";
+  components: SystemHealthComponent[];
+};
+
+export async function fetchInternalSystemHealth(): Promise<SystemHealthReport | null> {
+  const candidates = ["internal/system-health", "aggregate/system-health"];
+  for (const path of candidates) {
+    const url = getInternalApiPath(path);
+    if (!url) return null;
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        cache: "no-store",
+        headers: internalApiHeadersBase(),
+      });
+      if (res.status === 404) continue;
+      if (!res.ok) return null;
+      const body = (await res.json()) as { ok?: boolean; report?: SystemHealthReport };
+      if (body?.ok && body.report) return body.report;
+      return null;
+    } catch {
+      // try the next candidate
+    }
+  }
+  return null;
+}
+
 export async function fetchInternalAuditLogRows(
   limit = 2500,
 ): Promise<

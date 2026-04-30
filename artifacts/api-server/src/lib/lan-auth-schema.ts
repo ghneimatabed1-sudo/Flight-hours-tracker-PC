@@ -60,6 +60,12 @@ export async function ensureFullSchema(): Promise<void> {
   `);
 
   // ── Audit log ───────────────────────────────────────────────────────
+  // Audit rows are append-only and we never delete history, so the
+  // table grows for the life of the install. The composite index on
+  // (occurred_at desc, type) keeps the most-common dashboard query
+  // — "give me the last N rows, optionally filtered by type" — fast
+  // even after a decade of writes (>10M rows). Postgres autovacuum
+  // is on by default and is the only maintenance this table needs.
   await pool.query(`
     create table if not exists audit_log (
       id bigserial primary key,
@@ -71,6 +77,24 @@ export async function ensureFullSchema(): Promise<void> {
     create index if not exists audit_log_occurred_at_idx
       on audit_log (occurred_at desc);
     create index if not exists audit_log_actor_idx on audit_log (actor);
+    create index if not exists audit_log_occurred_at_type_idx
+      on audit_log (occurred_at desc, type);
+  `);
+
+  // ── System-health marker ────────────────────────────────────────────
+  // Cross-process state shared between the api-server (which reads it
+  // for the System Health admin page) and the LAN-host PowerShell
+  // helpers (verify-backup.ps1 writes a `last_backup_verify` row when
+  // the quarterly self-restore-test passes). Single-row-per-key shape
+  // keeps the surface trivial to reason about; never grows unbounded.
+  await pool.query(`
+    create table if not exists system_health_marker (
+      key text primary key,
+      ok boolean not null,
+      message text,
+      observed_at timestamptz not null default now(),
+      detail jsonb
+    );
   `);
 
   // ── Wings & bases (multi-tier RBAC) ─────────────────────────────────

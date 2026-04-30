@@ -584,7 +584,71 @@ pnpm lan:host:health      # hits http://127.0.0.1:3847/api/healthz
 
 ---
 
-## 9. What to escalate
+## 9. Quarterly operator checklist
+
+Hawk Eye is built to run unattended for ~15 years on the squadron LAN.
+A short quarterly walk-through (≈10 minutes per host PC) is the only
+maintenance the operator owes the system. Every step below is also
+surfaced on the **Admin → System Health** page in the dashboard, so the
+operator can do most of this without opening PowerShell.
+
+Schedule: **15 January, 15 April, 15 July, 15 October.** (Same day the
+backup-verify Scheduled Task fires automatically.)
+
+1. **Open the System Health page** — sign in as super-admin and visit
+   **Admin → System Health**. Every tile should be green. Yellow tiles
+   include the operator action right in the message; red tiles must be
+   resolved immediately (writes are blocked when the disk tile turns
+   red). The page refreshes every 30 seconds.
+2. **Check the disk** — the *disk* tile must read >20% free. If it is
+   yellow, archive old `.dump` files in
+   `artifacts/api-server/backups/` to a USB stick and delete them from
+   the host PC; the rest of the data lives in Postgres and does not
+   prune itself.
+3. **Confirm the nightly backup ran** — the *last_backup* tile should
+   read "<24h ago". If it is yellow/red, run
+   `pnpm lan:host:backup` once by hand to confirm the script still
+   works, then re-install the Scheduled Task with
+   `pnpm lan:host:install-backup-task`.
+4. **Confirm the quarterly verify ran** — the *last_backup_verify*
+   tile should read "<120 days ago". If older, run
+   `pnpm lan:host:verify-backup` once by hand and re-install the
+   quarterly task with `pnpm lan:host:install-verify-backup-task`.
+5. **Check peer reachability (aggregator PCs only)** — the *peers*
+   tile lists every squadron hub. Any offline peer is also listed in
+   the address book on **Admin → Squadrons**; ping the listed
+   hostname from the aggregator PC. If a peer reports a clock skew
+   over 5 minutes, fix that PC's system clock (right-click the
+   taskbar clock → *Adjust date/time*).
+6. **Glance at the audit log** — the *audit_log* tile shows row count
+   and on-disk size. The table is append-only and is fine to grow
+   (the composite index keeps reads fast even at 10M+ rows). Open
+   **Admin → Audit Log** and confirm there are no recent
+   `actor: unknown` rows from outside an expected
+   `HAWK_LAN_DEV_NO_AUTH=1` bring-up window.
+7. **Note the schema/install-profile drift** — the
+   *install_profile* tile reports the originally-installed profile
+   pinned in `install_profile_meta`. If it disagrees with the
+   currently-running profile, escalate to the developer; the
+   first-boot value is canonical.
+
+If every tile is green, you are done — write the date in the host PC's
+log book and move on. The host PC needs no further attention until
+next quarter.
+
+### Scheduled tasks installed by the runbook
+
+| Task | Cadence | Installed by |
+| --- | --- | --- |
+| `HawkEye-Postgres-Backup-Daily` | 02:30 every day | `pnpm lan:host:install-backup-task` |
+| `HawkEye-Backup-Verify-Quarterly` | 03:30 on the 15th of Jan/Apr/Jul/Oct | `pnpm lan:host:install-verify-backup-task` |
+
+Both tasks run as `SYSTEM`, read `DATABASE_URL` from
+`artifacts\api-server\.env`, and write nothing to the public internet.
+
+---
+
+## 10. What to escalate
 
 Contact the developer (with logs) only when:
 - The api-server crashes on boot and `first-time-setup.log` shows a
