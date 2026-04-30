@@ -35,6 +35,7 @@ export const requireInternalLanSession: RequestHandler = async (req, res, next) 
       join lan_users u on u.id = s.user_id
       where s.token = $1
         and s.expires_at > now()
+        and u.disabled_at is null
       limit 1
       `,
       [token],

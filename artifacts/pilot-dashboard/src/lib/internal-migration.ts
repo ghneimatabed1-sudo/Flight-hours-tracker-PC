@@ -2112,6 +2112,161 @@ export async function postInternalUndoImport(
   }
 }
 
+/**
+ * One row from `GET /api/internal/users` (Super Admin user-management page).
+ *
+ * Mirrors the LAN api-server columns from `lan_users` plus the runtime-derived
+ * `disabled_at` flag (null = active, ISO timestamp = disabled). The admin Users
+ * page (pages/admin/Users.tsx) renders this list, and the LAN session middleware
+ * refuses to mint or honour sessions for any row with a non-null `disabled_at`.
+ */
+export type InternalLanUserRow = {
+  id: string;
+  username: string;
+  display_name: string | null;
+  role: string;
+  squadron_id: string | null;
+  wing_id: string | null;
+  base_id: string | null;
+  disabled_at: string | null;
+  created_at: string;
+};
+
+export async function fetchInternalLanUsers(): Promise<InternalLanUserRow[] | null> {
+  const url = getInternalApiPath("internal/users");
+  if (!url) return null;
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: internalApiHeadersBase(),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { items?: unknown };
+    if (!body || !Array.isArray(body.items)) return null;
+    return body.items
+      .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+      .map((r) => ({
+        id: String(r.id ?? ""),
+        username: String(r.username ?? ""),
+        display_name:
+          r.display_name == null || r.display_name === ""
+            ? null
+            : String(r.display_name),
+        role: String(r.role ?? ""),
+        squadron_id:
+          r.squadron_id == null || r.squadron_id === "" ? null : String(r.squadron_id),
+        wing_id:
+          r.wing_id == null || r.wing_id === "" ? null : String(r.wing_id),
+        base_id:
+          r.base_id == null || r.base_id === "" ? null : String(r.base_id),
+        disabled_at:
+          r.disabled_at == null || r.disabled_at === "" ? null : String(r.disabled_at),
+        created_at: String(r.created_at ?? ""),
+      }));
+  } catch {
+    return null;
+  }
+}
+
+export async function postInternalLanUserCreate(input: {
+  username: string;
+  password: string;
+  role: string;
+  display_name?: string;
+  squadron_id?: string | null;
+  wing_id?: string | null;
+  base_id?: string | null;
+}): Promise<
+  | { ok: true; row: InternalLanUserRow }
+  | { ok: false; error: string; status?: number }
+> {
+  const url = getInternalApiPath("internal/users");
+  if (!url) return { ok: false, error: "internal_api_disabled" };
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: internalWriteHeaders(),
+      body: JSON.stringify(input),
+    });
+    const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      return { ok: false, error: String(parsed?.error ?? `http_${res.status}`), status: res.status };
+    }
+    const r = (parsed?.row ?? {}) as Record<string, unknown>;
+    return {
+      ok: true,
+      row: {
+        id: String(r.id ?? ""),
+        username: String(r.username ?? ""),
+        display_name:
+          r.display_name == null || r.display_name === "" ? null : String(r.display_name),
+        role: String(r.role ?? ""),
+        squadron_id:
+          r.squadron_id == null || r.squadron_id === "" ? null : String(r.squadron_id),
+        wing_id: r.wing_id == null || r.wing_id === "" ? null : String(r.wing_id),
+        base_id: r.base_id == null || r.base_id === "" ? null : String(r.base_id),
+        disabled_at:
+          r.disabled_at == null || r.disabled_at === "" ? null : String(r.disabled_at),
+        created_at: String(r.created_at ?? ""),
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Patch a LAN user. Each field is only sent if the caller wants to change it.
+ * `disabled` flips the soft-disable flag; the server stamps / clears
+ * `disabled_at` and refuses to disable the last super_admin.
+ */
+export async function patchInternalLanUser(
+  id: string,
+  input: {
+    password?: string;
+    role?: string;
+    squadron_id?: string | null;
+    wing_id?: string | null;
+    base_id?: string | null;
+    disabled?: boolean;
+  },
+): Promise<{ ok: true } | { ok: false; error: string; status?: number }> {
+  const url = getInternalApiPath(`internal/users/${encodeURIComponent(id)}`);
+  if (!url) return { ok: false, error: "internal_api_disabled" };
+  try {
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: internalWriteHeaders(),
+      body: JSON.stringify(input),
+    });
+    const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      return { ok: false, error: String(parsed?.error ?? `http_${res.status}`), status: res.status };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function deleteInternalLanUser(
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string; status?: number }> {
+  const url = getInternalApiPath(`internal/users/${encodeURIComponent(id)}`);
+  if (!url) return { ok: false, error: "internal_api_disabled" };
+  try {
+    const res = await fetch(url, { method: "DELETE", headers: internalWriteHeaders() });
+    const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      return { ok: false, error: String(parsed?.error ?? `http_${res.status}`), status: res.status };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export async function postInternalPilotTransfer(
   pilotId: string,
   toSquadronId: string,

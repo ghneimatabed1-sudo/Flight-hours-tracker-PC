@@ -56,6 +56,7 @@ export function HQLayout({ children }: { children: ReactNode }) {
         { path: "/admin/reminders", labelKey: "remindersSchedule", icon: <AlarmClock className="h-4 w-4" /> },
         { path: "/admin/audit", labelKey: "auditLog", icon: <ListChecks className="h-4 w-4" /> },
         { path: "/admin/security", labelKey: "nav_security", icon: <Lock className="h-4 w-4" /> },
+        { path: "/admin/users", labelKey: "nav_users", icon: <Users className="h-4 w-4" /> },
         { path: "/admin/connection-map", labelKey: "nav_connection_map", icon: <Network className="h-4 w-4" /> },
         { path: "/connections", labelKey: "nav_connections", icon: <Link2Icon className="h-4 w-4" /> },
         { path: "/settings", labelKey: "nav_settings", icon: <SettingsIcon className="h-4 w-4" /> },

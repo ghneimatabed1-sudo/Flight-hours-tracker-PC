@@ -29,3 +29,4 @@ to = "/index.html"
 [services.env]
 PORT = "25875"
 BASE_PATH = "/"
+INTERNAL_API_PROXY_TARGET = "http://127.0.0.1:8080"

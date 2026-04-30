@@ -95,10 +95,11 @@ router.get("/users", async (req, res, next) => {
       squadron_id: string | null;
       wing_id: string | null;
       base_id: string | null;
+      disabled_at: string | null;
       created_at: string;
     }>(
       `
-      select id, username, display_name, role, squadron_id, wing_id, base_id, created_at
+      select id, username, display_name, role, squadron_id, wing_id, base_id, disabled_at, created_at
       from lan_users
       order by created_at asc
       `,
@@ -158,7 +159,7 @@ router.post("/users", requireInternalWriteSecret, async (req, res, next) => {
       `
       insert into lan_users (id, username, display_name, role, squadron_id, wing_id, base_id, password_hash)
       values ($1, $2, $3, $4, $5, $6, $7, $8)
-      returning id, username, display_name, role, squadron_id, wing_id, base_id, created_at
+      returning id, username, display_name, role, squadron_id, wing_id, base_id, disabled_at, created_at
       `,
       [id, username, displayName, role, squadronId, wingId, baseId, ph],
     );
@@ -217,6 +218,13 @@ router.patch("/users/:id", requireInternalWriteSecret, async (req, res, next) =>
     const squadronId = hasSquadron ? trimOrNull(b.squadron_id ?? b.squadronId) : undefined;
     const wingId = hasWing ? trimOrNull(b.wing_id ?? b.wingId) : undefined;
     const baseId = hasBase ? trimOrNull(b.base_id ?? b.baseId) : undefined;
+    // Disable / re-enable. `disabled: true` stamps `disabled_at = now()`,
+    // `disabled: false` clears it. The login route refuses to mint a
+    // session for any user with a non-null disabled_at, and the LAN
+    // session middleware drops in-flight sessions for such users on
+    // their next request.
+    const hasDisabled = "disabled" in b;
+    const disabledFlag = hasDisabled ? Boolean(b.disabled) : undefined;
 
     if (password !== null && password.length < 8) {
       res.status(400).json({ error: "password_too_short" });
@@ -249,6 +257,21 @@ router.patch("/users/:id", requireInternalWriteSecret, async (req, res, next) =>
       sets.push(`base_id = $${idx++}`);
       params.push(baseId);
     }
+    if (disabledFlag !== undefined) {
+      // Block disabling the last super_admin so the host PC can never
+      // get locked out.
+      if (disabledFlag && normalizeLanRole(current.role) === "super_admin") {
+        const remaining = await pool.query<{ n: string }>(
+          `select count(*)::text as n from lan_users where role = 'super_admin' and disabled_at is null and id <> $1`,
+          [id],
+        );
+        if (Number(remaining.rows[0]?.n ?? 0) === 0) {
+          res.status(409).json({ error: "last_super_admin" });
+          return;
+        }
+      }
+      sets.push(`disabled_at = ${disabledFlag ? "now()" : "null"}`);
+    }
     if (sets.length === 0) {
       res.status(400).json({ error: "nothing_to_update" });
       return;
@@ -266,6 +289,7 @@ router.patch("/users/:id", requireInternalWriteSecret, async (req, res, next) =>
       squadron_change: squadronId !== undefined ? squadronId : null,
       wing_change: wingId !== undefined ? wingId : null,
       base_change: baseId !== undefined ? baseId : null,
+      disabled_change: disabledFlag !== undefined ? disabledFlag : null,
       actor_role: normalizeLanRole(lanUser?.role),
     });
     res.json({ ok: true });

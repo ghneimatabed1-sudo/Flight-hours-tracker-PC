@@ -82,8 +82,9 @@ router.post("/auth/lan/login", async (req, res, next) => {
       role: string;
       squadron_id: string | null;
       password_hash: string;
+      disabled_at: string | null;
     }>(
-      `select id, display_name, role, squadron_id, password_hash from lan_users where lower(username) = lower($1) limit 1`,
+      `select id, display_name, role, squadron_id, password_hash, disabled_at from lan_users where lower(username) = lower($1) limit 1`,
       [username],
     );
     const u = uq.rows[0];
@@ -93,6 +94,10 @@ router.post("/auth/lan/login", async (req, res, next) => {
     }
     if (!(await verifyPassword(password, u.password_hash))) {
       res.status(401).json({ error: "lan_bad_creds" });
+      return;
+    }
+    if (u.disabled_at) {
+      res.status(403).json({ error: "lan_user_disabled" });
       return;
     }
     const sessionTok = newSessionToken();
@@ -252,6 +257,7 @@ router.get("/auth/lan/me", async (req, res, next) => {
       join lan_users u on u.id = s.user_id
       where s.token = $1
         and s.expires_at > now()
+        and u.disabled_at is null
       limit 1
       `,
       [token],

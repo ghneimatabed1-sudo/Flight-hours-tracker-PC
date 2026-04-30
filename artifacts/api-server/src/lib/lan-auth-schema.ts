@@ -40,6 +40,7 @@ export async function ensureFullSchema(): Promise<void> {
   await pool.query(`
     alter table lan_users add column if not exists wing_id text;
     alter table lan_users add column if not exists base_id text;
+    alter table lan_users add column if not exists disabled_at timestamptz;
   `);
 
   // ── Session tokens ──────────────────────────────────────────────────

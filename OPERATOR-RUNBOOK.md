@@ -126,13 +126,39 @@ picks up the restored data on next boot.
 
 ---
 
-## 6. Reset a forgotten password
+## 6. Reset password / add user
 
-When an ops officer or commander forgets their password, on the host
-PC export the database URL once per shell, then run the reset:
+Day-to-day account work is done from the dashboard, not from the host
+PC scripts:
+
+1. On any PC, sign in as **super-admin**.
+2. Open **Admin → Users** in the sidebar.
+3. From this page you can:
+   - **Add User** — create a new ops officer or commander account
+     (deputy / ops / commander_squadron / commander_wing /
+     commander_base). Pick a squadron when prompted; the wing and
+     base are filled in automatically from that choice.
+   - **Edit** — change role or squadron scope, or use the
+     "Reset password" field to set a new password (minimum 8
+     characters). Tell the user to sign in with the new password and
+     then go to **Settings → Change Password** to pick a personal one.
+   - **Disable / Enable** — soft-disable an account without losing
+     its history. A disabled user cannot sign in and any in-flight
+     session is dropped on its next request. The page refuses to
+     disable the last super-admin so you can never lock the host out.
+   - **Delete** — permanently remove the account. Use this only when
+     the person is leaving and you do not want their username sitting
+     around.
+
+All four actions write through the LAN api-server, hash passwords
+before storage, and add an audit log row under your username.
+
+Fallback for total lock-out (e.g. the only super-admin password is
+lost and no other super-admin exists), run on the **host PC** —
+export the database URL once per shell, then run the reset:
 ```
 $env:DATABASE_URL = "postgresql://postgres:<pg-pw>@127.0.0.1:5432/hawkeye_internal"
-.\scripts\lan-host\reset-admin-password.ps1 -Username "ops1"
+.\scripts\lan-host\reset-admin-password.ps1 -Username "superadmin"
 ```
 
 (or pass `-DatabaseUrl "postgresql://..."` directly to the script).
@@ -141,11 +167,10 @@ You can read the same URL out of `artifacts\api-server\.env`.
 
 You will be prompted for the new password twice. The new password is
 hashed (never stored as plain text) and written directly to the
-`lan_users` table. An audit log row is added under
-`actor='host_script'`.
-
-Tell the user to sign in with the new password and immediately go to
-**Settings → Change Password** to pick a personal one.
+`lan_users` table; an audit log row is added under
+`actor='host_script'`. Use this only when the in-app page is
+unreachable — it bypasses the audit chain that the **Admin → Users**
+page provides.
 
 ---
 
@@ -188,8 +213,9 @@ pnpm lan:host:health      # hits http://127.0.0.1:3847/api/healthz
 | Symptom | Try this |
 | --- | --- |
 | Dashboard says "Cannot reach API server" | `ping hawk-host.local` from the dashboard PC. If it fails, the host PC is offline, mDNS is blocked on the LAN, or the LAN path is broken. Run `pnpm lan:host:health` on the host to confirm the api-server itself is alive. |
-| Sign-in keeps failing | Check the audit log on the host PC's Postgres for `lan_login_failed` rows. Ask user to wait 5 minutes (rate limit) and try again. |
-| All sign-ins fail and we just rebuilt the host | Run `reset-admin-password.ps1` for the super-admin and try again. |
+| Sign-in keeps failing | Check the audit log on the host PC's Postgres for `lan_login_failed` rows. Ask user to wait 5 minutes (rate limit) and try again. If the user account was disabled, sign in as super-admin and re-enable it from **Admin → Users**. |
+| Sign-in returns "lan_user_disabled" | The account is soft-disabled. Sign in as super-admin and toggle it back to **Active** from **Admin → Users**. |
+| All sign-ins fail and we just rebuilt the host | Run `reset-admin-password.ps1` for the super-admin on the host PC, then sign in and use **Admin → Users** to reset everything else. |
 | Dashboard title bar shows "v? · nogit" | The build was made from a tarball without `.git`. Functionally fine; cosmetic. |
 | Auto-update toggled on by accident | Set `RJAF_ENABLE_AUTO_UPDATE=0` (or unset it) in the dashboard launch environment. The Settings → Auto-Update toggle in the app also controls this per-role. |
 | Audit log row shows `actor: unknown` | Someone made a write while the api-server was in `HAWK_LAN_DEV_NO_AUTH=1` mode. Flip it back to `0` immediately. |

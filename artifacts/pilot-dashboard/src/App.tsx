@@ -89,6 +89,7 @@ import AdminOverview from "@/pages/admin/Overview";
 import AdminSquadrons from "@/pages/admin/Squadrons";
 import AdminAuditLog from "@/pages/admin/AuditLog";
 import AdminSecurity from "@/pages/admin/Security";
+import AdminUsers from "@/pages/admin/Users";
 import RemindersSchedule from "@/pages/admin/RemindersSchedule";
 import ConnectionMap from "@/pages/admin/ConnectionMap";
 import Connections from "@/pages/Connections";
@@ -170,6 +171,7 @@ function AdminRoutes() {
       <Route path="/admin/squadrons" component={AdminSquadrons} />
       <Route path="/admin/audit" component={AdminAuditLog} />
       <Route path="/admin/security" component={AdminSecurity} />
+      <Route path="/admin/users" component={AdminUsers} />
       <Route path="/admin/connection-map" component={ConnectionMap} />
       <Route path="/connections" component={Connections} />
       <Route path="/admin/reminders" component={RemindersSchedule} />
