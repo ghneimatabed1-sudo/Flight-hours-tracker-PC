@@ -19,6 +19,7 @@ import lanAuthPublic from "./lan-auth-public";
 import peerShellRouter from "./peer-shell";
 import aggregateShellRouter from "./aggregate-shell";
 import systemHealthRouter from "./system-health";
+import mdnsHealthRouter from "./mdns-health";
 import backupVerifyStatusRouter from "./backup-verify-status";
 import aboutRouter from "./about";
 import { requireInternalLanSession } from "../lib/lan-auth-middleware";
@@ -55,6 +56,7 @@ export function buildRouter(profile: InstallProfile): IRouter {
     // operator can still see what's wrong.
     internal.use(diskGuard);
     internal.use(systemHealthRouter);
+    internal.use(mdnsHealthRouter);
     internal.use(backupVerifyStatusRouter);
     internal.use(aboutRouter);
     internal.use(pilotOptionsRouter);
@@ -88,6 +90,7 @@ export function buildRouter(profile: InstallProfile): IRouter {
     aggregate.use(requireInternalLanSession);
     aggregate.use(diskGuard);
     aggregate.use(systemHealthRouter);
+    aggregate.use(mdnsHealthRouter);
     aggregate.use(aboutRouter);
     aggregate.use(aggregateShellRouter);
     router.use("/aggregate", aggregate);

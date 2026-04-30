@@ -757,6 +757,90 @@ export async function fetchInternalSystemHealth(): Promise<SystemHealthReport | 
   return null;
 }
 
+// ── mDNS broadcast health (Task #398) ─────────────────────────────
+//
+// The api-server reads `%PROGRAMDATA%\HawkEye\mdns-supervisor.heartbeat`
+// (when present) and reports whether the LAN broadcast is alive. The
+// route is mounted on both `/internal/system/mdns-health` (hub) and
+// `/aggregate/system/mdns-health` (aggregator). 404 means mDNS was
+// never enabled on this host — the dashboard renders a "disabled"
+// badge in that case.
+export type MdnsBadgeState =
+  | "alive"
+  | "stale"
+  | "restarting"
+  | "spawn-failed"
+  | "starting"
+  | "unreadable"
+  | "disabled";
+
+export type MdnsHealthReport = {
+  state: MdnsBadgeState;
+  supervisorState: string | null;
+  ageSec: number | null;
+  staleThresholdSec: number;
+  restartCount: number | null;
+  squadronName: string | null;
+  apiPort: string | null;
+  timestamp: string | null;
+  heartbeatPath: string;
+};
+
+export type MdnsHealthFetchResult =
+  /** Heartbeat present (any state, including unreadable). */
+  | { ok: true; report: MdnsHealthReport }
+  /** mDNS never enabled — file does not exist. */
+  | { ok: true; disabled: true }
+  /** Internal API not reachable / endpoint missing — render nothing. */
+  | { ok: false; error: string };
+
+export async function fetchInternalMdnsHealth(): Promise<MdnsHealthFetchResult> {
+  const candidates = ["internal/system/mdns-health", "aggregate/system/mdns-health"];
+  let lastError = "internal_api_disabled";
+  for (const path of candidates) {
+    const url = getInternalApiPath(path);
+    if (!url) return { ok: false, error: "internal_api_disabled" };
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        cache: "no-store",
+        headers: internalApiHeadersBase(),
+      });
+      if (res.status === 404) {
+        // 404 from the agent means "mdns_disabled" (no heartbeat
+        // file). 404 from the proxy / wrong shell means "try next
+        // candidate" — distinguish by inspecting the body.
+        let body: { ok?: boolean; error?: string } = {};
+        try {
+          body = (await res.json()) as { ok?: boolean; error?: string };
+        } catch {
+          // non-JSON 404 → wrong mount, try next candidate.
+        }
+        if (body?.error === "mdns_disabled") {
+          return { ok: true, disabled: true };
+        }
+        lastError = "endpoint_not_mounted";
+        continue;
+      }
+      if (!res.ok) {
+        lastError = `http_${res.status}`;
+        return { ok: false, error: lastError };
+      }
+      const body = (await res.json()) as {
+        ok?: boolean;
+        report?: MdnsHealthReport;
+      };
+      if (body?.ok && body.report) {
+        return { ok: true, report: body.report };
+      }
+      return { ok: false, error: "bad_payload" };
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
+    }
+  }
+  return { ok: false, error: lastError };
+}
+
 // ── About this PC ─────────────────────────────────────────────────
 // Settings-level snapshot. Mirrors fetchInternalSystemHealth: tries
 // `/api/internal/about` first (hub), falls back to

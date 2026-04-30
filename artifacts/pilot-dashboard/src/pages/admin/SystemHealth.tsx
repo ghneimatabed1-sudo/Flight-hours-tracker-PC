@@ -10,6 +10,7 @@ import {
 } from "@/lib/internal-migration";
 import { HeartPulse, RefreshCw } from "lucide-react";
 import { fmtDateTime } from "@/lib/format";
+import MdnsHealthCard from "@/components/MdnsHealthCard";
 
 const REFRESH_MS = 30_000;
 
@@ -163,6 +164,11 @@ export default function SystemHealth() {
             </CardContent>
           </Card>
         ))}
+        {/* mDNS broadcast badge (Task #398). The supervisor task itself
+            stays Running even when dns-sd.exe is between restarts, so a
+            generic scheduled-task view does not catch this — surfaced
+            here next to the other host-level checks. */}
+        <MdnsHealthCard />
       </div>
     </div>
   );
