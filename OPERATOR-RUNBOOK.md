@@ -519,6 +519,23 @@ This requires `dns-sd.exe` (ships with Apple Bonjour Print Services).
 On a stripped-down PC the script warns and exits cleanly so you can
 install Bonjour and re-run.
 
+The broadcast runs under a small supervisor wrapper
+(`mdns-supervisor.ps1`) launched by the `HawkEye-Mdns-OnStartup`
+scheduled task. If `dns-sd.exe` is killed (OOM, manual kill, console
+session close, crash) the supervisor respawns it within ~5 seconds —
+operators do not need to do anything. To confirm the broadcast is
+alive without RDP'ing into the host:
+
+```
+.\scripts\lan-host\check-mdns-health.ps1
+```
+
+Exit `0` means alive, `2` means the supervisor itself died (re-run
+`register-mdns.ps1` to reinstall the task), `3` means it is in the
+middle of a restart (try again in ~30s). The supervisor's rolling
+log lives at `%PROGRAMDATA%\HawkEye\mdns-supervisor.log` and the
+latest heartbeat at `%PROGRAMDATA%\HawkEye\mdns-supervisor.heartbeat`.
+
 ---
 
 ## 7. Push an updated build via USB
@@ -590,7 +607,7 @@ pnpm lan:host:health      # hits http://127.0.0.1:3847/api/healthz
 | Sign-in returns "lan_user_disabled" | The account is soft-disabled. Sign in as super-admin and toggle it back to **Active** from **Admin → Users**. |
 | All sign-ins fail and we just rebuilt the host | Run `reset-admin-password.ps1` for the super-admin on the host PC, then sign in and use **Admin → Users** to reset everything else. |
 | Wing Commander PC asks for the squadron's peer token and we don't have it | The initial token is in `%PROGRAMDATA%\HawkEye\peer-token-initial.txt` on the host (Local Administrators only). If that file is gone, mint a fresh one with `reset-peer-token.ps1 -Username "<super_admin>"` — it overwrites the file and prints the new token in a green banner. |
-| Aggregator wizard cannot see this hub on the LAN | mDNS may be off. Re-run `register-mdns.ps1 -SquadronName "<name>" -ApiPort 3847` on the host. If `dns-sd.exe` is missing, install Apple Bonjour Print Services and re-run. Either way, the operator can still type `<squadron>.local` by hand. |
+| Aggregator wizard cannot see this hub on the LAN | mDNS may be off, or the supervisor died. First run `scripts\lan-host\check-mdns-health.ps1` on the host: exit 0 = alive, 2 = supervisor died (re-run `register-mdns.ps1 -SquadronName "<name>" -ApiPort 3847`), 1 = mDNS was never enabled. If `dns-sd.exe` is missing, install Apple Bonjour Print Services and re-run. Either way, the operator can still type `<squadron>.local` by hand. |
 | Dashboard title bar shows "v? · nogit" | The build was made from a tarball without `.git`. Functionally fine; cosmetic. |
 | Auto-update toggled on by accident | Set `RJAF_ENABLE_AUTO_UPDATE=0` (or unset it) in the dashboard launch environment. The Settings → Auto-Update toggle in the app also controls this per-role. |
 | Audit log row shows `actor: unknown` | Someone made a write while the api-server was in `HAWK_LAN_DEV_NO_AUTH=1` mode. Flip it back to `0` immediately. |

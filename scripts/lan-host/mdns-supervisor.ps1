@@ -1,0 +1,142 @@
+# mdns-supervisor.ps1
+#
+# Hawk Eye — watchdog around the dns-sd.exe Bonjour broadcast.
+#
+# Started by the HawkEye-Mdns-OnStartup scheduled task in SYSTEM
+# context at boot. Loops forever: spawns dns-sd.exe, waits for it,
+# and restarts it on any exit (OOM kill, manual kill, console
+# session close, dns-sd crash, …) within $RestartDelaySec seconds
+# (capped at $MaxRestartDelaySec to avoid busy-looping on a
+# permanently broken setup).
+#
+# Writes a heartbeat file every $HeartbeatIntervalSec seconds so
+# operators (or check-mdns-health.ps1, or any monitoring tool) can
+# verify the broadcast is alive without RDP'ing into the box.
+#
+# Output paths:
+#   %PROGRAMDATA%\HawkEye\mdns-supervisor.log         (rolling text log)
+#   %PROGRAMDATA%\HawkEye\mdns-supervisor.heartbeat   (latest JSON tick)
+#
+# This script is invoked by register-mdns.ps1; operators do not
+# need to call it directly.
+
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$SquadronName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ApiPort,
+
+    [Parameter(Mandatory = $true)]
+    [string]$DnsSdPath,
+
+    # How long to wait before respawning dns-sd.exe after a crash.
+    # Doubles up to $MaxRestartDelaySec on repeated rapid failures,
+    # then resets after a run that lasted at least 60s.
+    [int]$RestartDelaySec      = 5,
+    [int]$MaxRestartDelaySec   = 60,
+
+    # How often the supervisor refreshes the heartbeat file while
+    # the child is alive.
+    [int]$HeartbeatIntervalSec = 15
+)
+
+$ErrorActionPreference = "Stop"
+
+if (-not (Test-Path $DnsSdPath)) {
+    throw "dns-sd.exe not found at '$DnsSdPath'."
+}
+if ($RestartDelaySec -lt 1)                       { $RestartDelaySec = 1 }
+if ($MaxRestartDelaySec -lt $RestartDelaySec)     { $MaxRestartDelaySec = $RestartDelaySec }
+if ($HeartbeatIntervalSec -lt 1)                  { $HeartbeatIntervalSec = 1 }
+
+$dataDir = Join-Path $env:ProgramData "HawkEye"
+if (-not (Test-Path $dataDir)) {
+    New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+}
+$logFile       = Join-Path $dataDir "mdns-supervisor.log"
+$heartbeatFile = Join-Path $dataDir "mdns-supervisor.heartbeat"
+
+function Write-SupervisorLog {
+    param([string]$Message)
+    $line = "{0} {1}" -f (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz"), $Message
+    try { Add-Content -Path $logFile -Value $line -ErrorAction Stop } catch { }
+    Write-Host $line
+}
+
+function Write-Heartbeat {
+    param(
+        [int]$ChildPid,
+        [int]$RestartCount,
+        [string]$State
+    )
+    $payload = [ordered]@{
+        timestamp     = (Get-Date).ToUniversalTime().ToString("o")
+        squadronName  = $SquadronName
+        apiPort       = $ApiPort
+        dnsSdPath     = $DnsSdPath
+        childPid      = $ChildPid
+        restartCount  = $RestartCount
+        state         = $State
+    } | ConvertTo-Json -Compress
+    try {
+        Set-Content -Path $heartbeatFile -Value $payload -Encoding UTF8 -ErrorAction Stop
+    } catch { }
+}
+
+Write-SupervisorLog "[supervisor] start: SquadronName=$SquadronName ApiPort=$ApiPort DnsSdPath=$DnsSdPath restartDelay=${RestartDelaySec}s maxDelay=${MaxRestartDelaySec}s heartbeat=${HeartbeatIntervalSec}s"
+Write-Heartbeat -ChildPid 0 -RestartCount 0 -State "starting"
+
+# `$args` is an automatic variable in PowerShell, so name this
+# something distinct.
+$dnsArgs = @("-R", $SquadronName, "_hawkeye-hub._tcp", "local", $ApiPort)
+
+$restartCount = 0
+$currentDelay = $RestartDelaySec
+
+while ($true) {
+    $startedAt = Get-Date
+    try {
+        $proc = Start-Process -FilePath $DnsSdPath -ArgumentList $dnsArgs -PassThru -WindowStyle Hidden
+    } catch {
+        Write-SupervisorLog "[supervisor] failed to spawn dns-sd.exe: $($_.Exception.Message). Sleeping ${currentDelay}s."
+        Write-Heartbeat -ChildPid 0 -RestartCount $restartCount -State "spawn-failed"
+        Start-Sleep -Seconds $currentDelay
+        $currentDelay = [Math]::Min($currentDelay * 2, $MaxRestartDelaySec)
+        continue
+    }
+
+    Write-SupervisorLog "[supervisor] spawned dns-sd.exe pid=$($proc.Id)"
+    Write-Heartbeat -ChildPid $proc.Id -RestartCount $restartCount -State "running"
+
+    while (-not $proc.HasExited) {
+        Start-Sleep -Seconds $HeartbeatIntervalSec
+        if (-not $proc.HasExited) {
+            Write-Heartbeat -ChildPid $proc.Id -RestartCount $restartCount -State "running"
+        }
+    }
+    # Make sure the exit code is materialised.
+    try { $proc.WaitForExit() } catch { }
+
+    $ranFor   = (New-TimeSpan -Start $startedAt -End (Get-Date)).TotalSeconds
+    $exitCode = $proc.ExitCode
+
+    # Compute the *next* backoff first so the log line and the
+    # actual Start-Sleep agree. If the broadcast held up for at
+    # least a minute treat it as a healthy run and reset the
+    # backoff. Otherwise grow it so a permanently broken setup
+    # (missing Bonjour libs, port collision, etc.) does not pin a
+    # CPU core respawning every second.
+    if ($ranFor -ge 60) {
+        $currentDelay = $RestartDelaySec
+    } else {
+        $currentDelay = [Math]::Min($currentDelay * 2, $MaxRestartDelaySec)
+    }
+
+    Write-SupervisorLog ("[supervisor] dns-sd.exe pid={0} exited code={1} after {2:N0}s — restarting in {3}s" -f $proc.Id, $exitCode, $ranFor, $currentDelay)
+
+    $restartCount++
+    Write-Heartbeat -ChildPid 0 -RestartCount $restartCount -State "restarting"
+    Start-Sleep -Seconds $currentDelay
+}

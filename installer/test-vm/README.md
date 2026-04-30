@@ -86,11 +86,20 @@ exercise these explicitly
    was set up without a stored DATABASE_URL, the add-peer
    wizard prompts for the postgres password. Type one with `@`
    and `#`. Confirm the peer row lands in `peer_squadrons`.
-6. **mDNS broadcast survival.** `dns-sd.exe` in the foreground
-   task does not auto-restart on death (known limitation, NOT
-   fixed in this pass). Kill the `dns-sd.exe` process, wait 5
-   minutes, confirm peers stop seeing this host on the LAN.
-   Document that a watchdog wrapper is the next improvement.
+6. **mDNS broadcast survival.** `dns-sd.exe` is now wrapped by
+   `mdns-supervisor.ps1` (Task #393). On the host, kill the
+   `dns-sd.exe` process and confirm:
+   - within ~5s a fresh `dns-sd.exe` PID appears in Task Manager,
+   - `scripts\lan-host\check-mdns-health.ps1` returns exit 0 with
+     `state: running` and a non-zero `restartCount`,
+   - `%PROGRAMDATA%\HawkEye\mdns-supervisor.log` contains a
+     `dns-sd.exe pid=… exited code=… — restarting in 5s` line,
+   - peers continue to resolve `<squadron>.local`.
+   Then end the supervisor's scheduled task
+   (`schtasks /End /TN HawkEye-Mdns-OnStartup`), confirm
+   `check-mdns-health.ps1` eventually returns exit 2 (stale
+   heartbeat), and re-register via `register-mdns.ps1` to verify
+   recovery is one command.
 
 ## Known PowerShell 5.1 quirks worth eyeballing
 

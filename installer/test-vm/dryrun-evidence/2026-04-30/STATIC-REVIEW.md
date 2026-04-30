@@ -123,12 +123,24 @@ message that misled operators into looking for the wrong fix.
 
 ## Bugs not fixed in this pass (documented for next operator)
 
-### A. mDNS broadcast (`dns-sd.exe`) does not auto-restart
+### A. mDNS broadcast (`dns-sd.exe`) does not auto-restart — FIXED in Task #393
 
-If the foreground `dns-sd.exe -R …` process dies (OOM, manual
-kill, console session close), peers stop seeing this host. The
-scheduled task currently registers it once at boot; there is no
-watchdog. Document in the test-VM playbook; defer to a follow-up.
+If the foreground `dns-sd.exe -R …` process died (OOM, manual
+kill, console session close), peers stopped seeing this host and
+the only fix was a manual restart.
+
+**Fix:** introduced `scripts/lan-host/mdns-supervisor.ps1`, a
+PowerShell watchdog loop that spawns `dns-sd.exe`, waits for it,
+and respawns it within 5s on any exit (capped at 60s on repeated
+rapid failures, reset to 5s after a run that lasts >=60s). The
+`HawkEye-Mdns-OnStartup` scheduled task now invokes the supervisor
+instead of `dns-sd.exe` directly. The supervisor writes a heartbeat
+file at `%PROGRAMDATA%\HawkEye\mdns-supervisor.heartbeat` every 15s
+and a rolling log at `%PROGRAMDATA%\HawkEye\mdns-supervisor.log`.
+Operators can run `scripts/lan-host/check-mdns-health.ps1` to
+verify the broadcast is alive without RDP'ing into the host
+(exit 0 = alive, 1 = never installed, 2 = supervisor died, 3 =
+between restarts). VM dry-run still deferred — see playbook.
 
 ### B. PowerShell 5.1 `schtasks /TR` quoting
 
