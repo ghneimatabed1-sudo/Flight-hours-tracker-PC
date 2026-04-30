@@ -93,13 +93,12 @@ test("hub: /api/internal/* requires LAN session (401 when missing)", async () =>
   });
 });
 
-test("hub: /api/peer/* shell mounts and returns 501 not_implemented_yet", async () => {
+test("hub: /api/peer/* mounts and rejects requests with no peer token (401)", async () => {
   await withServer("hub", async (baseUrl) => {
-    const res = await fetch(`${baseUrl}/api/peer/anything`);
-    assert.equal(res.status, 501);
-    const body = (await res.json()) as { error?: string; surface?: string };
-    assert.equal(body.error, "not_implemented_yet");
-    assert.equal(body.surface, "peer");
+    const res = await fetch(`${baseUrl}/api/peer/pilots`);
+    assert.equal(res.status, 401);
+    const body = (await res.json()) as { error?: string };
+    assert.equal(body.error, "invalid_peer_token");
   });
 });
 

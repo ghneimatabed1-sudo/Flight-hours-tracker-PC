@@ -47,9 +47,18 @@ or registered as artifacts):
   persisted in `install_profile_meta` on first boot and surfaced on
   `/api/healthz`. `routes/index.ts#buildRouter(profile)` decides which
   surfaces are mounted: hub mounts `/api/internal/*` + `/api/peer/*`,
-  aggregators mount `/api/aggregate/*`. Peer-token issuance, fan-out,
-  and install wizards are separate downstream tasks; the foundation
-  ships empty-but-mounted shells that return 501.
+  aggregators mount `/api/aggregate/*`. The `/api/peer/*` surface is
+  read-only and gated by an `X-Hawk-Peer-Token` bearer (format
+  `phk_<uuid>_<secret>`, scrypt-hashed at rest in `peer_tokens`).
+  Tokens are issued / revoked at `/api/internal/peer-tokens` (super_admin
+  only); the plain bearer is returned exactly once at create time.
+  Read endpoints: `/pilots`, `/sorties`, `/leaves`, `/unavailable`,
+  `/notams`, `/readiness-summary`. Explicitly blocked (403
+  `not_exposed_to_peers`): `/weekly-roster`, `/schedule`,
+  `/pilot-devices`, `/lan-users`. Every peer call writes an
+  `audit_log` row tagged with the token label (never the secret).
+  Aggregator fan-out and install wizards remain separate downstream
+  tasks; aggregators still ship empty-but-mounted 501 shells.
 - **Auth:** username + password. Passwords stored as bcrypt(12) hashes.
   Sessions are server-side rows in `lan_sessions` with a token returned
   to the dashboard. There is no JWT, no refresh token, no recovery

@@ -23,6 +23,7 @@ import pilotLinksInternalRouter from "./pilot-links-internal";
 import lanUsersRemindersRouter from "./lan-users-reminders";
 import importHistoryInternalRouter from "./import-history-internal";
 import pilotsTransferRouter from "./pilots-transfer";
+import peerTokensInternalRouter from "./peer-tokens-internal";
 import lanAuthPublic from "./lan-auth-public";
 import peerShellRouter from "./peer-shell";
 import aggregateShellRouter from "./aggregate-shell";
@@ -77,6 +78,7 @@ export function buildRouter(profile: InstallProfile): IRouter {
     internal.use(lanUsersRemindersRouter);
     internal.use(importHistoryInternalRouter);
     internal.use(pilotsTransferRouter);
+    internal.use(peerTokensInternalRouter);
     router.use("/internal", internal);
 
     router.use("/peer", peerShellRouter);
