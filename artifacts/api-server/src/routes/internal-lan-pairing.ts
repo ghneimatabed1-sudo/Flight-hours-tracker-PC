@@ -37,6 +37,10 @@ import {
   encryptApprovalForRequester,
   decryptApprovalFromHub,
   getLocalPairingKeypair,
+  getLocalSigningKeypair,
+  pairingRequestCanonical,
+  signPairingRequest,
+  verifyPairingRequestSignature,
   newPairingRequestId,
 } from "../lib/lan-pairing-crypto";
 import {
@@ -194,8 +198,22 @@ router.post(
 
       const id = newPairingRequestId();
       const myKeypair = await getLocalPairingKeypair();
+      const mySigningKeypair = await getLocalSigningKeypair();
       const profile = getActiveInstallProfile() ?? "viewer";
+      const requesterAddress = firstLocalIp() ?? "";
       const callbackUrl = `${selfBaseUrl(req)}/api/internal/lan-pairing/approval`;
+
+      // Sign the canonical payload so the Hub can verify that the
+      // requester_pub_key was not tampered with in transit.
+      const canonical = pairingRequestCanonical({
+        id,
+        requester_pub_key: myKeypair.publicKeyHex,
+        requester_callback_url: callbackUrl,
+        requester_role: profile,
+        requester_address: requesterAddress,
+      });
+      const requestSig = signPairingRequest(mySigningKeypair.signPrivKeyHex, canonical);
+
       await pool.query(
         `
         insert into lan_pairing_outbound_requests
@@ -211,10 +229,12 @@ router.post(
         id,
         requester_role: profile,
         requester_hostname: os.hostname(),
-        requester_address: firstLocalIp() ?? "",
+        requester_address: requesterAddress,
         requester_pub_key: myKeypair.publicKeyHex,
         requester_callback_url: callbackUrl,
         requester_app_version: process.env.npm_package_version ?? null,
+        requester_sign_pub_key: mySigningKeypair.signPubKeyHex,
+        requester_sig: requestSig,
       });
       if (!result.ok) {
         await pool.query(
@@ -246,7 +266,7 @@ router.post(
         "internal.lan_pairing.request_sent",
         { id, hub_hostname: hubHostname, hub_address: hubAddress },
       );
-      res.json({ ok: true, id });
+      res.json({ ok: true, id, sign_pub_key: mySigningKeypair.signPubKeyHex });
     } catch (err) {
       next(err);
     }
@@ -263,6 +283,9 @@ router.post(
  * pairing inbox. Idempotent on (id) — repeated POSTs are silently
  * ignored, which protects against requesters that retry.
  */
+// Ed25519 signatures are 64 bytes = 128 hex chars.
+const SIG_RE = /^[0-9a-fA-F]{128}$/;
+
 router.post("/lan-pairing/inbound-request", async (req, res, next) => {
   try {
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -272,6 +295,8 @@ router.post("/lan-pairing/inbound-request", async (req, res, next) => {
     const address = trim(body.requester_address);
     const pubKey = trim(body.requester_pub_key);
     const callbackUrl = trim(body.requester_callback_url);
+    const signPubKey = trim(body.requester_sign_pub_key);
+    const sig = trim(body.requester_sig);
     if (!UUID_RE.test(id)) {
       res.status(400).json({ error: "bad_id" });
       return;
@@ -295,6 +320,39 @@ router.post("/lan-pairing/inbound-request", async (req, res, next) => {
     }
     if (!URL_RE.test(callbackUrl)) {
       res.status(400).json({ error: "bad_callback_url" });
+      return;
+    }
+    // Require the Ed25519 signing key and signature that prove the
+    // requester possesses the private key for requester_sign_pub_key.
+    // Without this check an active LAN attacker can replace
+    // requester_pub_key with their own X25519 key and intercept the
+    // encrypted approval.
+    if (!PUBKEY_RE.test(signPubKey)) {
+      res.status(400).json({ error: "bad_sign_pub_key" });
+      return;
+    }
+    if (!SIG_RE.test(sig)) {
+      res.status(400).json({ error: "bad_requester_sig" });
+      return;
+    }
+    // Verify the signature over the canonical payload.  Any field that
+    // an attacker might swap (pub_key, callback_url, role, address) is
+    // covered by the canonical message so tampering invalidates the sig.
+    const canonical = pairingRequestCanonical({
+      id,
+      requester_pub_key: pubKey,
+      requester_callback_url: callbackUrl,
+      requester_role: role,
+      requester_address: address,
+    });
+    const sigValid = verifyPairingRequestSignature(signPubKey, canonical, sig);
+    if (!sigValid) {
+      await appendInternalAudit("system", "internal.lan_pairing.sig_rejected", {
+        id,
+        requester_hostname: hostname,
+        requester_address: address,
+      });
+      res.status(400).json({ error: "bad_requester_sig" });
       return;
     }
     // SSRF guard: callback must be RFC1918/loopback http: at the same
@@ -325,8 +383,9 @@ router.post("/lan-pairing/inbound-request", async (req, res, next) => {
       insert into lan_pairing_inbound_requests (
         id, requester_role, requester_hostname, requester_address,
         requester_pub_key, requester_callback_url, requester_app_version,
+        requester_sign_pub_key,
         status, created_at
-      ) values ($1, $2, $3, $4, $5, $6, $7, 'pending', now())
+      ) values ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', now())
       on conflict (id) do nothing
       returning id, status
       `,
@@ -338,6 +397,7 @@ router.post("/lan-pairing/inbound-request", async (req, res, next) => {
         pubKey,
         callbackUrl,
         trim(body.requester_app_version) || null,
+        signPubKey,
       ],
     );
     const inserted = (ins.rowCount ?? 0) > 0;
@@ -377,7 +437,8 @@ router.get("/lan-pairing/inbox", async (req, res, next) => {
     const q = await pool.query(
       `
       select id, requester_role, requester_hostname, requester_address,
-             requester_app_version, status, issued_token_id, approval_error,
+             requester_app_version, requester_sign_pub_key, status,
+             issued_token_id, approval_error,
              created_at, decided_at, decided_by, delivered_at
       from lan_pairing_inbound_requests
       ${where}

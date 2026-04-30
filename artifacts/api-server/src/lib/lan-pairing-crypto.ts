@@ -39,6 +39,8 @@ import {
   hkdfSync,
   randomBytes,
   randomUUID,
+  sign as cryptoSign,
+  verify as cryptoVerify,
 } from "node:crypto";
 
 import { pool } from "@workspace/db";
@@ -308,4 +310,168 @@ export function _resetCachedKeypairForTests(): void {
 /** Generate a new pairing-request id (UUID v4 hex with dashes). */
 export function newPairingRequestId(): string {
   return randomUUID();
+}
+
+// ── Ed25519 request-signing keypair ─────────────────────────────────
+//
+// In addition to the X25519 encryption keypair above, each PC holds a
+// persistent Ed25519 *signing* keypair.  When the requester POSTs an
+// inbound pairing request to the Hub it includes:
+//   - requester_sign_pub_key  — the Ed25519 public key (64 hex chars)
+//   - requester_sig           — Ed25519 signature over the canonical
+//                               request payload (see signPairingRequest)
+//
+// The Hub verifies the signature before accepting the request.  This
+// proof-of-possession ties the claim "my encryption pubkey is X" to an
+// entity that actually holds the corresponding signing private key.  An
+// active LAN attacker who replaces requester_pub_key must substitute a
+// different signing key (they lack the legitimate PC's signing private
+// key), which causes the fingerprint shown in the Hub inbox to differ
+// from the one displayed on the legitimate PC — giving the operator a
+// detectable signal.
+
+const ED25519_KEY_LEN = 32;
+
+// SPKI DER prefix for Ed25519 public key (12 bytes).
+const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
+// PKCS8 DER prefix for Ed25519 private key seed (16 bytes).
+const ED25519_PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
+
+function ed25519PublicKeyFromRawHex(hex: string): ReturnType<typeof createPublicKey> {
+  const raw = Buffer.from(hex, "hex");
+  if (raw.length !== ED25519_KEY_LEN) throw new Error("invalid_ed25519_public_key_length");
+  return createPublicKey({
+    key: Buffer.concat([ED25519_SPKI_PREFIX, raw]),
+    format: "der",
+    type: "spki",
+  });
+}
+
+function ed25519PrivateKeyFromRawHex(hex: string): ReturnType<typeof createPrivateKey> {
+  const raw = Buffer.from(hex, "hex");
+  if (raw.length !== ED25519_KEY_LEN) throw new Error("invalid_ed25519_private_key_length");
+  return createPrivateKey({
+    key: Buffer.concat([ED25519_PKCS8_PREFIX, raw]),
+    format: "der",
+    type: "pkcs8",
+  });
+}
+
+export type LanPairingSigningKeypair = {
+  signPubKeyHex: string;
+  signPrivKeyHex: string;
+};
+
+/**
+ * Build the canonical message that is signed over a pairing request.
+ * All mutable fields that an attacker could swap are included so that
+ * any substitution invalidates the signature.
+ */
+export function pairingRequestCanonical(fields: {
+  id: string;
+  requester_pub_key: string;
+  requester_callback_url: string;
+  requester_role: string;
+  requester_address: string;
+}): Buffer {
+  const msg = [
+    "hawkeye-pair-request-v1",
+    fields.id,
+    fields.requester_pub_key,
+    fields.requester_callback_url,
+    fields.requester_role,
+    fields.requester_address,
+  ].join("|");
+  return Buffer.from(msg, "utf8");
+}
+
+/**
+ * Sign a canonical pairing request payload with the local Ed25519
+ * signing private key.  Returns the signature as a 128-char hex string.
+ */
+export function signPairingRequest(
+  signPrivKeyHex: string,
+  canonical: Buffer,
+): string {
+  const privKey = ed25519PrivateKeyFromRawHex(signPrivKeyHex);
+  const sig = cryptoSign(undefined, canonical, privKey);
+  return sig.toString("hex");
+}
+
+/**
+ * Verify an Ed25519 signature over a canonical pairing request payload.
+ * Returns true only when the signature is cryptographically valid for
+ * the given public key and canonical message.
+ */
+export function verifyPairingRequestSignature(
+  signPubKeyHex: string,
+  canonical: Buffer,
+  sigHex: string,
+): boolean {
+  try {
+    const pubKey = ed25519PublicKeyFromRawHex(signPubKeyHex);
+    const sig = Buffer.from(sigHex, "hex");
+    return cryptoVerify(undefined, canonical, pubKey, sig);
+  } catch {
+    return false;
+  }
+}
+
+let __cachedSigning: LanPairingSigningKeypair | null = null;
+
+/**
+ * Load this PC's persistent Ed25519 signing keypair, creating one on
+ * first call.  Stored alongside the X25519 keypair in
+ * `lan_pairing_keypair` (columns `sign_pub_key` / `sign_priv_key`).
+ */
+export async function getLocalSigningKeypair(): Promise<LanPairingSigningKeypair> {
+  if (__cachedSigning) return __cachedSigning;
+
+  const existing = await pool.query<{ sign_pub_key: string | null; sign_priv_key: string | null }>(
+    `select sign_pub_key, sign_priv_key from lan_pairing_keypair where id = 1`,
+  );
+  const row = existing.rows[0];
+  if (row?.sign_pub_key && row?.sign_priv_key) {
+    __cachedSigning = {
+      signPubKeyHex: row.sign_pub_key,
+      signPrivKeyHex: row.sign_priv_key,
+    };
+    return __cachedSigning;
+  }
+
+  // Generate a fresh Ed25519 keypair.
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const pubDer = publicKey.export({ format: "der", type: "spki" }) as Buffer;
+  const privDer = privateKey.export({ format: "der", type: "pkcs8" }) as Buffer;
+  const pubHex = pubDer.subarray(pubDer.length - ED25519_KEY_LEN).toString("hex");
+  const privHex = privDer.subarray(privDer.length - ED25519_KEY_LEN).toString("hex");
+
+  // Upsert into the existing row (id=1 must exist from getLocalPairingKeypair).
+  await pool.query(
+    `update lan_pairing_keypair
+        set sign_pub_key  = coalesce(sign_pub_key, $1),
+            sign_priv_key = coalesce(sign_priv_key, $2)
+      where id = 1`,
+    [pubHex, privHex],
+  );
+
+  // Re-read to pick up any value another concurrent process inserted.
+  const after = await pool.query<{ sign_pub_key: string | null; sign_priv_key: string | null }>(
+    `select sign_pub_key, sign_priv_key from lan_pairing_keypair where id = 1`,
+  );
+  const afterRow = after.rows[0];
+  if (afterRow?.sign_pub_key && afterRow?.sign_priv_key) {
+    __cachedSigning = {
+      signPubKeyHex: afterRow.sign_pub_key,
+      signPrivKeyHex: afterRow.sign_priv_key,
+    };
+    return __cachedSigning;
+  }
+
+  __cachedSigning = { signPubKeyHex: pubHex, signPrivKeyHex: privHex };
+  return __cachedSigning;
+}
+
+export function _resetCachedSigningKeypairForTests(): void {
+  __cachedSigning = null;
 }

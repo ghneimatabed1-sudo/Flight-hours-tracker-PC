@@ -1,8 +1,9 @@
 import { Router, type IRouter } from "express";
-import { normalizeLanRole, readLanUser } from "../lib/lan-authz";
+import { normalizeLanRole, readLanUser, type LanUserContext } from "../lib/lan-authz";
 import {
   fanOutResource,
   listActivePeers,
+  listPeersForActor,
   type FanoutDeps,
 } from "../lib/peer-fanout";
 
@@ -15,16 +16,29 @@ import {
  */
 const router: IRouter = Router();
 
-function canRead(req: unknown): boolean {
+/**
+ * Returns the actor context when the caller is authorised to read
+ * aggregate data, or `null` when access must be denied.
+ *
+ * Returns a sentinel `{ _bringUp: true }` object when running in
+ * bring-up mode (HAWK_INTERNAL_SESSION_AUTH=off) so downstream code
+ * can still distinguish "no session system" from "denied".
+ */
+function resolveAggregateActor(
+  req: unknown,
+): LanUserContext | { _bringUp: true } | null {
   const user = readLanUser(req);
-  if (!user) return true; // bring-up mode (HAWK_INTERNAL_SESSION_AUTH=off)
+  if (!user) return { _bringUp: true }; // bring-up mode
   const role = normalizeLanRole(user.role);
-  return (
+  if (
     role === "super_admin"
     || role === "admin"
     || role === "commander_wing"
     || role === "commander_base"
-  );
+  ) {
+    return user;
+  }
+  return null;
 }
 
 type AggregateOpts = {
@@ -56,12 +70,16 @@ function asTime(v: unknown): number {
 const aggregateOpts: AggregateOpts = {};
 
 async function runAggregate<R extends Record<string, unknown>>(
+  actor: LanUserContext | { _bringUp: true },
   resource: string,
   cacheKind: string,
   sortKey: ((row: R) => string | number | null) | null,
   sortOrder: "asc" | "desc" = "asc",
 ) {
-  const peers = await listActivePeers();
+  const peers =
+    "_bringUp" in actor
+      ? await listActivePeers()
+      : await listPeersForActor(actor);
   return fanOutResource<R>(peers, resource, {
     cacheKind,
     deps: aggregateOpts.deps,
@@ -71,11 +89,13 @@ async function runAggregate<R extends Record<string, unknown>>(
 
 router.get("/pilots", async (req, res, next) => {
   try {
-    if (!canRead(req)) {
+    const actor = resolveAggregateActor(req);
+    if (!actor) {
       res.status(403).json({ error: "forbidden_role" });
       return;
     }
     const result = await runAggregate(
+      actor,
       "pilots",
       "pilots",
       (row) =>
@@ -89,11 +109,13 @@ router.get("/pilots", async (req, res, next) => {
 
 router.get("/sorties", async (req, res, next) => {
   try {
-    if (!canRead(req)) {
+    const actor = resolveAggregateActor(req);
+    if (!actor) {
       res.status(403).json({ error: "forbidden_role" });
       return;
     }
     const result = await runAggregate(
+      actor,
       "sorties",
       "sorties",
       (row) => -asTime(pick(row, "date", "flight_date", "created_at")),
@@ -106,11 +128,13 @@ router.get("/sorties", async (req, res, next) => {
 
 router.get("/leaves", async (req, res, next) => {
   try {
-    if (!canRead(req)) {
+    const actor = resolveAggregateActor(req);
+    if (!actor) {
       res.status(403).json({ error: "forbidden_role" });
       return;
     }
     const result = await runAggregate(
+      actor,
       "leaves",
       "leaves",
       (row) => {
@@ -127,11 +151,13 @@ router.get("/leaves", async (req, res, next) => {
 
 router.get("/unavailable", async (req, res, next) => {
   try {
-    if (!canRead(req)) {
+    const actor = resolveAggregateActor(req);
+    if (!actor) {
       res.status(403).json({ error: "forbidden_role" });
       return;
     }
     const result = await runAggregate(
+      actor,
       "unavailable",
       "unavailable",
       (row) => asTime(pick(row, "from_date", "start_date", "created_at")),
@@ -145,11 +171,13 @@ router.get("/unavailable", async (req, res, next) => {
 
 router.get("/notams", async (req, res, next) => {
   try {
-    if (!canRead(req)) {
+    const actor = resolveAggregateActor(req);
+    if (!actor) {
       res.status(403).json({ error: "forbidden_role" });
       return;
     }
     const result = await runAggregate(
+      actor,
       "notams",
       "notams",
       (row) => -asTime(pick(row, "posted_on", "created_at")),
@@ -162,11 +190,13 @@ router.get("/notams", async (req, res, next) => {
 
 router.get("/readiness-summary", async (req, res, next) => {
   try {
-    if (!canRead(req)) {
+    const actor = resolveAggregateActor(req);
+    if (!actor) {
       res.status(403).json({ error: "forbidden_role" });
       return;
     }
     const result = await runAggregate(
+      actor,
       "readiness-summary",
       "readiness-summary",
       (row) =>

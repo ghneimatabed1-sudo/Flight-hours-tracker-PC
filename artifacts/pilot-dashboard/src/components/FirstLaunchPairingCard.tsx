@@ -87,6 +87,7 @@ export default function FirstLaunchPairingCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadAt, setReloadAt] = useState(Date.now());
+  const [localKeyFp, setLocalKeyFp] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,6 +145,9 @@ export default function FirstLaunchPairingCard({
     if (!r.ok) {
       setError(r.error ?? "request_failed");
       return;
+    }
+    if (r.sign_pub_key) {
+      setLocalKeyFp(r.sign_pub_key.slice(0, 16));
     }
     setReloadAt(Date.now());
   }
@@ -253,6 +257,15 @@ export default function FirstLaunchPairingCard({
                   </div>
                 </div>
               </div>
+              {localKeyFp && (
+                <div className="rounded-md border bg-muted/50 p-3 text-xs space-y-1" data-testid="key-fingerprint-box">
+                  <div className="font-medium text-foreground">{t("firstLaunchPairKeyFpTitle")}</div>
+                  <code className="font-mono text-sm tracking-wider" data-testid="key-fingerprint-value">
+                    {localKeyFp}…
+                  </code>
+                  <div className="text-muted-foreground">{t("firstLaunchPairKeyFpBody")}</div>
+                </div>
+              )}
               <Button
                 variant="outline"
                 size="sm"

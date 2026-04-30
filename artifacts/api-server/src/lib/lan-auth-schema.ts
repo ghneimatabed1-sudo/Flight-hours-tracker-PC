@@ -326,6 +326,10 @@ export async function ensureFullSchema(): Promise<void> {
       private_key text not null,
       created_at timestamptz not null default now()
     );
+    alter table lan_pairing_keypair
+      add column if not exists sign_pub_key text;
+    alter table lan_pairing_keypair
+      add column if not exists sign_priv_key text;
   `);
 
   // Inbound pairing requests received by *this* PC (typically a Hub
@@ -371,6 +375,8 @@ export async function ensureFullSchema(): Promise<void> {
       on lan_pairing_inbound_requests (
         requester_hostname, requester_address, status
       ) where status = 'pending';
+    alter table lan_pairing_inbound_requests
+      add column if not exists requester_sign_pub_key text;
   `);
 
   // Outbound pairing requests this PC has sent to a remote Hub. We

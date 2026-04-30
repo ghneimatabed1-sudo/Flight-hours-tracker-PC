@@ -2473,6 +2473,7 @@ export type LanInboundRequestRow = {
   requester_hostname: string;
   requester_address: string;
   requester_app_version: string | null;
+  requester_sign_pub_key: string | null;
   status: string;
   issued_token_id: string | null;
   approval_error: string | null;
@@ -2494,6 +2495,9 @@ function parseLanInboundRow(raw: Record<string, unknown>): LanInboundRequestRow 
     requester_app_version: raw.requester_app_version == null
       ? null
       : String(raw.requester_app_version),
+    requester_sign_pub_key: raw.requester_sign_pub_key == null
+      ? null
+      : String(raw.requester_sign_pub_key),
     status: String(raw.status ?? "pending"),
     issued_token_id: raw.issued_token_id == null
       ? null
@@ -2625,7 +2629,7 @@ export async function postLanPairingRequest(input: {
   hub_hostname: string;
   hub_address: string;
   hub_port: number;
-}): Promise<{ ok: boolean; id?: string; error?: string; status?: number }> {
+}): Promise<{ ok: boolean; id?: string; sign_pub_key?: string; error?: string; status?: number }> {
   const url = getInternalApiPath("internal/lan-pairing/request");
   if (!url) return { ok: false, error: "internal_api_disabled" };
   try {
@@ -2636,7 +2640,11 @@ export async function postLanPairingRequest(input: {
     });
     const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (!res.ok) return { ok: false, error: String(body?.error ?? `http_${res.status}`), status: res.status };
-    return { ok: true, id: String(body?.id ?? "") };
+    return {
+      ok: true,
+      id: String(body?.id ?? ""),
+      sign_pub_key: body?.sign_pub_key ? String(body.sign_pub_key) : undefined,
+    };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

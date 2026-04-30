@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { pool } from "@workspace/db";
+import { readLanUser, normalizeLanRole } from "../lib/lan-authz";
 
 const router: IRouter = Router();
 
@@ -60,6 +61,16 @@ router.post("/audit/log", async (req, res, next) => {
 
 router.get("/audit-log", async (req, res, next) => {
   try {
+    const user = readLanUser(req);
+    // In bring-up mode (no session system) there is no user context; allow.
+    // When auth is active, only super_admin may read the audit log.
+    if (user !== null) {
+      const role = normalizeLanRole(user.role);
+      if (role !== "super_admin") {
+        res.status(403).json({ error: "forbidden_role" });
+        return;
+      }
+    }
     const raw = String(req.query.limit ?? "").trim();
     const n = Number.parseInt(raw || "2500", 10);
     const limit = Number.isFinite(n) ? Math.min(Math.max(n, 1), 5000) : 2500;

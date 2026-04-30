@@ -191,6 +191,7 @@ export default function LanPairingInbox() {
                 <tr>
                   <th className="text-start p-3">{t("lanPairingColRequester")}</th>
                   <th className="text-start p-3">{t("lanPairingColRole")}</th>
+                  <th className="text-start p-3">{t("lanPairingColKeyFp")}</th>
                   <th className="text-start p-3">{t("lanPairingColStatus")}</th>
                   <th className="text-start p-3">{t("lanPairingColCreated")}</th>
                   <th className="text-end p-3">{t("lanPairingColActions")}</th>
@@ -208,6 +209,19 @@ export default function LanPairingInbox() {
                     </td>
                     <td className="p-3">
                       <Badge variant="secondary">{r.requester_role}</Badge>
+                    </td>
+                    <td className="p-3">
+                      {r.requester_sign_pub_key ? (
+                        <code
+                          className="text-xs font-mono text-muted-foreground"
+                          title={t("lanPairingKeyFpTitle")}
+                          data-testid={`key-fp-${r.id}`}
+                        >
+                          {r.requester_sign_pub_key.slice(0, 16)}…
+                        </code>
+                      ) : (
+                        <span className="text-xs text-destructive">{t("lanPairingKeyFpMissing")}</span>
+                      )}
                     </td>
                     <td className="p-3">
                       <Badge variant={statusVariant(r.status)} data-testid={`status-${r.id}`}>

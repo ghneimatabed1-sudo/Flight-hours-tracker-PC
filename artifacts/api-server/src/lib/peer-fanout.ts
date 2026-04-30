@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { pool } from "@workspace/db";
 import { logger } from "./logger";
+import { normalizeLanRole, type LanUserContext } from "./lan-authz";
 
 /**
  * Aggregator fan-out client.
@@ -194,6 +195,78 @@ export async function listActivePeers(): Promise<PeerSquadronRow[]> {
     if (/relation .*peer_squadrons.* does not exist/i.test(msg)) return [];
     throw err;
   }
+}
+
+/**
+ * Return the active peers that the given actor is authorised to read.
+ *
+ *  - super_admin / admin  → all active peers (no restriction)
+ *  - commander_wing       → peers whose squadron is under the actor's
+ *                           wing_id, plus the actor's own squadron
+ *  - commander_base       → peers whose squadron is under the actor's
+ *                           base_id, plus the actor's own squadron
+ *  - all other roles      → only the peer matching the actor's own
+ *                           squadron_id (fail-closed if missing)
+ */
+export async function listPeersForActor(
+  actor: LanUserContext,
+): Promise<PeerSquadronRow[]> {
+  const all = await listActivePeers();
+  const role = normalizeLanRole(actor.role);
+
+  if (role === "super_admin" || role === "admin") return all;
+
+  if (role === "commander_wing") {
+    const wingId = (actor.wing_id ?? "").trim().toLowerCase();
+    const ownSqId = (actor.squadron_id ?? "").trim().toLowerCase();
+    if (!wingId && !ownSqId) return [];
+    let wingSquadronIds: Set<string> = new Set();
+    if (wingId) {
+      try {
+        const q = await pool.query<{ id: string }>(
+          `select id::text as id from squadrons where lower(wing_id::text) = $1`,
+          [wingId],
+        );
+        wingSquadronIds = new Set(q.rows.map((r) => r.id.toLowerCase()));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!/relation .*squadrons.* does not exist/i.test(msg)) throw err;
+      }
+    }
+    return all.filter((p) => {
+      const sid = p.squadron_id.trim().toLowerCase();
+      return (ownSqId && sid === ownSqId) || wingSquadronIds.has(sid);
+    });
+  }
+
+  if (role === "commander_base") {
+    const baseId = (actor.base_id ?? "").trim().toLowerCase();
+    const ownSqId = (actor.squadron_id ?? "").trim().toLowerCase();
+    if (!baseId && !ownSqId) return [];
+    let baseSquadronIds: Set<string> = new Set();
+    if (baseId) {
+      try {
+        const q = await pool.query<{ id: string }>(
+          `select id::text as id from squadrons where lower(base_id::text) = $1`,
+          [baseId],
+        );
+        baseSquadronIds = new Set(q.rows.map((r) => r.id.toLowerCase()));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!/relation .*squadrons.* does not exist/i.test(msg)) throw err;
+      }
+    }
+    return all.filter((p) => {
+      const sid = p.squadron_id.trim().toLowerCase();
+      return (ownSqId && sid === ownSqId) || baseSquadronIds.has(sid);
+    });
+  }
+
+  // All other roles (ops, commander_squadron, commander, unknown):
+  // restrict to only the actor's own squadron.
+  const ownSqId = (actor.squadron_id ?? "").trim().toLowerCase();
+  if (!ownSqId) return [];
+  return all.filter((p) => p.squadron_id.trim().toLowerCase() === ownSqId);
 }
 
 async function defaultSetCache(

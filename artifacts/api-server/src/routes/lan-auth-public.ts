@@ -10,6 +10,59 @@ const SESSION_DAYS = 30;
 const LAN_DEV_NO_AUTH_ENABLED =
   String(process.env.HAWK_LAN_DEV_NO_AUTH ?? "").trim() === "1";
 
+// ── Server-side brute-force protection ────────────────────────────────
+// Tracks per-username failed login attempts in process memory.
+// After MAX_ATTEMPTS failures within WINDOW_MS the account is locked
+// for LOCKOUT_MS regardless of what the desktop UI shows.
+const MAX_ATTEMPTS = 10;
+const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
+
+type LoginAttemptEntry = {
+  count: number;
+  windowStart: number;
+  lockedUntil: number | null;
+};
+
+const loginAttempts = new Map<string, LoginAttemptEntry>();
+
+function getLoginEntry(username: string): LoginAttemptEntry {
+  let entry = loginAttempts.get(username);
+  if (!entry) {
+    entry = { count: 0, windowStart: Date.now(), lockedUntil: null };
+    loginAttempts.set(username, entry);
+  }
+  return entry;
+}
+
+function isLoginLocked(username: string): boolean {
+  const entry = loginAttempts.get(username);
+  if (!entry || entry.lockedUntil == null) return false;
+  if (Date.now() < entry.lockedUntil) return true;
+  // Lockout expired — reset state
+  loginAttempts.delete(username);
+  return false;
+}
+
+function recordLoginFailure(username: string): void {
+  const entry = getLoginEntry(username);
+  const now = Date.now();
+  // Reset window if expired
+  if (now - entry.windowStart > WINDOW_MS) {
+    entry.count = 0;
+    entry.windowStart = now;
+    entry.lockedUntil = null;
+  }
+  entry.count += 1;
+  if (entry.count >= MAX_ATTEMPTS) {
+    entry.lockedUntil = now + LOCKOUT_MS;
+  }
+}
+
+function recordLoginSuccess(username: string): void {
+  loginAttempts.delete(username);
+}
+
 function newSessionToken(): string {
   return randomBytes(32).toString("hex");
 }
@@ -76,6 +129,11 @@ router.post("/auth/lan/login", async (req, res, next) => {
       res.status(400).json({ error: "password_too_short" });
       return;
     }
+    // Server-side lockout check — must run before any DB or crypto work.
+    if (isLoginLocked(username)) {
+      res.status(429).json({ error: "lan_account_locked" });
+      return;
+    }
     const uq = await pool.query<{
       id: string;
       display_name: string;
@@ -89,10 +147,12 @@ router.post("/auth/lan/login", async (req, res, next) => {
     );
     const u = uq.rows[0];
     if (!u) {
+      recordLoginFailure(username);
       res.status(401).json({ error: "lan_bad_creds" });
       return;
     }
     if (!(await verifyPassword(password, u.password_hash))) {
+      recordLoginFailure(username);
       res.status(401).json({ error: "lan_bad_creds" });
       return;
     }
@@ -100,6 +160,7 @@ router.post("/auth/lan/login", async (req, res, next) => {
       res.status(403).json({ error: "lan_user_disabled" });
       return;
     }
+    recordLoginSuccess(username);
     const sessionTok = newSessionToken();
     const sessionId = randomUUID();
     await pool.query(
